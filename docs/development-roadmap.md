@@ -37,6 +37,7 @@ Acceptance checks:
 Expected outcome: Google Calendar, Gmail, and Drive become the primary meeting context source.
 
 - Implement domain-wide delegation credentials and per-subject impersonation.
+- Use keyless service-account signing for local diagnostics and avoid downloaded service-account JSON keys.
 - Sync all calendars for selected Workspace users.
 - Handle recurring events, changed events, cancelled events, attendees, Meet links, and organizer metadata.
 - Implement Drive changes sync for Meet recordings, shared drives, file metadata, and recording download.

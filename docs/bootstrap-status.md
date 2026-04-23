@@ -51,6 +51,12 @@ Assigned project roles:
 
 - Billing is enabled on `billingAccounts/014429-7C26AF-C31224`.
 - Secret Manager API is enabled.
+- Domain-wide delegation is verified end-to-end using keyless `sign-jwt` impersonation as `info@realization.co.il`.
+  - Calendar read probe: passed.
+  - Drive read probe: passed.
+  - Gmail profile probe: passed.
+  - Admin Directory user probe: passed.
+- Service-account key creation is blocked by organization policy, and that is acceptable. MeetSum should use keyless service-account signing or VPS-managed secrets instead of downloaded JSON keys.
 
 ### Decisions
 
@@ -124,6 +130,5 @@ Detected relevant directories:
 
 ## Next Technical Steps
 
-1. Test domain-wide delegation with a temporary local credential or VPS workload identity.
-2. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
-3. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.
+1. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
+2. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.

@@ -37,6 +37,7 @@ pnpm-debug.log*
 # env files
 .env*.local
 .env
+.secrets/
 
 # MCP config with real tokens (use .mcp.example.json as template)
 .mcp.json

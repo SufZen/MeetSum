@@ -45,6 +45,14 @@ Enable domain-wide delegation for this service account in Google Cloud Console, 
 
 V1 uses Gmail polling. Gmail Pub/Sub push is intentionally deferred because the Workspace organization policy blocks the Google Gmail push publisher service account.
 
+Delegation can be verified locally without creating a service-account JSON key:
+
+```powershell
+node scripts/test-google-delegation.mjs
+```
+
+The script uses `gcloud iam service-accounts sign-jwt` and never writes a reusable private key.
+
 ## Secrets
 
 Do not commit service-account JSON or private keys. For local development, prefer `.env.local`. For production, use the VPS secret manager approach we decide during deployment hardening.
