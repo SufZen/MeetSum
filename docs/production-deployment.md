@@ -42,6 +42,12 @@ The VPS currently uses Coolify's Traefik proxy. Deployments that use `docker-com
 
 RealizeOS currently runs directly on the VPS host at port `8082`. The production compose file maps `host.docker.internal` to the Docker host gateway for `app` and `worker`, so MeetSum can use `REALIZEOS_API_URL=http://host.docker.internal:8082` without exposing RealizeOS publicly.
 
+Because the app joins both the MeetSum network and Coolify's network, internal service URLs use unique aliases:
+
+- `meetsum-postgres`
+- `meetsum-redis`
+- `meetsum-minio`
+
 ## Health
 
 `GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.
