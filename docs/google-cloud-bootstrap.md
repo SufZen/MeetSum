@@ -29,6 +29,8 @@ gcloud services enable secretmanager.googleapis.com
 gcloud services enable cloudresourcemanager.googleapis.com
 ```
 
+Current status is tracked in `docs/bootstrap-status.md`.
+
 ## Create Service Account
 
 ```powershell
