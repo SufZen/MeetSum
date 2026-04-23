@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "meetsum": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "env": {
+        "MEETINGS_APP_URL": "http://127.0.0.1:3000"
+      }
+    }
+  }
+}
