@@ -28,6 +28,7 @@ Last updated: 2026-04-23
 - Pub/Sub API: `pubsub.googleapis.com`
 - Organization Policy API: `orgpolicy.googleapis.com`
 - Cloud Resource Manager API: `cloudresourcemanager.googleapis.com`
+- Secret Manager API: `secretmanager.googleapis.com`
 
 ### Service Account
 
@@ -46,12 +47,13 @@ Assigned project roles:
 - Gmail watch topic: `projects/meetsum-494211/topics/meetsum-gmail-watch`
 - Subscription: `projects/meetsum-494211/subscriptions/meetsum-gmail-watch-sub`
 
+### Resolved
+
+- Billing is enabled on `billingAccounts/014429-7C26AF-C31224`.
+- Secret Manager API is enabled.
+
 ### Blockers
 
-- Secret Manager API could not be enabled because the project is not linked to billing.
-- Both visible billing accounts returned quota errors when trying to link this project:
-  - `013178-3527EF-7CB14D`
-  - `01BE94-5A8FB9-FD05D1`
 - Gmail push publisher binding is blocked by org policy `constraints/iam.allowedPolicyMemberDomains`.
   - Effective allowed customer ID: `C04d02lbn`
   - Blocked member: `serviceAccount:gmail-api-push@system.gserviceaccount.com`
@@ -121,8 +123,7 @@ Detected relevant directories:
 
 ## Next Technical Steps
 
-1. Resolve Google billing quota/linking so Secret Manager and future paid APIs can be enabled.
-2. Decide how to handle Gmail Pub/Sub publisher org-policy exception.
-3. Complete Google Admin domain-wide delegation authorization.
-4. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
-5. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.
+1. Decide how to handle Gmail Pub/Sub publisher org-policy exception.
+2. Complete Google Admin domain-wide delegation authorization.
+3. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
+4. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.
