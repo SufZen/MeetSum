@@ -41,6 +41,7 @@ Expected outcome: Google Calendar, Gmail, and Drive become the primary meeting c
 - Handle recurring events, changed events, cancelled events, attendees, Meet links, and organizer metadata.
 - Implement Drive changes sync for Meet recordings, shared drives, file metadata, and recording download.
 - Implement Gmail thread matching for meeting prep and follow-up context.
+- Use Gmail polling in V1; defer Pub/Sub push until the organization policy exception is approved.
 - Store sync cursors, watch channels, expiration timestamps, and last error state in Postgres.
 - Add scheduled renewal for Calendar/Drive watch channels and Gmail Pub/Sub subscriptions.
 - Add admin UI for Workspace sync health and scope status.

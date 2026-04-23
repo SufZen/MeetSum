@@ -19,13 +19,13 @@ export type GoogleSyncSource = "calendar" | "gmail" | "drive"
 export type GoogleSyncPlanItem = {
   source: GoogleSyncSource
   subject: string
-  mode: "incremental-watch" | "pubsub-watch" | "changes-watch"
+  mode: "incremental-watch" | "polling" | "changes-watch"
 }
 
 export function buildGoogleSyncPlan(subject: string): GoogleSyncPlanItem[] {
   return [
     { source: "calendar", subject, mode: "incremental-watch" },
-    { source: "gmail", subject, mode: "pubsub-watch" },
+    { source: "gmail", subject, mode: "polling" },
     { source: "drive", subject, mode: "changes-watch" },
   ]
 }

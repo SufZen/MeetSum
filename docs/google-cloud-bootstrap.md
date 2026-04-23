@@ -43,6 +43,8 @@ gcloud iam service-accounts describe `
 
 Enable domain-wide delegation for this service account in Google Cloud Console, then authorize the client ID in Google Admin Console using the scope groups documented in `lib/google/workspace.ts`.
 
+V1 uses Gmail polling. Gmail Pub/Sub push is intentionally deferred because the Workspace organization policy blocks the Google Gmail push publisher service account.
+
 ## Secrets
 
 Do not commit service-account JSON or private keys. For local development, prefer `.env.local`. For production, use the VPS secret manager approach we decide during deployment hardening.

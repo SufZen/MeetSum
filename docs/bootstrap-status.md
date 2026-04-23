@@ -52,16 +52,17 @@ Assigned project roles:
 - Billing is enabled on `billingAccounts/014429-7C26AF-C31224`.
 - Secret Manager API is enabled.
 
-### Blockers
+### Decisions
 
-- Gmail push publisher binding is blocked by org policy `constraints/iam.allowedPolicyMemberDomains`.
+- Gmail V1 will use polling instead of Pub/Sub push.
+- Gmail push publisher binding is blocked by org policy `constraints/iam.allowedPolicyMemberDomains`, so push notifications are deferred.
   - Effective allowed customer ID: `C04d02lbn`
   - Blocked member: `serviceAccount:gmail-api-push@system.gserviceaccount.com`
-  - Impact: Gmail push notifications cannot publish to `meetsum-gmail-watch` until this policy allows the Google Gmail push service account or an approved exception path is chosen.
+  - Impact: Gmail context can lag by the polling interval in V1.
 
 ## Required Manual Admin Action
 
-Authorize domain-wide delegation in Google Admin Console for OAuth client ID:
+Domain-wide delegation was authorized in Google Admin Console for OAuth client ID:
 
 ```text
 114094907385707784417
@@ -123,7 +124,6 @@ Detected relevant directories:
 
 ## Next Technical Steps
 
-1. Decide how to handle Gmail Pub/Sub publisher org-policy exception.
-2. Complete Google Admin domain-wide delegation authorization.
-3. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
-4. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.
+1. Test domain-wide delegation with a temporary local credential or VPS workload identity.
+2. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
+3. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.

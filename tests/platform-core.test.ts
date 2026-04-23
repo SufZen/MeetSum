@@ -105,7 +105,7 @@ describe("Google Workspace connector policy", () => {
       {
         source: "gmail",
         subject: "admin@example.com",
-        mode: "pubsub-watch",
+        mode: "polling",
       },
       {
         source: "drive",
