@@ -34,6 +34,8 @@ DNS must point that subdomain at the VPS before HTTPS issuance can work.
 
 The VPS currently uses Coolify's Traefik proxy. Deployments that use `docker-compose.prod.yml` attach the `app` container to the external `coolify` Docker network and set `traefik.docker.network=coolify`, so Traefik can reach the internal app port.
 
+RealizeOS currently runs directly on the VPS host at port `8082`. The production compose file maps `host.docker.internal` to the Docker host gateway for `app` and `worker`, so MeetSum can use `REALIZEOS_API_URL=http://host.docker.internal:8082` without exposing RealizeOS publicly.
+
 ## Health
 
 `GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.

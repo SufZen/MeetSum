@@ -8,6 +8,8 @@ services:
       - "${APP_PORT:-3005}:3000"
     env_file:
       - .env.local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -36,6 +38,8 @@ services:
     command: ["npm", "run", "db:migrate"]
     env_file:
       - .env.local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
