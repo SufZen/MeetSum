@@ -30,7 +30,7 @@ Use `--env-file .env.local` in production because Docker Compose interpolates se
 docker compose --env-file .env.local -f docker-compose.prod.yml up -d --build
 ```
 
-The production compose file includes Traefik labels for:
+The production compose file includes Coolify/Traefik labels for:
 
 ```text
 meetsum.realization.co.il
@@ -39,6 +39,7 @@ meetsum.realization.co.il
 DNS must point that subdomain at the VPS before HTTPS issuance can work.
 
 The VPS currently uses Coolify's Traefik proxy. Deployments that use `docker-compose.prod.yml` attach the `app` container to the external `coolify` Docker network and set `traefik.docker.network=coolify`, so Traefik can reach the internal app port.
+Coolify's Traefik entrypoints are named `http` and `https`.
 
 RealizeOS currently runs directly on the VPS host at port `8082`. The production compose file maps `host.docker.internal` to the Docker host gateway for `app` and `worker`, so MeetSum can use `REALIZEOS_API_URL=http://host.docker.internal:8082` without exposing RealizeOS publicly.
 
