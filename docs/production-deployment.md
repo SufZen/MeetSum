@@ -32,6 +32,8 @@ meetsum.realization.co.il
 
 DNS must point that subdomain at the VPS before HTTPS issuance can work.
 
+The VPS currently uses Coolify's Traefik proxy. Deployments that use `docker-compose.prod.yml` attach the `app` container to the external `coolify` Docker network and set `traefik.docker.network=coolify`, so Traefik can reach the internal app port.
+
 ## Health
 
 `GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.

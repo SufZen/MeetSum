@@ -22,10 +22,14 @@ services:
       retries: 5
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
       - "traefik.http.routers.meetsum.rule=Host(`meetsum.realization.co.il`)"
       - "traefik.http.routers.meetsum.entrypoints=websecure"
       - "traefik.http.routers.meetsum.tls.certresolver=letsencrypt"
       - "traefik.http.services.meetsum.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - coolify
 
   migrate:
     build: .
@@ -107,3 +111,7 @@ volumes:
   redis-data:
   minio-data:
   n8n-data:
+
+networks:
+  coolify:
+    external: true
