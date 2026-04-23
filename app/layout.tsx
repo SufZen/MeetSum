@@ -13,8 +13,8 @@ const fontMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Meeting Intelligence",
-  description: "Self-hosted AI-first meeting memory for Google Workspace.",
+  title: "MeetSum",
+  description: "Self-hosted AI-first meeting summaries for Google Workspace.",
 }
 
 export default function RootLayout({

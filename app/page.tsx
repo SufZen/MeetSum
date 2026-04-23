@@ -49,7 +49,7 @@ export default function Page() {
               <SparklesIcon aria-hidden="true" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold">Meeting Intelligence</h1>
+              <h1 className="text-lg font-semibold">MeetSum</h1>
               <p className="text-sm text-muted-foreground">Google-first AI memory</p>
             </div>
           </div>

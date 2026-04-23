@@ -1,4 +1,4 @@
-# AI-First Meeting Intelligence Architecture
+# MeetSum Architecture
 
 This repo starts the self-hosted meeting platform as a modular monolith. The app is intentionally built around stable seams before real credentials are added: Google Workspace sync, meeting ingestion, AI providers, event/webhook delivery, CLI, and MCP tools.
 
