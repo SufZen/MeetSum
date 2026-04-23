@@ -24,6 +24,12 @@ Use:
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+Use `--env-file .env.local` in production because Docker Compose interpolates service environment values before `env_file` is applied:
+
+```bash
+docker compose --env-file .env.local -f docker-compose.prod.yml up -d --build
+```
+
 The production compose file includes Traefik labels for:
 
 ```text
@@ -46,8 +52,15 @@ RealizeOS currently runs directly on the VPS host at port `8082`. The production
 cd /opt/meetsum
 ./scripts/backup-postgres.sh
 git pull --ff-only
-docker compose -f docker-compose.prod.yml build app worker migrate
-docker compose -f docker-compose.prod.yml up -d --remove-orphans
+docker compose --env-file .env.local -f docker-compose.prod.yml build app migrate
+docker compose --env-file .env.local -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
 The helper `scripts/deploy-vps.sh` performs the same flow.
+
+The `worker` and bundled `n8n` services are profile-gated. Start them only when they are ready to do useful work:
+
+```bash
+docker compose --env-file .env.local -f docker-compose.prod.yml --profile worker up -d worker
+docker compose --env-file .env.local -f docker-compose.prod.yml --profile automation up -d n8n
+```

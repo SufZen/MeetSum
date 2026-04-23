@@ -2,6 +2,7 @@
 set -eu
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-.env.local}"
 BACKUP_FILE="${1:-}"
 CONFIRM="${2:-}"
 
@@ -16,6 +17,6 @@ if [ ! -f "$BACKUP_FILE" ]; then
   exit 1
 fi
 
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
   pg_restore -U "${POSTGRES_USER:-meetings}" -d "${POSTGRES_DB:-meetings}" \
   --clean --if-exists --no-owner --no-privileges < "$BACKUP_FILE"

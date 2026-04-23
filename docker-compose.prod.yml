@@ -47,6 +47,8 @@ services:
   worker:
     build: .
     command: ["npm", "run", "mcp"]
+    profiles:
+      - worker
     restart: unless-stopped
     env_file:
       - .env.local
@@ -102,6 +104,8 @@ services:
 
   n8n:
     image: n8nio/n8n:latest
+    profiles:
+      - automation
     restart: unless-stopped
     environment:
       N8N_HOST: ${N8N_HOST:-n8n.realization.co.il}
