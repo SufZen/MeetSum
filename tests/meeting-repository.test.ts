@@ -6,7 +6,7 @@ import {
 } from "@/lib/meetings/repository"
 
 describe("meeting repository", () => {
-  it("creates audio-first meetings with searchable summaries", () => {
+  it("creates audio-first meetings with searchable summaries", async () => {
     const repository = createInMemoryMeetingRepository()
     const input: CreateMeetingInput = {
       title: "Hebrew strategy review",
@@ -16,7 +16,7 @@ describe("meeting repository", () => {
       participants: ["Ran", "Maya"],
     }
 
-    const meeting = repository.createMeeting(input)
+    const meeting = await repository.createMeeting(input)
 
     expect(meeting).toMatchObject({
       title: "Hebrew strategy review",
@@ -25,10 +25,10 @@ describe("meeting repository", () => {
       status: "created",
       retention: "audio",
     })
-    expect(repository.searchMeetings("strategy")).toHaveLength(1)
+    expect(await repository.searchMeetings("strategy")).toHaveLength(1)
   })
 
-  it("answers questions from transcript and summary context", () => {
+  it("answers questions from transcript and summary context", async () => {
     const repository = createInMemoryMeetingRepository([
       {
         id: "meet_1",
@@ -63,9 +63,9 @@ describe("meeting repository", () => {
       },
     ])
 
-    const answer = repository.askMeetingMemory(
+    const answer = await repository.askMeetingMemory(
       "meet_1",
-      "What should RealizeOS receive?",
+      "What should RealizeOS receive?"
     )
 
     expect(answer.answer).toContain("meeting context")

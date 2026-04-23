@@ -29,28 +29,30 @@ const statusProgress = new Map(
   MEETING_STATUS_FLOW.map((status, index) => [
     status,
     Math.round((index / (MEETING_STATUS_FLOW.length - 2)) * 100),
-  ]),
+  ])
 )
 
-export default function Page() {
-  const meetings = meetingRepository.listMeetings()
-  const selectedMeeting = meetings[0]
+export default async function Page() {
+  const meetings = await meetingRepository.listMeetings()
+  const selectedMeeting = meetings[0] ?? null
   const totalActionItems = meetings.reduce(
     (count, meeting) => count + (meeting.summary?.actionItems.length ?? 0),
-    0,
+    0
   )
 
   return (
     <main className="min-h-svh bg-background">
       <div className="grid min-h-svh grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border-b bg-muted/30 p-5 lg:border-b-0 lg:border-r">
+        <aside className="border-b bg-muted/30 p-5 lg:border-r lg:border-b-0">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <SparklesIcon aria-hidden="true" />
             </div>
             <div>
               <h1 className="text-lg font-semibold">MeetSum</h1>
-              <p className="text-sm text-muted-foreground">Google-first AI memory</p>
+              <p className="text-sm text-muted-foreground">
+                Google-first AI memory
+              </p>
             </div>
           </div>
 
@@ -94,7 +96,9 @@ export default function Page() {
           <header className="border-b p-5">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Self-hosted control plane</p>
+                <p className="text-sm text-muted-foreground">
+                  Self-hosted control plane
+                </p>
                 <h2 className="text-3xl font-semibold tracking-tight">
                   Meetings, memory, automations
                 </h2>
@@ -114,9 +118,12 @@ export default function Page() {
           </header>
 
           <div className="grid flex-1 grid-cols-1 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)_340px]">
-            <div className="border-b p-5 xl:border-b-0 xl:border-r">
+            <div className="border-b p-5 xl:border-r xl:border-b-0">
               <div className="mb-4 flex items-center gap-2">
-                <SearchIcon aria-hidden="true" className="text-muted-foreground" />
+                <SearchIcon
+                  aria-hidden="true"
+                  className="text-muted-foreground"
+                />
                 <Input placeholder="Search meetings, Hebrew notes, decisions" />
               </div>
 
@@ -140,7 +147,9 @@ export default function Page() {
                       </div>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3">
-                      <Progress value={statusProgress.get(meeting.status) ?? 0} />
+                      <Progress
+                        value={statusProgress.get(meeting.status) ?? 0}
+                      />
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span>{meeting.status.replaceAll("_", " ")}</span>
                         <span>{meeting.language.toUpperCase()}</span>
@@ -151,94 +160,133 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="min-w-0 border-b p-5 xl:border-b-0 xl:border-r">
-              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <Badge variant="outline">Selected meeting</Badge>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-tight">
-                    {selectedMeeting.title}
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {selectedMeeting.participants.join(", ")}
-                  </p>
-                </div>
-                <div className="flex -space-x-2">
-                  {selectedMeeting.participants.map((participant) => (
-                    <Avatar key={participant} className="size-9 border-2 border-background">
-                      <AvatarFallback>{participant.slice(0, 2)}</AvatarFallback>
-                    </Avatar>
-                  ))}
-                </div>
-              </div>
-
-              <Tabs defaultValue="summary" className="w-full">
-                <TabsList>
-                  <TabsTrigger value="summary">Summary</TabsTrigger>
-                  <TabsTrigger value="transcript">Transcript</TabsTrigger>
-                  <TabsTrigger value="ask">Ask</TabsTrigger>
-                </TabsList>
-                <TabsContent value="summary" className="mt-5 flex flex-col gap-5">
-                  <section>
-                    <h4 className="mb-2 font-medium">Overview</h4>
-                    <p className="leading-7 text-muted-foreground">
-                      {selectedMeeting.summary?.overview}
-                    </p>
-                  </section>
-                  <section>
-                    <h4 className="mb-2 font-medium">Decisions</h4>
-                    <ul className="flex flex-col gap-2">
-                      {selectedMeeting.summary?.decisions.map((decision) => (
-                        <li key={decision} className="rounded-md bg-muted p-3 text-sm">
-                          {decision}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                  <section>
-                    <h4 className="mb-2 font-medium">Action items</h4>
-                    <div className="flex flex-col gap-2">
-                      {selectedMeeting.summary?.actionItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
-                        >
-                          <span>{item.title}</span>
-                          <Badge variant="outline">{item.owner ?? "Unassigned"}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                </TabsContent>
-                <TabsContent value="transcript" className="mt-5 flex flex-col gap-3">
-                  {selectedMeeting.transcript?.map((segment) => (
-                    <div key={segment.id} className="grid gap-2 rounded-md border p-3">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium">{segment.speaker}</span>
-                        <span className="text-muted-foreground">
-                          {Math.floor(segment.startMs / 1000)}s
-                        </span>
-                      </div>
-                      <p className="text-sm leading-6 text-muted-foreground">
-                        {segment.text}
+            <div className="min-w-0 border-b p-5 xl:border-r xl:border-b-0">
+              {selectedMeeting ? (
+                <>
+                  <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <Badge variant="outline">Selected meeting</Badge>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight">
+                        {selectedMeeting.title}
+                      </h3>
+                      <p className="text-muted-foreground">
+                        {selectedMeeting.participants.join(", ")}
                       </p>
                     </div>
-                  ))}
-                </TabsContent>
-                <TabsContent value="ask" className="mt-5">
-                  <Card className="rounded-md shadow-none">
-                    <CardHeader>
-                      <CardTitle>Ask meeting memory</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-3">
-                      <Input defaultValue="What should RealizeOS receive?" />
-                      <Button className="w-fit">
-                        <BotIcon data-icon="inline-start" />
-                        Ask
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+                    <div className="flex -space-x-2">
+                      {selectedMeeting.participants.map((participant) => (
+                        <Avatar
+                          key={participant}
+                          className="size-9 border-2 border-background"
+                        >
+                          <AvatarFallback>
+                            {participant.slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Tabs defaultValue="summary" className="w-full">
+                    <TabsList>
+                      <TabsTrigger value="summary">Summary</TabsTrigger>
+                      <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                      <TabsTrigger value="ask">Ask</TabsTrigger>
+                    </TabsList>
+                    <TabsContent
+                      value="summary"
+                      className="mt-5 flex flex-col gap-5"
+                    >
+                      <section>
+                        <h4 className="mb-2 font-medium">Overview</h4>
+                        <p className="leading-7 text-muted-foreground">
+                          {selectedMeeting.summary?.overview}
+                        </p>
+                      </section>
+                      <section>
+                        <h4 className="mb-2 font-medium">Decisions</h4>
+                        <ul className="flex flex-col gap-2">
+                          {selectedMeeting.summary?.decisions.map(
+                            (decision) => (
+                              <li
+                                key={decision}
+                                className="rounded-md bg-muted p-3 text-sm"
+                              >
+                                {decision}
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </section>
+                      <section>
+                        <h4 className="mb-2 font-medium">Action items</h4>
+                        <div className="flex flex-col gap-2">
+                          {selectedMeeting.summary?.actionItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
+                            >
+                              <span>{item.title}</span>
+                              <Badge variant="outline">
+                                {item.owner ?? "Unassigned"}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    </TabsContent>
+                    <TabsContent
+                      value="transcript"
+                      className="mt-5 flex flex-col gap-3"
+                    >
+                      {selectedMeeting.transcript?.map((segment) => (
+                        <div
+                          key={segment.id}
+                          className="grid gap-2 rounded-md border p-3"
+                        >
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium">
+                              {segment.speaker}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {Math.floor(segment.startMs / 1000)}s
+                            </span>
+                          </div>
+                          <p className="text-sm leading-6 text-muted-foreground">
+                            {segment.text}
+                          </p>
+                        </div>
+                      ))}
+                    </TabsContent>
+                    <TabsContent value="ask" className="mt-5">
+                      <Card className="rounded-md shadow-none">
+                        <CardHeader>
+                          <CardTitle>Ask meeting memory</CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex flex-col gap-3">
+                          <Input defaultValue="What should RealizeOS receive?" />
+                          <Button className="w-fit">
+                            <BotIcon data-icon="inline-start" />
+                            Ask
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  </Tabs>
+                </>
+              ) : (
+                <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 text-center">
+                  <FileAudioIcon
+                    aria-hidden="true"
+                    className="size-10 text-muted-foreground"
+                  />
+                  <h3 className="text-xl font-semibold">No meetings yet</h3>
+                  <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                    Upload audio, record in the browser, or sync Google
+                    Workspace to start building meeting memory.
+                  </p>
+                </div>
+              )}
             </div>
 
             <aside className="p-5 xl:col-span-2 xl:border-t 2xl:col-span-1 2xl:border-t-0">
@@ -246,31 +294,41 @@ export default function Page() {
                 <section>
                   <h3 className="mb-3 font-medium">Pipeline</h3>
                   <div className="flex flex-col gap-2">
-                    {["media_uploaded", "transcribing", "summarizing", "indexing"].map(
-                      (status) => (
-                        <div
-                          key={status}
-                          className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
-                        >
-                          <span>{status.replaceAll("_", " ")}</span>
-                          <ActivityIcon aria-hidden="true" className="text-muted-foreground" />
-                        </div>
-                      ),
-                    )}
+                    {[
+                      "media_uploaded",
+                      "transcribing",
+                      "summarizing",
+                      "indexing",
+                    ].map((status) => (
+                      <div
+                        key={status}
+                        className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
+                      >
+                        <span>{status.replaceAll("_", " ")}</span>
+                        <ActivityIcon
+                          aria-hidden="true"
+                          className="text-muted-foreground"
+                        />
+                      </div>
+                    ))}
                   </div>
                 </section>
 
                 <section>
                   <h3 className="mb-3 font-medium">Google scopes</h3>
                   <div className="flex flex-col gap-2 text-sm">
-                    {Object.entries(GOOGLE_WORKSPACE_SCOPES).map(([group, scopes]) => (
-                      <div key={group} className="rounded-md bg-muted p-3">
-                        <div className="mb-1 font-medium capitalize">{group}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {scopes.length} least-privilege scopes
+                    {Object.entries(GOOGLE_WORKSPACE_SCOPES).map(
+                      ([group, scopes]) => (
+                        <div key={group} className="rounded-md bg-muted p-3">
+                          <div className="mb-1 font-medium capitalize">
+                            {group}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {scopes.length} least-privilege scopes
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    )}
                   </div>
                 </section>
 
@@ -283,15 +341,18 @@ export default function Page() {
                     <Badge variant="secondary">REST</Badge>
                   </div>
                   <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    {totalActionItems} open action items can trigger agents, webhooks,
-                    RealizeOS context packets, or follow-up drafts.
+                    {totalActionItems} open action items can trigger agents,
+                    webhooks, RealizeOS context packets, or follow-up drafts.
                   </p>
                 </section>
 
                 <section>
                   <h3 className="mb-3 font-medium">Storage policy</h3>
                   <div className="flex items-center gap-3 rounded-md border p-3">
-                    <FileAudioIcon aria-hidden="true" className="text-muted-foreground" />
+                    <FileAudioIcon
+                      aria-hidden="true"
+                      className="text-muted-foreground"
+                    />
                     <div>
                       <div className="text-sm font-medium">Audio-first</div>
                       <div className="text-xs text-muted-foreground">

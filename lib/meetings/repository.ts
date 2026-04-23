@@ -58,7 +58,16 @@ export type MeetingAnswer = {
   }>
 }
 
-export type MeetingRepository = ReturnType<typeof createInMemoryMeetingRepository>
+export type MeetingRepository = {
+  listMeetings: () => Promise<MeetingRecord[]>
+  getMeeting: (id: string) => Promise<MeetingRecord | undefined>
+  createMeeting: (input: CreateMeetingInput) => Promise<MeetingRecord>
+  searchMeetings: (query: string) => Promise<MeetingRecord[]>
+  askMeetingMemory: (
+    meetingId: string,
+    question: string
+  ) => Promise<MeetingAnswer>
+}
 
 function normalize(value: string): string {
   return value.toLowerCase()
@@ -68,23 +77,25 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`
 }
 
-export function createInMemoryMeetingRepository(initialMeetings: MeetingRecord[] = []) {
+export function createInMemoryMeetingRepository(
+  initialMeetings: MeetingRecord[] = []
+): MeetingRepository {
   const meetings = new Map<string, MeetingRecord>(
-    initialMeetings.map((meeting) => [meeting.id, meeting]),
+    initialMeetings.map((meeting) => [meeting.id, meeting])
   )
 
   return {
-    listMeetings(): MeetingRecord[] {
+    async listMeetings(): Promise<MeetingRecord[]> {
       return [...meetings.values()].sort((a, b) =>
-        b.startedAt.localeCompare(a.startedAt),
+        b.startedAt.localeCompare(a.startedAt)
       )
     },
 
-    getMeeting(id: string): MeetingRecord | undefined {
+    async getMeeting(id: string): Promise<MeetingRecord | undefined> {
       return meetings.get(id)
     },
 
-    createMeeting(input: CreateMeetingInput): MeetingRecord {
+    async createMeeting(input: CreateMeetingInput): Promise<MeetingRecord> {
       const meeting: MeetingRecord = {
         id: createId("meet"),
         title: input.title,
@@ -100,10 +111,11 @@ export function createInMemoryMeetingRepository(initialMeetings: MeetingRecord[]
       return meeting
     },
 
-    searchMeetings(query: string): MeetingRecord[] {
+    async searchMeetings(query: string): Promise<MeetingRecord[]> {
       const needle = normalize(query)
+      const allMeetings = await this.listMeetings()
 
-      return this.listMeetings().filter((meeting) => {
+      return allMeetings.filter((meeting) => {
         const searchable = [
           meeting.title,
           meeting.summary?.overview,
@@ -118,7 +130,10 @@ export function createInMemoryMeetingRepository(initialMeetings: MeetingRecord[]
       })
     },
 
-    askMeetingMemory(meetingId: string, question: string): MeetingAnswer {
+    async askMeetingMemory(
+      meetingId: string,
+      question: string
+    ): Promise<MeetingAnswer> {
       const meeting = meetings.get(meetingId)
 
       if (!meeting) {
@@ -128,8 +143,8 @@ export function createInMemoryMeetingRepository(initialMeetings: MeetingRecord[]
       const normalizedQuestion = normalize(question)
       const transcriptMatch = meeting.transcript?.find((segment) =>
         normalize(segment.text).includes(
-          normalizedQuestion.includes("realizeos") ? "realizeos" : "",
-        ),
+          normalizedQuestion.includes("realizeos") ? "realizeos" : ""
+        )
       )
 
       const answer =

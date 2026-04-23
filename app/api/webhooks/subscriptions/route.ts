@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server"
 
+import { jsonError, requireApiKey } from "@/lib/api/responses"
 import { createPlatformEvent, signWebhookPayload } from "@/lib/platform/events"
 
 export async function POST(request: Request) {
+  const unauthorized = requireApiKey(request)
+
+  if (unauthorized) {
+    return unauthorized
+  }
+
   const { url, secret = "dev-secret" } = (await request.json()) as {
     url?: string
     secret?: string
   }
 
   if (!url) {
-    return NextResponse.json({ error: "Webhook URL is required" }, { status: 400 })
+    return jsonError("Webhook URL is required", 400)
   }
 
   const event = createPlatformEvent("summary.created", { url })
@@ -24,6 +31,6 @@ export async function POST(request: Request) {
       testEvent: event,
       signature: signWebhookPayload(event, secret),
     },
-    { status: 201 },
+    { status: 201 }
   )
 }

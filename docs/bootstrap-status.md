@@ -131,4 +131,6 @@ Detected relevant directories:
 ## Next Technical Steps
 
 1. Re-test SSH stability and inspect VPS compose files without exposing `.env` secrets.
-2. Build Phase 1: Postgres persistence, auth, API-key auth, migrations, and integration tests.
+2. Continue Phase 1 persistence: extend the Postgres repository beyond meeting headers into summaries, transcripts, action items, Google sync state, webhooks, and AI runs.
+3. Add first-admin session auth and an API-key management screen.
+4. Start Phase 2 Calendar sync against the verified domain-wide delegation setup.

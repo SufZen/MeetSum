@@ -9,7 +9,17 @@ const defaultAppUrl = process.env.MEETINGS_APP_URL ?? "http://127.0.0.1:3000"
 
 async function request(path, init) {
   const appUrl = program.opts().url ?? defaultAppUrl
-  const response = await fetch(`${appUrl}${path}`, init)
+  const apiKey = program.opts().apiKey ?? process.env.MEETSUM_API_KEY
+  const headers = new Headers(init?.headers)
+
+  if (apiKey) {
+    headers.set("authorization", `Bearer ${apiKey}`)
+  }
+
+  const response = await fetch(`${appUrl}${path}`, {
+    ...init,
+    headers,
+  })
   const body = await response.json()
 
   if (!response.ok) {
@@ -23,6 +33,7 @@ program
   .name("meetings")
   .description("CLI for the self-hosted meeting intelligence app")
   .option("--url <url>", "App URL", defaultAppUrl)
+  .option("--api-key <key>", "MeetSum API key", process.env.MEETSUM_API_KEY)
 
 program
   .command("sync")
@@ -40,7 +51,7 @@ program
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ subject: options.subject }),
-        }),
+        })
       )
     }
 
@@ -66,8 +77,8 @@ program
           body: formData,
         }),
         null,
-        2,
-      ),
+        2
+      )
     )
   })
 
@@ -84,8 +95,8 @@ program
           body: JSON.stringify({ question }),
         }),
         null,
-        2,
-      ),
+        2
+      )
     )
   })
 
@@ -98,8 +109,11 @@ program
     if (options.target === "markdown") {
       console.log(
         meetings
-          .map((meeting) => `# ${meeting.title}\n\n${meeting.summary?.overview ?? ""}`)
-          .join("\n\n"),
+          .map(
+            (meeting) =>
+              `# ${meeting.title}\n\n${meeting.summary?.overview ?? ""}`
+          )
+          .join("\n\n")
       )
       return
     }

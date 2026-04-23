@@ -11,13 +11,15 @@ This repository currently contains the first working architecture slice:
 - Next.js 16 App Router UI based on the Game Changer template.
 - Fireflies-style meeting workspace with meeting inbox, transcript, summary, action items, Google context, recorder shell, and automation rail.
 - Tested domain modules for meeting state, AI escalation policy, Google Workspace scope policy, signed webhooks, and meeting memory.
+- Postgres migration runner and repository adapter, with in-memory demo mode still available for local UI work.
+- API key hashing/verification, bearer-token CLI support, and request validation for meeting creation and protected write routes.
 - REST API scaffold for meetings, uploads, Ask-style Q&A, Google sync, webhooks, and agent runs.
 - CLI scaffold in `bin/meetings.mjs`.
 - MCP server scaffold in `mcp/server.mjs`.
 - VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
 - Initial Postgres schema in `db/schema.sql`.
 
-This is not yet a full production Fireflies replacement. Real Google API sync, persistent database repositories, media workers, transcription/diarization providers, billing/permissions, and production auth are the next build stages.
+This is not yet a full production Fireflies replacement. Real Google API sync, media workers, transcription/diarization providers, billing/permissions, and user-facing admin auth are the next build stages.
 
 ## Quick Start
 
@@ -30,6 +32,12 @@ Open `http://127.0.0.1:3000`. If that port is already in use:
 
 ```bash
 npm run dev -- --hostname 127.0.0.1 --port 3001
+```
+
+Run database migrations against a configured Postgres database:
+
+```bash
+npm run db:migrate
 ```
 
 ## Verification
@@ -47,11 +55,14 @@ npm run build
 curl http://127.0.0.1:3000/api/meetings
 
 curl -X POST http://127.0.0.1:3000/api/meetings/meet_google_workspace/ask \
+  -H "authorization: Bearer $MEETSUM_API_KEY" \
   -H "content-type: application/json" \
   -d "{\"question\":\"What is the Google Workspace source of truth?\"}"
 
 node bin/meetings.mjs export --target markdown
 ```
+
+When `MEETSUM_REQUIRE_API_KEY=true`, set `MEETSUM_API_KEY` for local CLI calls or pass `--api-key`.
 
 ## Self-Hosted Stack
 
@@ -64,6 +75,7 @@ docker compose up --build
 The compose stack includes:
 
 - `app`: Next.js UI and API.
+- `migrate`: one-shot migration runner.
 - `worker`: placeholder worker/MCP service process.
 - `postgres`: source-of-truth database.
 - `redis`: queues, locks, retry state.

@@ -6,9 +6,20 @@ services:
     env_file:
       - .env.local
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  migrate:
+    build: .
+    command: ["npm", "run", "db:migrate"]
+    env_file:
+      - .env.local
+    depends_on:
       - postgres
-      - redis
-      - minio
 
   worker:
     build: .
@@ -30,7 +41,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
 
   redis:
     image: redis:7-alpine

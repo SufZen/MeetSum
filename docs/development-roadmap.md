@@ -16,12 +16,12 @@ Turn the current scaffold into a production-grade, self-hosted, Google Workspace
 
 Expected outcome: the current demo state becomes a persistent, testable app that can survive restarts.
 
-- Replace the in-memory meeting repository with a Postgres repository using the schema in `db/schema.sql`.
-- Add migrations and a repeatable migration command.
+- Add a Postgres repository using the schema in `db/schema.sql`. Initial adapter is implemented; next step is broader summary/transcript persistence.
+- Add migrations and a repeatable migration command. Initial runner is implemented with `npm run db:migrate`.
 - Add app authentication for the first admin user.
-- Add API key authentication for automation, CLI, and MCP clients.
-- Add request validation for every API route.
-- Add structured error responses and server-side audit logging.
+- Add API key authentication for automation, CLI, and MCP clients. Initial bearer-key guard is implemented for API routes when enabled.
+- Add request validation for every API route. Meeting create and required-string payloads are implemented first.
+- Add structured error responses and server-side audit logging. Structured errors are started; audit logs remain open.
 - Add seed data only in development mode.
 - Add integration tests that run against a disposable Postgres database.
 
@@ -173,8 +173,8 @@ Provide these when you are ready to wire real systems:
 
 Start with Phase 1 and part of Phase 2:
 
-1. Add database migrations and Postgres repository.
-2. Add admin/API-key auth.
+1. Finish the Postgres repository for summaries, transcript segments, action items, sync state, and webhooks.
+2. Add first-admin login/session auth and an API-key management screen.
 3. Add Google Workspace credential adapter and sync-state persistence.
 4. Implement Calendar sync first.
 5. Add Drive recording discovery second.

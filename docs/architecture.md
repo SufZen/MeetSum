@@ -6,7 +6,7 @@ This repo starts the self-hosted meeting platform as a modular monolith. The app
 
 - `app`: Next.js App Router UI and REST API.
 - `worker`: background jobs for Google sync, media processing, transcription, summarization, embeddings, webhook retries, and agent runs.
-- `postgres`: system of record for meetings, Google state, transcripts, summaries, action items, API keys, and MCP clients.
+- `postgres`: system of record for meetings, Google state, transcripts, summaries, action items, API keys, and MCP clients. Migrations live in `db/migrations` and run through `npm run db:migrate`.
 - `redis`: queue, retry, lock, and job state backend.
 - `minio`: S3-compatible storage for audio-first media artifacts.
 - `n8n`: first automation surface for business workflows.
@@ -29,3 +29,7 @@ Business systems should connect through these surfaces in this order:
 4. CLI for local/admin automation.
 
 RealizeOS starts as an outbound agent target through `/api/agents/run`; the payload contract should become a dedicated adapter once the receiving API is stable.
+
+## API Security
+
+Production API access is guarded by bearer API keys when `MEETSUM_REQUIRE_API_KEY=true`. Keys can be provided as raw bootstrap values with `MEETSUM_API_KEYS` or as stored hashes with `MEETSUM_API_KEY_HASHES`; the hashing helper lives in `lib/auth/api-keys.ts`. The CLI sends `Authorization: Bearer ...` from `--api-key` or `MEETSUM_API_KEY`.
