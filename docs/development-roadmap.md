@@ -18,6 +18,8 @@ Expected outcome: the current demo state becomes a persistent, testable app that
 
 - Add a Postgres repository using the schema in `db/schema.sql`. Initial adapter is implemented; next step is broader summary/transcript persistence.
 - Add migrations and a repeatable migration command. Initial runner is implemented with `npm run db:migrate`.
+- Add day-one locale routing for English, Hebrew, Portuguese, Spanish, and Italian. Initial locale shell is implemented.
+- Add deterministic language intelligence for mixed-language meetings. Initial heuristic layer is implemented.
 - Add app authentication for the first admin user.
 - Add API key authentication for automation, CLI, and MCP clients. Initial bearer-key guard is implemented for API routes when enabled.
 - Add request validation for every API route. Meeting create and required-string payloads are implemented first.
@@ -139,7 +141,7 @@ Expected outcome: the system can run safely on a VPS.
 
 - Add reverse proxy and TLS deployment docs.
 - Add environment validation at boot.
-- Add backup and restore scripts for Postgres and MinIO.
+- Add backup and restore scripts for Postgres and MinIO. Postgres scripts are implemented; MinIO object backup remains open.
 - Add log aggregation guidance.
 - Add metrics for queue depth, job latency, AI cost, Google sync lag, webhook failure rate, and storage growth.
 - Add rate limiting and abuse protection for API, CLI, and MCP clients.
@@ -173,11 +175,12 @@ Provide these when you are ready to wire real systems:
 
 Start with Phase 1 and part of Phase 2:
 
-1. Finish the Postgres repository for summaries, transcript segments, action items, sync state, and webhooks.
+1. Finish persistent meeting detail storage for summaries, transcript segments, tags, contexts, intelligence runs, and enriched action items.
 2. Add first-admin login/session auth and an API-key management screen.
 3. Add Google Workspace credential adapter and sync-state persistence.
-4. Implement Calendar sync first.
+4. Implement Calendar polling first.
 5. Add Drive recording discovery second.
-6. Keep Gmail context third, after meeting identity matching is stable.
+6. Add Gemini/Gemma provider adapters for Hebrew-first summarization and regression tests.
+7. Keep Gmail context after meeting identity matching is stable.
 
 This order creates a reliable product spine before expensive AI/media processing work begins.

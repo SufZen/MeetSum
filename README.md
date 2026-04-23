@@ -10,6 +10,8 @@ This repository currently contains the first working architecture slice:
 
 - Next.js 16 App Router UI based on the Game Changer template.
 - Fireflies-style meeting workspace with meeting inbox, transcript, summary, action items, Google context, recorder shell, and automation rail.
+- Production-oriented app shell with locale-prefixed UI routes for English, Hebrew, Portuguese, Spanish, and Italian.
+- Deterministic mixed-language intelligence for language metadata, Hebrew cleanup, auto-tags, smart tasks, and structured follow-up output.
 - Tested domain modules for meeting state, AI escalation policy, Google Workspace scope policy, signed webhooks, and meeting memory.
 - Postgres migration runner and repository adapter, with in-memory demo mode still available for local UI work.
 - API key hashing/verification, bearer-token CLI support, and request validation for meeting creation and protected write routes.
@@ -18,6 +20,7 @@ This repository currently contains the first working architecture slice:
 - MCP server scaffold in `mcp/server.mjs`.
 - VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
 - Initial Postgres schema in `db/schema.sql`.
+- Production compose, health endpoint, and Postgres backup/restore scripts.
 
 This is not yet a full production Fireflies replacement. Real Google API sync, media workers, transcription/diarization providers, billing/permissions, and user-facing admin auth are the next build stages.
 
@@ -28,7 +31,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3000`. If that port is already in use:
+Open `http://127.0.0.1:3000/en`. If that port is already in use:
 
 ```bash
 npm run dev -- --hostname 127.0.0.1 --port 3001
@@ -53,6 +56,8 @@ npm run build
 
 ```bash
 curl http://127.0.0.1:3000/api/meetings
+curl http://127.0.0.1:3000/api/health
+curl http://127.0.0.1:3000/api/locales
 
 curl -X POST http://127.0.0.1:3000/api/meetings/meet_google_workspace/ask \
   -H "authorization: Bearer $MEETSUM_API_KEY" \
@@ -82,11 +87,25 @@ The compose stack includes:
 - `minio`: S3-compatible meeting media storage.
 - `n8n`: first automation surface.
 
+Production VPS deploy uses `docker-compose.prod.yml`, exposes MeetSum on host port `3005`, and includes Traefik labels for `meetsum.realization.co.il`.
+
 ## Documentation
 
 - `docs/architecture.md`: current architecture and integration surfaces.
+- `docs/design-system.md`: UI palette, typography, layout, and component layer.
+- `docs/internationalization.md`: locale routing, language cookie, and RTL policy.
+- `docs/language-intelligence.md`: mixed-language detection, Hebrew cleanup, tags, and smart tasks.
+- `docs/production-deployment.md`: VPS compose, Traefik, health checks, and deploy flow.
+- `docs/backup-restore.md`: Postgres backup and restore commands.
+- `docs/competitive-feature-plan.md`: Fireflies/Timeless-inspired feature staging.
 - `docs/google-workspace-setup.md`: Workspace admin setup notes.
 - `docs/development-roadmap.md`: production-grade next-stage plan.
+
+## License
+
+MeetSum is licensed under the MIT License. See `LICENSE`.
+
+Third-party dependencies keep their own licenses. Private secrets, deployment environment files, Google credentials, Fireflies transcript exports, recordings, summaries, and meeting data are not covered by the repository license and must not be committed.
 
 ## Product Direction
 

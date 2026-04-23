@@ -1,15 +1,18 @@
 # MeetSum Architecture
 
-This repo starts the self-hosted meeting platform as a modular monolith. The app is intentionally built around stable seams before real credentials are added: Google Workspace sync, meeting ingestion, AI providers, event/webhook delivery, CLI, and MCP tools.
+This repo starts the self-hosted meeting platform as a modular monolith. The app is intentionally built around stable integration boundaries before real credentials are added: Google Workspace sync, meeting ingestion, AI providers, event/webhook delivery, CLI, and MCP tools.
 
 ## Production Shape
 
-- `app`: Next.js App Router UI and REST API.
+- `app`: Next.js App Router UI and REST API. Production exposes host port `3005` and serves locale-prefixed routes.
 - `worker`: background jobs for Google sync, media processing, transcription, summarization, embeddings, webhook retries, and agent runs.
-- `postgres`: system of record for meetings, Google state, transcripts, summaries, action items, API keys, and MCP clients. Migrations live in `db/migrations` and run through `npm run db:migrate`.
-- `redis`: queue, retry, lock, and job state backend.
-- `minio`: S3-compatible storage for audio-first media artifacts.
+- `migrate`: one-shot migration runner that must complete before the app starts.
+- `postgres`: system of record for meetings, Google state, transcripts, summaries, action items, tags, contexts, intelligence runs, API keys, and MCP clients. Migrations live in `db/migrations` and run through `npm run db:migrate`.
+- `redis`: queue, retry, lock, and job state backend, stored in a persistent Docker volume.
+- `minio`: S3-compatible storage for audio-first media artifacts, stored in a persistent Docker volume.
 - `n8n`: first automation surface for business workflows.
+
+The `app`, `worker`, and `migrate` containers are disposable. Postgres, Redis, MinIO, and n8n are stateful services with named volumes.
 
 ## Google Workspace
 
@@ -18,6 +21,8 @@ Use domain-wide delegation with narrow scope groups from `lib/google/workspace.t
 ## AI Layer
 
 Provider adapters should hide local/API choices from product code. The default policy is hybrid: local/open-source processing first, then paid/API escalation when Hebrew confidence, diarization confidence, or audio quality is weak.
+
+The current deterministic intelligence layer handles language metadata, Hebrew cleanup, auto-tags, smart tasks, and structured output. Gemini and local Gemma should be added through provider adapters rather than directly inside route handlers.
 
 ## External Systems
 
@@ -28,7 +33,7 @@ Business systems should connect through these surfaces in this order:
 3. MCP tools for agents and context-aware clients.
 4. CLI for local/admin automation.
 
-RealizeOS starts as an outbound agent target through `/api/agents/run`; the payload contract should become a dedicated adapter once the receiving API is stable.
+RealizeOS starts as an outbound export suggestion through `/api/integrations/realizeos/export`; autonomous execution should wait until the receiving API contract is stable.
 
 ## API Security
 

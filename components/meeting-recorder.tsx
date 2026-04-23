@@ -8,26 +8,48 @@ import { Button } from "@/components/ui/button"
 
 type RecorderState = "idle" | "recording" | "blocked" | "unsupported"
 
-export function MeetingRecorder() {
+type MeetingRecorderLabels = {
+  ready: string
+  record: string
+  stop: string
+  recording: string
+  blocked: string
+  unsupported: string
+}
+
+const defaultLabels: MeetingRecorderLabels = {
+  ready: "Ready for in-person audio",
+  record: "Record",
+  stop: "Stop",
+  recording: "Recording",
+  blocked: "Microphone blocked",
+  unsupported: "Recorder unsupported",
+}
+
+export function MeetingRecorder({
+  labels = defaultLabels,
+}: {
+  labels?: MeetingRecorderLabels
+}) {
   const mediaRecorder = useRef<MediaRecorder | null>(null)
   const [state, setState] = useState<RecorderState>("idle")
   const [seconds, setSeconds] = useState(0)
 
   const label = useMemo(() => {
     if (state === "recording") {
-      return `Recording ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+      return `${labels.recording} ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
     }
 
     if (state === "blocked") {
-      return "Microphone blocked"
+      return labels.blocked
     }
 
     if (state === "unsupported") {
-      return "Recorder unsupported"
+      return labels.unsupported
     }
 
-    return "Ready for in-person audio"
-  }, [seconds, state])
+    return labels.ready
+  }, [labels, seconds, state])
 
   async function startRecording() {
     if (!("MediaRecorder" in window)) {
@@ -68,12 +90,12 @@ export function MeetingRecorder() {
       {state === "recording" ? (
         <Button size="sm" variant="outline" onClick={stopRecording}>
           <SquareIcon data-icon="inline-start" />
-          Stop
+          {labels.stop}
         </Button>
       ) : (
         <Button size="sm" onClick={startRecording}>
           <MicIcon data-icon="inline-start" />
-          Record
+          {labels.record}
         </Button>
       )}
     </div>

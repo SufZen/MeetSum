@@ -1,0 +1,137 @@
+name: meetsum
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3005}:3000"
+    env_file:
+      - .env.local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.meetsum.rule=Host(`meetsum.realization.co.il`)"
+      - "traefik.http.routers.meetsum.entrypoints=https"
+      - "traefik.http.routers.meetsum.tls.certresolver=letsencrypt"
+      - "traefik.http.services.meetsum.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - coolify
+
+  migrate:
+    build: .
+    command: ["npm", "run", "db:migrate"]
+    env_file:
+      - .env.local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["npm", "run", "mcp"]
+    profiles:
+      - worker
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-meetings}
+      POSTGRES_USER: ${POSTGRES_USER:-meetings}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      default:
+        aliases:
+          - meetsum-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meetings} -d ${POSTGRES_DB:-meetings}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      default:
+        aliases:
+          - meetsum-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - minio-data:/data
+    networks:
+      default:
+        aliases:
+          - meetsum-minio
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    profiles:
+      - automation
+    restart: unless-stopped
+    environment:
+      N8N_HOST: ${N8N_HOST:-n8n.realization.co.il}
+      N8N_PORT: 5678
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  n8n-data:
+
+networks:
+  coolify:
+    external: true

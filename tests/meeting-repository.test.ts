@@ -77,4 +77,50 @@ describe("meeting repository", () => {
       },
     ])
   })
+
+  it("persists intelligence, tags, language metadata, contexts, and suggested agent runs", async () => {
+    const repository = createInMemoryMeetingRepository([
+      {
+        id: "meet_2",
+        title: "Hebrew automation review",
+        source: "google_meet",
+        language: "he",
+        status: "completed",
+        retention: "audio",
+        startedAt: "2026-04-23T09:00:00.000Z",
+        participants: ["Ran", "Maya"],
+        transcript: [
+          {
+            id: "seg_1",
+            speaker: "Ran",
+            startMs: 0,
+            endMs: 5200,
+            text: "צריך לשלוח את הסיכום ל-RealizeOS וליצור משימה דחופה.",
+          },
+        ],
+      },
+    ])
+
+    const context = await repository.createContext({
+      name: "RealizeOS",
+      description: "Business context memory room",
+    })
+
+    await repository.linkMeetingContext("meet_2", context.id)
+    const intelligence = await repository.runMeetingIntelligence("meet_2")
+    const suggestion = await repository.createSuggestedAgentRun({
+      meetingId: "meet_2",
+      target: "realizeos",
+      payload: { contextId: context.id },
+    })
+
+    const meeting = await repository.getMeeting("meet_2")
+
+    expect(intelligence.languageMetadata.primaryLanguage).toBe("he")
+    expect(meeting?.tags).toEqual(
+      expect.arrayContaining(["hebrew", "follow-up-needed", "urgent"])
+    )
+    expect(meeting?.contexts?.[0]).toMatchObject({ name: "RealizeOS" })
+    expect(meeting?.suggestedAgentRuns?.[0]).toEqual(suggestion)
+  })
 })
