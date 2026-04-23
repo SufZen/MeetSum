@@ -45,6 +45,11 @@ export const dictionaries = {
     recording: "Recording",
     recorderBlocked: "Microphone blocked",
     recorderUnsupported: "Recorder unsupported",
+    signInTitle: "Sign in to MeetSum",
+    signInDescription:
+      "Use your Google Workspace account to access private meeting intelligence.",
+    signInWithGoogle: "Continue with Google",
+    signInRestricted: "Access is currently limited to the first admin account.",
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -90,6 +95,11 @@ export const dictionaries = {
     recording: "מקליט",
     recorderBlocked: "המיקרופון חסום",
     recorderUnsupported: "הקלטה לא נתמכת",
+    signInTitle: "כניסה ל-MeetSum",
+    signInDescription:
+      "התחבר עם חשבון Google Workspace כדי לגשת למודיעין הפגישות הפרטי.",
+    signInWithGoogle: "המשך עם Google",
+    signInRestricted: "הגישה מוגבלת כרגע לחשבון האדמין הראשון.",
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -135,6 +145,11 @@ export const dictionaries = {
     recording: "Gravando",
     recorderBlocked: "Microfone bloqueado",
     recorderUnsupported: "Gravador nao suportado",
+    signInTitle: "Entrar no MeetSum",
+    signInDescription:
+      "Use sua conta Google Workspace para acessar inteligencia privada de reunioes.",
+    signInWithGoogle: "Continuar com Google",
+    signInRestricted: "O acesso esta limitado a primeira conta admin.",
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -180,6 +195,11 @@ export const dictionaries = {
     recording: "Grabando",
     recorderBlocked: "Microfono bloqueado",
     recorderUnsupported: "Grabador no compatible",
+    signInTitle: "Iniciar sesion en MeetSum",
+    signInDescription:
+      "Usa tu cuenta de Google Workspace para acceder a inteligencia privada de reuniones.",
+    signInWithGoogle: "Continuar con Google",
+    signInRestricted: "El acceso esta limitado a la primera cuenta admin.",
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -225,6 +245,11 @@ export const dictionaries = {
     recording: "Registrazione",
     recorderBlocked: "Microfono bloccato",
     recorderUnsupported: "Registratore non supportato",
+    signInTitle: "Accedi a MeetSum",
+    signInDescription:
+      "Usa il tuo account Google Workspace per accedere all'intelligence privata delle riunioni.",
+    signInWithGoogle: "Continua con Google",
+    signInRestricted: "L'accesso e limitato al primo account admin.",
   },
 } as const
 
