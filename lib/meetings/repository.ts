@@ -4,7 +4,6 @@ import {
   type MeetingIntelligence,
   type MeetingLanguageMetadata,
   type MeetingTag,
-  type SmartTask,
 } from "@/lib/intelligence"
 
 export type MeetingSource =
@@ -33,6 +32,8 @@ export type TranscriptSegment = {
   startMs: number
   endMs: number
   text: string
+  confidence?: number
+  language?: string
 }
 
 export type MeetingSummary = {
@@ -62,6 +63,32 @@ export type SuggestedAgentRun = {
   createdAt: string
 }
 
+export type MediaAsset = {
+  id: string
+  meetingId: string
+  storageKey: string
+  filename?: string
+  contentType: string
+  sizeBytes: number
+  retention: "audio" | "video"
+  createdAt: string
+}
+
+export type JobStatus = "queued" | "active" | "completed" | "failed"
+
+export type JobRecord = {
+  id: string
+  name: string
+  status: JobStatus
+  meetingId?: string
+  payload: Record<string, unknown>
+  result: Record<string, unknown>
+  error?: string
+  attempts: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type MeetingRecord = {
   id: string
   title: string
@@ -78,6 +105,7 @@ export type MeetingRecord = {
   contexts?: MeetingContext[]
   intelligence?: MeetingIntelligence
   suggestedAgentRuns?: SuggestedAgentRun[]
+  mediaAssets?: MediaAsset[]
 }
 
 export type CreateMeetingInput = {
@@ -101,6 +129,44 @@ export type MeetingRepository = {
   listMeetings: () => Promise<MeetingRecord[]>
   getMeeting: (id: string) => Promise<MeetingRecord | undefined>
   createMeeting: (input: CreateMeetingInput) => Promise<MeetingRecord>
+  updateMeetingStatus: (
+    id: string,
+    status: MeetingStatus
+  ) => Promise<MeetingRecord>
+  createMediaAsset: (input: {
+    meetingId: string
+    storageKey: string
+    filename?: string
+    contentType: string
+    sizeBytes: number
+    retention?: "audio" | "video"
+  }) => Promise<MediaAsset>
+  replaceTranscriptSegments: (
+    meetingId: string,
+    segments: TranscriptSegment[]
+  ) => Promise<TranscriptSegment[]>
+  upsertMeetingIntelligence: (
+    meetingId: string,
+    intelligence: MeetingIntelligence,
+    provider?: string,
+    model?: string
+  ) => Promise<MeetingIntelligence>
+  updateActionItem: (
+    id: string,
+    patch: Partial<Pick<ActionItem, "status" | "title" | "owner" | "dueDate" | "priority">>
+  ) => Promise<ActionItem>
+  createJob: (input: {
+    id?: string
+    name: string
+    meetingId?: string
+    payload?: Record<string, unknown>
+    status?: JobStatus
+  }) => Promise<JobRecord>
+  updateJob: (
+    id: string,
+    patch: Partial<Pick<JobRecord, "status" | "result" | "error" | "attempts">>
+  ) => Promise<JobRecord>
+  getJob: (id: string) => Promise<JobRecord | undefined>
   searchMeetings: (query: string) => Promise<MeetingRecord[]>
   askMeetingMemory: (
     meetingId: string,
@@ -138,6 +204,7 @@ export function createInMemoryMeetingRepository(
     initialMeetings.map((meeting) => [meeting.id, meeting])
   )
   const contexts = new Map<string, MeetingContext>()
+  const jobs = new Map<string, JobRecord>()
 
   return {
     async listMeetings(): Promise<MeetingRecord[]> {
@@ -164,6 +231,160 @@ export function createInMemoryMeetingRepository(
 
       meetings.set(meeting.id, meeting)
       return meeting
+    },
+
+    async updateMeetingStatus(
+      id: string,
+      status: MeetingStatus
+    ): Promise<MeetingRecord> {
+      const meeting = meetings.get(id)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${id}`)
+      }
+
+      const updated = { ...meeting, status }
+
+      meetings.set(id, updated)
+      return updated
+    },
+
+    async createMediaAsset(input): Promise<MediaAsset> {
+      const meeting = meetings.get(input.meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${input.meetingId}`)
+      }
+
+      const asset: MediaAsset = {
+        id: createId("asset"),
+        meetingId: input.meetingId,
+        storageKey: input.storageKey,
+        filename: input.filename,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        retention: input.retention ?? "audio",
+        createdAt: new Date().toISOString(),
+      }
+      const updated = {
+        ...meeting,
+        mediaAssets: [...(meeting.mediaAssets ?? []), asset],
+        status: "media_uploaded" as const,
+      }
+
+      meetings.set(meeting.id, updated)
+      return asset
+    },
+
+    async replaceTranscriptSegments(
+      meetingId: string,
+      segments: TranscriptSegment[]
+    ): Promise<TranscriptSegment[]> {
+      const meeting = meetings.get(meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${meetingId}`)
+      }
+
+      meetings.set(meetingId, { ...meeting, transcript: segments })
+      return segments
+    },
+
+    async upsertMeetingIntelligence(
+      meetingId: string,
+      intelligence: MeetingIntelligence
+    ): Promise<MeetingIntelligence> {
+      const meeting = meetings.get(meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${meetingId}`)
+      }
+
+      const updatedMeeting: MeetingRecord = {
+        ...meeting,
+        status: "completed",
+        intelligence,
+        languageMetadata: intelligence.languageMetadata,
+        tags: intelligence.tags,
+        summary: {
+          overview: intelligence.overview,
+          decisions: intelligence.decisions,
+          actionItems: intelligence.actionItems,
+        },
+      }
+
+      meetings.set(meetingId, updatedMeeting)
+      return intelligence
+    },
+
+    async updateActionItem(id, patch): Promise<ActionItem> {
+      for (const meeting of meetings.values()) {
+        const actionItems = meeting.summary?.actionItems ?? []
+        const index = actionItems.findIndex((item) => item.id === id)
+
+        if (index >= 0) {
+          const updatedItem = { ...actionItems[index], ...patch }
+          const updatedActionItems = [...actionItems]
+
+          updatedActionItems[index] = updatedItem
+          meetings.set(meeting.id, {
+            ...meeting,
+            summary: meeting.summary
+              ? { ...meeting.summary, actionItems: updatedActionItems }
+              : undefined,
+            intelligence: meeting.intelligence
+              ? {
+                  ...meeting.intelligence,
+                  actionItems: meeting.intelligence.actionItems.map((item) =>
+                    item.id === id ? { ...item, ...patch } : item
+                  ),
+                }
+              : undefined,
+          })
+          return updatedItem
+        }
+      }
+
+      throw new Error(`Action item not found: ${id}`)
+    },
+
+    async createJob(input): Promise<JobRecord> {
+      const now = new Date().toISOString()
+      const job: JobRecord = {
+        id: input.id ?? createId("job"),
+        name: input.name,
+        status: input.status ?? "queued",
+        meetingId: input.meetingId,
+        payload: input.payload ?? {},
+        result: {},
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      jobs.set(job.id, job)
+      return job
+    },
+
+    async updateJob(id, patch): Promise<JobRecord> {
+      const job = jobs.get(id)
+
+      if (!job) {
+        throw new Error(`Job not found: ${id}`)
+      }
+
+      const updated = {
+        ...job,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      }
+
+      jobs.set(id, updated)
+      return updated
+    },
+
+    async getJob(id): Promise<JobRecord | undefined> {
+      return jobs.get(id)
     },
 
     async searchMeetings(query: string): Promise<MeetingRecord[]> {
@@ -237,21 +458,8 @@ export function createInMemoryMeetingRepository(
       }
 
       const intelligence = buildMeetingIntelligence(meeting)
-      const actionItems: SmartTask[] = intelligence.actionItems
-      const updatedMeeting: MeetingRecord = {
-        ...meeting,
-        intelligence,
-        languageMetadata: intelligence.languageMetadata,
-        tags: intelligence.tags,
-        summary: {
-          overview: intelligence.overview,
-          decisions: intelligence.decisions,
-          actionItems,
-        },
-      }
 
-      meetings.set(meetingId, updatedMeeting)
-      return intelligence
+      return this.upsertMeetingIntelligence(meetingId, intelligence)
     },
 
     async listContexts(): Promise<MeetingContext[]> {

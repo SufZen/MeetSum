@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
 
-export async function POST(
+export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -14,19 +14,21 @@ export async function POST(
   }
 
   const { id } = await params
-  const { contextId } = (await request.json()) as { contextId?: string }
-
-  if (!contextId) {
-    return jsonError("contextId is required", 400)
+  const body = (await request.json()) as {
+    title?: string
+    owner?: string
+    status?: "open" | "done"
+    dueDate?: string
+    priority?: "low" | "normal" | "high" | "urgent"
   }
 
   try {
-    const meeting = await meetingRepository.linkMeetingContext(id, contextId)
+    const actionItem = await meetingRepository.updateActionItem(id, body)
 
-    return NextResponse.json({ meeting })
+    return NextResponse.json({ actionItem })
   } catch (error) {
     return jsonError(
-      error instanceof Error ? error.message : "Unable to link context",
+      error instanceof Error ? error.message : "Unable to update action item",
       404
     )
   }

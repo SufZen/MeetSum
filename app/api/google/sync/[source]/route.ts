@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import {
   buildGoogleSyncPlan,
   type GoogleSyncSource,
 } from "@/lib/google/workspace"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 const eventBySource: Record<
@@ -20,7 +21,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ source: string }> }
 ) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
@@ -41,12 +42,17 @@ export async function POST(
   const syncItem = buildGoogleSyncPlan(subject).find(
     (item) => item.source === syncSource
   )
+  const job = await enqueueMeetSumJob(`google.${syncSource}.poll`, {
+    subject,
+    source: syncSource,
+  })
 
   return NextResponse.json({
     sync: {
       ...syncItem,
       status: "queued",
     },
+    job,
     event: createPlatformEvent(eventBySource[syncSource], {
       subject,
       source: syncSource,

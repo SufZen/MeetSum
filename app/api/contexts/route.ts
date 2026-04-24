@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
 
 export async function GET(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized

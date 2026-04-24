@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
 import { parseRequiredString } from "@/lib/meetings/validation"
 
@@ -8,7 +8,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized

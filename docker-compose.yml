@@ -23,7 +23,7 @@ services:
 
   worker:
     build: .
-    command: ["npm", "run", "mcp"]
+    command: ["npm", "run", "worker"]
     env_file:
       - .env.local
     depends_on:

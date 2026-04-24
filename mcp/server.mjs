@@ -6,7 +6,13 @@ import { z } from "zod"
 const appUrl = process.env.MEETINGS_APP_URL ?? "http://127.0.0.1:3000"
 
 async function request(path, init) {
-  const response = await fetch(`${appUrl}${path}`, init)
+  const headers = new Headers(init?.headers)
+
+  if (process.env.MEETSUM_API_KEY) {
+    headers.set("authorization", `Bearer ${process.env.MEETSUM_API_KEY}`)
+  }
+
+  const response = await fetch(`${appUrl}${path}`, { ...init, headers })
   const body = await response.json()
 
   if (!response.ok) {

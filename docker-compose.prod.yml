@@ -46,9 +46,7 @@ services:
 
   worker:
     build: .
-    command: ["npm", "run", "mcp"]
-    profiles:
-      - worker
+    command: ["npm", "run", "worker"]
     restart: unless-stopped
     env_file:
       - .env.local

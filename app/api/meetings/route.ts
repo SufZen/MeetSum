@@ -1,22 +1,28 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
 import { parseCreateMeetingInput } from "@/lib/meetings/validation"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 export async function GET(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
   }
 
-  return NextResponse.json({ meetings: await meetingRepository.listMeetings() })
+  const query = new URL(request.url).searchParams.get("query")?.trim()
+
+  return NextResponse.json({
+    meetings: query
+      ? await meetingRepository.searchMeetings(query)
+      : await meetingRepository.listMeetings(),
+  })
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized

@@ -1,12 +1,15 @@
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { ActionItem } from "@/lib/meetings/repository"
 
 export function ActionItemList({
   items = [],
   unassigned,
+  onToggle,
 }: {
   items?: ActionItem[]
   unassigned: string
+  onToggle?: (item: ActionItem) => void
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -17,9 +20,21 @@ export function ActionItemList({
         >
           <div className="flex items-start justify-between gap-3">
             <span className="min-w-0 leading-5">{item.title}</span>
-            <Badge variant="outline" className="shrink-0 rounded-sm">
-              {item.owner ?? unassigned}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant="outline" className="rounded-sm">
+                {item.owner ?? unassigned}
+              </Badge>
+              {onToggle && (
+                <Button
+                  size="sm"
+                  variant={item.status === "done" ? "secondary" : "outline"}
+                  className="h-7 rounded-sm px-2 text-xs"
+                  onClick={() => onToggle(item)}
+                >
+                  {item.status === "done" ? "Done" : "Open"}
+                </Button>
+              )}
+            </div>
           </div>
           {(item.priority || item.confidence) && (
             <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">

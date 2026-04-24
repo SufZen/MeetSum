@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
@@ -17,12 +17,15 @@ export async function POST(
   const { id } = await params
 
   try {
-    const intelligence = await meetingRepository.runMeetingIntelligence(id)
+    const job = await enqueueMeetSumJob("meeting.summarize", { meetingId: id })
 
-    return NextResponse.json({
-      intelligence,
-      event: createPlatformEvent("summary.created", { meetingId: id }),
-    })
+    return NextResponse.json(
+      {
+        job,
+        event: createPlatformEvent("summary.created", { meetingId: id }),
+      },
+      { status: 202 }
+    )
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to run intelligence",

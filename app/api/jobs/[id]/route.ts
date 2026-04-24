@@ -14,19 +14,11 @@ export async function GET(
   }
 
   const { id } = await params
-  const meeting = await meetingRepository.getMeeting(id)
+  const job = await meetingRepository.getJob(id)
 
-  if (!meeting) {
-    return jsonError("Meeting not found", 404)
+  if (!job) {
+    return jsonError("Job not found", 404)
   }
 
-  const intelligence =
-    (await meetingRepository.getMeetingIntelligence(id)) ??
-    meeting.intelligence
-
-  if (!intelligence) {
-    return jsonError("Meeting intelligence has not been generated", 404)
-  }
-
-  return NextResponse.json({ intelligence })
+  return NextResponse.json({ job })
 }

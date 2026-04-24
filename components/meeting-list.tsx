@@ -14,9 +14,13 @@ const statusProgress = new Map(
 export function MeetingList({
   meetings,
   locale,
+  selectedMeetingId,
+  onSelectMeeting,
 }: {
   meetings: MeetingRecord[]
   locale: SupportedLocale
+  selectedMeetingId?: string
+  onSelectMeeting?: (meetingId: string) => void
 }) {
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     dateStyle: "medium",
@@ -25,11 +29,13 @@ export function MeetingList({
 
   return (
     <div className="flex flex-col gap-2">
-      {meetings.map((meeting, index) => (
-        <article
+      {meetings.map((meeting) => (
+        <button
           key={meeting.id}
-          className="grid min-h-32 gap-3 rounded-md border bg-card p-3 shadow-sm transition-colors data-[selected=true]:border-primary/50 data-[selected=true]:bg-primary/5"
-          data-selected={index === 0}
+          type="button"
+          className="grid min-h-32 gap-3 rounded-md border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 data-[selected=true]:border-primary/50 data-[selected=true]:bg-primary/5 rtl:text-right"
+          data-selected={(selectedMeetingId ?? meetings[0]?.id) === meeting.id}
+          onClick={() => onSelectMeeting?.(meeting.id)}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -45,7 +51,7 @@ export function MeetingList({
             <span>{meeting.source.replaceAll("_", " ")}</span>
             <span>{meeting.language.toUpperCase()}</span>
           </div>
-        </article>
+        </button>
       ))}
     </div>
   )

@@ -78,9 +78,11 @@ create table if not exists media_assets (
   id text primary key,
   meeting_id text not null references meetings(id),
   storage_key text not null,
+  filename text,
   content_type text not null,
   size_bytes bigint not null,
-  retention text not null default 'audio'
+  retention text not null default 'audio',
+  created_at timestamptz not null default now()
 );
 
 create table if not exists speakers (
@@ -97,7 +99,9 @@ create table if not exists transcript_segments (
   start_ms integer not null,
   end_ms integer not null,
   text text not null,
-  confidence numeric
+  confidence numeric,
+  language text,
+  metadata jsonb not null default '{}'::jsonb
 );
 
 create table if not exists summaries (
@@ -106,6 +110,7 @@ create table if not exists summaries (
   overview text not null,
   language text not null default 'he',
   model_provider text,
+  intelligence_run_id text,
   created_at timestamptz not null default now()
 );
 
@@ -121,7 +126,8 @@ create table if not exists action_items (
   meeting_id text not null references meetings(id),
   title text not null,
   owner text,
-  status text not null default 'open'
+  status text not null default 'open',
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists ai_runs (
@@ -131,6 +137,10 @@ create table if not exists ai_runs (
   task text not null,
   status text not null,
   metadata jsonb not null default '{}'::jsonb,
+  job_id text,
+  started_at timestamptz,
+  completed_at timestamptz,
+  error text,
   created_at timestamptz not null default now()
 );
 
@@ -173,6 +183,19 @@ create table if not exists api_keys (
   key_hash text not null,
   scopes jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
+);
+
+create table if not exists jobs (
+  id text primary key,
+  name text not null,
+  status text not null,
+  meeting_id text references meetings(id) on delete set null,
+  payload jsonb not null default '{}'::jsonb,
+  result jsonb not null default '{}'::jsonb,
+  error text,
+  attempts integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 alter table meetings
@@ -279,6 +302,12 @@ create index if not exists action_items_open_meeting_idx
 
 create unique index if not exists api_keys_key_hash_idx
   on api_keys(key_hash);
+
+create index if not exists idx_jobs_meeting_id
+  on jobs(meeting_id, created_at desc);
+
+create index if not exists idx_jobs_status
+  on jobs(status, created_at desc);
 
 create index if not exists idx_meetings_language_metadata
   on meetings using gin (language_metadata);

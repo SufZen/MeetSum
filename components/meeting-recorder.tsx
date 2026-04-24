@@ -28,10 +28,13 @@ const defaultLabels: MeetingRecorderLabels = {
 
 export function MeetingRecorder({
   labels = defaultLabels,
+  onRecordingReady,
 }: {
   labels?: MeetingRecorderLabels
+  onRecordingReady?: (file: File) => void
 }) {
   const mediaRecorder = useRef<MediaRecorder | null>(null)
+  const chunks = useRef<BlobPart[]>([])
   const [state, setState] = useState<RecorderState>("idle")
   const [seconds, setSeconds] = useState(0)
 
@@ -60,6 +63,12 @@ export function MeetingRecorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       mediaRecorder.current = new MediaRecorder(stream)
+      chunks.current = []
+      mediaRecorder.current.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          chunks.current.push(event.data)
+        }
+      })
       mediaRecorder.current.start()
       setState("recording")
       setSeconds(0)
@@ -71,6 +80,17 @@ export function MeetingRecorder({
       mediaRecorder.current.addEventListener("stop", () => {
         window.clearInterval(intervalId)
         stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(chunks.current, {
+          type: mediaRecorder.current?.mimeType || "audio/webm",
+        })
+
+        if (blob.size > 0) {
+          onRecordingReady?.(
+            new File([blob], `meetsum-recording-${Date.now()}.webm`, {
+              type: blob.type,
+            })
+          )
+        }
         setState("idle")
       })
     } catch {
