@@ -51,6 +51,22 @@ Google Workspace signing material is mounted read-only from:
 
 Use `GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json` or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` in `.env.local`. Do not commit service-account JSON files, Gemini keys, OAuth secrets, or meeting media.
 
+For the temporary AI Studio Gemini key path, keep:
+
+```env
+GOOGLE_GENAI_USE_VERTEXAI=false
+GOOGLE_GEMINI_API_KEY=...
+```
+
+For the production Vertex AI path, create a dedicated `meetsum-ai-runtime` service account, grant `roles/aiplatform.user`, store the JSON at `/opt/meetsum/secrets/vertex-ai-runtime.json`, and switch:
+
+```env
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=meetsum-494211
+GOOGLE_CLOUD_LOCATION=global
+GOOGLE_APPLICATION_CREDENTIALS=/opt/meetsum/secrets/vertex-ai-runtime.json
+```
+
 Because the app joins both the MeetSum network and Coolify's network, internal service URLs use unique aliases:
 
 - `meetsum-postgres`

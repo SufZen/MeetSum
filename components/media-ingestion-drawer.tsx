@@ -1,7 +1,7 @@
 "use client"
 
 import type { ChangeEvent } from "react"
-import { UploadIcon } from "lucide-react"
+import { MicIcon, UploadIcon } from "lucide-react"
 
 import { MeetingRecorder } from "@/components/meeting-recorder"
 import { Button } from "@/components/ui/button"
@@ -18,19 +18,24 @@ import type { Dictionary } from "@/lib/i18n/dictionaries"
 export function MediaIngestionDrawer({
   dictionary,
   pending,
+  mode = "upload",
   onFileChange,
   onRecordingReady,
 }: {
   dictionary: Dictionary
   pending?: boolean
+  mode?: "upload" | "record"
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
 }) {
+  const triggerLabel = mode === "record" ? dictionary.record : dictionary.upload
+  const TriggerIcon = mode === "record" ? MicIcon : UploadIcon
+
   return (
     <Sheet>
       <SheetTrigger render={<Button className="h-9" disabled={pending} />}>
-        <UploadIcon data-icon="inline-start" />
-        {dictionary.upload}
+        <TriggerIcon data-icon="inline-start" />
+        {triggerLabel}
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>

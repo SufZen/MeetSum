@@ -19,6 +19,38 @@ function inferSpeaker(participant: string | undefined, index: number) {
   return participant || `Speaker ${index + 1}`
 }
 
+export type GeminiProviderMode = "gemini-developer-api" | "vertex-ai"
+
+export function getGeminiProviderMode(): GeminiProviderMode {
+  return process.env.GOOGLE_GENAI_USE_VERTEXAI === "true"
+    ? "vertex-ai"
+    : "gemini-developer-api"
+}
+
+export function isGeminiConfigured() {
+  if (getGeminiProviderMode() === "vertex-ai") {
+    return Boolean(
+      process.env.GOOGLE_CLOUD_PROJECT &&
+        process.env.GOOGLE_CLOUD_LOCATION &&
+        process.env.GOOGLE_APPLICATION_CREDENTIALS
+    )
+  }
+
+  return Boolean(process.env.GOOGLE_GEMINI_API_KEY)
+}
+
+export function createGeminiClient() {
+  if (getGeminiProviderMode() === "vertex-ai") {
+    return new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      location: process.env.GOOGLE_CLOUD_LOCATION ?? "global",
+    })
+  }
+
+  return new GoogleGenAI({ apiKey: process.env.GOOGLE_GEMINI_API_KEY })
+}
+
 type GeminiTranscriptSegment = {
   speaker?: string
   startMs?: number
@@ -97,13 +129,11 @@ export class GeminiSummaryProvider implements SummaryProvider {
   private readonly fallback = new HeuristicFallbackProvider()
 
   async summarize(meeting: MeetingRecord) {
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY
-
-    if (!apiKey || !meeting.transcript?.length) {
+    if (!isGeminiConfigured() || !meeting.transcript?.length) {
       return this.fallback.summarize(meeting)
     }
 
-    const ai = new GoogleGenAI({ apiKey })
+    const ai = createGeminiClient()
     const transcript = meeting.transcript
       .map(
         (segment) =>
@@ -170,20 +200,28 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   private readonly fallback = new HeuristicFallbackProvider()
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY
     const asset = meeting.mediaAssets?.[0]
 
-    if (!apiKey || !asset?.storageKey) {
+    if (!isGeminiConfigured() || !asset?.storageKey) {
       return this.fallback.transcribe(meeting)
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey })
+      const ai = createGeminiClient()
       const bytes = await getMeetingObjectBytes(asset.storageKey)
       const prompt = getAudioPrompt(meeting)
-      const mediaPart =
+      const useInline =
         bytes.byteLength <=
         Number(process.env.GOOGLE_GEMINI_INLINE_AUDIO_LIMIT_BYTES ?? 18_000_000)
+
+      if (!useInline && getGeminiProviderMode() === "vertex-ai") {
+        throw new Error(
+          "Large media on Vertex AI requires a GCS-backed media handoff"
+        )
+      }
+
+      const mediaPart =
+        useInline
           ? {
               inlineData: {
                 mimeType: asset.contentType,
@@ -261,13 +299,13 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
 }
 
 export function createTranscriptionProvider(): TranscriptionProvider {
-  return process.env.GOOGLE_GEMINI_API_KEY
+  return isGeminiConfigured()
     ? new GeminiAudioTranscriptionProvider()
     : new HeuristicFallbackProvider()
 }
 
 export function createSummaryProvider(): SummaryProvider {
-  return process.env.GOOGLE_GEMINI_API_KEY
+  return isGeminiConfigured()
     ? new GeminiSummaryProvider()
     : new HeuristicFallbackProvider()
 }

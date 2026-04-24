@@ -1,4 +1,5 @@
 import { getDatabasePool } from "@/lib/db/client"
+import { getGeminiProviderMode, isGeminiConfigured } from "@/lib/ai/providers"
 
 export type ProviderStatus = {
   id: string
@@ -30,14 +31,19 @@ export type WorkspaceStatus = {
 }
 
 export function getProviderStatus(): ProviderStatus[] {
+  const geminiMode = getGeminiProviderMode()
+  const geminiConfigured = isGeminiConfigured()
+
   return [
     {
       id: "gemini",
-      label: "Gemini",
-      configured: Boolean(process.env.GOOGLE_GEMINI_API_KEY),
-      detail: process.env.GOOGLE_GEMINI_API_KEY
-        ? "Audio and summary provider configured"
-        : "Missing GOOGLE_GEMINI_API_KEY",
+      label: geminiMode === "vertex-ai" ? "Gemini on Vertex AI" : "Gemini",
+      configured: geminiConfigured,
+      detail: geminiConfigured
+        ? `Audio and summary provider configured via ${geminiMode}`
+        : geminiMode === "vertex-ai"
+          ? "Missing Vertex project/location or GOOGLE_APPLICATION_CREDENTIALS"
+          : "Missing GOOGLE_GEMINI_API_KEY",
     },
     {
       id: "workspace",
