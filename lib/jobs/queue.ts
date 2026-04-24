@@ -38,6 +38,8 @@ export async function enqueueMeetSumJob(
     name,
     meetingId: payload.meetingId,
     payload,
+    retryOfJobId:
+      typeof payload.retryOfJobId === "string" ? payload.retryOfJobId : undefined,
   })
 
   await getMeetSumQueue().add(name, { ...payload, jobRecordId: record.id }, {

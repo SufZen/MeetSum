@@ -8,6 +8,8 @@ services:
       - "${APP_PORT:-3005}:3000"
     env_file:
       - .env.local
+    volumes:
+      - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -38,6 +40,8 @@ services:
     command: ["npm", "run", "db:migrate"]
     env_file:
       - .env.local
+    volumes:
+      - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -50,6 +54,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.local
+    volumes:
+      - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

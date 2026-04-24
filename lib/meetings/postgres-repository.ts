@@ -105,6 +105,8 @@ type JobRow = {
   result: Record<string, unknown> | null
   error: string | null
   attempts: number
+  max_attempts: number
+  retry_of_job_id: string | null
   created_at: string | Date
   updated_at: string | Date
 }
@@ -184,6 +186,8 @@ function mapJob(row: JobRow): JobRecord {
     result: row.result ?? {},
     error: row.error ?? undefined,
     attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+    retryOfJobId: row.retry_of_job_id ?? undefined,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   }
@@ -648,14 +652,14 @@ export function createPostgresMeetingRepository(
       const nowId = input.id ?? createId("job")
       const result = await client.query(
         `
-          insert into jobs (id, name, status, meeting_id, payload)
-          values ($1, $2, $3, $4, $5::jsonb)
+          insert into jobs (id, name, status, meeting_id, payload, retry_of_job_id)
+          values ($1, $2, $3, $4, $5::jsonb, $6)
           on conflict (id) do update
             set status = excluded.status,
                 payload = excluded.payload,
                 updated_at = now()
           returning id, name, status, meeting_id, payload, result, error,
-                    attempts, created_at, updated_at
+                    attempts, max_attempts, retry_of_job_id, created_at, updated_at
         `,
         [
           nowId,
@@ -663,6 +667,7 @@ export function createPostgresMeetingRepository(
           input.status ?? "queued",
           input.meetingId ?? null,
           JSON.stringify(input.payload ?? {}),
+          input.retryOfJobId ?? null,
         ]
       )
 
@@ -680,7 +685,7 @@ export function createPostgresMeetingRepository(
               updated_at = now()
           where id = $1
           returning id, name, status, meeting_id, payload, result, error,
-                    attempts, created_at, updated_at
+                    attempts, max_attempts, retry_of_job_id, created_at, updated_at
         `,
         [
           id,
@@ -700,7 +705,7 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           select id, name, status, meeting_id, payload, result, error,
-                 attempts, created_at, updated_at
+                 attempts, max_attempts, retry_of_job_id, created_at, updated_at
           from jobs
           where id = $1
           limit 1
@@ -709,6 +714,34 @@ export function createPostgresMeetingRepository(
       )
 
       return result.rows[0] ? mapJob(result.rows[0] as JobRow) : undefined
+    },
+
+    async listJobs(filters = {}) {
+      const clauses: string[] = []
+      const values: unknown[] = []
+
+      if (filters.meetingId) {
+        values.push(filters.meetingId)
+        clauses.push(`meeting_id = $${values.length}`)
+      }
+      if (filters.status) {
+        values.push(filters.status)
+        clauses.push(`status = $${values.length}`)
+      }
+
+      const result = await client.query(
+        `
+          select id, name, status, meeting_id, payload, result, error,
+                 attempts, max_attempts, retry_of_job_id, created_at, updated_at
+          from jobs
+          ${clauses.length ? `where ${clauses.join(" and ")}` : ""}
+          order by created_at desc
+          limit 100
+        `,
+        values
+      )
+
+      return result.rows.map((row) => mapJob(row as JobRow))
     },
 
     async searchMeetings(query: string) {

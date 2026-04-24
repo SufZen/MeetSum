@@ -85,6 +85,8 @@ export type JobRecord = {
   result: Record<string, unknown>
   error?: string
   attempts: number
+  maxAttempts: number
+  retryOfJobId?: string
   createdAt: string
   updatedAt: string
 }
@@ -161,12 +163,14 @@ export type MeetingRepository = {
     meetingId?: string
     payload?: Record<string, unknown>
     status?: JobStatus
+    retryOfJobId?: string
   }) => Promise<JobRecord>
   updateJob: (
     id: string,
     patch: Partial<Pick<JobRecord, "status" | "result" | "error" | "attempts">>
   ) => Promise<JobRecord>
   getJob: (id: string) => Promise<JobRecord | undefined>
+  listJobs: (filters?: { meetingId?: string; status?: JobStatus }) => Promise<JobRecord[]>
   searchMeetings: (query: string) => Promise<MeetingRecord[]>
   askMeetingMemory: (
     meetingId: string,
@@ -358,6 +362,8 @@ export function createInMemoryMeetingRepository(
         payload: input.payload ?? {},
         result: {},
         attempts: 0,
+        maxAttempts: 3,
+        retryOfJobId: input.retryOfJobId,
         createdAt: now,
         updatedAt: now,
       }
@@ -385,6 +391,15 @@ export function createInMemoryMeetingRepository(
 
     async getJob(id): Promise<JobRecord | undefined> {
       return jobs.get(id)
+    },
+
+    async listJobs(filters = {}): Promise<JobRecord[]> {
+      return [...jobs.values()]
+        .filter((job) =>
+          filters.meetingId ? job.meetingId === filters.meetingId : true
+        )
+        .filter((job) => (filters.status ? job.status === filters.status : true))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     },
 
     async searchMeetings(query: string): Promise<MeetingRecord[]> {

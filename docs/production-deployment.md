@@ -43,6 +43,14 @@ Coolify's Traefik entrypoints are named `http` and `https`.
 
 RealizeOS currently runs directly on the VPS host at port `8082`. The production compose file maps `host.docker.internal` to the Docker host gateway for `app` and `worker`, so MeetSum can use `REALIZEOS_API_URL=http://host.docker.internal:8082` without exposing RealizeOS publicly.
 
+Google Workspace signing material is mounted read-only from:
+
+```text
+/opt/meetsum/secrets
+```
+
+Use `GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json` or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` in `.env.local`. Do not commit service-account JSON files, Gemini keys, OAuth secrets, or meeting media.
+
 Because the app joins both the MeetSum network and Coolify's network, internal service URLs use unique aliases:
 
 - `meetsum-postgres`
@@ -52,6 +60,13 @@ Because the app joins both the MeetSum network and Coolify's network, internal s
 ## Health
 
 `GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.
+
+Operational UI status comes from:
+
+- `GET /api/ai/providers/status`
+- `GET /api/workspace/status`
+- `GET /api/google/sync/status`
+- `GET /api/jobs`
 
 ## Deploy Flow
 
@@ -65,9 +80,8 @@ docker compose --env-file .env.local -f docker-compose.prod.yml up -d --remove-o
 
 The helper `scripts/deploy-vps.sh` performs the same flow.
 
-The `worker` and bundled `n8n` services are profile-gated. Start them only when they are ready to do useful work:
+The `worker` runs by default because uploads, Gemini transcription, Google polling, RealizeOS export, and retryable jobs all depend on it. The bundled `n8n` service remains profile-gated until a live workflow is created:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.prod.yml --profile worker up -d worker
 docker compose --env-file .env.local -f docker-compose.prod.yml --profile automation up -d n8n
 ```

@@ -4,6 +4,7 @@ import {
   createSummaryProvider,
   createTranscriptionProvider,
 } from "@/lib/ai/providers"
+import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
 import { meetingRepository } from "@/lib/meetings/store"
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
 
@@ -71,6 +72,32 @@ async function processMediaJob(payload: MeetSumJobPayload) {
   }
 }
 
+async function processGoogleJob(
+  name: MeetSumJobName,
+  payload: MeetSumJobPayload
+) {
+  const subject =
+    typeof payload.subject === "string"
+      ? payload.subject
+      : process.env.GOOGLE_WORKSPACE_SUBJECT ??
+        process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ??
+        "info@realization.co.il"
+
+  if (name === "google.calendar.poll") {
+    return pollCalendar(subject)
+  }
+
+  if (name === "google.drive.poll") {
+    return pollDrive(subject)
+  }
+
+  if (name === "google.gmail.poll") {
+    return pollGmail(subject)
+  }
+
+  return { source: name, status: "ignored" }
+}
+
 async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) {
   const jobRecordId = await markActive(job)
 
@@ -85,11 +112,7 @@ async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) 
     ) {
       result = await processMediaJob(job.data)
     } else if (job.name.startsWith("google.")) {
-      result = {
-        source: job.name,
-        status: "polling-adapter-ready",
-        subject: job.data.subject,
-      }
+      result = await processGoogleJob(job.name, job.data)
     } else if (job.name === "realizeos.export") {
       result = { status: "export-ready", meetingId: job.data.meetingId }
     } else if (job.name === "webhook.deliver") {
