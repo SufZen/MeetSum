@@ -1,11 +1,21 @@
 import { GoogleGenAI, Type } from "@google/genai"
+import { execFile } from "node:child_process"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { promisify } from "node:util"
 
 import { buildMeetingIntelligence, cleanupTranscriptSegments } from "@/lib/intelligence"
 import type {
   MeetingRecord,
   TranscriptSegment,
 } from "@/lib/meetings/repository"
-import { getMeetingObjectBytes } from "@/lib/storage/object-storage"
+import {
+  downloadMeetingObjectToFile,
+  getMeetingObjectBytes,
+} from "@/lib/storage/object-storage"
+
+const execFileAsync = promisify(execFile)
 
 export type TranscriptionProvider = {
   transcribe: (meeting: MeetingRecord) => Promise<TranscriptSegment[]>
@@ -97,6 +107,55 @@ function getAudioPrompt(meeting: MeetingRecord) {
     `Meeting title: ${meeting.title}`,
     `Known participants: ${meeting.participants.join(", ") || "unknown"}`,
   ].join("\n")
+}
+
+function safeTempFilename(filename: string | undefined, fallback: string) {
+  return (filename ?? fallback).replace(/[^\w. -]+/g, "_")
+}
+
+async function extractAudioForGemini(inputPath: string, outputPath: string) {
+  await execFileAsync(
+    "ffmpeg",
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-b:a",
+      "64k",
+      outputPath,
+    ],
+    {
+      maxBuffer: 1024 * 1024 * 8,
+      timeout: Number(process.env.MEETSUM_FFMPEG_TIMEOUT_MS ?? 900_000),
+    }
+  )
+}
+
+async function waitForGeminiFile(
+  ai: GoogleGenAI,
+  name: string | undefined
+) {
+  if (!name) return
+
+  const deadline = Date.now() + Number(process.env.GOOGLE_GEMINI_FILE_WAIT_MS ?? 300_000)
+
+  while (Date.now() < deadline) {
+    const file = await ai.files.get({ name })
+
+    if (file.state === "ACTIVE") return
+    if (file.state === "FAILED") {
+      throw new Error(`Gemini file processing failed for ${name}`)
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+  }
+
+  throw new Error(`Timed out waiting for Gemini file processing: ${name}`)
 }
 
 export class HeuristicFallbackProvider
@@ -206,13 +265,17 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
       return this.fallback.transcribe(meeting)
     }
 
+    let tempDir: string | undefined
+
     try {
       const ai = createGeminiClient()
-      const bytes = await getMeetingObjectBytes(asset.storageKey)
       const prompt = getAudioPrompt(meeting)
+      const sizeBytes = Number(asset.sizeBytes ?? 0)
+      const inlineLimit = Number(
+        process.env.GOOGLE_GEMINI_INLINE_AUDIO_LIMIT_BYTES ?? 18_000_000
+      )
       const useInline =
-        bytes.byteLength <=
-        Number(process.env.GOOGLE_GEMINI_INLINE_AUDIO_LIMIT_BYTES ?? 18_000_000)
+        sizeBytes > 0 ? sizeBytes <= inlineLimit : true
 
       if (!useInline && getGeminiProviderMode() === "vertex-ai") {
         throw new Error(
@@ -220,36 +283,54 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
         )
       }
 
-      const mediaPart =
-        useInline
-          ? {
-              inlineData: {
-                mimeType: asset.contentType,
-                data: bytes.toString("base64"),
-              },
-            }
-          : {
-              fileData: {
-                mimeType: asset.contentType,
-                fileUri: (
-                  await ai.files.upload({
-                    file: new Blob(
-                      [
-                        bytes.buffer.slice(
-                          bytes.byteOffset,
-                          bytes.byteOffset + bytes.byteLength
-                        ) as ArrayBuffer,
-                      ],
-                      { type: asset.contentType }
-                    ),
-                    config: {
-                      mimeType: asset.contentType,
-                      displayName: asset.filename ?? `${meeting.id}-media`,
-                    },
-                  })
-                ).uri,
-              },
-            }
+      let mediaPart:
+        | { inlineData: { mimeType: string; data: string } }
+        | { fileData: { mimeType: string; fileUri: string } }
+
+      if (useInline) {
+        const bytes = await getMeetingObjectBytes(asset.storageKey)
+        mediaPart = {
+          inlineData: {
+            mimeType: asset.contentType,
+            data: bytes.toString("base64"),
+          },
+        }
+      } else {
+        tempDir = await mkdtemp(path.join(tmpdir(), "meetsum-gemini-"))
+        const inputPath = path.join(
+          tempDir,
+          safeTempFilename(asset.filename, `${meeting.id}.media`)
+        )
+        await downloadMeetingObjectToFile(asset.storageKey, inputPath)
+
+        let uploadPath = inputPath
+        let uploadMimeType = asset.contentType
+
+        if (asset.contentType.startsWith("video/")) {
+          const audioPath = path.join(tempDir, `${meeting.id}.m4a`)
+          await extractAudioForGemini(inputPath, audioPath)
+          uploadPath = audioPath
+          uploadMimeType = "audio/mp4"
+        }
+
+        const uploaded = await ai.files.upload({
+          file: uploadPath,
+          config: {
+            mimeType: uploadMimeType,
+            displayName: asset.filename ?? `${meeting.id}-media`,
+          },
+        })
+        await waitForGeminiFile(ai, uploaded.name)
+        if (!uploaded.uri) {
+          throw new Error("Gemini file upload did not return a file URI")
+        }
+        mediaPart = {
+          fileData: {
+            mimeType: uploadMimeType,
+            fileUri: uploaded.uri,
+          },
+        }
+      }
 
       const response = await ai.models.generateContent({
         model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-2.5-flash",
@@ -292,8 +373,13 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
       const segments = normalizeGeminiSegments(parsed.segments ?? [], meeting)
 
       return segments.length ? segments : this.fallback.transcribe(meeting)
-    } catch {
+    } catch (error) {
+      console.error("Gemini audio transcription failed", error)
       return this.fallback.transcribe(meeting)
+    } finally {
+      if (typeof tempDir === "string") {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+      }
     }
   }
 }

@@ -231,7 +231,10 @@ export function createMeetSumWorker() {
       connection: {
         url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
       },
-      concurrency: Number(process.env.MEETSUM_WORKER_CONCURRENCY ?? 2),
+      concurrency: Number(process.env.MEETSUM_WORKER_CONCURRENCY ?? 1),
+      lockDuration: Number(process.env.MEETSUM_WORKER_LOCK_DURATION_MS ?? 1_800_000),
+      stalledInterval: Number(process.env.MEETSUM_WORKER_STALLED_INTERVAL_MS ?? 60_000),
+      maxStalledCount: Number(process.env.MEETSUM_WORKER_MAX_STALLED_COUNT ?? 2),
     }
   )
 }

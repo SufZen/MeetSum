@@ -5,6 +5,8 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
+import { createWriteStream } from "node:fs"
+import { pipeline } from "node:stream/promises"
 
 export type StoredObject = {
   bucket: string
@@ -102,4 +104,22 @@ export async function getMeetingObjectBytes(key: string): Promise<Buffer> {
   }
 
   return Buffer.concat(chunks)
+}
+
+export async function downloadMeetingObjectToFile(key: string, destination: string) {
+  const result = await getS3Client().send(
+    new GetObjectCommand({
+      Bucket: getMeetingMediaBucket(),
+      Key: key,
+    })
+  )
+
+  if (!result.Body) {
+    throw new Error(`Object body is empty: ${key}`)
+  }
+
+  await pipeline(
+    result.Body as AsyncIterable<Uint8Array>,
+    createWriteStream(destination)
+  )
 }
