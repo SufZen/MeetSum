@@ -136,6 +136,7 @@ create table if not exists action_items (
   title text not null,
   owner text,
   status text not null default 'open',
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
@@ -255,6 +256,7 @@ alter table drive_files
   add column if not exists imported_at timestamptz;
 
 alter table action_items
+  add column if not exists created_at timestamptz not null default now(),
   add column if not exists due_date timestamptz,
   add column if not exists priority text not null default 'normal',
   add column if not exists confidence numeric,
