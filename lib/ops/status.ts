@@ -40,6 +40,7 @@ export type WorkspaceStatus = {
 export function getProviderStatus(): ProviderStatus[] {
   const geminiMode = getGeminiProviderMode()
   const geminiConfigured = isGeminiConfigured()
+  const workspaceAuth = getWorkspaceAuthStatus()
 
   return [
     {
@@ -56,16 +57,9 @@ export function getProviderStatus(): ProviderStatus[] {
     {
       id: "workspace",
       label: "Google Workspace",
-      configured: Boolean(
-        process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
-          (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
-            process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE)
-      ),
-      detail:
-        process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
-        process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE
-          ? "Domain-wide delegation credentials configured"
-          : "Missing service-account signing material",
+      configured: workspaceAuth.configured,
+      mode: workspaceAuth.strategy,
+      detail: workspaceAuth.detail,
     },
     {
       id: "realizeos",
