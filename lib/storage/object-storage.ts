@@ -1,4 +1,10 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
+import {
+  CreateBucketCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3"
 
 export type StoredObject = {
   bucket: string
@@ -8,6 +14,7 @@ export type StoredObject = {
 }
 
 let client: S3Client | undefined
+const ensuredBuckets = new Set<string>()
 
 function getS3Client() {
   client ??= new S3Client({
@@ -30,6 +37,20 @@ export function getMeetingMediaBucket() {
   return process.env.S3_BUCKET ?? "meeting-media"
 }
 
+async function ensureBucket(bucket: string) {
+  if (ensuredBuckets.has(bucket)) return
+
+  const s3 = getS3Client()
+
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }))
+  } catch {
+    await s3.send(new CreateBucketCommand({ Bucket: bucket }))
+  }
+
+  ensuredBuckets.add(bucket)
+}
+
 export async function storeMeetingObject(options: {
   meetingId: string
   filename: string
@@ -43,6 +64,8 @@ export async function storeMeetingObject(options: {
     `${Date.now()}-${crypto.randomUUID()}-${safeFilename}`,
   ].join("/")
   const bucket = getMeetingMediaBucket()
+
+  await ensureBucket(bucket)
 
   await getS3Client().send(
     new PutObjectCommand({
