@@ -35,14 +35,12 @@ server.registerTool(
     inputSchema: { query: z.string() },
   },
   async ({ query }) => {
-    const { meetings } = await request("/api/meetings")
-    const normalized = query.toLowerCase()
-    const matches = meetings.filter((meeting) =>
-      JSON.stringify(meeting).toLowerCase().includes(normalized),
+    const { meetings } = await request(
+      `/api/meetings?query=${encodeURIComponent(query)}`,
     )
 
     return {
-      content: [{ type: "text", text: JSON.stringify(matches, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify(meetings, null, 2) }],
     }
   },
 )

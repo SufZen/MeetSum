@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button"
 export type WorkspaceStatusView = {
   google: {
     subject: string
-    strategy: "json-key" | "key-file" | "missing"
+    strategy: "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
+    configured: boolean
+    detail: string
+    serviceAccountEmail?: string
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
     keyFileConfigured: boolean
@@ -16,7 +19,9 @@ export type WorkspaceStatusView = {
     status: string
     updatedAt?: string
     lastSyncedAt?: string
+    nextPollAt?: string
     lastError?: string
+    stats?: Record<string, unknown>
   }>
   jobs: {
     queued: number
@@ -54,6 +59,24 @@ export function WorkspaceSyncPanel({
           {status?.google.subject ?? "info@realization.co.il"}
         </span>
       </div>
+      <div className="rounded-md border bg-background p-2 text-xs leading-5 text-muted-foreground">
+        <div>
+          Auth:{" "}
+          <span className="font-medium text-foreground">
+            {status?.google.detail ?? "Checking Workspace credentials"}
+          </span>
+        </div>
+        {status?.google.serviceAccountEmail && (
+          <div className="break-all font-mono">
+            {status.google.serviceAccountEmail}
+          </div>
+        )}
+        {status?.google.strategy === "missing" && (
+          <p className="mt-1 text-amber-700">
+            Google sync will fail until Workspace signing is configured.
+          </p>
+        )}
+      </div>
       <Button
         variant="outline"
         className="h-9 w-full"
@@ -70,6 +93,19 @@ export function WorkspaceSyncPanel({
               <span className="font-medium capitalize">{item.source}</span>
               <span className="text-muted-foreground">{item.status}</span>
             </div>
+            {item.stats && Object.keys(item.stats).length > 0 && (
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {Object.entries(item.stats)
+                  .filter(([, value]) => typeof value !== "object")
+                  .map(([key, value]) => `${key}: ${String(value)}`)
+                  .join(" · ")}
+              </p>
+            )}
+            {item.nextPollAt && (
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Next poll: {new Date(item.nextPollAt).toLocaleString()}
+              </p>
+            )}
             {item.lastError && (
               <p className="mt-1 break-words text-xs leading-5 text-destructive">
                 {item.lastError}

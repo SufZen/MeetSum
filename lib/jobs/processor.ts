@@ -3,9 +3,13 @@ import { Worker, type Job } from "bullmq"
 import {
   createSummaryProvider,
   createTranscriptionProvider,
+  getGeminiProviderMode,
 } from "@/lib/ai/providers"
+import { getDatabasePool } from "@/lib/db/client"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
+import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
 import { meetingRepository } from "@/lib/meetings/store"
+import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
 
 async function markActive(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) {
@@ -36,6 +40,43 @@ async function failJob(jobRecordId: string, error: unknown) {
   })
 }
 
+async function recordAiRun(options: {
+  meetingId: string
+  task: string
+  status: "completed" | "failed"
+  startedAt: number
+  model?: string
+  metadata?: Record<string, unknown>
+  error?: string
+}) {
+  if (process.env.MEETSUM_STORAGE !== "postgres") return
+
+  await getDatabasePool().query(
+    `
+      insert into ai_runs (
+        id, meeting_id, provider, task, status, metadata, model,
+        latency_ms, confidence, started_at, completed_at, error
+      )
+      values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, now(), $11)
+    `,
+    [
+      `airun_${crypto.randomUUID()}`,
+      options.meetingId,
+      getGeminiProviderMode(),
+      options.task,
+      options.status,
+      JSON.stringify(options.metadata ?? {}),
+      options.model ?? null,
+      Date.now() - options.startedAt,
+      typeof options.metadata?.confidence === "number"
+        ? options.metadata.confidence
+        : null,
+      new Date(options.startedAt).toISOString(),
+      options.error ?? null,
+    ]
+  )
+}
+
 async function processMediaJob(payload: MeetSumJobPayload) {
   if (!payload.meetingId) {
     throw new Error("meetingId is required")
@@ -48,22 +89,57 @@ async function processMediaJob(payload: MeetSumJobPayload) {
     throw new Error(`Meeting not found: ${payload.meetingId}`)
   }
 
+  const transcriptionStartedAt = Date.now()
   const transcript = await createTranscriptionProvider().transcribe(meeting)
+  await recordAiRun({
+    meetingId: meeting.id,
+    task: "audio.transcribe",
+    status: "completed",
+    startedAt: transcriptionStartedAt,
+    model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "heuristic-v1",
+    metadata: {
+      segments: transcript.length,
+      providerMode: getGeminiProviderMode(),
+      inputAsset: payload.assetId ?? payload.storageKey,
+      confidence:
+        transcript.length > 0
+          ? transcript.reduce((sum, segment) => sum + (segment.confidence ?? 0), 0) /
+            transcript.length
+          : 0,
+    },
+  })
   await meetingRepository.replaceTranscriptSegments(meeting.id, transcript)
   await meetingRepository.updateMeetingStatus(meeting.id, "summarizing")
 
   const refreshed = await meetingRepository.getMeeting(meeting.id)
+  const summaryStartedAt = Date.now()
   const intelligence = await createSummaryProvider().summarize(
     refreshed ?? { ...meeting, transcript }
   )
+  await recordAiRun({
+    meetingId: meeting.id,
+    task: "summary.generate",
+    status: "completed",
+    startedAt: summaryStartedAt,
+    model: process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1",
+    metadata: {
+      providerMode: getGeminiProviderMode(),
+      tags: intelligence.tags,
+      confidence: intelligence.languageMetadata.confidence,
+    },
+  })
 
   await meetingRepository.updateMeetingStatus(meeting.id, "indexing")
   await meetingRepository.upsertMeetingIntelligence(
     meeting.id,
     intelligence,
-    process.env.GOOGLE_GEMINI_API_KEY ? "gemini" : "local",
+    getGeminiProviderMode(),
     process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1"
   )
+  await deliverWebhookEvent({
+    eventName: "meeting.completed",
+    data: { meetingId: meeting.id, title: meeting.title },
+  })
 
   return {
     meetingId: meeting.id,
@@ -114,9 +190,26 @@ async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) 
     } else if (job.name.startsWith("google.")) {
       result = await processGoogleJob(job.name, job.data)
     } else if (job.name === "realizeos.export") {
-      result = { status: "export-ready", meetingId: job.data.meetingId }
+      result = await exportMeetingToRealizeOS({
+        meetingId: job.data.meetingId,
+        suggestionId:
+          typeof job.data.suggestionId === "string"
+            ? job.data.suggestionId
+            : undefined,
+        contextId:
+          typeof job.data.contextId === "string" ? job.data.contextId : undefined,
+      })
     } else if (job.name === "webhook.deliver") {
-      result = { status: "delivery-ready" }
+      result = await deliverWebhookEvent({
+        eventName:
+          typeof job.data.eventName === "string"
+            ? (job.data.eventName as Parameters<typeof deliverWebhookEvent>[0]["eventName"])
+            : "meeting.completed",
+        data:
+          job.data.data && typeof job.data.data === "object"
+            ? (job.data.data as Record<string, unknown>)
+            : {},
+      })
     }
 
     await completeJob(jobRecordId, result)

@@ -1,11 +1,13 @@
 import { getDatabasePool } from "@/lib/db/client"
 import { getGeminiProviderMode, isGeminiConfigured } from "@/lib/ai/providers"
+import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 
 export type ProviderStatus = {
   id: string
   label: string
   configured: boolean
   detail: string
+  mode?: string
 }
 
 export type WorkspaceStatus = {
@@ -14,14 +16,19 @@ export type WorkspaceStatus = {
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
     keyFileConfigured: boolean
-    strategy: "json-key" | "key-file" | "missing"
+    strategy: "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
+    configured: boolean
+    detail: string
+    serviceAccountEmail?: string
   }
   sync: Array<{
     source: string
     status: string
     updatedAt?: string
     lastSyncedAt?: string
+    nextPollAt?: string
     lastError?: string
+    stats?: Record<string, unknown>
   }>
   jobs: {
     queued: number
@@ -39,6 +46,7 @@ export function getProviderStatus(): ProviderStatus[] {
       id: "gemini",
       label: geminiMode === "vertex-ai" ? "Gemini on Vertex AI" : "Gemini",
       configured: geminiConfigured,
+      mode: geminiMode,
       detail: geminiConfigured
         ? `Audio and summary provider configured via ${geminiMode}`
         : geminiMode === "vertex-ai"
@@ -87,6 +95,7 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
     const [syncResult, jobsResult] = await Promise.all([
       pool.query(`
         select source, status, updated_at, last_synced_at, last_error
+             , next_poll_at, metadata
         from google_sync_states
         order by updated_at desc
       `),
@@ -104,7 +113,9 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
           status: string
           updated_at: Date | string
           last_synced_at: Date | string | null
+          next_poll_at: Date | string | null
           last_error: string | null
+          metadata: Record<string, unknown> | null
         }
 
         return {
@@ -119,7 +130,13 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
               ? value.last_synced_at.toISOString()
               : value.last_synced_at
             : undefined,
+          nextPollAt: value.next_poll_at
+            ? value.next_poll_at instanceof Date
+              ? value.next_poll_at.toISOString()
+              : value.next_poll_at
+            : undefined,
           lastError: value.last_error ?? undefined,
+          stats: value.metadata ?? undefined,
         }
       })
     )
@@ -131,28 +148,20 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
     }
   }
 
-  const keyFileConfigured = Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE)
-  const serviceAccountKeyConfigured = Boolean(
-    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
-  )
+  const authStatus = getWorkspaceAuthStatus()
+  const keyFileConfigured = authStatus.strategy === "key-file"
+  const serviceAccountKeyConfigured = authStatus.strategy === "json-key"
 
   return {
     google: {
-      subject:
-        process.env.GOOGLE_WORKSPACE_SUBJECT ??
-        process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ??
-        "info@realization.co.il",
-      serviceAccountEmailConfigured: Boolean(
-        process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
-          process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT
-      ),
+      subject: authStatus.subject,
+      serviceAccountEmailConfigured: Boolean(authStatus.serviceAccountEmail),
       serviceAccountKeyConfigured,
       keyFileConfigured,
-      strategy: serviceAccountKeyConfigured
-        ? "json-key"
-        : keyFileConfigured
-          ? "key-file"
-          : "missing",
+      strategy: authStatus.strategy,
+      configured: authStatus.configured,
+      detail: authStatus.detail,
+      serviceAccountEmail: authStatus.serviceAccountEmail,
     },
     sync,
     jobs,

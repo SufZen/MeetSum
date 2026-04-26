@@ -69,6 +69,7 @@
     "vitest": "^4.1.5"
   },
   "overrides": {
+    "postcss": "$postcss",
     "uuid": "^14.0.0"
   }
 }

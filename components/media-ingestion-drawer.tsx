@@ -19,12 +19,16 @@ export function MediaIngestionDrawer({
   dictionary,
   pending,
   mode = "upload",
+  open,
+  onOpenChange,
   onFileChange,
   onRecordingReady,
 }: {
   dictionary: Dictionary
   pending?: boolean
   mode?: "upload" | "record"
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
 }) {
@@ -32,7 +36,7 @@ export function MediaIngestionDrawer({
   const TriggerIcon = mode === "record" ? MicIcon : UploadIcon
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger render={<Button className="h-9" disabled={pending} />}>
         <TriggerIcon data-icon="inline-start" />
         {triggerLabel}

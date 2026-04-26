@@ -1,10 +1,17 @@
-import { FileAudioIcon, ListTodoIcon } from "lucide-react"
+import {
+  CalendarSyncIcon,
+  FileAudioIcon,
+  ListTodoIcon,
+  SettingsIcon,
+  UploadIcon,
+} from "lucide-react"
 
 import { ActionItemList } from "@/components/action-item-list"
 import { AskMeetingPanel } from "@/components/ask-meeting-panel"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import { TranscriptTimeline } from "@/components/transcript-timeline"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -19,6 +26,9 @@ export function MeetingWorkspace({
   onQuestionChange,
   onAsk,
   onToggleActionItem,
+  onOpenUpload,
+  onSyncGoogle,
+  onCheckSetup,
   locale,
 }: {
   dictionary: Dictionary
@@ -30,6 +40,9 @@ export function MeetingWorkspace({
   onQuestionChange: (value: string) => void
   onAsk: () => void
   onToggleActionItem: (item: ActionItem) => void
+  onOpenUpload: () => void
+  onSyncGoogle: () => void
+  onCheckSetup: () => void
 }) {
   if (!meeting) {
     return (
@@ -39,6 +52,20 @@ export function MeetingWorkspace({
         <p className="max-w-sm text-sm leading-6 text-muted-foreground">
           {dictionary.noMeetingsDescription}
         </p>
+        <div className="mt-3 flex flex-wrap justify-center gap-2">
+          <Button onClick={onSyncGoogle}>
+            <CalendarSyncIcon data-icon="inline-start" />
+            Sync Google Workspace
+          </Button>
+          <Button variant="outline" onClick={onOpenUpload}>
+            <UploadIcon data-icon="inline-start" />
+            Upload recording
+          </Button>
+          <Button variant="ghost" onClick={onCheckSetup}>
+            <SettingsIcon data-icon="inline-start" />
+            Check setup
+          </Button>
+        </div>
       </div>
     )
   }

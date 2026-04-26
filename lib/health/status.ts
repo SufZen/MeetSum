@@ -5,6 +5,7 @@ export type HealthReport = {
   version: string
   uptimeSeconds: number
   timestamp: string
+  warnings?: string[]
   services: {
     database: HealthState
     redis: HealthState
@@ -18,6 +19,7 @@ export async function createHealthReport(options: {
   database: () => Promise<HealthState>
   redis: () => Promise<HealthState>
   storage: () => Promise<HealthState>
+  warnings?: () => string[]
 }): Promise<HealthReport> {
   const [database, redis, storage] = await Promise.all([
     options.database().catch(() => "degraded" as const),
@@ -30,6 +32,7 @@ export async function createHealthReport(options: {
     version: options.version,
     uptimeSeconds: Math.max(0, Math.floor((Date.now() - options.startedAt) / 1000)),
     timestamp: new Date().toISOString(),
+    warnings: options.warnings?.(),
     services: {
       database,
       redis,

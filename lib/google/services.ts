@@ -1,49 +1,90 @@
-import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 
 import { google } from "googleapis"
 
 import { getDatabasePool } from "@/lib/db/client"
+import { createDelegatedGoogleClient } from "@/lib/google/auth"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { meetingRepository } from "@/lib/meetings/store"
 import { storeMeetingObject } from "@/lib/storage/object-storage"
 
 type GoogleSource = "calendar" | "drive" | "gmail"
+type SyncStatus = "idle" | "running" | "completed" | "failed"
+
+type SyncStats = {
+  source: GoogleSource
+  created?: number
+  updated?: number
+  cancelled?: number
+  discovered?: number
+  matched?: number
+  imported?: number
+  skipped?: number
+  errors?: string[]
+  status?: string
+}
+
+type CalendarCursor = Record<string, string>
 
 function createId(prefix: string, stable: string) {
   return `${prefix}_${Buffer.from(stable).toString("base64url").slice(0, 40)}`
 }
 
-function getPrivateKey() {
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY) {
-    return process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, "\n")
-  }
+function safeDate(value?: string | null) {
+  if (!value) return undefined
+  const time = new Date(value).getTime()
 
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
-    const parsed = JSON.parse(
-      readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE, "utf8")
-    ) as { private_key?: string; client_email?: string }
-
-    return parsed.private_key
-  }
-
-  return undefined
+  return Number.isFinite(time) ? new Date(time) : undefined
 }
 
-function getServiceAccountEmail() {
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
-    return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+function eventDateTime(value?: { date?: string | null; dateTime?: string | null }) {
+  return value?.dateTime ?? value?.date ?? undefined
+}
+
+function parseCursor(value?: string | null): CalendarCursor {
+  if (!value) return {}
+
+  try {
+    const parsed = JSON.parse(value)
+
+    return parsed && typeof parsed === "object" ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeTitle(value: string) {
+  return value
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]/g, " ")
+    .replace(/\b(google meet|meet recording|recording|meeting)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function titleScore(a: string, b: string) {
+  const left = new Set(normalizeTitle(a).split(" ").filter((word) => word.length > 2))
+  const right = new Set(normalizeTitle(b).split(" ").filter((word) => word.length > 2))
+
+  if (!left.size || !right.size) return 0
+
+  let common = 0
+  for (const word of left) {
+    if (right.has(word)) common += 1
   }
 
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
-    const parsed = JSON.parse(
-      readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE, "utf8")
-    ) as { client_email?: string }
+  return common / Math.max(left.size, right.size)
+}
 
-    return parsed.client_email
-  }
+function isLikelyMeetRecording(name: string, mimeType?: string | null) {
+  const normalized = name.toLowerCase()
 
-  return process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT
+  return (
+    /meet|recording|פגישה|הקלט|הקלטה/.test(normalized) &&
+    (mimeType?.startsWith("video/") || mimeType?.startsWith("audio/"))
+  )
 }
 
 async function getIdentityId(subject: string) {
@@ -79,13 +120,31 @@ async function getIdentityId(subject: string) {
   return identityId
 }
 
+async function getSyncCursor(subject: string, source: GoogleSource) {
+  const pool = getDatabasePool()
+  const identityId = await getIdentityId(subject)
+  const result = await pool.query(
+    `
+      select cursor_value
+      from google_sync_states
+      where google_identity_id = $1 and source = $2
+      limit 1
+    `,
+    [identityId, source]
+  )
+
+  return (result.rows[0] as { cursor_value?: string } | undefined)?.cursor_value
+}
+
 async function setSyncState(
   subject: string,
   source: GoogleSource,
   patch: {
-    status: "idle" | "running" | "completed" | "failed"
+    status: SyncStatus
     cursorValue?: string
     lastError?: string | null
+    stats?: SyncStats
+    nextPollAt?: Date
   }
 ) {
   const pool = getDatabasePool()
@@ -96,10 +155,12 @@ async function setSyncState(
     `
       insert into google_sync_states (
         id, google_identity_id, source, cursor_value, status, last_error,
-        last_synced_at, updated_at
+        last_synced_at, next_poll_at, metadata, updated_at
       )
       values ($1, $2, $3, $4, $5, $6,
         case when $5 = 'completed' then now() else null end,
+        $7,
+        $8::jsonb,
         now()
       )
       on conflict (google_identity_id, source)
@@ -111,6 +172,8 @@ async function setSyncState(
           when excluded.status = 'completed' then now()
           else google_sync_states.last_synced_at
         end,
+        next_poll_at = coalesce(excluded.next_poll_at, google_sync_states.next_poll_at),
+        metadata = coalesce(excluded.metadata, google_sync_states.metadata),
         updated_at = now()
     `,
     [
@@ -120,160 +183,251 @@ async function setSyncState(
       patch.cursorValue ?? null,
       patch.status,
       patch.lastError ?? null,
+      patch.nextPollAt?.toISOString() ?? null,
+      JSON.stringify(patch.stats ?? {}),
     ]
   )
 }
 
-function createDelegatedClient(subject: string, scopes: readonly string[]) {
-  const email = getServiceAccountEmail()
-  const key = getPrivateKey()
+async function findMatchingCalendarEvent(options: {
+  identityId: string
+  fileName: string
+  fileTime?: Date
+}) {
+  if (!options.fileTime) return undefined
 
-  if (!email || !key) {
-    throw new Error(
-      "Google Workspace service-account email or private key is missing"
-    )
+  const pool = getDatabasePool()
+  const result = await pool.query(
+    `
+      select ce.id, ce.title, ce.starts_at, m.id as meeting_id
+      from calendar_events ce
+      left join meetings m on m.calendar_event_id = ce.id
+      where ce.google_identity_id = $1
+        and ce.starts_at between ($2::timestamptz - interval '12 hours')
+                            and ($2::timestamptz + interval '12 hours')
+        and coalesce(ce.status, '') <> 'cancelled'
+      order by abs(extract(epoch from (ce.starts_at - $2::timestamptz))) asc
+      limit 20
+    `,
+    [options.identityId, options.fileTime.toISOString()]
+  )
+
+  let best:
+    | {
+        id: string
+        title: string
+        meeting_id?: string | null
+        matchMethod: string
+        confidence: number
+      }
+    | undefined
+
+  for (const row of result.rows as Array<{
+    id: string
+    title: string
+    starts_at: string | Date
+    meeting_id: string | null
+  }>) {
+    const startsAt = row.starts_at instanceof Date ? row.starts_at : new Date(row.starts_at)
+    const hoursDelta =
+      Math.abs(startsAt.getTime() - options.fileTime.getTime()) / 1000 / 60 / 60
+    const timeScore = Math.max(0, 1 - hoursDelta / 12)
+    const score = Math.max(timeScore * 0.72, titleScore(options.fileName, row.title))
+
+    if (!best || score > best.confidence) {
+      best = {
+        id: row.id,
+        title: row.title,
+        meeting_id: row.meeting_id,
+        matchMethod: titleScore(options.fileName, row.title) > 0.25 ? "title_time" : "time_window",
+        confidence: Number(score.toFixed(2)),
+      }
+    }
   }
 
-  return new google.auth.JWT({
-    email,
-    key,
-    scopes: [...scopes],
-    subject,
-  })
+  return best && best.confidence >= 0.35 ? best : undefined
 }
 
-function eventDateTime(value?: { date?: string | null; dateTime?: string | null }) {
-  return value?.dateTime ?? value?.date ?? undefined
-}
-
-export async function pollCalendar(subject: string) {
+export async function pollCalendar(subject: string): Promise<SyncStats> {
   await setSyncState(subject, "calendar", { status: "running" })
 
+  const stats: SyncStats = {
+    source: "calendar",
+    created: 0,
+    updated: 0,
+    cancelled: 0,
+    errors: [],
+  }
+
   try {
-    const auth = createDelegatedClient(subject, GOOGLE_WORKSPACE_SCOPES.calendar)
+    const auth = await createDelegatedGoogleClient(
+      subject,
+      GOOGLE_WORKSPACE_SCOPES.calendar
+    )
     const calendar = google.calendar({ version: "v3", auth })
     const pool = getDatabasePool()
     const identityId = await getIdentityId(subject)
     const calendarList = await calendar.calendarList.list({ maxResults: 250 })
-    let upserted = 0
+    const previousCursor = parseCursor(await getSyncCursor(subject, "calendar"))
+    const nextCursor: CalendarCursor = { ...previousCursor }
 
     for (const item of calendarList.data.items ?? []) {
       if (!item.id) continue
 
-      const events = await calendar.events.list({
-        calendarId: item.id,
-        singleEvents: true,
-        orderBy: "startTime",
-        timeMin: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-        timeMax: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-        maxResults: 2500,
-      })
+      try {
+        const syncToken = previousCursor[item.id]
+        const events = await calendar.events.list({
+          calendarId: item.id,
+          singleEvents: syncToken ? undefined : true,
+          orderBy: syncToken ? undefined : "startTime",
+          timeMin: syncToken
+            ? undefined
+            : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+          timeMax: syncToken
+            ? undefined
+            : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          maxResults: 2500,
+          syncToken,
+        })
 
-      for (const event of events.data.items ?? []) {
-        if (!event.id) continue
-
-        const calendarEventId = createId("gcal", `${item.id}:${event.id}`)
-        const title = event.summary ?? "Untitled meeting"
-        const startsAt = eventDateTime(event.start)
-        const endsAt = eventDateTime(event.end)
-
-        await pool.query(
-          `
-            insert into calendar_events (
-              id, google_identity_id, google_event_id, calendar_id, title,
-              starts_at, ends_at, meet_link, status, organizer_email,
-              attendees, raw
-            )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
-            on conflict (google_identity_id, google_event_id)
-            do update set
-              calendar_id = excluded.calendar_id,
-              title = excluded.title,
-              starts_at = excluded.starts_at,
-              ends_at = excluded.ends_at,
-              meet_link = excluded.meet_link,
-              status = excluded.status,
-              organizer_email = excluded.organizer_email,
-              attendees = excluded.attendees,
-              raw = excluded.raw
-          `,
-          [
-            calendarEventId,
-            identityId,
-            event.id,
-            item.id,
-            title,
-            startsAt ?? null,
-            endsAt ?? null,
-            event.hangoutLink ?? event.conferenceData?.entryPoints?.[0]?.uri ?? null,
-            event.status ?? null,
-            event.organizer?.email ?? null,
-            JSON.stringify(event.attendees ?? []),
-            JSON.stringify(event),
-          ]
-        )
-
-        if (event.status !== "cancelled" && startsAt) {
-          const meetingId = createId("meet_google", `${item.id}:${event.id}`)
-          await pool.query(
-            `
-              insert into meetings (
-                id, calendar_event_id, title, source, language, status,
-                retention, started_at, participants, google_meet_link
-              )
-              values ($1, $2, $3, 'google_meet', 'mixed', 'scheduled',
-                'audio', $4, $5::jsonb, $6)
-              on conflict (id)
-              do update set
-                title = excluded.title,
-                calendar_event_id = excluded.calendar_event_id,
-                started_at = excluded.started_at,
-                participants = excluded.participants,
-                google_meet_link = excluded.google_meet_link
-            `,
-            [
-              meetingId,
-              calendarEventId,
-              title,
-              startsAt,
-              JSON.stringify(
-                (event.attendees ?? [])
-                  .map((attendee) => attendee.displayName ?? attendee.email)
-                  .filter(Boolean)
-              ),
-              event.hangoutLink ?? null,
-            ]
-          )
+        if (events.data.nextSyncToken) {
+          nextCursor[item.id] = events.data.nextSyncToken
         }
 
-        upserted += 1
+        for (const event of events.data.items ?? []) {
+          if (!event.id) continue
+
+          const calendarEventId = createId("gcal", `${item.id}:${event.id}`)
+          const title = event.summary ?? "Untitled meeting"
+          const startsAt = eventDateTime(event.start)
+          const endsAt = eventDateTime(event.end)
+          const eventResult = await pool.query(
+            `
+              insert into calendar_events (
+                id, google_identity_id, google_event_id, calendar_id, title,
+                starts_at, ends_at, meet_link, status, organizer_email,
+                attendees, raw
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
+              on conflict (google_identity_id, google_event_id)
+              do update set
+                calendar_id = excluded.calendar_id,
+                title = excluded.title,
+                starts_at = excluded.starts_at,
+                ends_at = excluded.ends_at,
+                meet_link = excluded.meet_link,
+                status = excluded.status,
+                organizer_email = excluded.organizer_email,
+                attendees = excluded.attendees,
+                raw = excluded.raw
+              returning (xmax = 0) as inserted
+            `,
+            [
+              calendarEventId,
+              identityId,
+              event.id,
+              item.id,
+              title,
+              startsAt ?? null,
+              endsAt ?? null,
+              event.hangoutLink ?? event.conferenceData?.entryPoints?.[0]?.uri ?? null,
+              event.status ?? null,
+              event.organizer?.email ?? null,
+              JSON.stringify(event.attendees ?? []),
+              JSON.stringify(event),
+            ]
+          )
+          const inserted = Boolean(
+            (eventResult.rows[0] as { inserted?: boolean } | undefined)?.inserted
+          )
+
+          if (inserted) stats.created = (stats.created ?? 0) + 1
+          else stats.updated = (stats.updated ?? 0) + 1
+
+          if (event.status === "cancelled") {
+            stats.cancelled = (stats.cancelled ?? 0) + 1
+            await pool.query(
+              `update meetings set status = 'failed' where calendar_event_id = $1 and status <> 'completed'`,
+              [calendarEventId]
+            )
+            continue
+          }
+
+          if (startsAt) {
+            const meetingId = createId("meet_google", `${item.id}:${event.id}`)
+            await pool.query(
+              `
+                insert into meetings (
+                  id, calendar_event_id, title, source, language, status,
+                  retention, started_at, participants, google_meet_link
+                )
+                values ($1, $2, $3, 'google_meet', 'mixed', 'scheduled',
+                  'audio', $4, $5::jsonb, $6)
+                on conflict (id)
+                do update set
+                  title = excluded.title,
+                  calendar_event_id = excluded.calendar_event_id,
+                  started_at = excluded.started_at,
+                  participants = excluded.participants,
+                  google_meet_link = excluded.google_meet_link
+              `,
+              [
+                meetingId,
+                calendarEventId,
+                title,
+                startsAt,
+                JSON.stringify(
+                  (event.attendees ?? [])
+                    .map((attendee) => attendee.displayName ?? attendee.email)
+                    .filter(Boolean)
+                ),
+                event.hangoutLink ?? null,
+              ]
+            )
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Calendar page failed"
+
+        stats.errors?.push(`${item.summary ?? item.id}: ${message}`)
+        delete nextCursor[item.id]
       }
     }
 
-    await setSyncState(subject, "calendar", { status: "completed" })
-    return { source: "calendar", upserted }
+    await setSyncState(subject, "calendar", {
+      status: "completed",
+      cursorValue: JSON.stringify(nextCursor),
+      stats,
+      nextPollAt: new Date(Date.now() + 15 * 60 * 1000),
+    })
+    return stats
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Calendar sync failed"
+
     await setSyncState(subject, "calendar", {
       status: "failed",
-      lastError: error instanceof Error ? error.message : "Calendar sync failed",
+      lastError: message,
+      stats: { ...stats, errors: [...(stats.errors ?? []), message] },
+      nextPollAt: new Date(Date.now() + 15 * 60 * 1000),
     })
     throw error
   }
 }
 
-function isLikelyMeetRecording(name: string, mimeType?: string | null) {
-  const normalized = name.toLowerCase()
-  return (
-    /meet|recording|פגישה|הקלט/.test(normalized) &&
-    (mimeType?.startsWith("video/") || mimeType?.startsWith("audio/"))
-  )
-}
-
-export async function pollDrive(subject: string) {
+export async function pollDrive(subject: string): Promise<SyncStats> {
   await setSyncState(subject, "drive", { status: "running" })
 
+  const stats: SyncStats = {
+    source: "drive",
+    discovered: 0,
+    matched: 0,
+    imported: 0,
+    skipped: 0,
+    errors: [],
+  }
+
   try {
-    const auth = createDelegatedClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
+    const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
     const drive = google.drive({ version: "v3", auth })
     const pool = getDatabasePool()
     const identityId = await getIdentityId(subject)
@@ -282,25 +436,33 @@ export async function pollDrive(subject: string) {
       includeItemsFromAllDrives: true,
       supportsAllDrives: true,
       fields:
-        "files(id,name,mimeType,webViewLink,createdTime,modifiedTime,size)",
+        "files(id,name,mimeType,webViewLink,createdTime,modifiedTime,size,videoMediaMetadata)",
       q: "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/')",
+      orderBy: "modifiedTime desc",
     })
-    let discovered = 0
-    let imported = 0
 
     for (const file of response.data.files ?? []) {
       if (!file.id || !file.name || !isLikelyMeetRecording(file.name, file.mimeType)) {
+        stats.skipped = (stats.skipped ?? 0) + 1
         continue
       }
 
+      const fileTime = safeDate(file.createdTime ?? file.modifiedTime)
       const driveFileId = createId("gdrive", file.id)
+      const match = await findMatchingCalendarEvent({
+        identityId,
+        fileName: file.name,
+        fileTime,
+      })
+
       await pool.query(
         `
           insert into drive_files (
             id, google_identity_id, google_file_id, name, mime_type,
-            web_view_link, created_time, modified_time, size_bytes, raw
+            web_view_link, created_time, modified_time, size_bytes,
+            calendar_event_id, raw
           )
-          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
           on conflict (google_identity_id, google_file_id)
           do update set
             name = excluded.name,
@@ -308,6 +470,7 @@ export async function pollDrive(subject: string) {
             web_view_link = excluded.web_view_link,
             modified_time = excluded.modified_time,
             size_bytes = excluded.size_bytes,
+            calendar_event_id = coalesce(excluded.calendar_event_id, drive_files.calendar_event_id),
             raw = excluded.raw
         `,
         [
@@ -320,35 +483,54 @@ export async function pollDrive(subject: string) {
           file.createdTime ?? null,
           file.modifiedTime ?? null,
           file.size ? Number(file.size) : null,
+          match?.id ?? null,
           JSON.stringify(file),
         ]
       )
-      discovered += 1
+      stats.discovered = (stats.discovered ?? 0) + 1
 
       const existing = await pool.query(
         `select imported_at from drive_files where id = $1 and imported_at is not null`,
         [driveFileId]
       )
-      if (existing.rows.length > 0) continue
+      if (existing.rows.length > 0) {
+        stats.skipped = (stats.skipped ?? 0) + 1
+        continue
+      }
 
       const media = await drive.files.get(
         { fileId: file.id, alt: "media", supportsAllDrives: true },
         { responseType: "arraybuffer" }
       )
       const bytes = Buffer.from(media.data as ArrayBuffer)
-      const meeting = await meetingRepository.createMeeting({
-        title: file.name.replace(/\.[^.]+$/, ""),
-        source: "google_meet",
-        language: "mixed",
-        startedAt: file.createdTime ?? new Date().toISOString(),
-        participants: [],
-      })
+      const meeting =
+        match?.meeting_id
+          ? await meetingRepository.getMeeting(match.meeting_id)
+          : await meetingRepository.createMeeting({
+              title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),
+              source: "google_meet",
+              language: "mixed",
+              startedAt: file.createdTime ?? new Date().toISOString(),
+              participants: [],
+            })
+
+      if (!meeting) {
+        throw new Error(`Matched meeting not found for Drive file ${file.id}`)
+      }
+      if (match?.id) {
+        await pool.query(
+          `update meetings set calendar_event_id = $2 where id = $1 and calendar_event_id is null`,
+          [meeting.id, match.id]
+        )
+      }
+
       const stored = await storeMeetingObject({
         meetingId: meeting.id,
         filename: file.name,
         contentType: file.mimeType ?? "application/octet-stream",
         bytes,
       })
+      const checksum = createHash("sha256").update(bytes).digest("hex")
 
       await meetingRepository.createMediaAsset({
         meetingId: meeting.id,
@@ -359,8 +541,14 @@ export async function pollDrive(subject: string) {
         retention: stored.contentType.startsWith("video/") ? "video" : "audio",
       })
       await pool.query(
-        `update media_assets set source = 'google_drive', source_file_id = $2 where meeting_id = $1 and storage_key = $3`,
-        [meeting.id, file.id, stored.key]
+        `
+          update media_assets
+          set source = 'google_drive',
+              source_file_id = $2,
+              checksum_sha256 = $4
+          where meeting_id = $1 and storage_key = $3
+        `,
+        [meeting.id, file.id, stored.key, checksum]
       )
       await pool.query(`update drive_files set imported_at = now() where id = $1`, [
         driveFileId,
@@ -368,10 +556,15 @@ export async function pollDrive(subject: string) {
       await pool.query(
         `
           insert into meeting_drive_files (meeting_id, drive_file_id, match_method, confidence)
-          values ($1, $2, 'drive_import', 0.7)
+          values ($1, $2, $3, $4)
           on conflict do nothing
         `,
-        [meeting.id, driveFileId]
+        [
+          meeting.id,
+          driveFileId,
+          match?.matchMethod ?? "drive_import",
+          match?.confidence ?? 0.7,
+        ]
       )
       await enqueueMeetSumJob("media.ingest", {
         meetingId: meeting.id,
@@ -379,22 +572,36 @@ export async function pollDrive(subject: string) {
         bucket: stored.bucket,
         source: "google_drive",
       })
-      imported += 1
+      if (match) stats.matched = (stats.matched ?? 0) + 1
+      stats.imported = (stats.imported ?? 0) + 1
     }
 
-    await setSyncState(subject, "drive", { status: "completed" })
-    return { source: "drive", discovered, imported }
+    await setSyncState(subject, "drive", {
+      status: "completed",
+      stats,
+      nextPollAt: new Date(Date.now() + 30 * 60 * 1000),
+    })
+    return stats
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Drive sync failed"
+
     await setSyncState(subject, "drive", {
       status: "failed",
-      lastError: error instanceof Error ? error.message : "Drive sync failed",
+      lastError: message,
+      stats: { ...stats, errors: [...(stats.errors ?? []), message] },
+      nextPollAt: new Date(Date.now() + 30 * 60 * 1000),
     })
     throw error
   }
 }
 
-export async function pollGmail(subject: string) {
-  await setSyncState(subject, "gmail", { status: "running" })
-  await setSyncState(subject, "gmail", { status: "completed" })
-  return { source: "gmail", status: "deferred" }
+export async function pollGmail(subject: string): Promise<SyncStats> {
+  const stats: SyncStats = { source: "gmail", status: "deferred" }
+
+  await setSyncState(subject, "gmail", {
+    status: "completed",
+    stats,
+    nextPollAt: new Date(Date.now() + 60 * 60 * 1000),
+  })
+  return stats
 }

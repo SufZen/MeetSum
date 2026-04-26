@@ -78,6 +78,7 @@ export function CommandCenterShell({
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatusView>()
   const [exporting, setExporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -306,6 +307,11 @@ export function CommandCenterShell({
             ...current,
           ])
           await refreshOperationalState()
+          const meetingsResponse = await fetch("/api/meetings")
+          if (meetingsResponse.ok) {
+            const meetingsBody = await meetingsResponse.json()
+            setMeetingRecords(meetingsBody.meetings ?? [])
+          }
         } finally {
           setSyncing(false)
         }
@@ -392,6 +398,9 @@ export function CommandCenterShell({
         onQuestionChange={setAskQuestion}
         onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
+        onOpenUpload={() => setUploadOpen(true)}
+        onSyncGoogle={() => syncGoogle("all")}
+        onCheckSetup={() => setActivePanel("workspace")}
       />
       <MeetingRightRail
         meeting={selectedMeeting}
@@ -417,7 +426,9 @@ export function CommandCenterShell({
             query={query}
             pending={isPending}
             syncing={syncing}
+            uploadOpen={uploadOpen}
             onQueryChange={setQuery}
+            onUploadOpenChange={setUploadOpen}
             onFileChange={handleFileChange}
             onRecordingReady={handleRecordingReady}
             onSync={syncGoogle}

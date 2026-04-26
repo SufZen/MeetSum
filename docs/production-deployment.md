@@ -49,7 +49,27 @@ Google Workspace signing material is mounted read-only from:
 /opt/meetsum/secrets
 ```
 
-Use `GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json` or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` in `.env.local`. Do not commit service-account JSON files, Gemini keys, OAuth secrets, or meeting media.
+Production should prefer keyless domain-wide delegation. Leave
+`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` and `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`
+empty, set `GOOGLE_SERVICE_ACCOUNT_EMAIL`, and give the runtime Application
+Default Credentials permission to call IAM Credentials `signJwt` for that
+service account.
+
+```env
+GOOGLE_WORKSPACE_ADMIN_EMAIL=info@realization.co.il
+GOOGLE_WORKSPACE_SUBJECT=info@realization.co.il
+GOOGLE_SERVICE_ACCOUNT_EMAIL=meetsum-workspace-sync@meetsum-494211.iam.gserviceaccount.com
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=
+GOOGLE_SERVICE_ACCOUNT_KEY_FILE=
+MEETSUM_SCHEDULE_GOOGLE_SYNC=true
+MEETSUM_CALENDAR_POLL_MINUTES=15
+MEETSUM_DRIVE_POLL_MINUTES=30
+```
+
+If keyless signing is not available, development may still use
+`GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json`
+or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`. Do not commit service-account JSON
+files, Gemini keys, OAuth secrets, or meeting media.
 
 For the temporary AI Studio Gemini key path, keep:
 

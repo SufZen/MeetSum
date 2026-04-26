@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { createApiKeyHash } from "@/lib/auth/api-keys"
 import { getDatabasePool } from "@/lib/db/client"
 import { createPlatformEvent, signWebhookPayload } from "@/lib/platform/events"
 
@@ -30,14 +31,15 @@ export async function POST(request: Request) {
   if (process.env.MEETSUM_STORAGE === "postgres") {
     await getDatabasePool().query(
       `
-        insert into webhook_subscriptions (id, url, events, secret_ref)
-        values ($1, $2, $3::jsonb, $4)
+        insert into webhook_subscriptions (id, url, events, secret_ref, secret_hash, enabled)
+        values ($1, $2, $3::jsonb, $4, $5, true)
       `,
       [
         subscription.id,
         subscription.url,
         JSON.stringify(subscription.events),
         secret ? "provided" : null,
+        secret ? createApiKeyHash(secret) : null,
       ]
     )
   }

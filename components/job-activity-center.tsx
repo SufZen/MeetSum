@@ -42,7 +42,7 @@ export function JobActivityCenter({
                   {job.error}
                 </p>
               )}
-              {job.status === "failed" && (
+              {job.status === "failed" && job.retryable !== false && (
                 <Button
                   size="sm"
                   variant="outline"

@@ -30,7 +30,9 @@ export function TopCommandBar({
   query,
   pending,
   syncing,
+  uploadOpen,
   onQueryChange,
+  onUploadOpenChange,
   onFileChange,
   onRecordingReady,
   onSync,
@@ -40,7 +42,9 @@ export function TopCommandBar({
   query: string
   pending?: boolean
   syncing?: boolean
+  uploadOpen?: boolean
   onQueryChange: (value: string) => void
+  onUploadOpenChange?: (open: boolean) => void
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
   onSync: (target: SyncTarget) => void
@@ -64,6 +68,8 @@ export function TopCommandBar({
         <MediaIngestionDrawer
           dictionary={dictionary}
           pending={pending}
+          open={uploadOpen}
+          onOpenChange={onUploadOpenChange}
           onFileChange={onFileChange}
           onRecordingReady={onRecordingReady}
         />

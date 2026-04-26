@@ -59,7 +59,9 @@ export type SuggestedAgentRun = {
   meetingId: string
   target: "realizeos" | "n8n" | "mcp" | "webhook"
   payload: Record<string, unknown>
+  response?: Record<string, unknown>
   status: "suggested" | "queued" | "sent" | "failed"
+  lastError?: string
   createdAt: string
 }
 
@@ -87,6 +89,9 @@ export type JobRecord = {
   attempts: number
   maxAttempts: number
   retryOfJobId?: string
+  startedAt?: string
+  completedAt?: string
+  retryable?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -167,7 +172,12 @@ export type MeetingRepository = {
   }) => Promise<JobRecord>
   updateJob: (
     id: string,
-    patch: Partial<Pick<JobRecord, "status" | "result" | "error" | "attempts">>
+    patch: Partial<
+      Pick<
+        JobRecord,
+        "status" | "result" | "error" | "attempts" | "startedAt" | "completedAt"
+      >
+    >
   ) => Promise<JobRecord>
   getJob: (id: string) => Promise<JobRecord | undefined>
   listJobs: (filters?: { meetingId?: string; status?: JobStatus }) => Promise<JobRecord[]>
@@ -364,6 +374,7 @@ export function createInMemoryMeetingRepository(
         attempts: 0,
         maxAttempts: 3,
         retryOfJobId: input.retryOfJobId,
+        retryable: false,
         createdAt: now,
         updatedAt: now,
       }
@@ -382,6 +393,18 @@ export function createInMemoryMeetingRepository(
       const updated = {
         ...job,
         ...patch,
+        startedAt:
+          patch.startedAt ??
+          (patch.status === "active" ? new Date().toISOString() : job.startedAt),
+        completedAt:
+          patch.completedAt ??
+          (patch.status === "completed" || patch.status === "failed"
+            ? new Date().toISOString()
+            : job.completedAt),
+        retryable:
+          patch.status === "failed"
+            ? (patch.attempts ?? job.attempts) < job.maxAttempts
+            : job.retryable,
         updatedAt: new Date().toISOString(),
       }
 
@@ -531,6 +554,7 @@ export function createInMemoryMeetingRepository(
         meetingId: input.meetingId,
         target: input.target,
         payload: input.payload,
+        response: {},
         status: "suggested",
         createdAt: new Date().toISOString(),
       }

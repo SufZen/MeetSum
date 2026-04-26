@@ -5,6 +5,7 @@ import {
   buildGoogleSyncPlan,
   type GoogleSyncSource,
 } from "@/lib/google/workspace"
+import { getWorkspaceSubject } from "@/lib/google/auth"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
@@ -28,7 +29,7 @@ export async function POST(
   }
 
   const { source } = await params
-  const { subject = "admin@example.com" } = (await request
+  const { subject = getWorkspaceSubject() } = (await request
     .json()
     .catch(() => ({}))) as {
     subject?: string

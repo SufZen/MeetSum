@@ -81,7 +81,9 @@ type SuggestedAgentRunRow = {
   meeting_id: string
   target: SuggestedAgentRun["target"]
   payload: Record<string, unknown> | null
+  response: Record<string, unknown> | null
   status: SuggestedAgentRun["status"]
+  last_error: string | null
   created_at: string | Date
 }
 
@@ -107,6 +109,8 @@ type JobRow = {
   attempts: number
   max_attempts: number
   retry_of_job_id: string | null
+  started_at: string | Date | null
+  completed_at: string | Date | null
   created_at: string | Date
   updated_at: string | Date
 }
@@ -188,6 +192,9 @@ function mapJob(row: JobRow): JobRecord {
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
     retryOfJobId: row.retry_of_job_id ?? undefined,
+    startedAt: row.started_at ? toIso(row.started_at) : undefined,
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
+    retryable: row.status === "failed" && row.attempts < row.max_attempts,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   }
@@ -276,7 +283,7 @@ export function createPostgresMeetingRepository(
       ),
       client.query(
         `
-          select id, meeting_id, target, payload, status, created_at
+          select id, meeting_id, target, payload, response, status, last_error, created_at
           from suggested_agent_runs
           where meeting_id = $1
           order by created_at desc
@@ -360,7 +367,9 @@ export function createPostgresMeetingRepository(
           meetingId: run.meeting_id,
           target: run.target,
           payload: run.payload ?? {},
+          response: run.response ?? {},
           status: run.status,
+          lastError: run.last_error ?? undefined,
           createdAt: toIso(run.created_at),
         })
       ),
@@ -659,7 +668,8 @@ export function createPostgresMeetingRepository(
                 payload = excluded.payload,
                 updated_at = now()
           returning id, name, status, meeting_id, payload, result, error,
-                    attempts, max_attempts, retry_of_job_id, created_at, updated_at
+                    attempts, max_attempts, retry_of_job_id, started_at,
+                    completed_at, created_at, updated_at
         `,
         [
           nowId,
@@ -682,10 +692,19 @@ export function createPostgresMeetingRepository(
               result = coalesce($3::jsonb, result),
               error = $4,
               attempts = coalesce($5, attempts),
+              started_at = case
+                when $2 = 'active' then coalesce(started_at, now())
+                else started_at
+              end,
+              completed_at = case
+                when $2 in ('completed', 'failed') then now()
+                else completed_at
+              end,
               updated_at = now()
           where id = $1
           returning id, name, status, meeting_id, payload, result, error,
-                    attempts, max_attempts, retry_of_job_id, created_at, updated_at
+                    attempts, max_attempts, retry_of_job_id, started_at,
+                    completed_at, created_at, updated_at
         `,
         [
           id,
@@ -705,7 +724,8 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           select id, name, status, meeting_id, payload, result, error,
-                 attempts, max_attempts, retry_of_job_id, created_at, updated_at
+                 attempts, max_attempts, retry_of_job_id, started_at,
+                 completed_at, created_at, updated_at
           from jobs
           where id = $1
           limit 1
@@ -732,7 +752,8 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           select id, name, status, meeting_id, payload, result, error,
-                 attempts, max_attempts, retry_of_job_id, created_at, updated_at
+                 attempts, max_attempts, retry_of_job_id, started_at,
+                 completed_at, created_at, updated_at
           from jobs
           ${clauses.length ? `where ${clauses.join(" and ")}` : ""}
           order by created_at desc
@@ -889,7 +910,8 @@ export function createPostgresMeetingRepository(
         `
           insert into suggested_agent_runs (id, meeting_id, target, payload, status)
           values ($1, $2, $3, $4::jsonb, 'suggested')
-          returning id, meeting_id, target, payload, status, created_at
+          returning id, meeting_id, target, payload, response, status,
+                    last_error, created_at
         `,
         [
           createId("agent_suggestion"),
@@ -905,7 +927,9 @@ export function createPostgresMeetingRepository(
         meetingId: row.meeting_id,
         target: row.target,
         payload: row.payload ?? {},
+        response: row.response ?? {},
         status: row.status,
+        lastError: row.last_error ?? undefined,
         createdAt: toIso(row.created_at),
       }
     },

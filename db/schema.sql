@@ -167,6 +167,8 @@ create table if not exists webhook_subscriptions (
   url text not null,
   events jsonb not null default '[]'::jsonb,
   secret_ref text,
+  secret_hash text,
+  enabled boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -177,6 +179,9 @@ create table if not exists webhook_deliveries (
   status text not null,
   attempts integer not null default 0,
   last_error text,
+  event_payload jsonb not null default '{}'::jsonb,
+  response_status integer,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
 
@@ -205,6 +210,8 @@ create table if not exists jobs (
   attempts integer not null default 0,
   retry_of_job_id text references jobs(id) on delete set null,
   max_attempts integer not null default 3,
+  started_at timestamptz,
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -230,7 +237,9 @@ alter table ai_runs
 alter table google_sync_states
   add column if not exists status text not null default 'idle',
   add column if not exists last_error text,
-  add column if not exists last_synced_at timestamptz;
+  add column if not exists last_synced_at timestamptz,
+  add column if not exists metadata jsonb not null default '{}'::jsonb,
+  add column if not exists next_poll_at timestamptz;
 
 alter table calendar_events
   add column if not exists calendar_id text,
@@ -297,7 +306,10 @@ create table if not exists suggested_agent_runs (
   meeting_id text not null references meetings(id) on delete cascade,
   target text not null,
   payload jsonb not null default '{}'::jsonb,
+  response jsonb not null default '{}'::jsonb,
   status text not null default 'suggested',
+  last_error text,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
 
@@ -352,6 +364,12 @@ create index if not exists idx_jobs_meeting_id
 
 create index if not exists idx_jobs_status
   on jobs(status, created_at desc);
+
+create index if not exists idx_jobs_started_completed
+  on jobs(started_at, completed_at);
+
+create index if not exists idx_google_sync_states_next_poll
+  on google_sync_states(next_poll_at);
 
 create index if not exists idx_media_assets_source_file
   on media_assets(source, source_file_id);

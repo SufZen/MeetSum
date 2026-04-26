@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { requireAppAccess } from "@/lib/api/responses"
+import { getWorkspaceSubject } from "@/lib/google/auth"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 
 export async function POST(request: Request) {
@@ -8,7 +9,7 @@ export async function POST(request: Request) {
 
   if (unauthorized) return unauthorized
 
-  const { subject = "info@realization.co.il" } = (await request
+  const { subject = getWorkspaceSubject() } = (await request
     .json()
     .catch(() => ({}))) as { subject?: string }
   const jobs = await Promise.all([

@@ -38,7 +38,7 @@ program
 program
   .command("sync")
   .argument("<source>", "google")
-  .option("--subject <email>", "Workspace subject email", "admin@example.com")
+  .option("--subject <email>", "Workspace subject email", "info@realization.co.il")
   .action(async (source, options) => {
     if (source !== "google") {
       throw new Error("Only google sync is implemented in this scaffold")
@@ -61,8 +61,23 @@ program
 program
   .command("ingest")
   .argument("<file>", "Audio or video file")
-  .option("--meeting <id>", "Meeting id", "meet_google_workspace")
+  .option("--meeting <id>", "Existing meeting id")
   .action(async (file, options) => {
+    let meetingId = options.meeting
+    if (!meetingId) {
+      const created = await request("/api/meetings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: basename(file).replace(/\.[^.]+$/, "") || "CLI upload",
+          source: "upload",
+          language: "mixed",
+          startedAt: new Date().toISOString(),
+          participants: [],
+        }),
+      })
+      meetingId = created.meeting.id
+    }
     const formData = new FormData()
     const fileStat = await stat(file)
     const stream = createReadStream(file)
@@ -72,7 +87,7 @@ program
 
     console.log(
       JSON.stringify(
-        await request(`/api/meetings/${options.meeting}/upload`, {
+        await request(`/api/meetings/${meetingId}/upload`, {
           method: "POST",
           body: formData,
         }),
