@@ -31,6 +31,13 @@ function createId(prefix: string, stable: string) {
   return `${prefix}_${Buffer.from(stable).toString("base64url").slice(0, 40)}`
 }
 
+function createSyncStateId(identityId: string, source: GoogleSource) {
+  return `sync_${createHash("sha256")
+    .update(`${identityId}:${source}`)
+    .digest("hex")
+    .slice(0, 32)}`
+}
+
 function safeDate(value?: string | null) {
   if (!value) return undefined
   const time = new Date(value).getTime()
@@ -149,7 +156,7 @@ async function setSyncState(
 ) {
   const pool = getDatabasePool()
   const identityId = await getIdentityId(subject)
-  const id = createId("sync", `${identityId}:${source}`)
+  const id = createSyncStateId(identityId, source)
 
   await pool.query(
     `
