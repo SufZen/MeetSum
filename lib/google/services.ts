@@ -31,6 +31,10 @@ function createId(prefix: string, stable: string) {
   return `${prefix}_${Buffer.from(stable).toString("base64url").slice(0, 40)}`
 }
 
+function createHashedId(prefix: string, stable: string) {
+  return `${prefix}_${createHash("sha256").update(stable).digest("hex").slice(0, 32)}`
+}
+
 function createSyncStateId(identityId: string, source: GoogleSource) {
   return `sync_${createHash("sha256")
     .update(`${identityId}:${source}`)
@@ -304,7 +308,10 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
         for (const event of events.data.items ?? []) {
           if (!event.id) continue
 
-          const calendarEventId = createId("gcal", `${item.id}:${event.id}`)
+          const proposedCalendarEventId = createHashedId(
+            "gcal",
+            `${identityId}:${item.id}:${event.id}`
+          )
           const title = event.summary ?? "Untitled meeting"
           const startsAt = eventDateTime(event.start)
           const endsAt = eventDateTime(event.end)
@@ -326,11 +333,11 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
                 status = excluded.status,
                 organizer_email = excluded.organizer_email,
                 attendees = excluded.attendees,
-                raw = excluded.raw
-              returning (xmax = 0) as inserted
+              raw = excluded.raw
+              returning id, (xmax = 0) as inserted
             `,
             [
-              calendarEventId,
+              proposedCalendarEventId,
               identityId,
               event.id,
               item.id,
@@ -344,9 +351,11 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
               JSON.stringify(event),
             ]
           )
-          const inserted = Boolean(
-            (eventResult.rows[0] as { inserted?: boolean } | undefined)?.inserted
-          )
+          const calendarEventRow = eventResult.rows[0] as
+            | { id?: string; inserted?: boolean }
+            | undefined
+          const calendarEventId = calendarEventRow?.id ?? proposedCalendarEventId
+          const inserted = Boolean(calendarEventRow?.inserted)
 
           if (inserted) stats.created = (stats.created ?? 0) + 1
           else stats.updated = (stats.updated ?? 0) + 1
@@ -361,7 +370,13 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
           }
 
           if (startsAt) {
-            const meetingId = createId("meet_google", `${item.id}:${event.id}`)
+            const existingMeeting = await pool.query(
+              `select id from meetings where calendar_event_id = $1 limit 1`,
+              [calendarEventId]
+            )
+            const meetingId =
+              (existingMeeting.rows[0] as { id?: string } | undefined)?.id ??
+              createHashedId("meet_google", calendarEventId)
             await pool.query(
               `
                 insert into meetings (
@@ -455,14 +470,14 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
       }
 
       const fileTime = safeDate(file.createdTime ?? file.modifiedTime)
-      const driveFileId = createId("gdrive", file.id)
+      const proposedDriveFileId = createHashedId("gdrive", `${identityId}:${file.id}`)
       const match = await findMatchingCalendarEvent({
         identityId,
         fileName: file.name,
         fileTime,
       })
 
-      await pool.query(
+      const driveFileResult = await pool.query(
         `
           insert into drive_files (
             id, google_identity_id, google_file_id, name, mime_type,
@@ -479,9 +494,10 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
             size_bytes = excluded.size_bytes,
             calendar_event_id = coalesce(excluded.calendar_event_id, drive_files.calendar_event_id),
             raw = excluded.raw
+          returning id
         `,
         [
-          driveFileId,
+          proposedDriveFileId,
           identityId,
           file.id,
           file.name,
@@ -494,6 +510,9 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
           JSON.stringify(file),
         ]
       )
+      const driveFileId =
+        (driveFileResult.rows[0] as { id?: string } | undefined)?.id ??
+        proposedDriveFileId
       stats.discovered = (stats.discovered ?? 0) + 1
 
       const existing = await pool.query(

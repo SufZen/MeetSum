@@ -19,9 +19,11 @@ export function validateRuntimeEnvironment(): RuntimeEnvironmentReport {
     warnings.push("Google Workspace sync is missing service-account identity.")
   }
   if (workspace.strategy === "keyless-iam-signjwt") {
-    warnings.push(
-      "Google Workspace sync requires Application Default Credentials with iam.serviceAccounts.signJwt permission."
-    )
+    if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      warnings.push(
+        "Google Workspace sync requires Application Default Credentials with iam.serviceAccounts.signJwt permission."
+      )
+    }
   }
   if (!geminiConfigured) {
     warnings.push("Gemini is not configured; AI actions will use fallbacks.")
