@@ -95,11 +95,16 @@ function normalizeGeminiSegments(
   return cleanupTranscriptSegments(normalized)
 }
 
-function getAudioPrompt(meeting: MeetingRecord) {
+function getAudioPrompt(meeting: MeetingRecord, compactTimeline = false) {
   return [
-    "Transcribe this meeting audio/video as structured JSON.",
+    compactTimeline
+      ? "Create compact timestamped transcript notes for this long meeting audio/video as structured JSON."
+      : "Transcribe this meeting audio/video as structured JSON.",
     "Return ONLY JSON with a top-level `segments` array.",
     "Each segment must include: speaker, startMs, endMs, text, language, confidence, uncertainty.",
+    compactTimeline
+      ? "For long recordings, do not create a verbatim transcript. Return 30-80 concise timeline segments that preserve decisions, tasks, blockers, names, numbers, and important quotes."
+      : "Prefer faithful transcript text, split into timestamped speaker turns.",
     "Use speaker labels like Speaker 1, Speaker 2 when names are not clear.",
     "Support Hebrew, English, Portuguese, Spanish, Italian, and mixed-language meetings.",
     "For Hebrew, preserve names, numbers, dates, currencies, percentages, and mixed English technical terms such as VSCode, Supabase, MCP, RealizeOS, Gemini, Gemma.",
@@ -107,6 +112,51 @@ function getAudioPrompt(meeting: MeetingRecord) {
     `Meeting title: ${meeting.title}`,
     `Known participants: ${meeting.participants.join(", ") || "unknown"}`,
   ].join("\n")
+}
+
+function stripJsonFence(value: string) {
+  return value
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim()
+}
+
+function parseGeminiTranscriptSegments(raw: string): GeminiTranscriptSegment[] {
+  const text = stripJsonFence(raw)
+
+  try {
+    const parsed = JSON.parse(text) as { segments?: GeminiTranscriptSegment[] }
+    return parsed.segments ?? []
+  } catch {
+    const segments: GeminiTranscriptSegment[] = []
+    const objectPattern =
+      /\{[^{}]*"text"\s*:\s*"(?:(?:\\.)|[^"\\])*"[^{}]*\}/g
+
+    for (const match of text.matchAll(objectPattern)) {
+      try {
+        const parsed = JSON.parse(match[0]) as GeminiTranscriptSegment
+        if (parsed.text?.trim()) segments.push(parsed)
+      } catch {
+        // Keep scanning; Gemini can truncate the tail of an otherwise useful JSON payload.
+      }
+    }
+
+    if (segments.length) return segments
+
+    const textPattern = /"text"\s*:\s*"((?:(?:\\.)|[^"\\])*)"/g
+
+    for (const match of text.matchAll(textPattern)) {
+      try {
+        const parsedText = JSON.parse(`"${match[1]}"`) as string
+        if (parsedText.trim()) segments.push({ text: parsedText })
+      } catch {
+        // Ignore a malformed fragment and keep any other recoverable segments.
+      }
+    }
+
+    return segments
+  }
 }
 
 function safeTempFilename(filename: string | undefined, fallback: string) {
@@ -269,13 +319,13 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
 
     try {
       const ai = createGeminiClient()
-      const prompt = getAudioPrompt(meeting)
       const sizeBytes = Number(asset.sizeBytes ?? 0)
       const inlineLimit = Number(
         process.env.GOOGLE_GEMINI_INLINE_AUDIO_LIMIT_BYTES ?? 18_000_000
       )
       const useInline =
         sizeBytes > 0 ? sizeBytes <= inlineLimit : true
+      const prompt = getAudioPrompt(meeting, !useInline)
 
       if (!useInline && getGeminiProviderMode() === "vertex-ai") {
         throw new Error(
@@ -341,6 +391,9 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
           },
         ],
         config: {
+          maxOutputTokens: Number(
+            process.env.GOOGLE_GEMINI_TRANSCRIPT_MAX_OUTPUT_TOKENS ?? 65_536
+          ),
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -367,10 +420,10 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
         },
       })
 
-      const parsed = JSON.parse(response.text ?? "{}") as {
-        segments?: GeminiTranscriptSegment[]
-      }
-      const segments = normalizeGeminiSegments(parsed.segments ?? [], meeting)
+      const segments = normalizeGeminiSegments(
+        parseGeminiTranscriptSegments(response.text ?? "{}"),
+        meeting
+      )
 
       return segments.length ? segments : this.fallback.transcribe(meeting)
     } catch (error) {
