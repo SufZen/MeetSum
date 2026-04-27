@@ -49,16 +49,26 @@ export function isGeminiConfigured() {
   return Boolean(process.env.GOOGLE_GEMINI_API_KEY)
 }
 
+function getGeminiHttpOptions() {
+  return {
+    timeout: Number(process.env.GOOGLE_GEMINI_HTTP_TIMEOUT_MS ?? 900_000),
+  }
+}
+
 export function createGeminiClient() {
   if (getGeminiProviderMode() === "vertex-ai") {
     return new GoogleGenAI({
       vertexai: true,
       project: process.env.GOOGLE_CLOUD_PROJECT,
       location: process.env.GOOGLE_CLOUD_LOCATION ?? "global",
+      httpOptions: getGeminiHttpOptions(),
     })
   }
 
-  return new GoogleGenAI({ apiKey: process.env.GOOGLE_GEMINI_API_KEY })
+  return new GoogleGenAI({
+    apiKey: process.env.GOOGLE_GEMINI_API_KEY,
+    httpOptions: getGeminiHttpOptions(),
+  })
 }
 
 type GeminiTranscriptSegment = {
@@ -195,7 +205,10 @@ async function waitForGeminiFile(
   const deadline = Date.now() + Number(process.env.GOOGLE_GEMINI_FILE_WAIT_MS ?? 300_000)
 
   while (Date.now() < deadline) {
-    const file = await ai.files.get({ name })
+    const file = await ai.files.get({
+      name,
+      config: { httpOptions: getGeminiHttpOptions() },
+    })
 
     if (file.state === "ACTIVE") return
     if (file.state === "FAILED") {
@@ -368,6 +381,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
           config: {
             mimeType: uploadMimeType,
             displayName: asset.filename ?? `${meeting.id}-media`,
+            httpOptions: getGeminiHttpOptions(),
           },
         })
         await waitForGeminiFile(ai, uploaded.name)
@@ -391,6 +405,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
           },
         ],
         config: {
+          httpOptions: getGeminiHttpOptions(),
           maxOutputTokens: Number(
             process.env.GOOGLE_GEMINI_TRANSCRIPT_MAX_OUTPUT_TOKENS ?? 65_536
           ),
@@ -428,7 +443,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
       return segments.length ? segments : this.fallback.transcribe(meeting)
     } catch (error) {
       console.error("Gemini audio transcription failed", error)
-      return this.fallback.transcribe(meeting)
+      throw error
     } finally {
       if (typeof tempDir === "string") {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
