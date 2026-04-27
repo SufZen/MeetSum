@@ -1,4 +1,11 @@
+import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
+import { createWriteStream } from "node:fs"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { pipeline } from "node:stream/promises"
+import { promisify } from "node:util"
 
 import { google } from "googleapis"
 
@@ -8,6 +15,8 @@ import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { meetingRepository } from "@/lib/meetings/store"
 import { storeMeetingObject } from "@/lib/storage/object-storage"
+
+const execFileAsync = promisify(execFile)
 
 type GoogleSource = "calendar" | "drive" | "gmail"
 type SyncStatus = "idle" | "running" | "completed" | "failed"
@@ -96,6 +105,79 @@ function isLikelyMeetRecording(name: string, mimeType?: string | null) {
     /meet|recording|פגישה|הקלט|הקלטה/.test(normalized) &&
     (mimeType?.startsWith("video/") || mimeType?.startsWith("audio/"))
   )
+}
+
+function safeTempFilename(filename: string | undefined, fallback: string) {
+  return (filename ?? fallback).replace(/[^\w. -]+/g, "_")
+}
+
+async function extractAudio(inputPath: string, outputPath: string) {
+  await execFileAsync(
+    "ffmpeg",
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-b:a",
+      "64k",
+      outputPath,
+    ],
+    {
+      maxBuffer: 1024 * 1024 * 8,
+      timeout: Number(process.env.MEETSUM_FFMPEG_TIMEOUT_MS ?? 900_000),
+    }
+  )
+}
+
+async function prepareDriveMediaForStorage(options: {
+  drive: ReturnType<typeof google.drive>
+  fileId: string
+  fileName: string
+  mimeType?: string | null
+}) {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "meetsum-drive-"))
+
+  try {
+    const inputPath = path.join(
+      tempDir,
+      safeTempFilename(options.fileName, `${options.fileId}.media`)
+    )
+    const response = await options.drive.files.get(
+      { fileId: options.fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "stream" }
+    )
+
+    await pipeline(
+      response.data as NodeJS.ReadableStream,
+      createWriteStream(inputPath)
+    )
+
+    if (options.mimeType?.startsWith("video/")) {
+      const audioPath = path.join(tempDir, `${options.fileId}.m4a`)
+      await extractAudio(inputPath, audioPath)
+
+      return {
+        bytes: await readFile(audioPath),
+        filename: options.fileName.replace(/\.[^.]+$/, "") + ".m4a",
+        contentType: "audio/mp4",
+        retention: "audio" as const,
+      }
+    }
+
+    return {
+      bytes: await readFile(inputPath),
+      filename: options.fileName,
+      contentType: options.mimeType ?? "application/octet-stream",
+      retention: "audio" as const,
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+  }
 }
 
 async function getIdentityId(subject: string) {
@@ -453,6 +535,10 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
     const drive = google.drive({ version: "v3", auth })
     const pool = getDatabasePool()
     const identityId = await getIdentityId(subject)
+    const maxImports = Number(process.env.MEETSUM_DRIVE_MAX_IMPORTS_PER_POLL ?? 2)
+    const maxImportBytes = Number(
+      process.env.MEETSUM_DRIVE_MAX_IMPORT_BYTES ?? 2_000_000_000
+    )
     const response = await drive.files.list({
       pageSize: 100,
       includeItemsFromAllDrives: true,
@@ -464,7 +550,18 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
     })
 
     for (const file of response.data.files ?? []) {
+      if ((stats.imported ?? 0) >= maxImports) {
+        stats.skipped = (stats.skipped ?? 0) + 1
+        continue
+      }
+
       if (!file.id || !file.name || !isLikelyMeetRecording(file.name, file.mimeType)) {
+        stats.skipped = (stats.skipped ?? 0) + 1
+        continue
+      }
+
+      const fileSizeBytes = file.size ? Number(file.size) : 0
+      if (fileSizeBytes > maxImportBytes) {
         stats.skipped = (stats.skipped ?? 0) + 1
         continue
       }
@@ -524,11 +621,6 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
         continue
       }
 
-      const media = await drive.files.get(
-        { fileId: file.id, alt: "media", supportsAllDrives: true },
-        { responseType: "arraybuffer" }
-      )
-      const bytes = Buffer.from(media.data as ArrayBuffer)
       const meeting =
         match?.meeting_id
           ? await meetingRepository.getMeeting(match.meeting_id)
@@ -550,21 +642,27 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
         )
       }
 
+      const media = await prepareDriveMediaForStorage({
+        drive,
+        fileId: file.id,
+        fileName: file.name,
+        mimeType: file.mimeType,
+      })
       const stored = await storeMeetingObject({
         meetingId: meeting.id,
-        filename: file.name,
-        contentType: file.mimeType ?? "application/octet-stream",
-        bytes,
+        filename: media.filename,
+        contentType: media.contentType,
+        bytes: media.bytes,
       })
-      const checksum = createHash("sha256").update(bytes).digest("hex")
+      const checksum = createHash("sha256").update(media.bytes).digest("hex")
 
       await meetingRepository.createMediaAsset({
         meetingId: meeting.id,
         storageKey: stored.key,
-        filename: file.name,
+        filename: media.filename,
         contentType: stored.contentType,
         sizeBytes: stored.sizeBytes,
-        retention: stored.contentType.startsWith("video/") ? "video" : "audio",
+        retention: media.retention,
       })
       await pool.query(
         `
