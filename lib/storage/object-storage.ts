@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
 import { createWriteStream } from "node:fs"
@@ -121,5 +122,14 @@ export async function downloadMeetingObjectToFile(key: string, destination: stri
   await pipeline(
     result.Body as AsyncIterable<Uint8Array>,
     createWriteStream(destination)
+  )
+}
+
+export async function deleteMeetingObject(key: string) {
+  await getS3Client().send(
+    new DeleteObjectCommand({
+      Bucket: getMeetingMediaBucket(),
+      Key: key,
+    })
   )
 }
