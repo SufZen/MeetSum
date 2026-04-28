@@ -62,9 +62,19 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL=meetsum-workspace-sync@meetsum-494211.iam.gservicea
 GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=
 GOOGLE_SERVICE_ACCOUNT_KEY_FILE=
 MEETSUM_SCHEDULE_GOOGLE_SYNC=true
+MEETSUM_SCHEDULE_CALENDAR_SYNC=true
+MEETSUM_SCHEDULE_DRIVE_SYNC=false
 MEETSUM_CALENDAR_POLL_MINUTES=15
 MEETSUM_DRIVE_POLL_MINUTES=30
+MEETSUM_DRIVE_MAX_IMPORTS_PER_POLL=2
+MEETSUM_DRIVE_MAX_IMPORT_BYTES=2000000000
 ```
+
+Calendar polling should stay on for the first production phase. Drive imports
+should remain manual or explicitly enabled for small batches until retention,
+operator review, and storage expansion are in place. The importer stores
+extracted audio for video recordings by default; raw video archiving should only
+be enabled deliberately.
 
 If keyless signing is not available, development may still use
 `GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json`

@@ -31,25 +31,32 @@ function scheduleGoogleSync() {
   const subject = getWorkspaceSubject()
   const calendarMinutes = Number(process.env.MEETSUM_CALENDAR_POLL_MINUTES ?? 15)
   const driveMinutes = Number(process.env.MEETSUM_DRIVE_POLL_MINUTES ?? 30)
+  const scheduleCalendar = process.env.MEETSUM_SCHEDULE_CALENDAR_SYNC !== "false"
+  const scheduleDrive = process.env.MEETSUM_SCHEDULE_DRIVE_SYNC === "true"
 
-  scheduledTimers.push(
-    setInterval(() => {
-      void enqueueMeetSumJob("google.calendar.poll", {
-        subject,
-        source: "calendar",
-        scheduled: true,
-      }).catch((error) => console.error("Scheduled Calendar sync failed", error))
-    }, calendarMinutes * 60 * 1000)
-  )
-  scheduledTimers.push(
-    setInterval(() => {
-      void enqueueMeetSumJob("google.drive.poll", {
-        subject,
-        source: "drive",
-        scheduled: true,
-      }).catch((error) => console.error("Scheduled Drive sync failed", error))
-    }, driveMinutes * 60 * 1000)
-  )
+  if (scheduleCalendar) {
+    scheduledTimers.push(
+      setInterval(() => {
+        void enqueueMeetSumJob("google.calendar.poll", {
+          subject,
+          source: "calendar",
+          scheduled: true,
+        }).catch((error) => console.error("Scheduled Calendar sync failed", error))
+      }, calendarMinutes * 60 * 1000)
+    )
+  }
+
+  if (scheduleDrive) {
+    scheduledTimers.push(
+      setInterval(() => {
+        void enqueueMeetSumJob("google.drive.poll", {
+          subject,
+          source: "drive",
+          scheduled: true,
+        }).catch((error) => console.error("Scheduled Drive sync failed", error))
+      }, driveMinutes * 60 * 1000)
+    )
+  }
 }
 
 scheduleGoogleSync()
