@@ -14,9 +14,17 @@ export async function POST(request: Request) {
     .catch(() => ({}))) as { subject?: string }
   const jobs = await Promise.all([
     enqueueMeetSumJob("google.calendar.poll", { subject, source: "calendar" }),
-    enqueueMeetSumJob("google.drive.poll", { subject, source: "drive" }),
-    enqueueMeetSumJob("google.gmail.poll", { subject, source: "gmail" }),
   ])
 
-  return NextResponse.json({ jobs }, { status: 202 })
+  return NextResponse.json(
+    {
+      jobs,
+      skipped: {
+        drive:
+          "Drive media import is manual-only. Use /api/google/drive/recordings and /api/google/drive/import.",
+        gmail: "Gmail context sync is deferred.",
+      },
+    },
+    { status: 202 }
+  )
 }

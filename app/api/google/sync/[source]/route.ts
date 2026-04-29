@@ -40,6 +40,14 @@ export async function POST(
   }
 
   const syncSource = source as GoogleSyncSource
+
+  if (syncSource === "drive") {
+    return jsonError(
+      "Drive auto-import is disabled. Use /api/google/drive/recordings to review candidates and /api/google/drive/import to import selected files.",
+      409
+    )
+  }
+
   const syncItem = buildGoogleSyncPlan(subject).find(
     (item) => item.source === syncSource
   )

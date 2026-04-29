@@ -5,6 +5,7 @@ import {
   extractBearerToken,
   verifyApiKey,
 } from "@/lib/auth/api-keys"
+import { validateDriveImportFileIds } from "@/lib/google/services"
 import { parseCreateMeetingInput } from "@/lib/meetings/validation"
 
 describe("API key authentication", () => {
@@ -51,5 +52,23 @@ describe("meeting request validation", () => {
         startedAt: "not-a-date",
       })
     ).toThrow("Invalid meeting payload")
+  })
+})
+
+describe("Drive import request validation", () => {
+  it("deduplicates selected Drive recordings and caps batch imports", () => {
+    expect(validateDriveImportFileIds(["a", "a", "b"])).toEqual(["a", "b"])
+    expect(() =>
+      validateDriveImportFileIds(["1", "2", "3", "4", "5", "6"])
+    ).toThrow("Import at most 5 Drive recordings")
+  })
+
+  it("requires at least one Drive recording id", () => {
+    expect(() => validateDriveImportFileIds([])).toThrow(
+      "Select at least one Drive recording"
+    )
+    expect(() => validateDriveImportFileIds("file")).toThrow(
+      "fileIds must be an array"
+    )
   })
 })

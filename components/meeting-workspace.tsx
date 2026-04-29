@@ -75,7 +75,10 @@ export function MeetingWorkspace({
       <MeetingHeader meeting={meeting} locale={locale} />
 
       <Tabs defaultValue="summary" className="min-w-0">
-        <TabsList className="mx-7 mt-5 grid min-h-10 w-[min(640px,calc(100%-3.5rem))] grid-cols-3 bg-transparent p-0 md:grid-cols-6">
+        <TabsList
+          variant="line"
+          className="mx-7 mt-5 grid min-h-10 w-[min(640px,calc(100%-3.5rem))] grid-cols-3 border-b border-slate-200 bg-transparent p-0 md:grid-cols-6"
+        >
           <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
           <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>
           <TabsTrigger value="ask">{dictionary.ask}</TabsTrigger>

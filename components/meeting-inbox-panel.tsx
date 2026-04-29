@@ -13,7 +13,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
-const quickFilters = ["all", "my meetings", "rooms"]
+const quickFilters = ["all", "my meetings", "rooms"] as const
 
 function sourceMeta(source: MeetingRecord["source"]) {
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "M" }
@@ -29,6 +29,20 @@ function durationLabel(meeting: MeetingRecord) {
   return minutes >= 60
     ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
     : `${minutes}m`
+}
+
+function tagClass(tag: string) {
+  if (/(urgent|follow|review|action|task)/i.test(tag)) {
+    return "bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+  }
+  if (/(ai|mixed|hebrew|english|portuguese|spanish|italian)/i.test(tag)) {
+    return "bg-[var(--tag-ai)] text-[var(--tag-ai-fg)]"
+  }
+  if (/(technical|product|mcp|gemini|gemma|realizeos)/i.test(tag)) {
+    return "bg-[var(--tag-technical)] text-[var(--tag-technical-fg)]"
+  }
+
+  return "bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
 }
 
 export function MeetingInboxPanel({
@@ -58,7 +72,7 @@ export function MeetingInboxPanel({
   })
 
   return (
-    <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r bg-white">
+    <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] border-r border-slate-200 bg-white">
       <div className="border-b px-4 py-4">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -70,11 +84,11 @@ export function MeetingInboxPanel({
         <div className="mb-3 flex items-center gap-2">
           <Button variant="ghost" size="sm" className="h-8 justify-start px-2">
             <FilterIcon data-icon="inline-start" className="size-4 text-slate-500" />
-            Filter
+            {dictionary.filter}
           </Button>
           <Button variant="ghost" size="sm" className="ms-auto h-8 px-2">
             <SlidersHorizontalIcon data-icon="inline-start" className="size-4 text-slate-500" />
-            Sort: Recent
+            {dictionary.sortRecent}
             <ChevronDownIcon aria-hidden="true" className="size-3" />
           </Button>
         </div>
@@ -93,7 +107,7 @@ export function MeetingInboxPanel({
               key={filter}
               type="button"
               onClick={() => onFilterChange(filter === "all" ? "all" : activeFilter)}
-              className="rounded-sm"
+              className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
             >
               <Badge
                 variant={filter === "all" ? "secondary" : "outline"}
@@ -103,7 +117,11 @@ export function MeetingInboxPanel({
                     : "h-7 justify-center rounded-sm px-3 capitalize"
                 }
               >
-                {filter}
+                {filter === "all"
+                  ? dictionary.all
+                  : filter === "my meetings"
+                    ? dictionary.myMeetings
+                    : dictionary.contexts}
                 {filter === "rooms" && (
                   <ChevronDownIcon aria-hidden="true" className="size-3" />
                 )}
@@ -113,7 +131,7 @@ export function MeetingInboxPanel({
         </div>
       </div>
 
-      <div className="min-h-0 overflow-y-auto p-3">
+      <div className="min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-3">
         <div className="grid gap-2">
           {meetings.map((meeting) => {
             const source = sourceMeta(meeting.source)
@@ -124,7 +142,7 @@ export function MeetingInboxPanel({
                 key={meeting.id}
                 type="button"
                 data-selected={selected}
-                className="grid min-h-[112px] gap-2 rounded-md border bg-white p-3 text-left transition hover:border-teal-300 hover:bg-cyan-50/30 data-[selected=true]:border-teal-400 data-[selected=true]:bg-cyan-50/60 rtl:text-right"
+                className="grid min-h-[108px] gap-2 rounded-md border border-slate-200 bg-white p-3 text-left shadow-[0_1px_0_rgba(15,23,42,0.02)] transition hover:border-teal-300 hover:bg-cyan-50/30 data-[selected=true]:border-teal-500 data-[selected=true]:bg-[var(--selected)] rtl:text-right"
                 onClick={() => onSelectMeeting(meeting.id)}
               >
                 <div className="flex items-start gap-3">
@@ -153,7 +171,7 @@ export function MeetingInboxPanel({
                         <Badge
                           key={tag}
                           variant="secondary"
-                          className="h-6 rounded-sm bg-slate-100 px-2 text-[11px] font-medium text-slate-700"
+                          className={`h-6 rounded-sm px-2 text-[11px] font-medium ${tagClass(tag)}`}
                         >
                           {tag}
                         </Badge>

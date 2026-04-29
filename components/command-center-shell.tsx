@@ -3,7 +3,9 @@
 import { type ChangeEvent, useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { SearchIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import { DriveRecordingPickerDrawer } from "@/components/drive-recording-picker-drawer"
 import { JobActivityCenter } from "@/components/job-activity-center"
 import { MainSidebar, type MainPanelKey } from "@/components/main-sidebar"
 import { MeetingInboxPanel } from "@/components/meeting-inbox-panel"
@@ -79,6 +81,7 @@ export function CommandCenterShell({
   const [exporting, setExporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [drivePickerOpen, setDrivePickerOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -199,6 +202,7 @@ export function CommandCenterShell({
     }
 
     setJobs((current) => [body.job, ...current])
+    toast.success("Upload queued for meeting intelligence")
     await refreshMeeting(targetMeeting.id)
     await refreshOperationalState()
   }
@@ -238,6 +242,7 @@ export function CommandCenterShell({
     }
 
     setAskAnswer(body.answer.answer)
+    toast.success("Meeting answer ready")
   }
 
   async function toggleActionItem(item: ActionItem) {
@@ -276,6 +281,7 @@ export function CommandCenterShell({
       }
 
       setJobs((current) => [body.job, ...current])
+      toast.success("RealizeOS export queued")
       await refreshMeeting(selectedMeeting.id)
       await refreshOperationalState()
     } finally {
@@ -288,8 +294,12 @@ export function CommandCenterShell({
     startTransition(() => {
       void (async () => {
         try {
-          const endpoint =
-            target === "all" ? "/api/google/sync/all" : `/api/google/sync/${target}`
+          if (target === "gmail") {
+            toast.info("Gmail context is prepared but deferred for this phase")
+            return
+          }
+
+          const endpoint = `/api/google/sync/${target}`
           const response = await fetch(endpoint, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -299,13 +309,12 @@ export function CommandCenterShell({
 
           if (!response.ok) {
             setAskAnswer(body.error ?? "Unable to sync Google Workspace")
+            toast.error(body.error ?? "Unable to sync Google Workspace")
             return
           }
 
-          setJobs((current) => [
-            ...("jobs" in body ? body.jobs : [body.job]).filter(Boolean),
-            ...current,
-          ])
+          setJobs((current) => (body.job ? [body.job, ...current] : current))
+          toast.success("Calendar sync queued")
           await refreshOperationalState()
           const meetingsResponse = await fetch("/api/meetings")
           if (meetingsResponse.ok) {
@@ -315,8 +324,18 @@ export function CommandCenterShell({
         } finally {
           setSyncing(false)
         }
-      })()
+      })().catch((error) => {
+        setSyncing(false)
+        toast.error(error instanceof Error ? error.message : "Unable to sync Google Workspace")
+      })
     })
+  }
+
+  function handleDriveImported(importedJobs: JobRecord[]) {
+    if (importedJobs.length) {
+      setJobs((current) => [...importedJobs, ...current])
+    }
+    void refreshOperationalState()
   }
 
   function retryJob(job: JobRecord) {
@@ -343,7 +362,7 @@ export function CommandCenterShell({
         <WorkspaceSyncPanel
           status={workspaceStatus}
           syncing={syncing}
-          onSyncAll={() => syncGoogle("all")}
+          onSyncAll={() => syncGoogle("calendar")}
         />
         <ProviderHealthPanel providers={providers} />
         <div className="lg:col-span-2">
@@ -399,7 +418,7 @@ export function CommandCenterShell({
         onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
         onOpenUpload={() => setUploadOpen(true)}
-        onSyncGoogle={() => syncGoogle("all")}
+        onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
       />
       <MeetingRightRail
@@ -432,6 +451,12 @@ export function CommandCenterShell({
             onFileChange={handleFileChange}
             onRecordingReady={handleRecordingReady}
             onSync={syncGoogle}
+            onFindDriveRecordings={() => setDrivePickerOpen(true)}
+          />
+          <DriveRecordingPickerDrawer
+            open={drivePickerOpen}
+            onOpenChange={setDrivePickerOpen}
+            onImported={handleDriveImported}
           />
           {activePanel === "meetings"
             ? defaultMeetingsView

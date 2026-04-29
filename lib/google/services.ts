@@ -36,6 +36,38 @@ type SyncStats = {
 
 type CalendarCursor = Record<string, string>
 
+export type DriveRecordingCandidate = {
+  fileId: string
+  name: string
+  mimeType?: string
+  sizeBytes?: number
+  createdTime?: string
+  modifiedTime?: string
+  webViewLink?: string
+  imported: boolean
+  importedMeetingId?: string
+  bestCalendarMatch?: {
+    calendarEventId: string
+    meetingId?: string
+    title: string
+    matchMethod: string
+    confidence: number
+  }
+}
+
+export type DriveRecordingListResult = {
+  recordings: DriveRecordingCandidate[]
+  nextCursor?: string
+}
+
+export type DriveRecordingImportResult = {
+  imported: number
+  skipped: number
+  matched: number
+  jobs: Awaited<ReturnType<typeof enqueueMeetSumJob>>[]
+  errors: string[]
+}
+
 function createId(prefix: string, stable: string) {
   return `${prefix}_${Buffer.from(stable).toString("base64url").slice(0, 40)}`
 }
@@ -207,6 +239,34 @@ function isLikelyMeetRecording(name: string, mimeType?: string | null) {
     /meet|recording|פגישה|הקלט|הקלטה/.test(normalized) &&
     (mimeType?.startsWith("video/") || mimeType?.startsWith("audio/"))
   )
+}
+
+function escapeDriveQueryValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+}
+
+function normalizeDriveFileIds(fileIds: string[]) {
+  return [...new Set(fileIds.map((fileId) => fileId.trim()).filter(Boolean))]
+}
+
+export function validateDriveImportFileIds(fileIds: unknown) {
+  if (!Array.isArray(fileIds)) {
+    throw new Error("fileIds must be an array")
+  }
+
+  const normalized = normalizeDriveFileIds(
+    fileIds.filter((fileId): fileId is string => typeof fileId === "string")
+  )
+
+  if (!normalized.length) {
+    throw new Error("Select at least one Drive recording")
+  }
+
+  if (normalized.length > 5) {
+    throw new Error("Import at most 5 Drive recordings at a time")
+  }
+
+  return normalized
 }
 
 function safeTempFilename(filename: string | undefined, fallback: string) {
@@ -441,6 +501,338 @@ async function findMatchingCalendarEvent(options: {
   }
 
   return best && best.confidence >= 0.35 ? best : undefined
+}
+
+async function getDriveImportStatus(options: {
+  identityId: string
+  googleFileId: string
+}) {
+  const pool = getDatabasePool()
+  const result = await pool.query(
+    `
+      select df.imported_at, mdf.meeting_id
+      from drive_files df
+      left join meeting_drive_files mdf on mdf.drive_file_id = df.id
+      where df.google_identity_id = $1 and df.google_file_id = $2
+      limit 1
+    `,
+    [options.identityId, options.googleFileId]
+  )
+  const row = result.rows[0] as
+    | { imported_at?: string | Date | null; meeting_id?: string | null }
+    | undefined
+
+  return {
+    imported: Boolean(row?.imported_at),
+    importedMeetingId: row?.meeting_id ?? undefined,
+  }
+}
+
+async function upsertDriveFileMetadata(options: {
+  identityId: string
+  googleFileId: string
+  name: string
+  mimeType?: string | null
+  webViewLink?: string | null
+  createdTime?: string | null
+  modifiedTime?: string | null
+  size?: string | number | null
+  calendarEventId?: string | null
+  raw: unknown
+}) {
+  const pool = getDatabasePool()
+  const proposedDriveFileId = createHashedId(
+    "gdrive",
+    `${options.identityId}:${options.googleFileId}`
+  )
+  const driveFileResult = await pool.query(
+    `
+      insert into drive_files (
+        id, google_identity_id, google_file_id, name, mime_type,
+        web_view_link, created_time, modified_time, size_bytes,
+        calendar_event_id, raw
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+      on conflict (google_identity_id, google_file_id)
+      do update set
+        name = excluded.name,
+        mime_type = excluded.mime_type,
+        web_view_link = excluded.web_view_link,
+        modified_time = excluded.modified_time,
+        size_bytes = excluded.size_bytes,
+        calendar_event_id = coalesce(excluded.calendar_event_id, drive_files.calendar_event_id),
+        raw = excluded.raw
+      returning id
+    `,
+    [
+      proposedDriveFileId,
+      options.identityId,
+      options.googleFileId,
+      options.name,
+      options.mimeType ?? null,
+      options.webViewLink ?? null,
+      options.createdTime ?? null,
+      options.modifiedTime ?? null,
+      options.size ? Number(options.size) : null,
+      options.calendarEventId ?? null,
+      JSON.stringify(options.raw),
+    ]
+  )
+
+  return (
+    (driveFileResult.rows[0] as { id?: string } | undefined)?.id ??
+    proposedDriveFileId
+  )
+}
+
+export async function listDriveRecordings(
+  subject: string,
+  options: {
+    limit?: number
+    cursor?: string
+    query?: string
+    includeImported?: boolean
+  } = {}
+): Promise<DriveRecordingListResult> {
+  const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
+  const drive = google.drive({ version: "v3", auth })
+  const identityId = await getIdentityId(subject)
+  const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 25), 50))
+  const queryParts = [
+    "trashed = false",
+    "(mimeType contains 'video/' or mimeType contains 'audio/')",
+  ]
+
+  if (options.query?.trim()) {
+    queryParts.push(`name contains '${escapeDriveQueryValue(options.query.trim())}'`)
+  }
+
+  const recordings: DriveRecordingCandidate[] = []
+  let nextCursor = options.cursor
+
+  for (let pagesScanned = 0; pagesScanned < 5 && recordings.length < limit; pagesScanned++) {
+    const response = await drive.files.list({
+      pageSize: 100,
+      pageToken: nextCursor,
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+      fields:
+        "nextPageToken,files(id,name,mimeType,webViewLink,createdTime,modifiedTime,size,videoMediaMetadata)",
+      q: queryParts.join(" and "),
+      orderBy: "modifiedTime desc",
+    })
+
+    nextCursor = response.data.nextPageToken ?? undefined
+
+    for (const file of response.data.files ?? []) {
+      if (recordings.length >= limit) break
+      if (!file.id || !file.name || !isLikelyMeetRecording(file.name, file.mimeType)) {
+        continue
+      }
+
+      const importStatus = await getDriveImportStatus({
+        identityId,
+        googleFileId: file.id,
+      })
+
+      if (importStatus.imported && options.includeImported !== true) {
+        continue
+      }
+
+      const match = await findMatchingCalendarEvent({
+        identityId,
+        fileName: file.name,
+        fileTime: safeDate(file.createdTime ?? file.modifiedTime),
+      })
+
+      recordings.push({
+        fileId: file.id,
+        name: file.name,
+        mimeType: file.mimeType ?? undefined,
+        sizeBytes: file.size ? Number(file.size) : undefined,
+        createdTime: file.createdTime ?? undefined,
+        modifiedTime: file.modifiedTime ?? undefined,
+        webViewLink: file.webViewLink ?? undefined,
+        imported: importStatus.imported,
+        importedMeetingId: importStatus.importedMeetingId,
+        bestCalendarMatch: match
+          ? {
+              calendarEventId: match.id,
+              meetingId: match.meeting_id ?? undefined,
+              title: match.title,
+              matchMethod: match.matchMethod,
+              confidence: match.confidence,
+            }
+          : undefined,
+      })
+    }
+
+    if (!nextCursor) break
+  }
+
+  return {
+    recordings,
+    nextCursor,
+  }
+}
+
+export async function importDriveRecordings(
+  subject: string,
+  fileIds: string[]
+): Promise<DriveRecordingImportResult> {
+  const selectedFileIds = validateDriveImportFileIds(fileIds)
+  const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
+  const drive = google.drive({ version: "v3", auth })
+  const pool = getDatabasePool()
+  const identityId = await getIdentityId(subject)
+  const maxImportBytes = Number(
+    process.env.MEETSUM_DRIVE_MAX_IMPORT_BYTES ?? 2_000_000_000
+  )
+  const result: DriveRecordingImportResult = {
+    imported: 0,
+    skipped: 0,
+    matched: 0,
+    jobs: [],
+    errors: [],
+  }
+
+  for (const fileId of selectedFileIds) {
+    try {
+      const response = await drive.files.get({
+        fileId,
+        supportsAllDrives: true,
+        fields:
+          "id,name,mimeType,webViewLink,createdTime,modifiedTime,size,videoMediaMetadata",
+      })
+      const file = response.data
+
+      if (!file.id || !file.name || !isLikelyMeetRecording(file.name, file.mimeType)) {
+        result.skipped += 1
+        result.errors.push(`${fileId}: not a likely meeting recording`)
+        continue
+      }
+
+      const fileSizeBytes = file.size ? Number(file.size) : 0
+      if (fileSizeBytes > maxImportBytes) {
+        result.skipped += 1
+        result.errors.push(`${file.name}: exceeds import size limit`)
+        continue
+      }
+
+      const match = await findMatchingCalendarEvent({
+        identityId,
+        fileName: file.name,
+        fileTime: safeDate(file.createdTime ?? file.modifiedTime),
+      })
+      const driveFileId = await upsertDriveFileMetadata({
+        identityId,
+        googleFileId: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        webViewLink: file.webViewLink,
+        createdTime: file.createdTime,
+        modifiedTime: file.modifiedTime,
+        size: file.size,
+        calendarEventId: match?.id,
+        raw: file,
+      })
+      const existing = await pool.query(
+        `select imported_at from drive_files where id = $1 and imported_at is not null`,
+        [driveFileId]
+      )
+
+      if (existing.rows.length > 0) {
+        result.skipped += 1
+        continue
+      }
+
+      const meeting =
+        match?.meeting_id
+          ? await meetingRepository.getMeeting(match.meeting_id)
+          : await meetingRepository.createMeeting({
+              title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),
+              source: "google_meet",
+              language: "mixed",
+              startedAt: file.createdTime ?? new Date().toISOString(),
+              participants: [],
+            })
+
+      if (!meeting) {
+        throw new Error(`Matched meeting not found for Drive file ${file.id}`)
+      }
+
+      if (match?.id) {
+        await pool.query(
+          `update meetings set calendar_event_id = $2 where id = $1 and calendar_event_id is null`,
+          [meeting.id, match.id]
+        )
+      }
+
+      const media = await prepareDriveMediaForStorage({
+        drive,
+        fileId: file.id,
+        fileName: file.name,
+        mimeType: file.mimeType,
+      })
+      const stored = await storeMeetingObject({
+        meetingId: meeting.id,
+        filename: media.filename,
+        contentType: media.contentType,
+        bytes: media.bytes,
+      })
+      const checksum = createHash("sha256").update(media.bytes).digest("hex")
+
+      await meetingRepository.createMediaAsset({
+        meetingId: meeting.id,
+        storageKey: stored.key,
+        filename: media.filename,
+        contentType: stored.contentType,
+        sizeBytes: stored.sizeBytes,
+        retention: media.retention,
+      })
+      await pool.query(
+        `
+          update media_assets
+          set source = 'google_drive',
+              source_file_id = $2,
+              checksum_sha256 = $4
+          where meeting_id = $1 and storage_key = $3
+        `,
+        [meeting.id, file.id, stored.key, checksum]
+      )
+      await pool.query(`update drive_files set imported_at = now() where id = $1`, [
+        driveFileId,
+      ])
+      await pool.query(
+        `
+          insert into meeting_drive_files (meeting_id, drive_file_id, match_method, confidence)
+          values ($1, $2, $3, $4)
+          on conflict do nothing
+        `,
+        [
+          meeting.id,
+          driveFileId,
+          match?.matchMethod ?? "drive_import",
+          match?.confidence ?? 0.7,
+        ]
+      )
+      const job = await enqueueMeetSumJob("media.ingest", {
+        meetingId: meeting.id,
+        storageKey: stored.key,
+        bucket: stored.bucket,
+        source: "google_drive",
+      })
+
+      result.jobs.push(job)
+      result.imported += 1
+      if (match) result.matched += 1
+    } catch (error) {
+      result.skipped += 1
+      result.errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return result
 }
 
 export async function pollCalendar(subject: string): Promise<SyncStats> {

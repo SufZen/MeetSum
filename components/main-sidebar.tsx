@@ -49,7 +49,7 @@ export function MainSidebar({
     dictionary.navWorkspace,
     dictionary.navAutomations,
     dictionary.navStorage,
-    "Settings",
+    dictionary.navSettings,
   ]
   const rooms = [
     ["Real Estate Acquisitions", "bg-emerald-400"],
@@ -60,15 +60,15 @@ export function MainSidebar({
   ] as const
 
   return (
-    <aside className="flex min-h-0 flex-col bg-[#063244] p-2 text-white lg:sticky lg:top-0 lg:min-h-svh">
-      <div className="flex h-16 items-center gap-3 px-3">
+    <aside className="flex min-h-0 flex-col bg-[#052d3d] p-3 text-white lg:sticky lg:top-0 lg:min-h-svh lg:p-2">
+      <div className="flex h-12 items-center justify-center gap-3 px-3 lg:h-16 lg:justify-start">
         <div className="grid size-8 place-items-center text-teal-300">
           <AudioWaveformIcon aria-hidden="true" className="size-7" />
         </div>
         <div className="text-xl font-semibold tracking-tight">MeetSum</div>
       </div>
 
-      <nav className="mt-5 grid gap-2">
+      <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:mt-5 lg:grid lg:overflow-visible lg:pb-0">
         {navItems.map((label, index) => {
           const Icon = navIcons[index]
           const panel = panelKeys[index]
@@ -80,8 +80,8 @@ export function MainSidebar({
               variant="ghost"
               className={
                 active
-                  ? "h-11 justify-start rounded-md bg-[#087d8a] text-white hover:bg-[#087d8a] hover:text-white"
-                  : "h-11 justify-start rounded-md text-white/88 hover:bg-white/10 hover:text-white"
+                  ? "h-10 min-w-fit justify-start rounded-md bg-[#087d8a] px-3 text-white hover:bg-[#087d8a] hover:text-white lg:h-11 lg:min-w-0"
+                  : "h-10 min-w-fit justify-start rounded-md px-3 text-white/90 hover:bg-white/10 hover:text-white lg:h-11 lg:min-w-0"
               }
               onClick={() => onPanelChange(panel)}
             >

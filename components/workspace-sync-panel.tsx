@@ -84,7 +84,7 @@ export function WorkspaceSyncPanel({
         onClick={onSyncAll}
       >
         <CalendarSyncIcon data-icon="inline-start" />
-        {syncing ? "Sync queued..." : "Sync Calendar + Drive"}
+        {syncing ? "Sync queued..." : "Sync Calendar"}
       </Button>
       <div className="grid gap-2">
         {(status?.sync.length ? status.sync : []).map((item) => (

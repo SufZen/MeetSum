@@ -18,6 +18,20 @@ function computeConfidence(meeting: MeetingRecord | null) {
   return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
+function tagClass(tag: string) {
+  if (/(urgent|follow|review|action|task)/i.test(tag)) {
+    return "rounded-sm bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+  }
+  if (/(ai|mixed|hebrew|english|portuguese|spanish|italian)/i.test(tag)) {
+    return "rounded-sm bg-[var(--tag-ai)] text-[var(--tag-ai-fg)]"
+  }
+  if (/(technical|product|mcp|gemini|gemma|realizeos)/i.test(tag)) {
+    return "rounded-sm bg-[var(--tag-technical)] text-[var(--tag-technical-fg)]"
+  }
+
+  return "rounded-sm bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+}
+
 export function MeetingRightRail({
   meeting,
   jobs,
@@ -36,7 +50,7 @@ export function MeetingRightRail({
     : ["acquisition", "finance", "review", "real-estate", "english", "mixed"]
 
   return (
-    <aside className="grid content-start gap-2 bg-white p-3 lg:border-l">
+    <aside className="grid content-start gap-3 bg-[var(--rail)] p-3 lg:border-l">
       <PipelineTimeline meeting={meeting} jobs={jobs} />
 
       <section className="rounded-md border bg-white p-4">
@@ -71,19 +85,11 @@ export function MeetingRightRail({
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {tags.slice(0, 8).map((tag, index) => (
+          {tags.slice(0, 8).map((tag) => (
             <Badge
               key={tag}
               variant="secondary"
-              className={
-                index % 4 === 0
-                  ? "rounded-sm bg-cyan-50 text-teal-700"
-                  : index % 4 === 1
-                    ? "rounded-sm bg-blue-50 text-blue-700"
-                    : index % 4 === 2
-                      ? "rounded-sm bg-orange-50 text-orange-700"
-                      : "rounded-sm bg-violet-50 text-violet-700"
-              }
+              className={tagClass(tag)}
             >
               {tag}
             </Badge>
