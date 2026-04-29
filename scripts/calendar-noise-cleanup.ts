@@ -15,6 +15,7 @@ const candidatesSql = `
   from meetings m
   left join calendar_events ce on ce.id = m.calendar_event_id
   where m.source = 'google_meet'
+    and m.calendar_event_id is not null
     and m.status in ('scheduled', 'failed')
     and coalesce(jsonb_array_length(m.participants), 0) = 0
     and coalesce(m.google_meet_link, ce.meet_link, '') = ''
@@ -22,6 +23,8 @@ const candidatesSql = `
     and not exists (select 1 from transcript_segments ts where ts.meeting_id = m.id)
     and not exists (select 1 from summaries s where s.meeting_id = m.id)
     and not exists (select 1 from action_items ai where ai.meeting_id = m.id)
+    and not exists (select 1 from meeting_drive_files mdf where mdf.meeting_id = m.id)
+    and not exists (select 1 from jobs j where j.meeting_id = m.id)
   order by m.started_at desc
   limit $1
 `
