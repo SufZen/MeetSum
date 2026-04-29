@@ -1,6 +1,5 @@
 import {
   CalendarDaysIcon,
-  ChevronDownIcon,
   FilterIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -14,6 +13,16 @@ import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
 const quickFilters = ["all", "usable", "upcoming"] as const
+
+export type MeetingSortMode = "smart" | "recent" | "oldest" | "title" | "status"
+
+const sortLabels: Record<MeetingSortMode, string> = {
+  smart: "Smart",
+  recent: "Recent",
+  oldest: "Oldest",
+  title: "Title",
+  status: "Status",
+}
 
 function sourceMeta(source: MeetingRecord["source"]) {
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "M" }
@@ -52,8 +61,10 @@ export function MeetingInboxPanel({
   selectedMeetingId,
   query,
   activeFilter,
+  sortMode,
   onQueryChange,
   onFilterChange,
+  onSortChange,
   onSelectMeeting,
 }: {
   dictionary: Dictionary
@@ -62,8 +73,10 @@ export function MeetingInboxPanel({
   selectedMeetingId?: string
   query: string
   activeFilter: string
+  sortMode: MeetingSortMode
   onQueryChange: (value: string) => void
   onFilterChange: (value: string) => void
+  onSortChange: (value: MeetingSortMode) => void
   onSelectMeeting: (meetingId: string) => void
 }) {
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
@@ -86,11 +99,22 @@ export function MeetingInboxPanel({
             <FilterIcon data-icon="inline-start" className="size-4 text-slate-500" />
             {dictionary.filter}
           </Button>
-          <Button variant="ghost" size="sm" className="ms-auto h-8 px-2">
-            <SlidersHorizontalIcon data-icon="inline-start" className="size-4 text-slate-500" />
-            {dictionary.sortRecent}
-            <ChevronDownIcon aria-hidden="true" className="size-3" />
-          </Button>
+          <label className="ms-auto flex h-8 items-center gap-1 rounded-md px-2 text-sm text-slate-700">
+              <SlidersHorizontalIcon data-icon="inline-start" className="size-4 text-slate-500" />
+              <span className="sr-only">Sort meetings</span>
+              <select
+                value={sortMode}
+                onChange={(event) => onSortChange(event.target.value as MeetingSortMode)}
+                className="h-8 rounded-sm border border-transparent bg-transparent px-1 text-sm font-medium outline-none hover:border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
+                aria-label="Sort meetings"
+              >
+              {(Object.keys(sortLabels) as MeetingSortMode[]).map((mode) => (
+                <option key={mode} value={mode}>
+                  {sortLabels[mode]}
+                </option>
+              ))}
+              </select>
+          </label>
         </div>
         <div className="mb-3 flex h-10 items-center gap-2 rounded-md border bg-white px-3">
           <SearchIcon aria-hidden="true" className="size-4 shrink-0 text-slate-400" />

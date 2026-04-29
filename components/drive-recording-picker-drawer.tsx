@@ -73,6 +73,8 @@ export function DriveRecordingPickerDrawer({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState("")
   const [error, setError] = useState("")
+  const [importing, setImporting] = useState(false)
+  const [lastImport, setLastImport] = useState<DriveImportResult | null>(null)
   const [loading, startTransition] = useTransition()
   const selectedCount = selected.size
 
@@ -132,8 +134,9 @@ export function DriveRecordingPickerDrawer({
       return
     }
 
-    startTransition(() => {
-      void (async () => {
+    setImporting(true)
+    void (async () => {
+      try {
         const response = await fetch("/api/google/drive/import", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -146,24 +149,35 @@ export function DriveRecordingPickerDrawer({
           return
         }
 
-        onImported({
+        const importResult: DriveImportResult = {
           imported: body.imported ?? 0,
           skipped: body.skipped ?? 0,
           matched: body.matched ?? 0,
           jobs: body.jobs ?? [],
           errors: body.errors ?? [],
           files: body.files ?? [],
-        })
+        } satisfies DriveImportResult
+
+        setLastImport(importResult)
+        onImported(importResult)
         setSelected(new Set())
-        toast.success(`Processing ${body.imported ?? 0} Drive recording(s)`)
-        if ((body.imported ?? 0) > 0 || (body.files ?? []).some((file: DriveImportFileResult) => file.meetingId)) {
-          onOpenChange(false)
+
+        const failed = importResult.files.filter((file) => file.status === "failed")
+        if (importResult.imported > 0) {
+          toast.success(`Queued ${importResult.imported} Drive recording(s)`)
+        } else if (failed.length) {
+          toast.error(failed[0]?.error ?? "Drive import failed")
+        } else {
+          toast.info("No new recordings were imported")
         }
+
         loadRecordings()
-      })().catch((caught) =>
+      } catch (caught) {
         toast.error(caught instanceof Error ? caught.message : "Drive import failed")
-      )
-    })
+      } finally {
+        setImporting(false)
+      }
+    })()
   }
 
   return (
@@ -198,7 +212,34 @@ export function DriveRecordingPickerDrawer({
             </div>
           )}
 
-          {!loading && !error && recordings.length === 0 && (
+          {lastImport && (
+            <div className="grid gap-2 rounded-md border border-teal-200 bg-cyan-50 p-3 text-sm text-teal-950 dark:border-teal-900/70 dark:bg-teal-950/35 dark:text-teal-50">
+              <div className="font-semibold">
+                Import result: {lastImport.imported} queued, {lastImport.skipped} skipped
+              </div>
+              <div className="grid gap-1 text-xs">
+                {lastImport.files.map((file) => (
+                  <div key={`${file.fileId}-${file.jobId ?? file.status}`} className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">{file.name ?? file.fileId}</span>
+                    <span className="rounded-sm bg-white/80 px-2 py-0.5 font-medium text-teal-900 dark:bg-slate-900/70 dark:text-teal-100">
+                      {file.status}
+                      {file.jobId ? ` · ${file.jobId.slice(0, 8)}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(loading || importing) && (
+            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-teal-950 dark:border-cyan-900/70 dark:bg-cyan-950/30 dark:text-cyan-50">
+              {importing
+                ? "Importing selected recording(s): downloading from Drive, storing in MinIO, and queueing processing..."
+                : "Searching Drive recordings..."}
+            </div>
+          )}
+
+          {!loading && !importing && !error && recordings.length === 0 && (
             <div className="grid min-h-40 place-items-center rounded-md border border-dashed bg-slate-50 p-6 text-center text-sm text-slate-600">
               <div>
                 <FileAudioIcon aria-hidden="true" className="mx-auto mb-2 size-7 text-teal-700" />
@@ -213,7 +254,7 @@ export function DriveRecordingPickerDrawer({
                 key={recording.fileId}
                 role="button"
                 tabIndex={0}
-                className="grid gap-2 rounded-md border bg-white p-3 text-left transition hover:border-teal-300 hover:bg-cyan-50/30 data-[selected=true]:border-teal-500 data-[selected=true]:bg-cyan-50 rtl:text-right"
+                className="grid gap-2 rounded-md border bg-white p-3 text-left transition hover:border-teal-300 hover:bg-cyan-50/30 data-[selected=true]:border-teal-500 data-[selected=true]:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-70 rtl:text-right"
                 data-selected={selected.has(recording.fileId)}
                 onClick={() => toggle(recording.fileId)}
                 onKeyDown={(event) => {
@@ -278,9 +319,11 @@ export function DriveRecordingPickerDrawer({
         </div>
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-white p-4">
-          <div className="text-sm text-slate-600">{selectedCount}/5 selected</div>
-          <Button className="h-10" disabled={loading || !selectedCount} onClick={importSelected}>
-            Import selected to processing
+          <div className="text-sm text-slate-600">
+            {importing ? "Import in progress..." : `${selectedCount}/5 selected`}
+          </div>
+          <Button className="h-10" disabled={loading || importing || !selectedCount} onClick={importSelected}>
+            {importing ? "Importing and queueing..." : "Import selected to processing"}
           </Button>
         </div>
       </SheetContent>

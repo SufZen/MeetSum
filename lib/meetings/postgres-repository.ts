@@ -388,10 +388,28 @@ export function createPostgresMeetingRepository(
       const limit = normalizeLimit(options.limit)
       const result = await client.query(
         `
-        select id, title, source, language, status, retention, started_at,
-               participants, language_metadata
-        from meetings
-        order by started_at desc
+        select m.id, m.title, m.source, m.language, m.status, m.retention, m.started_at,
+               m.participants, m.language_metadata
+        from meetings m
+        left join lateral (
+          select max(j.created_at) as last_job_at
+          from jobs j
+          where j.meeting_id = m.id
+        ) recent_job on true
+        left join lateral (
+          select max(df.imported_at) as imported_at
+          from meeting_drive_files mdf
+          join drive_files df on df.id = mdf.drive_file_id
+          where mdf.meeting_id = m.id
+        ) recent_import on true
+        order by
+          case
+            when m.status in ('completed', 'indexing', 'summarizing', 'transcribing', 'media_uploaded', 'failed') then 0
+            when m.status = 'scheduled' and m.started_at > now() then 2
+            else 1
+          end asc,
+          coalesce(recent_job.last_job_at, recent_import.imported_at, m.created_at, m.started_at) desc,
+          m.started_at desc
         limit $1
       `,
         [limit]

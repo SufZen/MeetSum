@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai"
 import { execFile } from "node:child_process"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -197,6 +197,39 @@ async function extractAudioForGemini(inputPath: string, outputPath: string) {
       maxBuffer: 1024 * 1024 * 8,
       timeout: Number(process.env.MEETSUM_FFMPEG_TIMEOUT_MS ?? 900_000),
     }
+  )
+}
+
+async function compressMediaForInlineGemini(inputPath: string, outputPath: string) {
+  await execFileAsync(
+    "ffmpeg",
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-b:a",
+      process.env.MEETSUM_GEMINI_COMPRESSED_AUDIO_BITRATE ?? "32k",
+      outputPath,
+    ],
+    {
+      maxBuffer: 1024 * 1024 * 8,
+      timeout: Number(process.env.MEETSUM_FFMPEG_TIMEOUT_MS ?? 900_000),
+    }
+  )
+}
+
+function shouldFallbackToCompressedInline(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+
+  return (
+    message.includes('"code":404') ||
+    message.includes("fetchUploadUrl") ||
+    message.toLowerCase().includes("file upload")
   )
 }
 
@@ -437,23 +470,47 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
           uploadMimeType = "audio/mp4"
         }
 
-        const uploaded = await ai.files.upload({
-          file: uploadPath,
-          config: {
-            mimeType: uploadMimeType,
-            displayName: asset.filename ?? `${meeting.id}-media`,
-            httpOptions: getGeminiHttpOptions(),
-          },
-        })
-        await waitForGeminiFile(ai, uploaded.name)
-        if (!uploaded.uri) {
-          throw new Error("Gemini file upload did not return a file URI")
-        }
-        mediaPart = {
-          fileData: {
-            mimeType: uploadMimeType,
-            fileUri: uploaded.uri,
-          },
+        const compressedInlinePath = path.join(tempDir, `${meeting.id}.inline.m4a`)
+
+        try {
+          const uploaded = await ai.files.upload({
+            file: uploadPath,
+            config: {
+              mimeType: uploadMimeType,
+              displayName: asset.filename ?? `${meeting.id}-media`,
+              httpOptions: getGeminiHttpOptions(),
+            },
+          })
+          await waitForGeminiFile(ai, uploaded.name)
+          if (!uploaded.uri) {
+            throw new Error("Gemini file upload did not return a file URI")
+          }
+          mediaPart = {
+            fileData: {
+              mimeType: uploadMimeType,
+              fileUri: uploaded.uri,
+            },
+          }
+        } catch (error) {
+          if (!shouldFallbackToCompressedInline(error)) {
+            throw error
+          }
+
+          await compressMediaForInlineGemini(uploadPath, compressedInlinePath)
+          const compressedSize = (await stat(compressedInlinePath)).size
+
+          if (compressedSize > inlineLimit) {
+            throw error
+          }
+
+          const bytes = await readFile(compressedInlinePath)
+
+          mediaPart = {
+            inlineData: {
+              mimeType: "audio/mp4",
+              data: bytes.toString("base64"),
+            },
+          }
         }
       }
 

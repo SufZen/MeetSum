@@ -5,9 +5,11 @@ import {
   BellIcon,
   ChevronDownIcon,
   FolderSearchIcon,
+  MoonIcon,
   RefreshCwIcon,
   SearchIcon,
   SparklesIcon,
+  SunIcon,
 } from "lucide-react"
 
 import { LanguageSwitcher } from "@/components/language-switcher"
@@ -38,6 +40,8 @@ export function TopCommandBar({
   onRecordingReady,
   onSync,
   onFindDriveRecordings,
+  darkMode,
+  onToggleDarkMode,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
@@ -51,6 +55,8 @@ export function TopCommandBar({
   onRecordingReady: (file: File) => void
   onSync: (target: SyncTarget) => void
   onFindDriveRecordings: () => void
+  darkMode: boolean
+  onToggleDarkMode: () => void
 }) {
   return (
     <header className="sticky top-0 z-30 flex min-h-16 flex-col gap-3 border-b border-slate-200 bg-white/96 px-4 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
@@ -121,6 +127,19 @@ export function TopCommandBar({
           <span className="sr-only">AI status</span>
         </Button>
         <LanguageSwitcher locale={locale} />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="rounded-full"
+          onClick={onToggleDarkMode}
+        >
+          {darkMode ? (
+            <SunIcon aria-hidden="true" className="size-5" />
+          ) : (
+            <MoonIcon aria-hidden="true" className="size-5" />
+          )}
+          <span className="sr-only">Toggle dark mode</span>
+        </Button>
         <Button variant="ghost" size="icon" className="relative rounded-full">
           <BellIcon aria-hidden="true" className="size-5" />
           <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-orange-500 text-[10px] font-semibold text-white">

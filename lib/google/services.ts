@@ -533,10 +533,10 @@ async function getDriveImportStatus(options: {
       left join meeting_drive_files mdf on mdf.drive_file_id = df.id
       left join jobs j on j.meeting_id = mdf.meeting_id
         and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
-        and j.status in ('queued', 'active', 'failed')
+        and j.status in ('completed', 'queued', 'active', 'failed')
       where df.google_identity_id = $1 and df.google_file_id = $2
       order by
-        case j.status when 'active' then 0 when 'queued' then 1 when 'failed' then 2 else 3 end,
+        case j.status when 'completed' then 0 when 'active' then 1 when 'queued' then 2 when 'failed' then 3 else 4 end,
         j.created_at desc nulls last
       limit 1
     `,
@@ -551,7 +551,9 @@ async function getDriveImportStatus(options: {
       }
     | undefined
   const status: DriveRecordingCandidate["status"] =
-    row?.job_status === "failed"
+    row?.job_status === "completed"
+      ? "imported"
+      : row?.job_status === "failed"
       ? "failed"
       : row?.job_status === "queued" || row?.job_status === "active"
         ? "processing"
@@ -675,7 +677,11 @@ export async function listDriveRecordings(
         googleFileId: file.id,
       })
 
-      if (importStatus.imported && options.includeImported !== true) {
+      if (
+        importStatus.imported &&
+        importStatus.status === "imported" &&
+        options.includeImported !== true
+      ) {
         continue
       }
 
@@ -788,130 +794,159 @@ export async function importDriveRecordings(
         calendarEventId: match?.id,
         raw: file,
       })
-      const existing = await pool.query(
-        `
-          select df.imported_at, mdf.meeting_id, j.id as job_id, j.status as job_status
-          from drive_files df
-          left join meeting_drive_files mdf on mdf.drive_file_id = df.id
-          left join jobs j on j.meeting_id = mdf.meeting_id
-            and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
-            and j.status in ('queued', 'active')
-          where df.id = $1 and (df.imported_at is not null or j.id is not null)
-          order by j.created_at desc nulls last
-          limit 1
-        `,
-        [driveFileId]
-      )
-      const existingRow = existing.rows[0] as
-        | {
-            imported_at?: string | Date | null
-            meeting_id?: string | null
-            job_id?: string | null
-            job_status?: string | null
-          }
-        | undefined
+      const lockClient = await pool.connect()
 
-      if (existingRow) {
-        result.skipped += 1
+      try {
+        await lockClient.query(`select pg_advisory_lock(hashtext($1))`, [
+          driveFileId,
+        ])
+
+        const existing = await lockClient.query(
+          `
+            select
+              df.imported_at,
+              mdf.meeting_id,
+              j.id as job_id,
+              j.status as job_status,
+              j.error as job_error
+            from drive_files df
+            left join meeting_drive_files mdf on mdf.drive_file_id = df.id
+            left join jobs j on j.meeting_id = mdf.meeting_id
+              and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
+              and j.status in ('completed', 'queued', 'active', 'failed')
+            where df.id = $1 and (df.imported_at is not null or j.id is not null)
+            order by
+              case j.status when 'completed' then 0 when 'active' then 1 when 'queued' then 2 when 'failed' then 3 else 4 end,
+              j.created_at desc nulls last
+            limit 1
+          `,
+          [driveFileId]
+        )
+        const existingRow = existing.rows[0] as
+          | {
+              imported_at?: string | Date | null
+              meeting_id?: string | null
+              job_id?: string | null
+              job_status?: string | null
+              job_error?: string | null
+            }
+          | undefined
+
+        if (existingRow) {
+          result.skipped += 1
+          result.files.push({
+            fileId: file.id,
+            name: file.name,
+            status:
+              existingRow.job_status === "completed"
+                ? "already_imported"
+                : existingRow.job_status === "failed"
+                ? "failed"
+                : existingRow.job_id
+                  ? "queued"
+                  : "already_imported",
+            meetingId: existingRow.meeting_id ?? undefined,
+            jobId: existingRow.job_id ?? undefined,
+            error: existingRow.job_error ?? undefined,
+          })
+          continue
+        }
+
+        const meeting =
+          match?.meeting_id
+            ? await meetingRepository.getMeeting(match.meeting_id)
+            : await meetingRepository.createMeeting({
+                title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),
+                source: "google_meet",
+                language: "mixed",
+                startedAt: file.createdTime ?? new Date().toISOString(),
+                participants: [],
+              })
+
+        if (!meeting) {
+          throw new Error(`Matched meeting not found for Drive file ${file.id}`)
+        }
+
+        if (match?.id) {
+          await lockClient.query(
+            `update meetings set calendar_event_id = $2 where id = $1 and calendar_event_id is null`,
+            [meeting.id, match.id]
+          )
+        }
+
+        const media = await prepareDriveMediaForStorage({
+          drive,
+          fileId: file.id,
+          fileName: file.name,
+          mimeType: file.mimeType,
+        })
+        const stored = await storeMeetingObject({
+          meetingId: meeting.id,
+          filename: media.filename,
+          contentType: media.contentType,
+          bytes: media.bytes,
+        })
+        const checksum = createHash("sha256").update(media.bytes).digest("hex")
+
+        await meetingRepository.createMediaAsset({
+          meetingId: meeting.id,
+          storageKey: stored.key,
+          filename: media.filename,
+          contentType: stored.contentType,
+          sizeBytes: stored.sizeBytes,
+          retention: media.retention,
+        })
+        await lockClient.query(
+          `
+            update media_assets
+            set source = 'google_drive',
+                source_file_id = $2,
+                checksum_sha256 = $4
+            where meeting_id = $1 and storage_key = $3
+          `,
+          [meeting.id, file.id, stored.key, checksum]
+        )
+        await lockClient.query(`update drive_files set imported_at = now() where id = $1`, [
+          driveFileId,
+        ])
+        await lockClient.query(
+          `
+            insert into meeting_drive_files (meeting_id, drive_file_id, match_method, confidence)
+            values ($1, $2, $3, $4)
+            on conflict do nothing
+          `,
+          [
+            meeting.id,
+            driveFileId,
+            match?.matchMethod ?? "drive_import",
+            match?.confidence ?? 0.7,
+          ]
+        )
+        const job = await enqueueMeetSumJob("media.ingest", {
+          meetingId: meeting.id,
+          storageKey: stored.key,
+          bucket: stored.bucket,
+          source: "google_drive",
+          sourceFileId: file.id,
+          stage: "audio.transcribe",
+        })
+
+        result.jobs.push(job)
+        result.imported += 1
+        if (match) result.matched += 1
         result.files.push({
           fileId: file.id,
           name: file.name,
-          status: existingRow.job_id ? "queued" : "already_imported",
-          meetingId: existingRow.meeting_id ?? undefined,
-          jobId: existingRow.job_id ?? undefined,
+          status: "imported",
+          meetingId: meeting.id,
+          jobId: job.id,
         })
-        continue
+      } finally {
+        await lockClient
+          .query(`select pg_advisory_unlock(hashtext($1))`, [driveFileId])
+          .catch(() => undefined)
+        lockClient.release()
       }
-
-      const meeting =
-        match?.meeting_id
-          ? await meetingRepository.getMeeting(match.meeting_id)
-          : await meetingRepository.createMeeting({
-              title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),
-              source: "google_meet",
-              language: "mixed",
-              startedAt: file.createdTime ?? new Date().toISOString(),
-              participants: [],
-            })
-
-      if (!meeting) {
-        throw new Error(`Matched meeting not found for Drive file ${file.id}`)
-      }
-
-      if (match?.id) {
-        await pool.query(
-          `update meetings set calendar_event_id = $2 where id = $1 and calendar_event_id is null`,
-          [meeting.id, match.id]
-        )
-      }
-
-      const media = await prepareDriveMediaForStorage({
-        drive,
-        fileId: file.id,
-        fileName: file.name,
-        mimeType: file.mimeType,
-      })
-      const stored = await storeMeetingObject({
-        meetingId: meeting.id,
-        filename: media.filename,
-        contentType: media.contentType,
-        bytes: media.bytes,
-      })
-      const checksum = createHash("sha256").update(media.bytes).digest("hex")
-
-      await meetingRepository.createMediaAsset({
-        meetingId: meeting.id,
-        storageKey: stored.key,
-        filename: media.filename,
-        contentType: stored.contentType,
-        sizeBytes: stored.sizeBytes,
-        retention: media.retention,
-      })
-      await pool.query(
-        `
-          update media_assets
-          set source = 'google_drive',
-              source_file_id = $2,
-              checksum_sha256 = $4
-          where meeting_id = $1 and storage_key = $3
-        `,
-        [meeting.id, file.id, stored.key, checksum]
-      )
-      await pool.query(`update drive_files set imported_at = now() where id = $1`, [
-        driveFileId,
-      ])
-      await pool.query(
-        `
-          insert into meeting_drive_files (meeting_id, drive_file_id, match_method, confidence)
-          values ($1, $2, $3, $4)
-          on conflict do nothing
-        `,
-        [
-          meeting.id,
-          driveFileId,
-          match?.matchMethod ?? "drive_import",
-          match?.confidence ?? 0.7,
-        ]
-      )
-      const job = await enqueueMeetSumJob("media.ingest", {
-        meetingId: meeting.id,
-        storageKey: stored.key,
-        bucket: stored.bucket,
-        source: "google_drive",
-        sourceFileId: file.id,
-        stage: "audio.transcribe",
-      })
-
-      result.jobs.push(job)
-      result.imported += 1
-      if (match) result.matched += 1
-      result.files.push({
-        fileId: file.id,
-        name: file.name,
-        status: "imported",
-        meetingId: meeting.id,
-        jobId: job.id,
-      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       result.skipped += 1

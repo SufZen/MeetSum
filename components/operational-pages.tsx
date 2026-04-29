@@ -36,14 +36,14 @@ function PageFrame({
   return (
     <div className="min-h-[calc(100svh-4rem)] bg-[var(--surface-subtle)] p-4 lg:p-6">
       <div className="mx-auto grid max-w-7xl gap-5">
-        <header className="rounded-md border bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
-          <div className="text-xs font-semibold uppercase tracking-wide text-teal-700">
+        <header className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
             {eyebrow}
           </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
             {title}
           </h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
             {description}
           </p>
         </header>
@@ -67,19 +67,19 @@ function OpsCard({
   children?: ReactNode
 }) {
   return (
-    <section className="rounded-md border bg-white p-4">
+    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="grid size-9 place-items-center rounded-md bg-cyan-50 text-teal-800">
+          <div className="grid size-9 place-items-center rounded-md bg-[var(--selected)] text-[var(--primary)]">
             <Icon aria-hidden="true" className="size-4" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+            <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
           </div>
         </div>
         {status && (
-          <Badge className="rounded-sm bg-cyan-50 text-teal-800">{status}</Badge>
+          <Badge className="rounded-sm bg-[var(--selected)] text-[var(--primary)]">{status}</Badge>
         )}
       </div>
       {children && <div className="mt-4">{children}</div>}
@@ -132,8 +132,8 @@ export function OperationalPage({
               description="V1 uses native Google Meet recordings, transcripts, and smart notes. MeetSum imports artifacts after the meeting and does not join as a bot yet."
               status="Google artifacts first"
             >
-              <div className="grid gap-2 text-sm text-slate-700">
-                <div className="flex items-center justify-between rounded-md border bg-slate-50 p-2">
+              <div className="grid gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center justify-between rounded-md border bg-[var(--surface-subtle)] p-2">
                   <span>Recording / transcript / smart notes readiness</span>
                   <Badge variant="outline" className="rounded-sm">checklist</Badge>
                 </div>
@@ -176,9 +176,9 @@ export function OperationalPage({
             />
             <div className="mt-3 grid gap-2">
               {completed.slice(0, 6).map((meeting) => (
-                <div key={meeting.id} className="rounded-md border bg-slate-50 p-3">
-                  <div className="text-sm font-semibold text-slate-950">{meeting.title}</div>
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">
+                <div key={meeting.id} className="rounded-md border bg-[var(--surface-subtle)] p-3">
+                  <div className="text-sm font-semibold text-foreground">{meeting.title}</div>
+                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {meeting.summary?.overview}
                   </p>
                 </div>

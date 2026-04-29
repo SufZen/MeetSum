@@ -9,7 +9,10 @@ import {
   type DriveImportResult,
 } from "@/components/drive-recording-picker-drawer"
 import { MainSidebar, type MainPanelKey } from "@/components/main-sidebar"
-import { MeetingInboxPanel } from "@/components/meeting-inbox-panel"
+import {
+  MeetingInboxPanel,
+  type MeetingSortMode,
+} from "@/components/meeting-inbox-panel"
 import { MeetingRightRail } from "@/components/meeting-right-rail"
 import { MeetingWorkspace } from "@/components/meeting-workspace"
 import { OperationalPage } from "@/components/operational-pages"
@@ -68,7 +71,7 @@ function filterMeetings(
     })
 }
 
-function sortMeetingsForInbox(meetings: MeetingRecord[]) {
+function sortMeetingsForInbox(meetings: MeetingRecord[], mode: MeetingSortMode = "smart") {
   const rank: Record<string, number> = {
     completed: 0,
     indexing: 1,
@@ -86,6 +89,16 @@ function sortMeetingsForInbox(meetings: MeetingRecord[]) {
   return [...meetings].sort((left, right) => {
     const leftTime = new Date(left.startedAt).getTime()
     const rightTime = new Date(right.startedAt).getTime()
+
+    if (mode === "recent") return rightTime - leftTime
+    if (mode === "oldest") return leftTime - rightTime
+    if (mode === "title") return left.title.localeCompare(right.title)
+    if (mode === "status") {
+      const statusCompare = left.status.localeCompare(right.status)
+      if (statusCompare !== 0) return statusCompare
+      return rightTime - leftTime
+    }
+
     const leftFuture = left.status === "scheduled" && leftTime > now
     const rightFuture = right.status === "scheduled" && rightTime > now
     const leftRank = leftFuture ? 8 : (rank[left.status] ?? 5)
@@ -111,6 +124,7 @@ export function CommandCenterShell({
   const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetings[0]?.id ?? "")
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [sortMode, setSortMode] = useState<MeetingSortMode>("smart")
   const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
   const [askQuestion, setAskQuestion] = useState(dictionary.askDefaultQuestion)
   const [askAnswer, setAskAnswer] = useState("")
@@ -121,6 +135,7 @@ export function CommandCenterShell({
   const [syncing, setSyncing] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
+  const [darkMode, setDarkMode] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
@@ -167,9 +182,29 @@ export function CommandCenterShell({
     }
   }, [])
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem("meetsum_theme")
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    const enabled = saved ? saved === "dark" : Boolean(prefersDark)
+
+    document.documentElement.classList.toggle("dark", enabled)
+    queueMicrotask(() => setDarkMode(enabled))
+  }, [])
+
+  function toggleDarkMode() {
+    setDarkMode((current) => {
+      const next = !current
+
+      document.documentElement.classList.toggle("dark", next)
+      window.localStorage.setItem("meetsum_theme", next ? "dark" : "light")
+
+      return next
+    })
+  }
+
   const filteredMeetings = useMemo(
-    () => sortMeetingsForInbox(filterMeetings(meetingRecords, query, statusFilter)),
-    [meetingRecords, query, statusFilter]
+    () => sortMeetingsForInbox(filterMeetings(meetingRecords, query, statusFilter), sortMode),
+    [meetingRecords, query, sortMode, statusFilter]
   )
   const selectedMeeting =
     meetingRecords.find((meeting) => meeting.id === selectedMeetingId) ??
@@ -208,7 +243,7 @@ export function CommandCenterShell({
     const meetingsBody = await meetingsResponse.json()
     const nextMeetings = meetingsBody.meetings ?? []
 
-    setMeetingRecords(nextMeetings)
+    setMeetingRecords(sortMeetingsForInbox(nextMeetings))
     if (nextSelectedMeetingId) {
       selectMeeting(nextSelectedMeetingId)
     }
@@ -264,17 +299,23 @@ export function CommandCenterShell({
     const file = event.target.files?.[0]
 
     if (!file) return
+    toast.info(`Uploading ${file.name}`)
     startTransition(() =>
-      void uploadFile(file).catch((error) => setAskAnswer(error.message))
+      void uploadFile(file).catch((error) => {
+        setAskAnswer(error.message)
+        toast.error(error.message)
+      })
     )
     event.target.value = ""
   }
 
   function handleRecordingReady(file: File) {
+    toast.info("Recording saved. Uploading audio...")
     startTransition(() =>
-      void uploadFile(file, selectedMeeting ?? undefined).catch((error) =>
+      void uploadFile(file, selectedMeeting ?? undefined).catch((error) => {
         setAskAnswer(error.message)
-      )
+        toast.error(error.message)
+      })
     )
   }
 
@@ -443,8 +484,10 @@ export function CommandCenterShell({
         selectedMeetingId={selectedMeeting?.id}
         query={query}
         activeFilter={statusFilter}
+        sortMode={sortMode}
         onQueryChange={setQuery}
         onFilterChange={setStatusFilter}
+        onSortChange={setSortMode}
         onSelectMeeting={selectMeeting}
       />
       <MeetingWorkspace
@@ -472,7 +515,7 @@ export function CommandCenterShell({
   )
 
   return (
-    <main className="min-h-svh bg-slate-50 text-slate-950">
+    <main className="min-h-svh bg-[var(--surface-subtle)] text-foreground">
       <div className="grid min-h-svh grid-cols-1 lg:grid-cols-[206px_minmax(0,1fr)]">
         <MainSidebar
           dictionary={dictionary}
@@ -493,6 +536,8 @@ export function CommandCenterShell({
             onRecordingReady={handleRecordingReady}
             onSync={syncGoogle}
             onFindDriveRecordings={() => setDrivePickerOpen(true)}
+            darkMode={darkMode}
+            onToggleDarkMode={toggleDarkMode}
           />
           <DriveRecordingPickerDrawer
             open={drivePickerOpen}

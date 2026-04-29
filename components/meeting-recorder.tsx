@@ -55,21 +55,33 @@ export function MeetingRecorder({
   }, [labels, seconds, state])
 
   async function startRecording() {
-    if (!("MediaRecorder" in window)) {
+    if (
+      !("MediaRecorder" in window) ||
+      !navigator.mediaDevices?.getUserMedia ||
+      !window.isSecureContext
+    ) {
       setState("unsupported")
       return
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaRecorder.current = new MediaRecorder(stream)
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : ""
+      mediaRecorder.current = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      )
       chunks.current = []
       mediaRecorder.current.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
           chunks.current.push(event.data)
         }
       })
-      mediaRecorder.current.start()
+      mediaRecorder.current.start(1000)
       setState("recording")
       setSeconds(0)
 

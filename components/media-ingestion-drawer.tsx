@@ -34,6 +34,11 @@ export function MediaIngestionDrawer({
 }) {
   const triggerLabel = mode === "record" ? dictionary.record : dictionary.upload
   const TriggerIcon = mode === "record" ? MicIcon : UploadIcon
+  const title = mode === "record" ? "Record in-person meeting" : "Upload meeting media"
+  const description =
+    mode === "record"
+      ? "Capture audio in the browser and queue it into the same transcription and summary pipeline."
+      : "Upload audio/video directly into the processing pipeline. Files are stored privately first."
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -43,26 +48,30 @@ export function MediaIngestionDrawer({
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>Ingest meeting media</SheetTitle>
-          <SheetDescription>
-            Upload audio/video or record in-person audio directly into the
-            processing pipeline.
-          </SheetDescription>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 p-4">
-          <label className="grid min-h-36 cursor-pointer place-items-center rounded-md border border-dashed bg-muted/40 p-6 text-center text-sm text-muted-foreground">
-            <UploadIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
-            <span className="font-medium text-foreground">
-              Choose audio or video
-            </span>
-            <span>Gemini-ready files are stored privately in MinIO first.</span>
-            <input
-              type="file"
-              className="hidden"
-              accept="audio/*,video/*"
-              onChange={onFileChange}
-            />
-          </label>
+          {pending && (
+            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-teal-950">
+              Upload is queued. Keep this page open while MeetSum stores the media and starts processing.
+            </div>
+          )}
+          {mode === "upload" && (
+            <label className="grid min-h-36 cursor-pointer place-items-center rounded-md border border-dashed bg-muted/40 p-6 text-center text-sm text-muted-foreground">
+              <UploadIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
+              <span className="font-medium text-foreground">
+                Choose audio or video
+              </span>
+              <span>Gemini-ready files are stored privately in MinIO first.</span>
+              <input
+                type="file"
+                className="hidden"
+                accept="audio/*,video/*"
+                onChange={onFileChange}
+              />
+            </label>
+          )}
           <MeetingRecorder
             onRecordingReady={onRecordingReady}
             labels={{
