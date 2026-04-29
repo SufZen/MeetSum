@@ -74,6 +74,108 @@ function parseCursor(value?: string | null): CalendarCursor {
   }
 }
 
+function envBoolean(name: string, fallback = false) {
+  const value = process.env[name]
+
+  if (value === undefined) return fallback
+
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase())
+}
+
+function envInt(name: string, fallback: number) {
+  const value = Number(process.env[name])
+
+  return Number.isFinite(value) ? value : fallback
+}
+
+function splitEnvList(name: string) {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
+const defaultExcludedCalendarPatterns = [
+  "birthday",
+  "birthdays",
+  "holiday",
+  "holidays",
+  "reminder",
+  "reminders",
+  "task",
+  "tasks",
+]
+
+const defaultExcludedTitlePatterns = [
+  "break",
+  "brunch",
+  "dinner",
+  "gym",
+  "lunch",
+  "me time",
+  "sleep",
+  "workout",
+]
+
+function matchesPattern(value: string, patterns: string[]) {
+  const normalized = value.toLowerCase()
+
+  return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()))
+}
+
+function isAllDayEvent(event: { start?: { date?: string | null; dateTime?: string | null } }) {
+  return Boolean(event.start?.date && !event.start?.dateTime)
+}
+
+function extractMeetLink(event: {
+  hangoutLink?: string | null
+  conferenceData?: { entryPoints?: Array<{ uri?: string | null }> }
+}) {
+  return event.hangoutLink ?? event.conferenceData?.entryPoints?.[0]?.uri ?? null
+}
+
+function shouldSkipCalendar(
+  item: { id?: string | null; summary?: string | null },
+  importAll: boolean
+) {
+  if (importAll) return false
+
+  const patterns = [
+    ...defaultExcludedCalendarPatterns,
+    ...splitEnvList("MEETSUM_CALENDAR_EXCLUDED_CALENDAR_PATTERNS"),
+  ]
+  const searchable = `${item.summary ?? ""} ${item.id ?? ""}`
+
+  return matchesPattern(searchable, patterns)
+}
+
+function shouldImportCalendarEvent(
+  event: {
+    status?: string | null
+    summary?: string | null
+    attendees?: unknown[] | null
+    start?: { date?: string | null; dateTime?: string | null }
+    hangoutLink?: string | null
+    conferenceData?: { entryPoints?: Array<{ uri?: string | null }> }
+  },
+  importAll: boolean
+) {
+  if (importAll || event.status === "cancelled") return true
+
+  const hasMeetingSignal =
+    Boolean(extractMeetLink(event)) || Boolean(event.attendees?.length)
+
+  if (!hasMeetingSignal) return false
+  if (isAllDayEvent(event)) return false
+
+  const excludedTitlePatterns = [
+    ...defaultExcludedTitlePatterns,
+    ...splitEnvList("MEETSUM_CALENDAR_EXCLUDED_TITLE_PATTERNS"),
+  ]
+
+  return !matchesPattern(event.summary ?? "", excludedTitlePatterns)
+}
+
 function normalizeTitle(value: string) {
   return value
     .replace(/\.[^.]+$/, "")
@@ -363,9 +465,17 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
     const calendarList = await calendar.calendarList.list({ maxResults: 250 })
     const previousCursor = parseCursor(await getSyncCursor(subject, "calendar"))
     const nextCursor: CalendarCursor = { ...previousCursor }
+    const importAll = envBoolean("MEETSUM_CALENDAR_IMPORT_ALL", false)
+    const lookbackDays = envInt("MEETSUM_CALENDAR_LOOKBACK_DAYS", 30)
+    const lookaheadDays = envInt("MEETSUM_CALENDAR_LOOKAHEAD_DAYS", 60)
 
     for (const item of calendarList.data.items ?? []) {
       if (!item.id) continue
+
+      if (shouldSkipCalendar(item, importAll)) {
+        stats.skipped = (stats.skipped ?? 0) + 1
+        continue
+      }
 
       try {
         const syncToken = previousCursor[item.id]
@@ -375,10 +485,10 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
           orderBy: syncToken ? undefined : "startTime",
           timeMin: syncToken
             ? undefined
-            : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+            : new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString(),
           timeMax: syncToken
             ? undefined
-            : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+            : new Date(Date.now() + lookaheadDays * 24 * 60 * 60 * 1000).toISOString(),
           maxResults: 2500,
           syncToken,
         })
@@ -389,6 +499,10 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
 
         for (const event of events.data.items ?? []) {
           if (!event.id) continue
+          if (!shouldImportCalendarEvent(event, importAll)) {
+            stats.skipped = (stats.skipped ?? 0) + 1
+            continue
+          }
 
           const proposedCalendarEventId = createHashedId(
             "gcal",
@@ -426,7 +540,7 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
               title,
               startsAt ?? null,
               endsAt ?? null,
-              event.hangoutLink ?? event.conferenceData?.entryPoints?.[0]?.uri ?? null,
+              extractMeetLink(event),
               event.status ?? null,
               event.organizer?.email ?? null,
               JSON.stringify(event.attendees ?? []),
@@ -485,7 +599,7 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
                     .map((attendee) => attendee.displayName ?? attendee.email)
                     .filter(Boolean)
                 ),
-                event.hangoutLink ?? null,
+                extractMeetLink(event),
               ]
             )
           }

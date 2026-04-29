@@ -133,7 +133,7 @@ export type MeetingAnswer = {
 }
 
 export type MeetingRepository = {
-  listMeetings: () => Promise<MeetingRecord[]>
+  listMeetings: (options?: { limit?: number }) => Promise<MeetingRecord[]>
   getMeeting: (id: string) => Promise<MeetingRecord | undefined>
   createMeeting: (input: CreateMeetingInput) => Promise<MeetingRecord>
   updateMeetingStatus: (
@@ -181,7 +181,10 @@ export type MeetingRepository = {
   ) => Promise<JobRecord>
   getJob: (id: string) => Promise<JobRecord | undefined>
   listJobs: (filters?: { meetingId?: string; status?: JobStatus }) => Promise<JobRecord[]>
-  searchMeetings: (query: string) => Promise<MeetingRecord[]>
+  searchMeetings: (
+    query: string,
+    options?: { limit?: number }
+  ) => Promise<MeetingRecord[]>
   askMeetingMemory: (
     meetingId: string,
     question: string
@@ -221,10 +224,12 @@ export function createInMemoryMeetingRepository(
   const jobs = new Map<string, JobRecord>()
 
   return {
-    async listMeetings(): Promise<MeetingRecord[]> {
-      return [...meetings.values()].sort((a, b) =>
+    async listMeetings(options?: { limit?: number }): Promise<MeetingRecord[]> {
+      const sorted = [...meetings.values()].sort((a, b) =>
         b.startedAt.localeCompare(a.startedAt)
       )
+
+      return options?.limit ? sorted.slice(0, options.limit) : sorted
     },
 
     async getMeeting(id: string): Promise<MeetingRecord | undefined> {
@@ -425,11 +430,14 @@ export function createInMemoryMeetingRepository(
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     },
 
-    async searchMeetings(query: string): Promise<MeetingRecord[]> {
+    async searchMeetings(
+      query: string,
+      options?: { limit?: number }
+    ): Promise<MeetingRecord[]> {
       const needle = normalize(query)
       const allMeetings = await this.listMeetings()
 
-      return allMeetings.filter((meeting) => {
+      const matches = allMeetings.filter((meeting) => {
         const searchable = [
           meeting.title,
           meeting.summary?.overview,
@@ -442,6 +450,8 @@ export function createInMemoryMeetingRepository(
 
         return normalize(searchable).includes(needle)
       })
+
+      return options?.limit ? matches.slice(0, options.limit) : matches
     },
 
     async askMeetingMemory(

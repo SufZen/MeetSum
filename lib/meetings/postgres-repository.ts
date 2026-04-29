@@ -119,6 +119,12 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`
 }
 
+function normalizeLimit(value?: number) {
+  if (!value || !Number.isFinite(value)) return 50
+
+  return Math.max(1, Math.min(Math.trunc(value), 100))
+}
+
 function toIso(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value
 }
@@ -378,13 +384,18 @@ export function createPostgresMeetingRepository(
   }
 
   return {
-    async listMeetings() {
-      const result = await client.query(`
+    async listMeetings(options: { limit?: number } = {}) {
+      const limit = normalizeLimit(options.limit)
+      const result = await client.query(
+        `
         select id, title, source, language, status, retention, started_at,
                participants, language_metadata
         from meetings
         order by started_at desc
-      `)
+        limit $1
+      `,
+        [limit]
+      )
 
       const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
       return Promise.all(bases.map((meeting) => hydrateMeeting(meeting)))
@@ -765,7 +776,8 @@ export function createPostgresMeetingRepository(
       return result.rows.map((row) => mapJob(row as JobRow))
     },
 
-    async searchMeetings(query: string) {
+    async searchMeetings(query: string, options: { limit?: number } = {}) {
+      const limit = normalizeLimit(options.limit)
       const result = await client.query(
         `
           select distinct m.id, m.title, m.source, m.language, m.status,
@@ -779,8 +791,9 @@ export function createPostgresMeetingRepository(
              or s.overview ilike $1
              or ai.title ilike $1
           order by m.started_at desc
+          limit $2
         `,
-        [`%${query}%`]
+        [`%${query}%`, limit]
       )
 
       const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))

@@ -12,12 +12,17 @@ export async function GET(request: Request) {
     return unauthorized
   }
 
-  const query = new URL(request.url).searchParams.get("query")?.trim()
+  const searchParams = new URL(request.url).searchParams
+  const query = searchParams.get("query")?.trim()
+  const requestedLimit = Number(searchParams.get("limit") ?? 50)
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(Math.trunc(requestedLimit), 100))
+    : 50
 
   return NextResponse.json({
     meetings: query
-      ? await meetingRepository.searchMeetings(query)
-      : await meetingRepository.listMeetings(),
+      ? await meetingRepository.searchMeetings(query, { limit })
+      : await meetingRepository.listMeetings({ limit }),
   })
 }
 
