@@ -8,6 +8,7 @@ export const GOOGLE_WORKSPACE_SCOPES = {
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/drive.metadata.readonly",
   ],
+  meet: ["https://www.googleapis.com/auth/meetings.space.readonly"],
   admin: [
     "https://www.googleapis.com/auth/admin.directory.user.readonly",
     "https://www.googleapis.com/auth/admin.directory.group.readonly",

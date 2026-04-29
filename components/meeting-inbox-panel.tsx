@@ -13,7 +13,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
-const quickFilters = ["all", "my meetings", "rooms"] as const
+const quickFilters = ["all", "usable", "upcoming"] as const
 
 function sourceMeta(source: MeetingRecord["source"]) {
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "M" }
@@ -106,25 +106,22 @@ export function MeetingInboxPanel({
             <button
               key={filter}
               type="button"
-              onClick={() => onFilterChange(filter === "all" ? "all" : activeFilter)}
+              onClick={() => onFilterChange(filter)}
               className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
             >
               <Badge
-                variant={filter === "all" ? "secondary" : "outline"}
+                variant={activeFilter === filter ? "secondary" : "outline"}
                 className={
-                  filter === "my meetings"
+                  activeFilter === filter
                     ? "h-7 justify-center rounded-sm bg-cyan-50 px-3 capitalize text-teal-700"
                     : "h-7 justify-center rounded-sm px-3 capitalize"
                 }
               >
                 {filter === "all"
                   ? dictionary.all
-                  : filter === "my meetings"
-                    ? dictionary.myMeetings
-                    : dictionary.contexts}
-                {filter === "rooms" && (
-                  <ChevronDownIcon aria-hidden="true" className="size-3" />
-                )}
+                  : filter === "usable"
+                    ? "Ready"
+                    : "Upcoming"}
               </Badge>
             </button>
           ))}

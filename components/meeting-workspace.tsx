@@ -26,6 +26,7 @@ export function MeetingWorkspace({
   onQuestionChange,
   onAsk,
   onToggleActionItem,
+  onReprocessMeeting,
   onOpenUpload,
   onSyncGoogle,
   onCheckSetup,
@@ -40,6 +41,7 @@ export function MeetingWorkspace({
   onQuestionChange: (value: string) => void
   onAsk: () => void
   onToggleActionItem: (item: ActionItem) => void
+  onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
   onOpenUpload: () => void
   onSyncGoogle: () => void
   onCheckSetup: () => void
@@ -97,6 +99,7 @@ export function MeetingWorkspace({
             dictionary={dictionary}
             meeting={meeting}
             onToggleActionItem={onToggleActionItem}
+            onReprocessMeeting={onReprocessMeeting}
           />
         </TabsContent>
 

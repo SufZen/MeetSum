@@ -1,4 +1,4 @@
-import { CheckCircle2Icon, CopyIcon } from "lucide-react"
+import { CheckCircle2Icon, CopyIcon, RefreshCwIcon } from "lucide-react"
 
 import { AudioPlaybackBar } from "@/components/audio-playback-bar"
 import { Button } from "@/components/ui/button"
@@ -25,10 +25,12 @@ export function MeetingSummaryView({
   dictionary,
   meeting,
   onToggleActionItem,
+  onReprocessMeeting,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
   onToggleActionItem: (item: ActionItem) => void
+  onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
 }) {
   const actionItems = meeting.summary?.actionItems ?? []
   const quotes = meeting.transcript?.slice(0, 2) ?? []
@@ -38,10 +40,21 @@ export function MeetingSummaryView({
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.overview}</h2>
-          <Button variant="ghost" size="sm" className="h-8 text-slate-500">
-            <CopyIcon data-icon="inline-start" className="size-4" />
-            Copy
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-teal-800"
+              onClick={() => onReprocessMeeting("full")}
+            >
+              <RefreshCwIcon data-icon="inline-start" className="size-4" />
+              Reprocess
+            </Button>
+            <Button variant="ghost" size="sm" className="h-8 text-slate-500">
+              <CopyIcon data-icon="inline-start" className="size-4" />
+              Copy
+            </Button>
+          </div>
         </div>
         <p className="max-w-3xl text-sm leading-7 text-slate-700">
           {meeting.summary?.overview ?? "Summary will appear after intelligence runs."}

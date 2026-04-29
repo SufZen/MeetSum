@@ -106,7 +106,7 @@ export function TopCommandBar({
               <FolderSearchIcon aria-hidden="true" className="size-4" />
               {dictionary.findDriveRecordings}
             </DropdownMenuItem>
-            <DropdownMenuItem disabled onClick={() => onSync("gmail")}>
+            <DropdownMenuItem onClick={() => onSync("gmail")}>
               {dictionary.gmailContext}
             </DropdownMenuItem>
           </DropdownMenuContent>

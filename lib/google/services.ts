@@ -44,8 +44,12 @@ export type DriveRecordingCandidate = {
   createdTime?: string
   modifiedTime?: string
   webViewLink?: string
+  status: "available" | "imported" | "processing" | "failed"
   imported: boolean
   importedMeetingId?: string
+  meetingId?: string
+  jobId?: string
+  artifactHints: string[]
   bestCalendarMatch?: {
     calendarEventId: string
     meetingId?: string
@@ -60,12 +64,22 @@ export type DriveRecordingListResult = {
   nextCursor?: string
 }
 
+export type DriveRecordingImportFileResult = {
+  fileId: string
+  name?: string
+  status: "imported" | "already_imported" | "queued" | "skipped" | "failed"
+  meetingId?: string
+  jobId?: string
+  error?: string
+}
+
 export type DriveRecordingImportResult = {
   imported: number
   skipped: number
   matched: number
   jobs: Awaited<ReturnType<typeof enqueueMeetSumJob>>[]
   errors: string[]
+  files: DriveRecordingImportFileResult[]
 }
 
 function createId(prefix: string, stable: string) {
@@ -510,21 +524,47 @@ async function getDriveImportStatus(options: {
   const pool = getDatabasePool()
   const result = await pool.query(
     `
-      select df.imported_at, mdf.meeting_id
+      select
+        df.imported_at,
+        mdf.meeting_id,
+        j.id as job_id,
+        j.status as job_status
       from drive_files df
       left join meeting_drive_files mdf on mdf.drive_file_id = df.id
+      left join jobs j on j.meeting_id = mdf.meeting_id
+        and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
+        and j.status in ('queued', 'active', 'failed')
       where df.google_identity_id = $1 and df.google_file_id = $2
+      order by
+        case j.status when 'active' then 0 when 'queued' then 1 when 'failed' then 2 else 3 end,
+        j.created_at desc nulls last
       limit 1
     `,
     [options.identityId, options.googleFileId]
   )
   const row = result.rows[0] as
-    | { imported_at?: string | Date | null; meeting_id?: string | null }
+    | {
+        imported_at?: string | Date | null
+        meeting_id?: string | null
+        job_id?: string | null
+        job_status?: string | null
+      }
     | undefined
+  const status: DriveRecordingCandidate["status"] =
+    row?.job_status === "failed"
+      ? "failed"
+      : row?.job_status === "queued" || row?.job_status === "active"
+        ? "processing"
+        : row?.imported_at
+          ? "imported"
+          : "available"
 
   return {
     imported: Boolean(row?.imported_at),
     importedMeetingId: row?.meeting_id ?? undefined,
+    meetingId: row?.meeting_id ?? undefined,
+    jobId: row?.job_id ?? undefined,
+    status,
   }
 }
 
@@ -653,8 +693,15 @@ export async function listDriveRecordings(
         createdTime: file.createdTime ?? undefined,
         modifiedTime: file.modifiedTime ?? undefined,
         webViewLink: file.webViewLink ?? undefined,
+        status: importStatus.status,
         imported: importStatus.imported,
         importedMeetingId: importStatus.importedMeetingId,
+        meetingId: importStatus.meetingId,
+        jobId: importStatus.jobId,
+        artifactHints: [
+          file.mimeType?.startsWith("video/") ? "recording" : "audio",
+          match ? "calendar-match" : "needs-review",
+        ],
         bestCalendarMatch: match
           ? {
               calendarEventId: match.id,
@@ -694,6 +741,7 @@ export async function importDriveRecordings(
     matched: 0,
     jobs: [],
     errors: [],
+    files: [],
   }
 
   for (const fileId of selectedFileIds) {
@@ -708,14 +756,18 @@ export async function importDriveRecordings(
 
       if (!file.id || !file.name || !isLikelyMeetRecording(file.name, file.mimeType)) {
         result.skipped += 1
-        result.errors.push(`${fileId}: not a likely meeting recording`)
+        const error = `${fileId}: not a likely meeting recording`
+        result.errors.push(error)
+        result.files.push({ fileId, name: file.name ?? undefined, status: "skipped", error })
         continue
       }
 
       const fileSizeBytes = file.size ? Number(file.size) : 0
       if (fileSizeBytes > maxImportBytes) {
         result.skipped += 1
-        result.errors.push(`${file.name}: exceeds import size limit`)
+        const error = `${file.name}: exceeds import size limit`
+        result.errors.push(error)
+        result.files.push({ fileId: file.id, name: file.name, status: "skipped", error })
         continue
       }
 
@@ -737,12 +789,37 @@ export async function importDriveRecordings(
         raw: file,
       })
       const existing = await pool.query(
-        `select imported_at from drive_files where id = $1 and imported_at is not null`,
+        `
+          select df.imported_at, mdf.meeting_id, j.id as job_id, j.status as job_status
+          from drive_files df
+          left join meeting_drive_files mdf on mdf.drive_file_id = df.id
+          left join jobs j on j.meeting_id = mdf.meeting_id
+            and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
+            and j.status in ('queued', 'active')
+          where df.id = $1 and (df.imported_at is not null or j.id is not null)
+          order by j.created_at desc nulls last
+          limit 1
+        `,
         [driveFileId]
       )
+      const existingRow = existing.rows[0] as
+        | {
+            imported_at?: string | Date | null
+            meeting_id?: string | null
+            job_id?: string | null
+            job_status?: string | null
+          }
+        | undefined
 
-      if (existing.rows.length > 0) {
+      if (existingRow) {
         result.skipped += 1
+        result.files.push({
+          fileId: file.id,
+          name: file.name,
+          status: existingRow.job_id ? "queued" : "already_imported",
+          meetingId: existingRow.meeting_id ?? undefined,
+          jobId: existingRow.job_id ?? undefined,
+        })
         continue
       }
 
@@ -821,14 +898,25 @@ export async function importDriveRecordings(
         storageKey: stored.key,
         bucket: stored.bucket,
         source: "google_drive",
+        sourceFileId: file.id,
+        stage: "audio.transcribe",
       })
 
       result.jobs.push(job)
       result.imported += 1
       if (match) result.matched += 1
+      result.files.push({
+        fileId: file.id,
+        name: file.name,
+        status: "imported",
+        meetingId: meeting.id,
+        jobId: job.id,
+      })
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       result.skipped += 1
-      result.errors.push(error instanceof Error ? error.message : String(error))
+      result.errors.push(message)
+      result.files.push({ fileId, status: "failed", error: message })
     }
   }
 
@@ -1226,12 +1314,101 @@ export async function pollDrive(subject: string): Promise<SyncStats> {
 }
 
 export async function pollGmail(subject: string): Promise<SyncStats> {
-  const stats: SyncStats = { source: "gmail", status: "deferred" }
+  await setSyncState(subject, "gmail", { status: "running" })
 
-  await setSyncState(subject, "gmail", {
-    status: "completed",
-    stats,
-    nextPollAt: new Date(Date.now() + 60 * 60 * 1000),
-  })
-  return stats
+  const stats: SyncStats = {
+    source: "gmail",
+    discovered: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+  }
+
+  try {
+    const auth = await createDelegatedGoogleClient(
+      subject,
+      GOOGLE_WORKSPACE_SCOPES.gmail
+    )
+    const gmail = google.gmail({ version: "v1", auth })
+    const pool = getDatabasePool()
+    const identityId = await getIdentityId(subject)
+    const query =
+      process.env.MEETSUM_GMAIL_CONTEXT_QUERY ??
+      'newer_than:90d (meet OR "meeting notes" OR recording OR transcript OR summary)'
+    const response = await gmail.users.threads.list({
+      userId: "me",
+      q: query,
+      maxResults: Number(process.env.MEETSUM_GMAIL_CONTEXT_LIMIT ?? 25),
+    })
+
+    for (const threadRef of response.data.threads ?? []) {
+      if (!threadRef.id) continue
+
+      try {
+        const thread = await gmail.users.threads.get({
+          userId: "me",
+          id: threadRef.id,
+          format: "metadata",
+          metadataHeaders: ["Subject", "From", "To", "Cc", "Date"],
+        })
+        const messages = thread.data.messages ?? []
+        const firstMessage = messages[0]
+        const headers = firstMessage?.payload?.headers ?? []
+        const header = (name: string) =>
+          headers.find((item) => item.name?.toLowerCase() === name.toLowerCase())?.value
+        const subjectLine = header("Subject") ?? "(no subject)"
+        const participants = [header("From"), header("To"), header("Cc")]
+          .filter(Boolean)
+          .join(", ")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+        const gmailThreadId = thread.data.id ?? threadRef.id
+        const id = createHashedId("gmail", `${identityId}:${gmailThreadId}`)
+
+        await pool.query(
+          `
+            insert into gmail_threads (
+              id, google_identity_id, google_thread_id, subject, participants, raw
+            )
+            values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+            on conflict (google_identity_id, google_thread_id) do update
+              set subject = excluded.subject,
+                  participants = excluded.participants,
+                  raw = excluded.raw
+          `,
+          [
+            id,
+            identityId,
+            gmailThreadId,
+            subjectLine,
+            JSON.stringify(participants),
+            JSON.stringify(thread.data),
+          ]
+        )
+        stats.discovered = (stats.discovered ?? 0) + 1
+        stats.updated = (stats.updated ?? 0) + 1
+      } catch (error) {
+        stats.errors?.push(error instanceof Error ? error.message : String(error))
+      }
+    }
+
+    await setSyncState(subject, "gmail", {
+      status: "completed",
+      stats,
+      nextPollAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    return stats
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Gmail sync failed"
+
+    stats.errors?.push(message)
+    await setSyncState(subject, "gmail", {
+      status: "failed",
+      lastError: message,
+      stats,
+      nextPollAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    return stats
+  }
 }

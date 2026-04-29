@@ -112,6 +112,32 @@ describe("language intelligence", () => {
     expect(tasks.some((task) => task.priority === "urgent")).toBe(true)
   })
 
+  it("does not turn ordinary discussion fragments into action items", () => {
+    const tasks = extractSmartTasks([
+      {
+        id: "seg_discussion",
+        speaker: "Ran",
+        startMs: 0,
+        endMs: 4000,
+        text: "I think we should talk about the general model, but this is just context and not a task.",
+      },
+      {
+        id: "seg_task",
+        speaker: "Maya",
+        startMs: 5000,
+        endMs: 9000,
+        text: "Please send the signed agreement to the investor by tomorrow.",
+      },
+    ])
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      title: "Please send the signed agreement to the investor by tomorrow.",
+      owner: "Maya",
+      kind: "explicit",
+    })
+  })
+
   it("builds structured intelligence output for a meeting", () => {
     const intelligence = buildMeetingIntelligence({
       id: "meet_1",

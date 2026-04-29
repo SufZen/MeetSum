@@ -5,7 +5,11 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 
-import { buildMeetingIntelligence, cleanupTranscriptSegments } from "@/lib/intelligence"
+import {
+  buildMeetingIntelligence,
+  cleanupTranscriptSegments,
+  type SmartTask,
+} from "@/lib/intelligence"
 import type {
   MeetingRecord,
   TranscriptSegment,
@@ -273,6 +277,9 @@ export class GeminiSummaryProvider implements SummaryProvider {
                 "Create structured meeting intelligence as JSON.",
                 "Support Hebrew, English, Portuguese, Spanish, Italian, and mixed-language meetings.",
                 "Do not invent details; mark uncertainty in the text when needed.",
+                "Action items must be real tasks only: commitments, assignments, next steps, decisions requiring follow-up, or explicit requests. Do not copy ordinary transcript fragments as tasks.",
+                "For every action item, include title, owner if known, dueDate if stated or strongly implied, priority, confidence, sourceQuote, sourceStartMs, and kind explicit/inferred.",
+                "Decisions should be concise business decisions and should not include generic discussion.",
                 `Meeting: ${meeting.title}`,
                 transcript,
               ].join("\n\n"),
@@ -287,10 +294,28 @@ export class GeminiSummaryProvider implements SummaryProvider {
           properties: {
             overview: { type: Type.STRING },
             decisions: { type: Type.ARRAY, items: { type: Type.STRING } },
+            actionItems: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  owner: { type: Type.STRING },
+                  dueDate: { type: Type.STRING },
+                  priority: { type: Type.STRING },
+                  confidence: { type: Type.NUMBER },
+                  sourceQuote: { type: Type.STRING },
+                  sourceStartMs: { type: Type.NUMBER },
+                  kind: { type: Type.STRING },
+                },
+                required: ["title"],
+              },
+            },
             risks: { type: Type.ARRAY, items: { type: Type.STRING } },
             openQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
             commitments: { type: Type.ARRAY, items: { type: Type.STRING } },
             followUpDraft: { type: Type.STRING },
+            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
           required: ["overview"],
         },
@@ -302,15 +327,51 @@ export class GeminiSummaryProvider implements SummaryProvider {
         ReturnType<typeof buildMeetingIntelligence>
       >
       const fallback = buildMeetingIntelligence(meeting)
+      const parsedActionItems: SmartTask[] = Array.isArray(parsed.actionItems)
+        ? parsed.actionItems
+            .filter((item) => item?.title && String(item.title).trim().length > 0)
+            .slice(0, 20)
+            .map((item, index) => {
+              const priority: SmartTask["priority"] =
+                item.priority === "low" ||
+                item.priority === "high" ||
+                item.priority === "urgent"
+                  ? item.priority
+                  : "normal"
+              const kind: SmartTask["kind"] =
+                item.kind === "inferred" ? "inferred" : "explicit"
+
+              return {
+                id: item.id ?? `task_${crypto.randomUUID()}_${index}`,
+                title: String(item.title).trim(),
+                owner: item.owner ? String(item.owner) : undefined,
+                status: item.status === "done" ? "done" : "open",
+                dueDate: item.dueDate ? String(item.dueDate) : undefined,
+                priority,
+                confidence:
+                typeof item.confidence === "number"
+                  ? Math.min(1, Math.max(0, item.confidence))
+                  : 0.75,
+                sourceQuote: item.sourceQuote
+                  ? String(item.sourceQuote)
+                  : String(item.title),
+                sourceStartMs:
+                  typeof item.sourceStartMs === "number" ? item.sourceStartMs : 0,
+                kind,
+              }
+            })
+        : fallback.actionItems
 
       return {
         ...fallback,
         overview: parsed.overview ?? fallback.overview,
         decisions: parsed.decisions ?? fallback.decisions,
+        actionItems: parsedActionItems,
         risks: parsed.risks ?? fallback.risks,
         openQuestions: parsed.openQuestions ?? fallback.openQuestions,
         commitments: parsed.commitments ?? fallback.commitments,
         followUpDraft: parsed.followUpDraft ?? fallback.followUpDraft,
+        tags: parsed.tags ?? fallback.tags,
       }
     } catch {
       return this.fallback.summarize(meeting)

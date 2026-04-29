@@ -7,6 +7,7 @@ import {
 } from "@/lib/ai/providers"
 import { getDatabasePool } from "@/lib/db/client"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
+import { cleanupTranscriptSegments } from "@/lib/intelligence"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
 import { meetingRepository } from "@/lib/meetings/store"
 import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
@@ -77,12 +78,20 @@ async function recordAiRun(options: {
   )
 }
 
-async function processMediaJob(payload: MeetSumJobPayload) {
+async function processMediaJob(
+  payload: MeetSumJobPayload,
+  jobRecordId?: string
+) {
   if (!payload.meetingId) {
     throw new Error("meetingId is required")
   }
 
   await meetingRepository.updateMeetingStatus(payload.meetingId, "transcribing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "audio.transcribe" },
+    })
+  }
   const meeting = await meetingRepository.getMeeting(payload.meetingId)
 
   if (!meeting) {
@@ -110,6 +119,11 @@ async function processMediaJob(payload: MeetSumJobPayload) {
   })
   await meetingRepository.replaceTranscriptSegments(meeting.id, transcript)
   await meetingRepository.updateMeetingStatus(meeting.id, "summarizing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "summary.generate", transcriptSegments: transcript.length },
+    })
+  }
 
   const refreshed = await meetingRepository.getMeeting(meeting.id)
   const summaryStartedAt = Date.now()
@@ -130,6 +144,11 @@ async function processMediaJob(payload: MeetSumJobPayload) {
   })
 
   await meetingRepository.updateMeetingStatus(meeting.id, "indexing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "meeting.index", transcriptSegments: transcript.length },
+    })
+  }
   await meetingRepository.upsertMeetingIntelligence(
     meeting.id,
     intelligence,
@@ -145,6 +164,73 @@ async function processMediaJob(payload: MeetSumJobPayload) {
     meetingId: meeting.id,
     transcriptSegments: transcript.length,
     tags: intelligence.tags,
+  }
+}
+
+async function processIntelligenceOnlyJob(
+  payload: MeetSumJobPayload,
+  jobRecordId?: string
+) {
+  if (!payload.meetingId) {
+    throw new Error("meetingId is required")
+  }
+
+  const meeting = await meetingRepository.getMeeting(payload.meetingId)
+
+  if (!meeting) {
+    throw new Error(`Meeting not found: ${payload.meetingId}`)
+  }
+
+  await meetingRepository.updateMeetingStatus(meeting.id, "summarizing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "summary.generate", mode: payload.mode },
+    })
+  }
+
+  const cleanedTranscript = cleanupTranscriptSegments(meeting.transcript ?? [])
+  if (cleanedTranscript.length) {
+    await meetingRepository.replaceTranscriptSegments(meeting.id, cleanedTranscript)
+  }
+
+  const refreshed = await meetingRepository.getMeeting(meeting.id)
+  const summaryStartedAt = Date.now()
+  const intelligence = await createSummaryProvider().summarize(
+    refreshed ?? { ...meeting, transcript: cleanedTranscript }
+  )
+
+  await recordAiRun({
+    meetingId: meeting.id,
+    task: String(payload.mode ?? "summary.generate"),
+    status: "completed",
+    startedAt: summaryStartedAt,
+    model: process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1",
+    metadata: {
+      providerMode: getGeminiProviderMode(),
+      tags: intelligence.tags,
+      confidence: intelligence.languageMetadata.confidence,
+      mode: payload.mode,
+    },
+  })
+
+  await meetingRepository.updateMeetingStatus(meeting.id, "indexing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "meeting.index", mode: payload.mode },
+    })
+  }
+  await meetingRepository.upsertMeetingIntelligence(
+    meeting.id,
+    intelligence,
+    getGeminiProviderMode(),
+    process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1"
+  )
+
+  return {
+    meetingId: meeting.id,
+    transcriptSegments: cleanedTranscript.length,
+    tags: intelligence.tags,
+    mode: payload.mode,
   }
 }
 
@@ -183,10 +269,14 @@ async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) 
     if (
       job.name === "media.ingest" ||
       job.name === "meeting.transcribe" ||
-      job.name === "meeting.summarize" ||
       job.name === "meeting.index"
     ) {
-      result = await processMediaJob(job.data)
+      result = await processMediaJob(job.data, jobRecordId)
+    } else if (job.name === "meeting.summarize") {
+      result =
+        job.data.mode === "full"
+          ? await processMediaJob(job.data, jobRecordId)
+          : await processIntelligenceOnlyJob(job.data, jobRecordId)
     } else if (job.name.startsWith("google.")) {
       result = await processGoogleJob(job.name, job.data)
     } else if (job.name === "realizeos.export") {

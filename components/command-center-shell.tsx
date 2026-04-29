@@ -2,25 +2,20 @@
 
 import { type ChangeEvent, useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { SearchIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { DriveRecordingPickerDrawer } from "@/components/drive-recording-picker-drawer"
-import { JobActivityCenter } from "@/components/job-activity-center"
+import {
+  DriveRecordingPickerDrawer,
+  type DriveImportResult,
+} from "@/components/drive-recording-picker-drawer"
 import { MainSidebar, type MainPanelKey } from "@/components/main-sidebar"
 import { MeetingInboxPanel } from "@/components/meeting-inbox-panel"
 import { MeetingRightRail } from "@/components/meeting-right-rail"
 import { MeetingWorkspace } from "@/components/meeting-workspace"
-import {
-  ProviderHealthPanel,
-  type ProviderStatusView,
-} from "@/components/provider-health-panel"
+import { OperationalPage } from "@/components/operational-pages"
+import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { TopCommandBar, type SyncTarget } from "@/components/top-command-bar"
-import {
-  WorkspaceSyncPanel,
-  type WorkspaceStatusView,
-} from "@/components/workspace-sync-panel"
-import { Input } from "@/components/ui/input"
+import type { WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type {
@@ -37,9 +32,24 @@ function filterMeetings(
   const normalized = query.trim().toLowerCase()
 
   return meetings
-    .filter((meeting) =>
-      statusFilter === "all" ? true : meeting.status === statusFilter
-    )
+    .filter((meeting) => {
+      if (statusFilter === "all") return true
+      if (statusFilter === "usable") {
+        return [
+          "completed",
+          "indexing",
+          "summarizing",
+          "transcribing",
+          "media_uploaded",
+          "failed",
+        ].includes(meeting.status)
+      }
+      if (statusFilter === "upcoming") {
+        return meeting.status === "scheduled"
+      }
+
+      return meeting.status === statusFilter
+    })
     .filter((meeting) => {
       if (!normalized) return true
 
@@ -58,6 +68,34 @@ function filterMeetings(
     })
 }
 
+function sortMeetingsForInbox(meetings: MeetingRecord[]) {
+  const rank: Record<string, number> = {
+    completed: 0,
+    indexing: 1,
+    summarizing: 1,
+    transcribing: 1,
+    media_uploaded: 2,
+    media_found: 3,
+    media_uploaded_failed: 4,
+    failed: 4,
+    scheduled: 6,
+    created: 7,
+  }
+  const now = Date.now()
+
+  return [...meetings].sort((left, right) => {
+    const leftTime = new Date(left.startedAt).getTime()
+    const rightTime = new Date(right.startedAt).getTime()
+    const leftFuture = left.status === "scheduled" && leftTime > now
+    const rightFuture = right.status === "scheduled" && rightTime > now
+    const leftRank = leftFuture ? 8 : (rank[left.status] ?? 5)
+    const rightRank = rightFuture ? 8 : (rank[right.status] ?? 5)
+
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return rightTime - leftTime
+  })
+}
+
 export function CommandCenterShell({
   dictionary,
   locale,
@@ -68,8 +106,9 @@ export function CommandCenterShell({
   meetings: MeetingRecord[]
 }) {
   const router = useRouter()
-  const [meetingRecords, setMeetingRecords] = useState(meetings)
-  const [selectedMeetingId, setSelectedMeetingId] = useState(meetings[0]?.id ?? "")
+  const initialMeetings = useMemo(() => sortMeetingsForInbox(meetings), [meetings])
+  const [meetingRecords, setMeetingRecords] = useState(initialMeetings)
+  const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetings[0]?.id ?? "")
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
@@ -129,7 +168,7 @@ export function CommandCenterShell({
   }, [])
 
   const filteredMeetings = useMemo(
-    () => filterMeetings(meetingRecords, query, statusFilter),
+    () => sortMeetingsForInbox(filterMeetings(meetingRecords, query, statusFilter)),
     [meetingRecords, query, statusFilter]
   )
   const selectedMeeting =
@@ -159,6 +198,20 @@ export function CommandCenterShell({
     setMeetingRecords((current) =>
       current.map((meeting) => (meeting.id === meetingId ? body.meeting : meeting))
     )
+  }
+
+  async function refreshMeetings(nextSelectedMeetingId?: string) {
+    const meetingsResponse = await fetch("/api/meetings")
+
+    if (!meetingsResponse.ok) return
+
+    const meetingsBody = await meetingsResponse.json()
+    const nextMeetings = meetingsBody.meetings ?? []
+
+    setMeetingRecords(nextMeetings)
+    if (nextSelectedMeetingId) {
+      selectMeeting(nextSelectedMeetingId)
+    }
   }
 
   async function createMeetingForFile(file: File) {
@@ -289,16 +342,37 @@ export function CommandCenterShell({
     }
   }
 
+  function reprocessMeeting(mode: "full" | "summary" | "tasks" | "transcript-cleanup") {
+    if (!selectedMeeting) return
+
+    startTransition(() => {
+      void (async () => {
+        const response = await fetch(`/api/meetings/${selectedMeeting.id}/reprocess`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode }),
+        })
+        const body = await response.json()
+
+        if (!response.ok) {
+          toast.error(body.error ?? "Unable to reprocess meeting")
+          return
+        }
+
+        setJobs((current) => [body.job, ...current])
+        toast.success("Reprocess queued")
+        await refreshOperationalState()
+      })().catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Unable to reprocess meeting")
+      )
+    })
+  }
+
   function syncGoogle(target: SyncTarget) {
     setSyncing(true)
     startTransition(() => {
       void (async () => {
         try {
-          if (target === "gmail") {
-            toast.info("Gmail context is prepared but deferred for this phase")
-            return
-          }
-
           const endpoint = `/api/google/sync/${target}`
           const response = await fetch(endpoint, {
             method: "POST",
@@ -314,13 +388,9 @@ export function CommandCenterShell({
           }
 
           setJobs((current) => (body.job ? [body.job, ...current] : current))
-          toast.success("Calendar sync queued")
+          toast.success(target === "gmail" ? "Gmail context sync queued" : "Calendar sync queued")
           await refreshOperationalState()
-          const meetingsResponse = await fetch("/api/meetings")
-          if (meetingsResponse.ok) {
-            const meetingsBody = await meetingsResponse.json()
-            setMeetingRecords(meetingsBody.meetings ?? [])
-          }
+          await refreshMeetings()
         } finally {
           setSyncing(false)
         }
@@ -331,9 +401,17 @@ export function CommandCenterShell({
     })
   }
 
-  function handleDriveImported(importedJobs: JobRecord[]) {
-    if (importedJobs.length) {
-      setJobs((current) => [...importedJobs, ...current])
+  function handleDriveImported(result: DriveImportResult) {
+    if (result.jobs.length) {
+      setJobs((current) => [...result.jobs, ...current])
+    }
+    const targetMeetingId = result.files.find((file) => file.meetingId)?.meetingId
+
+    if (result.errors.length) {
+      toast.error(result.errors[0])
+    }
+    if (targetMeetingId) {
+      void refreshMeetings(targetMeetingId)
     }
     void refreshOperationalState()
   }
@@ -354,44 +432,6 @@ export function CommandCenterShell({
         setJobs((current) => [body.job, ...current])
       })()
     })
-  }
-
-  function renderWorkspacePanel() {
-    return (
-      <div className="grid gap-4 bg-slate-50 p-5 lg:grid-cols-2">
-        <WorkspaceSyncPanel
-          status={workspaceStatus}
-          syncing={syncing}
-          onSyncAll={() => syncGoogle("calendar")}
-        />
-        <ProviderHealthPanel providers={providers} />
-        <div className="lg:col-span-2">
-          <JobActivityCenter jobs={jobs} onRetry={retryJob} />
-        </div>
-      </div>
-    )
-  }
-
-  function renderSecondaryPanel() {
-    return (
-      <div className="grid gap-4 bg-slate-50 p-5 lg:grid-cols-2">
-        <section className="rounded-md border bg-white p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <SearchIcon aria-hidden="true" className="size-4 text-teal-700" />
-            <h2 className="text-sm font-semibold">
-              {activePanel === "memory" ? "Cross-meeting memory" : activePanel}
-            </h2>
-          </div>
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search summaries, transcripts, tags, and decisions"
-            className="h-10"
-          />
-        </section>
-        <JobActivityCenter jobs={jobs} onRetry={retryJob} />
-      </div>
-    )
   }
 
   const defaultMeetingsView = (
@@ -417,6 +457,7 @@ export function CommandCenterShell({
         onQuestionChange={setAskQuestion}
         onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
+        onReprocessMeeting={reprocessMeeting}
         onOpenUpload={() => setUploadOpen(true)}
         onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
@@ -460,9 +501,21 @@ export function CommandCenterShell({
           />
           {activePanel === "meetings"
             ? defaultMeetingsView
-            : activePanel === "workspace" || activePanel === "settings"
-              ? renderWorkspacePanel()
-              : renderSecondaryPanel()}
+            : (
+                <OperationalPage
+                  panel={activePanel}
+                  meetings={meetingRecords}
+                  jobs={jobs}
+                  providers={providers}
+                  workspaceStatus={workspaceStatus}
+                  syncing={syncing}
+                  query={query}
+                  onQueryChange={setQuery}
+                  onSyncCalendar={() => syncGoogle("calendar")}
+                  onFindDriveRecordings={() => setDrivePickerOpen(true)}
+                  onRetryJob={retryJob}
+                />
+              )}
         </section>
       </div>
     </main>

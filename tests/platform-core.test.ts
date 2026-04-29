@@ -94,6 +94,9 @@ describe("Google Workspace connector policy", () => {
     expect(GOOGLE_WORKSPACE_SCOPES.drive).toContain(
       "https://www.googleapis.com/auth/drive.readonly",
     )
+    expect(GOOGLE_WORKSPACE_SCOPES.meet).toContain(
+      "https://www.googleapis.com/auth/meetings.space.readonly",
+    )
   })
 
   it("builds a sync plan for all first-class Google sources", () => {

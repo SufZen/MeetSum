@@ -22,13 +22,35 @@ type DriveRecording = {
   mimeType?: string
   sizeBytes?: number
   modifiedTime?: string
+  status: "available" | "imported" | "processing" | "failed"
   imported: boolean
   importedMeetingId?: string
+  meetingId?: string
+  jobId?: string
+  artifactHints?: string[]
   bestCalendarMatch?: {
     title: string
     confidence: number
     matchMethod: string
   }
+}
+
+export type DriveImportFileResult = {
+  fileId: string
+  name?: string
+  status: "imported" | "already_imported" | "queued" | "skipped" | "failed"
+  meetingId?: string
+  jobId?: string
+  error?: string
+}
+
+export type DriveImportResult = {
+  imported: number
+  skipped: number
+  matched: number
+  jobs: JobRecord[]
+  errors: string[]
+  files: DriveImportFileResult[]
 }
 
 function formatBytes(value?: number) {
@@ -45,7 +67,7 @@ export function DriveRecordingPickerDrawer({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onImported: (jobs: JobRecord[]) => void
+  onImported: (result: DriveImportResult) => void
 }) {
   const [recordings, setRecordings] = useState<DriveRecording[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -124,9 +146,19 @@ export function DriveRecordingPickerDrawer({
           return
         }
 
-        onImported(body.jobs ?? [])
+        onImported({
+          imported: body.imported ?? 0,
+          skipped: body.skipped ?? 0,
+          matched: body.matched ?? 0,
+          jobs: body.jobs ?? [],
+          errors: body.errors ?? [],
+          files: body.files ?? [],
+        })
         setSelected(new Set())
-        toast.success(`Queued ${body.imported ?? 0} Drive recording(s)`)
+        toast.success(`Processing ${body.imported ?? 0} Drive recording(s)`)
+        if ((body.imported ?? 0) > 0 || (body.files ?? []).some((file: DriveImportFileResult) => file.meetingId)) {
+          onOpenChange(false)
+        }
         loadRecordings()
       })().catch((caught) =>
         toast.error(caught instanceof Error ? caught.message : "Drive import failed")
@@ -199,8 +231,13 @@ export function DriveRecordingPickerDrawer({
                     className="mt-1"
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="break-words text-sm font-semibold text-slate-950">
-                      {recording.name}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="break-words text-sm font-semibold text-slate-950">
+                        {recording.name}
+                      </div>
+                      <span className="rounded-sm bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                        {recording.status}
+                      </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
                       <span>{recording.mimeType ?? "media"}</span>
@@ -218,6 +255,18 @@ export function DriveRecordingPickerDrawer({
                         </span>
                       </div>
                     )}
+                    {recording.artifactHints?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {recording.artifactHints.map((hint) => (
+                          <span
+                            key={hint}
+                            className="rounded-sm bg-cyan-50 px-2 py-0.5 text-[11px] text-teal-800"
+                          >
+                            {hint}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   {recording.imported && (
                     <CheckCircle2Icon aria-hidden="true" className="size-4 text-emerald-600" />
@@ -231,7 +280,7 @@ export function DriveRecordingPickerDrawer({
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-white p-4">
           <div className="text-sm text-slate-600">{selectedCount}/5 selected</div>
           <Button className="h-10" disabled={loading || !selectedCount} onClick={importSelected}>
-            Import selected
+            Import selected to processing
           </Button>
         </div>
       </SheetContent>
