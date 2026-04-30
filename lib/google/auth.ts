@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs"
 
 import { google } from "googleapis"
 
+import { getGoogleWorkspaceOAuthRefreshToken } from "@/lib/google/oauth-tokens"
+
 export type WorkspaceAuthStrategy =
+  | "user-oauth"
   | "keyless-iam-signjwt"
   | "json-key"
   | "key-file"
@@ -59,6 +62,10 @@ function getPrivateKey() {
 }
 
 function getStrategy(): WorkspaceAuthStrategy {
+  if (process.env.GOOGLE_WORKSPACE_AUTH_STRATEGY === "user-oauth") {
+    return "user-oauth"
+  }
+
   const email = getWorkspaceServiceAccountEmail()
 
   if (!email) return "missing"
@@ -68,6 +75,17 @@ function getStrategy(): WorkspaceAuthStrategy {
   }
 
   return "keyless-iam-signjwt"
+}
+
+function getUserOAuthClientConfig() {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+
+  if (!clientId || !clientSecret) {
+    throw new Error("Google OAuth client is not configured")
+  }
+
+  return { clientId, clientSecret }
 }
 
 export function getWorkspaceAuthStatus(
@@ -82,11 +100,13 @@ export function getWorkspaceAuthStatus(
     serviceAccountEmail,
     strategy,
     configured,
-    detail: configured
-      ? strategy === "keyless-iam-signjwt"
-        ? "Using IAM Credentials signJwt with Application Default Credentials"
-        : "Using service-account private-key credentials"
-      : "Missing Google Workspace service-account email",
+    detail: !configured
+      ? "Missing Google Workspace service-account email or OAuth strategy"
+      : strategy === "user-oauth"
+        ? "Using first-admin Google OAuth refresh token"
+        : strategy === "keyless-iam-signjwt"
+          ? "Using IAM Credentials signJwt with Application Default Credentials"
+          : "Using service-account private-key credentials",
   }
 }
 
@@ -180,6 +200,16 @@ function createPrivateKeyDelegatedClient(
   })
 }
 
+async function createUserOAuthWorkspaceClient(subject: string) {
+  const { clientId, clientSecret } = getUserOAuthClientConfig()
+  const refreshToken = await getGoogleWorkspaceOAuthRefreshToken(subject)
+  const client = new google.auth.OAuth2(clientId, clientSecret)
+
+  client.setCredentials({ refresh_token: refreshToken })
+
+  return client
+}
+
 export async function createDelegatedGoogleClient(
   subject: string,
   scopes: readonly string[]
@@ -192,6 +222,10 @@ export async function createDelegatedGoogleClient(
 
   if (strategy === "keyless-iam-signjwt") {
     return createKeylessDelegatedClient(subject, scopes)
+  }
+
+  if (strategy === "user-oauth") {
+    return createUserOAuthWorkspaceClient(subject)
   }
 
   return createPrivateKeyDelegatedClient(subject, scopes)

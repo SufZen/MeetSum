@@ -59,16 +59,22 @@ export function createGoogleAuthorizationUrl(options: {
   redirectUri: string
   state: string
   loginHint?: string
+  scopes?: string[]
+  prompt?: string
 }): URL {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
 
   url.searchParams.set("client_id", options.clientId)
   url.searchParams.set("redirect_uri", options.redirectUri)
   url.searchParams.set("response_type", "code")
-  url.searchParams.set("scope", "openid email profile")
+  url.searchParams.set(
+    "scope",
+    [...new Set(options.scopes ?? ["openid", "email", "profile"])].join(" ")
+  )
   url.searchParams.set("state", options.state)
   url.searchParams.set("access_type", "offline")
-  url.searchParams.set("prompt", "select_account")
+  url.searchParams.set("prompt", options.prompt ?? "select_account")
+  url.searchParams.set("include_granted_scopes", "true")
 
   if (options.loginHint) {
     url.searchParams.set("login_hint", options.loginHint)

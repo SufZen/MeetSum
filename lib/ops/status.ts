@@ -1,6 +1,7 @@
 import { getDatabasePool } from "@/lib/db/client"
 import { getGeminiProviderMode, isGeminiConfigured } from "@/lib/ai/providers"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
+import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
 
 export type ProviderStatus = {
   id: string
@@ -16,7 +17,13 @@ export type WorkspaceStatus = {
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
     keyFileConfigured: boolean
-    strategy: "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
+    userOAuthConnected: boolean
+    strategy:
+      | "user-oauth"
+      | "keyless-iam-signjwt"
+      | "json-key"
+      | "key-file"
+      | "missing"
     configured: boolean
     detail: string
     serviceAccountEmail?: string
@@ -143,6 +150,9 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
   }
 
   const authStatus = getWorkspaceAuthStatus()
+  const userOAuth = await getGoogleWorkspaceOAuthConnectionStatus(
+    authStatus.subject
+  )
   const keyFileConfigured = authStatus.strategy === "key-file"
   const serviceAccountKeyConfigured = authStatus.strategy === "json-key"
 
@@ -152,9 +162,16 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
       serviceAccountEmailConfigured: Boolean(authStatus.serviceAccountEmail),
       serviceAccountKeyConfigured,
       keyFileConfigured,
+      userOAuthConnected: userOAuth.connected,
       strategy: authStatus.strategy,
-      configured: authStatus.configured,
-      detail: authStatus.detail,
+      configured:
+        authStatus.strategy === "user-oauth"
+          ? userOAuth.connected
+          : authStatus.configured,
+      detail:
+        authStatus.strategy === "user-oauth" && !userOAuth.connected
+          ? "Google Workspace OAuth is not connected. Sign in again to grant Workspace permissions."
+          : authStatus.detail,
       serviceAccountEmail: authStatus.serviceAccountEmail,
     },
     sync,

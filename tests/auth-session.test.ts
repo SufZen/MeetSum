@@ -64,12 +64,22 @@ describe("Google OAuth session", () => {
       clientId: "client-id",
       redirectUri: "https://meetsum.realization.co.il/api/auth/google/callback",
       state: "state-123",
+      scopes: [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/calendar.readonly",
+      ],
+      prompt: "consent select_account",
     })
 
     expect(url.origin).toBe("https://accounts.google.com")
     expect(url.searchParams.get("client_id")).toBe("client-id")
     expect(url.searchParams.get("response_type")).toBe("code")
     expect(url.searchParams.get("scope")).toContain("openid")
+    expect(url.searchParams.get("scope")).toContain("calendar.readonly")
+    expect(url.searchParams.get("prompt")).toBe("consent select_account")
+    expect(url.searchParams.get("include_granted_scopes")).toBe("true")
     expect(url.searchParams.get("state")).toBe("state-123")
   })
 })

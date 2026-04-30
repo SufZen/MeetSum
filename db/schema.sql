@@ -18,7 +18,11 @@ create table if not exists google_identities (
   workspace_account_id text not null references workspace_accounts(id),
   subject_email text not null,
   google_user_id text,
-  sync_enabled boolean not null default true
+  sync_enabled boolean not null default true,
+  oauth_refresh_token text,
+  oauth_scope text,
+  oauth_connected_at timestamptz,
+  oauth_last_error text
 );
 
 create table if not exists google_sync_states (
@@ -329,6 +333,10 @@ create table if not exists integration_endpoints (
 
 create unique index if not exists google_identities_workspace_subject_idx
   on google_identities(workspace_account_id, subject_email);
+
+create index if not exists idx_google_identities_oauth_connected
+  on google_identities(oauth_connected_at desc)
+  where oauth_refresh_token is not null;
 
 create unique index if not exists google_sync_states_identity_source_idx
   on google_sync_states(google_identity_id, source);

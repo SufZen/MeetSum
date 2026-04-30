@@ -6,6 +6,7 @@ import {
   createGoogleAuthorizationUrl,
   createOAuthState,
 } from "@/lib/auth/session"
+import { flattenGoogleWorkspaceScopes } from "@/lib/google/workspace"
 
 export async function GET(request: Request) {
   const config = getGoogleOAuthConfig()
@@ -18,6 +19,13 @@ export async function GET(request: Request) {
       redirectUri: config.redirectUri,
       state,
       loginHint: process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL,
+      scopes: [
+        "openid",
+        "email",
+        "profile",
+        ...flattenGoogleWorkspaceScopes(),
+      ],
+      prompt: "consent select_account",
     })
   )
 

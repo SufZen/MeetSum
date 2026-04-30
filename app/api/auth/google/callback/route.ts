@@ -7,6 +7,7 @@ import {
   getSessionSecret,
   parseAllowedEmails,
 } from "@/lib/auth/session"
+import { saveGoogleWorkspaceOAuthConnection } from "@/lib/google/oauth-tokens"
 
 function safeReturnTo(value: string | undefined): string {
   return value?.startsWith("/") && !value.startsWith("//") ? value : "/en"
@@ -40,6 +41,14 @@ export async function GET(request: Request) {
       secret: getSessionSecret(),
       allowedEmails: parseAllowedEmails(process.env.MEETSUM_ALLOWED_EMAILS),
     })
+
+    await saveGoogleWorkspaceOAuthConnection({
+      subject: identity.email,
+      googleUserId: identity.googleUserId,
+      refreshToken: identity.refreshToken,
+      scope: identity.scope,
+    })
+
     const response = NextResponse.redirect(
       new URL(safeReturnTo(storedReturnTo), appUrl)
     )
