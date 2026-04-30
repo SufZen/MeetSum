@@ -192,8 +192,8 @@ export function DriveRecordingPickerDrawer({
 
         <div className="grid gap-4 p-4">
           <div className="flex gap-2">
-            <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border bg-white px-3">
-              <SearchIcon aria-hidden="true" className="size-4 text-slate-500" />
+            <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3">
+              <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -213,7 +213,7 @@ export function DriveRecordingPickerDrawer({
           )}
 
           {lastImport && (
-            <div className="grid gap-2 rounded-md border border-teal-200 bg-cyan-50 p-3 text-sm text-teal-950 dark:border-teal-900/70 dark:bg-teal-950/35 dark:text-teal-50">
+            <div className="grid gap-2 rounded-md border border-[var(--focus)] bg-[var(--selected)] p-3 text-sm text-foreground">
               <div className="font-semibold">
                 Import result: {lastImport.imported} queued, {lastImport.skipped} skipped
               </div>
@@ -221,7 +221,7 @@ export function DriveRecordingPickerDrawer({
                 {lastImport.files.map((file) => (
                   <div key={`${file.fileId}-${file.jobId ?? file.status}`} className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0 truncate">{file.name ?? file.fileId}</span>
-                    <span className="rounded-sm bg-white/80 px-2 py-0.5 font-medium text-teal-900 dark:bg-slate-900/70 dark:text-teal-100">
+                    <span className="rounded-sm bg-[var(--surface)]/85 px-2 py-0.5 font-medium text-[var(--primary)]">
                       {file.status}
                       {file.jobId ? ` · ${file.jobId.slice(0, 8)}` : ""}
                     </span>
@@ -232,7 +232,7 @@ export function DriveRecordingPickerDrawer({
           )}
 
           {(loading || importing) && (
-            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-teal-950 dark:border-cyan-900/70 dark:bg-cyan-950/30 dark:text-cyan-50">
+            <div className="rounded-md border border-[var(--focus)] bg-[var(--selected)] p-3 text-sm text-foreground">
               {importing
                 ? "Importing selected recording(s): downloading from Drive, storing in MinIO, and queueing processing..."
                 : "Searching Drive recordings..."}
@@ -240,9 +240,9 @@ export function DriveRecordingPickerDrawer({
           )}
 
           {!loading && !importing && !error && recordings.length === 0 && (
-            <div className="grid min-h-40 place-items-center rounded-md border border-dashed bg-slate-50 p-6 text-center text-sm text-slate-600">
+            <div className="grid min-h-40 place-items-center rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-6 text-center text-sm text-muted-foreground">
               <div>
-                <FileAudioIcon aria-hidden="true" className="mx-auto mb-2 size-7 text-teal-700" />
+                <FileAudioIcon aria-hidden="true" className="mx-auto mb-2 size-7 text-[var(--primary)]" />
                 No unimported Drive recordings found.
               </div>
             </div>
@@ -254,7 +254,7 @@ export function DriveRecordingPickerDrawer({
                 key={recording.fileId}
                 role="button"
                 tabIndex={0}
-                className="grid gap-2 rounded-md border bg-white p-3 text-left transition hover:border-teal-300 hover:bg-cyan-50/30 data-[selected=true]:border-teal-500 data-[selected=true]:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-70 rtl:text-right"
+                className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/60 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] disabled:cursor-not-allowed disabled:opacity-70 rtl:text-right"
                 data-selected={selected.has(recording.fileId)}
                 onClick={() => toggle(recording.fileId)}
                 onKeyDown={(event) => {
@@ -273,14 +273,14 @@ export function DriveRecordingPickerDrawer({
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="break-words text-sm font-semibold text-slate-950">
+                      <div className="break-words text-sm font-semibold text-foreground">
                         {recording.name}
                       </div>
-                      <span className="rounded-sm bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                      <span className="rounded-sm bg-[var(--muted)] px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                         {recording.status}
                       </span>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span>{recording.mimeType ?? "media"}</span>
                       <span>{formatBytes(recording.sizeBytes)}</span>
                       {recording.modifiedTime && (
@@ -288,7 +288,7 @@ export function DriveRecordingPickerDrawer({
                       )}
                     </div>
                     {recording.bestCalendarMatch && (
-                      <div className="mt-2 flex items-center gap-2 text-xs text-teal-800">
+                      <div className="mt-2 flex items-center gap-2 text-xs text-[var(--primary)]">
                         <CalendarIcon aria-hidden="true" className="size-3.5" />
                         <span className="truncate">
                           Matches {recording.bestCalendarMatch.title} ·{" "}
@@ -301,7 +301,7 @@ export function DriveRecordingPickerDrawer({
                         {recording.artifactHints.map((hint) => (
                           <span
                             key={hint}
-                            className="rounded-sm bg-cyan-50 px-2 py-0.5 text-[11px] text-teal-800"
+                            className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] text-[var(--primary)]"
                           >
                             {hint}
                           </span>
@@ -318,8 +318,8 @@ export function DriveRecordingPickerDrawer({
           </div>
         </div>
 
-        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-white p-4">
-          <div className="text-sm text-slate-600">
+        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-[var(--divider)] bg-[var(--surface)] p-4">
+          <div className="text-sm text-muted-foreground">
             {importing ? "Import in progress..." : `${selectedCount}/5 selected`}
           </div>
           <Button className="h-10" disabled={loading || importing || !selectedCount} onClick={importSelected}>

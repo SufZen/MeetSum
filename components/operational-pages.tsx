@@ -34,7 +34,7 @@ function PageFrame({
   children: ReactNode
 }) {
   return (
-    <div className="min-h-[calc(100svh-4rem)] bg-[var(--surface-subtle)] p-4 lg:p-6">
+    <div className="min-h-[calc(100svh-4rem)] overflow-y-auto bg-[var(--surface-subtle)] p-4 lg:h-[calc(100svh-4rem)] lg:p-6">
       <div className="mx-auto grid max-w-7xl gap-5">
         <header className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
           <div className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">

@@ -42,20 +42,20 @@ export function MeetingHeader({
   const room = meeting.contexts?.[0]?.name ?? "Real Estate Acquisitions"
 
   return (
-    <header className="border-b bg-white px-7 py-5">
+    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-7 py-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <Badge variant="secondary" className="rounded-sm bg-emerald-50 text-emerald-700">
               {sourceLabel(meeting.source)}
             </Badge>
-            <h1 className="break-words text-xl font-semibold tracking-tight text-slate-950 md:text-2xl">
+            <h1 className="break-words text-xl font-semibold tracking-tight text-foreground md:text-2xl">
               {meeting.title}
             </h1>
             <StarIcon aria-hidden="true" className="size-4 text-amber-400" />
-            <EllipsisIcon aria-hidden="true" className="size-5 text-slate-500" />
+            <EllipsisIcon aria-hidden="true" className="size-5 text-muted-foreground" />
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600">
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
               <CalendarIcon aria-hidden="true" className="size-4" />
               {formatter.format(new Date(meeting.startedAt))}
@@ -70,11 +70,11 @@ export function MeetingHeader({
             </span>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-            <span className="flex items-center gap-2 text-slate-700">
+            <span className="flex items-center gap-2 text-muted-foreground">
               <span className="size-2 rounded-full bg-emerald-500" />
               {room}
             </span>
-            <Button variant="outline" size="sm" className="h-8 border-teal-100 bg-cyan-50 text-teal-700">
+            <Button variant="outline" size="sm" className="h-8 border-[var(--focus)] bg-[var(--selected)] text-[var(--primary)]">
               Add to room
             </Button>
           </div>

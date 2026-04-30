@@ -123,4 +123,76 @@ describe("meeting repository", () => {
     expect(meeting?.contexts?.[0]).toMatchObject({ name: "RealizeOS" })
     expect(meeting?.suggestedAgentRuns?.[0]).toEqual(suggestion)
   })
+
+  it("returns paged meeting lists with filtering, sorting, and totals", async () => {
+    const repository = createInMemoryMeetingRepository([
+      {
+        id: "meet_completed",
+        title: "Completed strategy call",
+        source: "google_meet",
+        language: "en",
+        status: "completed",
+        retention: "audio",
+        startedAt: "2026-04-23T09:00:00.000Z",
+        participants: ["Ran"],
+        tags: ["operations"],
+      },
+      {
+        id: "meet_processing",
+        title: "Processing upload",
+        source: "upload",
+        language: "he",
+        status: "transcribing",
+        retention: "audio",
+        startedAt: "2026-04-24T09:00:00.000Z",
+        participants: ["Ran"],
+      },
+      {
+        id: "meet_upcoming",
+        title: "Future calendar event",
+        source: "google_meet",
+        language: "en",
+        status: "scheduled",
+        retention: "audio",
+        startedAt: "2099-04-24T09:00:00.000Z",
+        participants: ["Ran"],
+      },
+    ])
+
+    const firstPage = await repository.listMeetingsPage({
+      limit: 2,
+      offset: 0,
+      sort: "smart",
+      status: "all",
+    })
+
+    expect(firstPage.page).toMatchObject({
+      limit: 2,
+      offset: 0,
+      total: 3,
+      hasMore: true,
+    })
+    expect(firstPage.meetings.map((meeting) => meeting.id)).toEqual([
+      "meet_completed",
+      "meet_processing",
+    ])
+
+    const processing = await repository.listMeetingsPage({
+      limit: 5,
+      status: "processing",
+    })
+
+    expect(processing.meetings.map((meeting) => meeting.id)).toEqual([
+      "meet_processing",
+    ])
+
+    const searched = await repository.listMeetingsPage({
+      limit: 5,
+      query: "strategy",
+    })
+
+    expect(searched.meetings.map((meeting) => meeting.id)).toEqual([
+      "meet_completed",
+    ])
+  })
 })

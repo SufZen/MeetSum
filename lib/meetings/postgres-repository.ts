@@ -8,6 +8,8 @@ import type {
   MediaAsset,
   MeetingAnswer,
   MeetingContext,
+  MeetingListOptions,
+  MeetingListSortMode,
   MeetingRecord,
   MeetingRepository,
   SuggestedAgentRun,
@@ -123,6 +125,100 @@ function normalizeLimit(value?: number) {
   if (!value || !Number.isFinite(value)) return 50
 
   return Math.max(1, Math.min(Math.trunc(value), 100))
+}
+
+function normalizeOffset(value?: number) {
+  if (!value || !Number.isFinite(value)) return 0
+
+  return Math.max(0, Math.trunc(value))
+}
+
+function normalizeSort(value?: MeetingListSortMode): MeetingListSortMode {
+  if (
+    value === "recent" ||
+    value === "oldest" ||
+    value === "title" ||
+    value === "status"
+  ) {
+    return value
+  }
+
+  return "smart"
+}
+
+function buildMeetingListClauses(options: MeetingListOptions) {
+  const clauses: string[] = []
+  const values: unknown[] = []
+
+  if (options.status && options.status !== "all") {
+    if (options.status === "usable") {
+      clauses.push(
+        `m.status in ('completed', 'indexing', 'summarizing', 'transcribing', 'media_uploaded', 'failed')`
+      )
+    } else if (options.status === "upcoming") {
+      clauses.push(`m.status = 'scheduled' and m.started_at > now()`)
+    } else if (options.status === "processing") {
+      clauses.push(
+        `m.status in ('indexing', 'summarizing', 'transcribing', 'media_uploaded')`
+      )
+    } else {
+      values.push(options.status)
+      clauses.push(`m.status = $${values.length}`)
+    }
+  }
+
+  if (options.query?.trim()) {
+    values.push(`%${options.query.trim()}%`)
+    const queryIndex = values.length
+
+    clauses.push(`
+      (
+        m.title ilike $${queryIndex}
+        or m.source::text ilike $${queryIndex}
+        or m.language ilike $${queryIndex}
+        or exists (
+          select 1 from transcript_segments ts
+          where ts.meeting_id = m.id and ts.text ilike $${queryIndex}
+        )
+        or exists (
+          select 1 from summaries s
+          where s.meeting_id = m.id and s.overview ilike $${queryIndex}
+        )
+        or exists (
+          select 1 from action_items ai
+          where ai.meeting_id = m.id and ai.title ilike $${queryIndex}
+        )
+        or exists (
+          select 1
+          from meeting_tags mt
+          join tags t on t.id = mt.tag_id
+          where mt.meeting_id = m.id and t.name ilike $${queryIndex}
+        )
+      )
+    `)
+  }
+
+  return {
+    whereSql: clauses.length ? `where ${clauses.join(" and ")}` : "",
+    values,
+  }
+}
+
+function meetingOrderSql(sort: MeetingListSortMode) {
+  if (sort === "recent") return `m.started_at desc, m.created_at desc`
+  if (sort === "oldest") return `m.started_at asc, m.created_at asc`
+  if (sort === "title") return `lower(m.title) asc, m.started_at desc`
+  if (sort === "status") return `m.status asc, m.started_at desc`
+
+  return `
+    case
+      when m.status in ('completed', 'indexing', 'summarizing', 'transcribing', 'media_uploaded', 'failed') then 0
+      when m.status = 'scheduled' and m.started_at > now() then 2
+      else 1
+    end asc,
+    coalesce(recent_job.last_job_at, recent_import.imported_at, m.created_at, m.started_at) desc,
+    m.started_at desc
+  `
 }
 
 function toIso(value: string | Date): string {
@@ -384,8 +480,26 @@ export function createPostgresMeetingRepository(
   }
 
   return {
-    async listMeetings(options: { limit?: number } = {}) {
+    async listMeetings(options: MeetingListOptions = {}) {
+      return (await this.listMeetingsPage(options)).meetings
+    },
+
+    async listMeetingsPage(options: MeetingListOptions = {}) {
       const limit = normalizeLimit(options.limit)
+      const offset = normalizeOffset(options.offset)
+      const sort = normalizeSort(options.sort)
+      const { whereSql, values } = buildMeetingListClauses(options)
+      const countResult = await client.query(
+        `
+          select count(*)::int as total
+          from meetings m
+          ${whereSql}
+        `,
+        values
+      )
+      const total = Number((countResult.rows[0] as { total?: number }).total ?? 0)
+      const limitIndex = values.length + 1
+      const offsetIndex = values.length + 2
       const result = await client.query(
         `
         select m.id, m.title, m.source, m.language, m.status, m.retention, m.started_at,
@@ -402,21 +516,28 @@ export function createPostgresMeetingRepository(
           join drive_files df on df.id = mdf.drive_file_id
           where mdf.meeting_id = m.id
         ) recent_import on true
-        order by
-          case
-            when m.status in ('completed', 'indexing', 'summarizing', 'transcribing', 'media_uploaded', 'failed') then 0
-            when m.status = 'scheduled' and m.started_at > now() then 2
-            else 1
-          end asc,
-          coalesce(recent_job.last_job_at, recent_import.imported_at, m.created_at, m.started_at) desc,
-          m.started_at desc
-        limit $1
+        ${whereSql}
+        order by ${meetingOrderSql(sort)}
+        limit $${limitIndex}
+        offset $${offsetIndex}
       `,
-        [limit]
+        [...values, limit, offset]
       )
 
       const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
-      return Promise.all(bases.map((meeting) => hydrateMeeting(meeting)))
+      const meetings = await Promise.all(
+        bases.map((meeting) => hydrateMeeting(meeting))
+      )
+
+      return {
+        meetings,
+        page: {
+          limit,
+          offset,
+          total,
+          hasMore: offset + meetings.length < total,
+        },
+      }
     },
 
     async getMeeting(id: string) {
@@ -795,27 +916,13 @@ export function createPostgresMeetingRepository(
     },
 
     async searchMeetings(query: string, options: { limit?: number } = {}) {
-      const limit = normalizeLimit(options.limit)
-      const result = await client.query(
-        `
-          select distinct m.id, m.title, m.source, m.language, m.status,
-                 m.retention, m.started_at, m.participants, m.language_metadata
-          from meetings m
-          left join transcript_segments ts on ts.meeting_id = m.id
-          left join summaries s on s.meeting_id = m.id
-          left join action_items ai on ai.meeting_id = m.id
-          where m.title ilike $1
-             or ts.text ilike $1
-             or s.overview ilike $1
-             or ai.title ilike $1
-          order by m.started_at desc
-          limit $2
-        `,
-        [`%${query}%`, limit]
-      )
-
-      const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
-      return Promise.all(bases.map((meeting) => hydrateMeeting(meeting)))
+      return (
+        await this.listMeetingsPage({
+          query,
+          limit: options.limit,
+          sort: "recent",
+        })
+      ).meetings
     },
 
     async askMeetingMemory(

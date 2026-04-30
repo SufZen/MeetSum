@@ -115,6 +115,33 @@ export type MeetingRecord = {
   mediaAssets?: MediaAsset[]
 }
 
+export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"
+
+export type MeetingListStatusFilter =
+  | "all"
+  | "usable"
+  | "upcoming"
+  | "processing"
+  | MeetingStatus
+
+export type MeetingListOptions = {
+  limit?: number
+  offset?: number
+  query?: string
+  status?: MeetingListStatusFilter | string
+  sort?: MeetingListSortMode
+}
+
+export type MeetingListPage = {
+  meetings: MeetingRecord[]
+  page: {
+    limit: number
+    offset: number
+    total: number
+    hasMore: boolean
+  }
+}
+
 export type CreateMeetingInput = {
   title: string
   source: MeetingSource
@@ -133,7 +160,8 @@ export type MeetingAnswer = {
 }
 
 export type MeetingRepository = {
-  listMeetings: (options?: { limit?: number }) => Promise<MeetingRecord[]>
+  listMeetings: (options?: MeetingListOptions) => Promise<MeetingRecord[]>
+  listMeetingsPage: (options?: MeetingListOptions) => Promise<MeetingListPage>
   getMeeting: (id: string) => Promise<MeetingRecord | undefined>
   createMeeting: (input: CreateMeetingInput) => Promise<MeetingRecord>
   updateMeetingStatus: (
@@ -214,6 +242,102 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`
 }
 
+function normalizeListLimit(value?: number) {
+  if (!value || !Number.isFinite(value)) return 50
+
+  return Math.max(1, Math.min(Math.trunc(value), 100))
+}
+
+function normalizeListOffset(value?: number) {
+  if (!value || !Number.isFinite(value)) return 0
+
+  return Math.max(0, Math.trunc(value))
+}
+
+function meetingMatchesStatus(meeting: MeetingRecord, status?: string) {
+  if (!status || status === "all") return true
+  if (status === "usable") {
+    return [
+      "completed",
+      "indexing",
+      "summarizing",
+      "transcribing",
+      "media_uploaded",
+      "failed",
+    ].includes(meeting.status)
+  }
+  if (status === "upcoming") {
+    return meeting.status === "scheduled" && new Date(meeting.startedAt).getTime() > Date.now()
+  }
+  if (status === "processing") {
+    return ["indexing", "summarizing", "transcribing", "media_uploaded"].includes(
+      meeting.status
+    )
+  }
+
+  return meeting.status === status
+}
+
+function meetingMatchesQuery(meeting: MeetingRecord, query?: string) {
+  const needle = query?.trim().toLowerCase()
+
+  if (!needle) return true
+
+  const searchable = [
+    meeting.title,
+    meeting.source,
+    meeting.language,
+    meeting.summary?.overview,
+    ...(meeting.summary?.decisions ?? []),
+    ...(meeting.summary?.actionItems.map((item) => item.title) ?? []),
+    ...(meeting.tags ?? []),
+    ...(meeting.contexts?.map((context) => context.name) ?? []),
+    ...(meeting.transcript?.map((segment) => segment.text) ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+
+  return searchable.includes(needle)
+}
+
+function sortMeetings(meetings: MeetingRecord[], mode: MeetingListSortMode = "smart") {
+  const rank: Record<string, number> = {
+    completed: 0,
+    indexing: 1,
+    summarizing: 1,
+    transcribing: 1,
+    media_uploaded: 2,
+    media_found: 3,
+    failed: 4,
+    scheduled: 6,
+    created: 7,
+  }
+  const now = Date.now()
+
+  return [...meetings].sort((left, right) => {
+    const leftTime = new Date(left.startedAt).getTime()
+    const rightTime = new Date(right.startedAt).getTime()
+
+    if (mode === "recent") return rightTime - leftTime
+    if (mode === "oldest") return leftTime - rightTime
+    if (mode === "title") return left.title.localeCompare(right.title)
+    if (mode === "status") {
+      const statusCompare = left.status.localeCompare(right.status)
+      if (statusCompare !== 0) return statusCompare
+      return rightTime - leftTime
+    }
+
+    const leftFuture = left.status === "scheduled" && leftTime > now
+    const rightFuture = right.status === "scheduled" && rightTime > now
+    const leftRank = leftFuture ? 8 : (rank[left.status] ?? 5)
+    const rightRank = rightFuture ? 8 : (rank[right.status] ?? 5)
+
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return rightTime - leftTime
+  })
+}
+
 export function createInMemoryMeetingRepository(
   initialMeetings: MeetingRecord[] = []
 ): MeetingRepository {
@@ -224,12 +348,28 @@ export function createInMemoryMeetingRepository(
   const jobs = new Map<string, JobRecord>()
 
   return {
-    async listMeetings(options?: { limit?: number }): Promise<MeetingRecord[]> {
-      const sorted = [...meetings.values()].sort((a, b) =>
-        b.startedAt.localeCompare(a.startedAt)
-      )
+    async listMeetings(options?: MeetingListOptions): Promise<MeetingRecord[]> {
+      return (await this.listMeetingsPage(options)).meetings
+    },
 
-      return options?.limit ? sorted.slice(0, options.limit) : sorted
+    async listMeetingsPage(options: MeetingListOptions = {}): Promise<MeetingListPage> {
+      const limit = normalizeListLimit(options.limit)
+      const offset = normalizeListOffset(options.offset)
+      const filtered = [...meetings.values()]
+        .filter((meeting) => meetingMatchesStatus(meeting, options.status))
+        .filter((meeting) => meetingMatchesQuery(meeting, options.query))
+      const sorted = sortMeetings(filtered, options.sort)
+      const pageMeetings = sorted.slice(offset, offset + limit)
+
+      return {
+        meetings: pageMeetings,
+        page: {
+          limit,
+          offset,
+          total: sorted.length,
+          hasMore: offset + pageMeetings.length < sorted.length,
+        },
+      }
     },
 
     async getMeeting(id: string): Promise<MeetingRecord | undefined> {
@@ -434,24 +574,13 @@ export function createInMemoryMeetingRepository(
       query: string,
       options?: { limit?: number }
     ): Promise<MeetingRecord[]> {
-      const needle = normalize(query)
-      const allMeetings = await this.listMeetings()
-
-      const matches = allMeetings.filter((meeting) => {
-        const searchable = [
-          meeting.title,
-          meeting.summary?.overview,
-          ...(meeting.summary?.decisions ?? []),
-          ...(meeting.summary?.actionItems.map((item) => item.title) ?? []),
-          ...(meeting.transcript?.map((segment) => segment.text) ?? []),
-        ]
-          .filter(Boolean)
-          .join(" ")
-
-        return normalize(searchable).includes(needle)
-      })
-
-      return options?.limit ? matches.slice(0, options.limit) : matches
+      return (
+        await this.listMeetingsPage({
+          query: normalize(query),
+          limit: options?.limit,
+          sort: "recent",
+        })
+      ).meetings
     },
 
     async askMeetingMemory(

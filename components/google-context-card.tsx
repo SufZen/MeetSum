@@ -13,10 +13,10 @@ export function GoogleContextCard({ meeting }: { meeting: MeetingRecord | null }
   ]
 
   return (
-    <section className="rounded-md border bg-white p-4">
+    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Google Context</h3>
-        <Button variant="ghost" size="sm" className="h-7 text-teal-700">
+        <Button variant="ghost" size="sm" className="h-7 text-[var(--primary)]">
           View all
         </Button>
       </div>
@@ -26,16 +26,16 @@ export function GoogleContextCard({ meeting }: { meeting: MeetingRecord | null }
 
           return (
             <div key={item.label} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3">
-              <Icon aria-hidden="true" className="mt-0.5 size-5 text-teal-700" />
+              <Icon aria-hidden="true" className="mt-0.5 size-5 text-[var(--primary)]" />
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-950">{item.label}</div>
-                <div className="truncate text-xs text-slate-600">{item.value}</div>
+                <div className="text-xs font-semibold text-foreground">{item.label}</div>
+                <div className="truncate text-xs text-muted-foreground">{item.value}</div>
               </div>
             </div>
           )
         })}
         {!meeting && (
-          <div className="flex items-center gap-2 rounded-md border border-dashed p-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--divider)] p-3 text-xs text-muted-foreground">
             <FileIcon aria-hidden="true" className="size-4" />
             Select a meeting to see linked Workspace context.
           </div>

@@ -60,9 +60,9 @@ export function MainSidebar({
   ] as const
 
   return (
-    <aside className="flex min-h-0 flex-col bg-[#052d3d] p-3 text-white lg:sticky lg:top-0 lg:min-h-svh lg:p-2">
+    <aside className="flex min-h-0 flex-col bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh lg:p-2">
       <div className="flex h-12 items-center justify-center gap-3 px-3 lg:h-16 lg:justify-start">
-        <div className="grid size-8 place-items-center text-teal-300">
+        <div className="grid size-8 place-items-center text-[var(--sidebar-primary)]">
           <AudioWaveformIcon aria-hidden="true" className="size-7" />
         </div>
         <div className="text-xl font-semibold tracking-tight">MeetSum</div>
@@ -80,8 +80,8 @@ export function MainSidebar({
               variant="ghost"
               className={
                 active
-                  ? "h-10 min-w-fit justify-start rounded-md bg-[#087d8a] px-3 text-white hover:bg-[#087d8a] hover:text-white lg:h-11 lg:min-w-0"
-                  : "h-10 min-w-fit justify-start rounded-md px-3 text-white/90 hover:bg-white/10 hover:text-white lg:h-11 lg:min-w-0"
+                  ? "h-10 min-w-fit justify-start rounded-md bg-[var(--sidebar-primary)] px-3 text-[var(--sidebar-primary-foreground)] hover:bg-[var(--sidebar-primary)] hover:text-[var(--sidebar-primary-foreground)] lg:h-11 lg:min-w-0"
+                  : "h-10 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground/90 hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground lg:h-11 lg:min-w-0"
               }
               onClick={() => onPanelChange(panel)}
             >
@@ -93,11 +93,11 @@ export function MainSidebar({
       </nav>
 
       <div className="mt-auto hidden px-3 pb-2 lg:block">
-        <div className="mb-4 flex items-center justify-between text-xs uppercase tracking-wide text-white/55">
+        <div className="mb-4 flex items-center justify-between text-xs uppercase tracking-wide text-sidebar-foreground/60">
           <span>Recent rooms</span>
           <FolderPlusIcon aria-hidden="true" className="size-4" />
         </div>
-        <div className="grid gap-3 text-sm text-white/86">
+        <div className="grid gap-3 text-sm text-sidebar-foreground/85">
           {rooms.map(([room, color]) => (
             <div key={room} className="flex min-w-0 items-center gap-2">
               <span className={`size-2 rounded-full ${color}`} />
@@ -105,13 +105,13 @@ export function MainSidebar({
             </div>
           ))}
         </div>
-        <div className="mt-10 flex items-center gap-3 rounded-md border border-white/12 bg-white/4 p-3">
+        <div className="mt-10 flex items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3">
           <div className="grid size-8 place-items-center rounded-full bg-blue-500 text-sm font-semibold">
             I
           </div>
           <div className="min-w-0">
             <div className="text-sm font-semibold">Info</div>
-            <div className="truncate text-xs text-white/64">
+            <div className="truncate text-xs text-sidebar-foreground/65">
               info@realization.co.il
             </div>
           </div>

@@ -49,7 +49,7 @@ export function PipelineTimeline({
     : "Waiting for job update"
 
   return (
-    <section className="rounded-md border bg-white p-4">
+    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
       <h3 className="mb-3 text-sm font-semibold">Pipeline</h3>
       <div className="grid gap-0">
         {pipeline.map(([status, label], index) => {
@@ -73,8 +73,8 @@ export function PipelineTimeline({
                 )}
               </div>
               <div className="pb-2">
-                <div className="text-sm font-medium text-slate-900">{label}</div>
-                <div className="text-xs text-slate-500">
+                <div className="text-sm font-medium text-foreground">{label}</div>
+                <div className="text-xs text-muted-foreground">
                   {active ? (latestJob?.status ?? "active") : latestJobLabel}
                 </div>
               </div>

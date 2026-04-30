@@ -35,10 +35,10 @@ export function AudioPlaybackBar({ meeting }: { meeting: MeetingRecord }) {
   const duration = meetingDuration(meeting)
 
   return (
-    <div className="mt-8 flex min-h-14 flex-wrap items-center gap-3 rounded-md border bg-white px-3 py-2 shadow-sm">
+    <div className="mt-8 flex min-h-14 flex-wrap items-center gap-3 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 shadow-sm">
       <Button
         size="icon"
-        className="size-9 rounded-full bg-teal-700 text-white hover:bg-teal-800"
+        className="size-9 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary)]/90"
         onClick={() => setPlaying((current) => !current)}
       >
         {playing ? <PauseIcon className="size-4" /> : <PlayIcon className="size-4" />}
@@ -53,11 +53,11 @@ export function AudioPlaybackBar({ meeting }: { meeting: MeetingRecord }) {
       <Button variant="ghost" size="sm" className="h-8">
         1x
       </Button>
-      <span className="font-mono text-xs text-slate-600">
+      <span className="font-mono text-xs text-muted-foreground">
         00:00 / {formatDuration(duration)}
       </span>
-      <BookmarkIcon aria-hidden="true" className="ms-auto size-4 text-slate-500" />
-      <Volume2Icon aria-hidden="true" className="size-4 text-slate-500" />
+      <BookmarkIcon aria-hidden="true" className="ms-auto size-4 text-muted-foreground" />
+      <Volume2Icon aria-hidden="true" className="size-4 text-muted-foreground" />
       <div className="flex h-6 min-w-[180px] flex-1 items-center gap-px">
         {Array.from({ length: 48 }).map((_, index) => (
           <span
@@ -66,13 +66,13 @@ export function AudioPlaybackBar({ meeting }: { meeting: MeetingRecord }) {
               index % 11 === 0
                 ? "h-5 w-0.5 rounded-full bg-amber-400"
                 : index < 16
-                  ? "h-4 w-0.5 rounded-full bg-cyan-400"
-                  : "h-3 w-0.5 rounded-full bg-slate-300"
+                  ? "h-4 w-0.5 rounded-full bg-[var(--primary)]"
+                  : "h-3 w-0.5 rounded-full bg-[var(--muted)]"
             }
           />
         ))}
       </div>
-      <ExpandIcon aria-hidden="true" className="size-4 text-slate-500" />
+      <ExpandIcon aria-hidden="true" className="size-4 text-muted-foreground" />
     </div>
   )
 }

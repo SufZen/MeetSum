@@ -1,6 +1,13 @@
 "use client"
 
-import { type ChangeEvent, useEffect, useMemo, useState, useTransition } from "react"
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
@@ -27,86 +34,11 @@ import type {
   MeetingRecord,
 } from "@/lib/meetings/repository"
 
-function filterMeetings(
-  meetings: MeetingRecord[],
-  query: string,
-  statusFilter: string
-) {
-  const normalized = query.trim().toLowerCase()
-
-  return meetings
-    .filter((meeting) => {
-      if (statusFilter === "all") return true
-      if (statusFilter === "usable") {
-        return [
-          "completed",
-          "indexing",
-          "summarizing",
-          "transcribing",
-          "media_uploaded",
-          "failed",
-        ].includes(meeting.status)
-      }
-      if (statusFilter === "upcoming") {
-        return meeting.status === "scheduled"
-      }
-
-      return meeting.status === statusFilter
-    })
-    .filter((meeting) => {
-      if (!normalized) return true
-
-      return [
-        meeting.title,
-        meeting.summary?.overview,
-        meeting.source,
-        meeting.language,
-        ...(meeting.tags ?? []),
-        ...(meeting.transcript?.map((segment) => segment.text) ?? []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(normalized)
-    })
-}
-
-function sortMeetingsForInbox(meetings: MeetingRecord[], mode: MeetingSortMode = "smart") {
-  const rank: Record<string, number> = {
-    completed: 0,
-    indexing: 1,
-    summarizing: 1,
-    transcribing: 1,
-    media_uploaded: 2,
-    media_found: 3,
-    media_uploaded_failed: 4,
-    failed: 4,
-    scheduled: 6,
-    created: 7,
-  }
-  const now = Date.now()
-
-  return [...meetings].sort((left, right) => {
-    const leftTime = new Date(left.startedAt).getTime()
-    const rightTime = new Date(right.startedAt).getTime()
-
-    if (mode === "recent") return rightTime - leftTime
-    if (mode === "oldest") return leftTime - rightTime
-    if (mode === "title") return left.title.localeCompare(right.title)
-    if (mode === "status") {
-      const statusCompare = left.status.localeCompare(right.status)
-      if (statusCompare !== 0) return statusCompare
-      return rightTime - leftTime
-    }
-
-    const leftFuture = left.status === "scheduled" && leftTime > now
-    const rightFuture = right.status === "scheduled" && rightTime > now
-    const leftRank = leftFuture ? 8 : (rank[left.status] ?? 5)
-    const rightRank = rightFuture ? 8 : (rank[right.status] ?? 5)
-
-    if (leftRank !== rightRank) return leftRank - rightRank
-    return rightTime - leftTime
-  })
+type MeetingPageState = {
+  limit: number
+  offset: number
+  total: number
+  hasMore: boolean
 }
 
 export function CommandCenterShell({
@@ -119,12 +51,21 @@ export function CommandCenterShell({
   meetings: MeetingRecord[]
 }) {
   const router = useRouter()
-  const initialMeetings = useMemo(() => sortMeetingsForInbox(meetings), [meetings])
+  const initialMeetings = useMemo(() => meetings, [meetings])
   const [meetingRecords, setMeetingRecords] = useState(initialMeetings)
   const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetings[0]?.id ?? "")
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [sortMode, setSortMode] = useState<MeetingSortMode>("smart")
+  const [pageSize, setPageSize] = useState(5)
+  const [pageOffset, setPageOffset] = useState(0)
+  const [meetingPage, setMeetingPage] = useState<MeetingPageState>({
+    limit: 5,
+    offset: 0,
+    total: initialMeetings.length,
+    hasMore: false,
+  })
+  const [meetingsLoading, setMeetingsLoading] = useState(false)
   const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
   const [askQuestion, setAskQuestion] = useState(dictionary.askDefaultQuestion)
   const [askAnswer, setAskAnswer] = useState("")
@@ -141,10 +82,10 @@ export function CommandCenterShell({
   useEffect(() => {
     const meetingId = new URLSearchParams(window.location.search).get("meeting")
 
-    if (meetingId && meetings.some((meeting) => meeting.id === meetingId)) {
+    if (meetingId && meetingRecords.some((meeting) => meeting.id === meetingId)) {
       queueMicrotask(() => setSelectedMeetingId(meetingId))
     }
-  }, [meetings])
+  }, [meetingRecords])
 
   async function refreshOperationalState() {
     const [providersResponse, workspaceResponse, jobsResponse] =
@@ -202,23 +143,19 @@ export function CommandCenterShell({
     })
   }
 
-  const filteredMeetings = useMemo(
-    () => sortMeetingsForInbox(filterMeetings(meetingRecords, query, statusFilter), sortMode),
-    [meetingRecords, query, sortMode, statusFilter]
-  )
   const selectedMeeting =
     meetingRecords.find((meeting) => meeting.id === selectedMeetingId) ??
-    filteredMeetings[0] ??
+    meetingRecords[0] ??
     null
 
-  function selectMeeting(meetingId: string) {
+  const selectMeeting = useCallback((meetingId: string) => {
     setSelectedMeetingId(meetingId)
     setActivePanel("meetings")
     const params = new URLSearchParams(window.location.search)
 
     params.set("meeting", meetingId)
     router.replace(`?${params.toString()}`, { scroll: false })
-  }
+  }, [router])
 
   async function refreshMeeting(meetingId = selectedMeeting?.id) {
     if (!meetingId) return
@@ -235,19 +172,65 @@ export function CommandCenterShell({
     )
   }
 
-  async function refreshMeetings(nextSelectedMeetingId?: string) {
-    const meetingsResponse = await fetch("/api/meetings")
+  const refreshMeetings = useCallback(async (nextSelectedMeetingId?: string) => {
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      offset: String(pageOffset),
+      sort: sortMode,
+      status: statusFilter,
+    })
 
-    if (!meetingsResponse.ok) return
+    if (query.trim()) {
+      params.set("query", query.trim())
+    }
+
+    setMeetingsLoading(true)
+    const meetingsResponse = await fetch(`/api/meetings?${params.toString()}`)
+
+    if (!meetingsResponse.ok) {
+      setMeetingsLoading(false)
+      return
+    }
 
     const meetingsBody = await meetingsResponse.json()
     const nextMeetings = meetingsBody.meetings ?? []
 
-    setMeetingRecords(sortMeetingsForInbox(nextMeetings))
+    setMeetingRecords(nextMeetings)
+    setMeetingPage(
+      meetingsBody.page ?? {
+        limit: pageSize,
+        offset: pageOffset,
+        total: nextMeetings.length,
+        hasMore: false,
+      }
+    )
+    setMeetingsLoading(false)
     if (nextSelectedMeetingId) {
       selectMeeting(nextSelectedMeetingId)
+    } else if (
+      nextMeetings.length &&
+      !nextMeetings.some((meeting: MeetingRecord) => meeting.id === selectedMeetingId)
+    ) {
+      setSelectedMeetingId(nextMeetings[0].id)
     }
-  }
+  }, [
+    pageOffset,
+    pageSize,
+    query,
+    selectMeeting,
+    selectedMeetingId,
+    sortMode,
+    statusFilter,
+  ])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(
+      () => void refreshMeetings(),
+      query.trim() ? 250 : 0
+    )
+
+    return () => window.clearTimeout(timeoutId)
+  }, [refreshMeetings, query])
 
   async function createMeetingForFile(file: File) {
     const response = await fetch("/api/meetings", {
@@ -267,7 +250,7 @@ export function CommandCenterShell({
       throw new Error(body.error ?? "Unable to create meeting")
     }
 
-    setMeetingRecords((current) => [body.meeting, ...current])
+    setMeetingRecords((current) => [body.meeting, ...current].slice(0, pageSize))
     setSelectedMeetingId(body.meeting.id)
     setActivePanel("meetings")
     return body.meeting as MeetingRecord
@@ -476,18 +459,38 @@ export function CommandCenterShell({
   }
 
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-4rem)] grid-cols-1 bg-slate-50 lg:grid-cols-[348px_minmax(0,1fr)] 2xl:grid-cols-[348px_minmax(0,1fr)_272px]">
+    <div className="grid min-h-[calc(100svh-4rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-4rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[348px_minmax(0,1fr)] 2xl:grid-cols-[348px_minmax(0,1fr)_272px]">
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
-        meetings={filteredMeetings}
+        meetings={meetingRecords}
         selectedMeetingId={selectedMeeting?.id}
         query={query}
         activeFilter={statusFilter}
         sortMode={sortMode}
-        onQueryChange={setQuery}
-        onFilterChange={setStatusFilter}
-        onSortChange={setSortMode}
+        loading={meetingsLoading}
+        page={meetingPage}
+        pageSize={pageSize}
+        onQueryChange={(value) => {
+          setQuery(value)
+          setPageOffset(0)
+        }}
+        onFilterChange={(value) => {
+          setStatusFilter(value)
+          setPageOffset(0)
+        }}
+        onSortChange={(value) => {
+          setSortMode(value)
+          setPageOffset(0)
+        }}
+        onPageSizeChange={(value) => {
+          setPageSize(value)
+          setPageOffset(0)
+        }}
+        onPreviousPage={() => setPageOffset((current) => Math.max(0, current - pageSize))}
+        onNextPage={() => {
+          if (meetingPage.hasMore) setPageOffset((current) => current + pageSize)
+        }}
         onSelectMeeting={selectMeeting}
       />
       <MeetingWorkspace
@@ -515,14 +518,14 @@ export function CommandCenterShell({
   )
 
   return (
-    <main className="min-h-svh bg-[var(--surface-subtle)] text-foreground">
-      <div className="grid min-h-svh grid-cols-1 lg:grid-cols-[206px_minmax(0,1fr)]">
+    <main className="min-h-svh bg-[var(--surface-subtle)] text-foreground lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden">
+      <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[206px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
           dictionary={dictionary}
           activePanel={activePanel}
           onPanelChange={setActivePanel}
         />
-        <section className="min-w-0">
+        <section className="min-w-0 lg:h-svh lg:overflow-hidden">
           <TopCommandBar
             dictionary={dictionary}
             locale={locale}
@@ -530,7 +533,10 @@ export function CommandCenterShell({
             pending={isPending}
             syncing={syncing}
             uploadOpen={uploadOpen}
-            onQueryChange={setQuery}
+            onQueryChange={(value) => {
+              setQuery(value)
+              setPageOffset(0)
+            }}
             onUploadOpenChange={setUploadOpen}
             onFileChange={handleFileChange}
             onRecordingReady={handleRecordingReady}

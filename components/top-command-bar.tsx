@@ -59,16 +59,16 @@ export function TopCommandBar({
   onToggleDarkMode: () => void
 }) {
   return (
-    <header className="sticky top-0 z-30 flex min-h-16 flex-col gap-3 border-b border-slate-200 bg-white/96 px-4 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex h-10 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 shadow-sm lg:max-w-[360px]">
-        <SearchIcon aria-hidden="true" className="size-4 text-slate-400" />
+    <header className="sticky top-0 z-30 flex min-h-16 flex-col gap-3 border-b border-[var(--divider)] bg-[color-mix(in_oklch,var(--surface)_96%,transparent)] px-4 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex h-10 w-full items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 shadow-sm lg:max-w-[360px]">
+        <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={dictionary.commandPlaceholder}
           className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
         />
-        <kbd className="hidden min-w-12 shrink-0 whitespace-nowrap rounded border bg-slate-50 px-1.5 py-0.5 text-center font-mono text-[11px] text-slate-600 sm:inline-flex">
+        <kbd className="hidden min-w-12 shrink-0 whitespace-nowrap rounded border border-[var(--divider)] bg-[var(--surface-subtle)] px-1.5 py-0.5 text-center font-mono text-[11px] text-muted-foreground sm:inline-flex">
           Ctrl K
         </kbd>
       </div>
@@ -94,7 +94,7 @@ export function TopCommandBar({
             render={
               <Button
                 variant="outline"
-                className="h-10 min-w-28 border-teal-300 text-teal-900 hover:bg-cyan-50"
+                className="h-10 min-w-28 border-[var(--focus)] text-[var(--primary)] hover:bg-[var(--selected)]"
                 disabled={syncing}
               />
             }
@@ -121,7 +121,7 @@ export function TopCommandBar({
         <Button
           variant="ghost"
           size="icon"
-          className="hidden rounded-full border bg-white text-violet-600 sm:inline-flex"
+          className="hidden rounded-full border border-[var(--divider)] bg-[var(--surface)] text-[var(--status-ai)] sm:inline-flex"
         >
           <SparklesIcon aria-hidden="true" className="size-5" />
           <span className="sr-only">AI status</span>

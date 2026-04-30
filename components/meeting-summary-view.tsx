@@ -13,12 +13,12 @@ function quoteTime(ms: number) {
 
 function priorityClass(priority?: ActionItem["priority"]) {
   if (priority === "urgent" || priority === "high") {
-    return "border-orange-200 bg-orange-50 text-orange-700"
+    return "border-[var(--accent)] bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
   }
   if (priority === "low") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700"
+    return "border-[var(--status-success)] bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
   }
-  return "border-amber-200 bg-amber-50 text-amber-700"
+  return "border-[var(--accent)] bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
 }
 
 export function MeetingSummaryView({
@@ -44,19 +44,19 @@ export function MeetingSummaryView({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 text-teal-800"
+              className="h-8 text-[var(--primary)]"
               onClick={() => onReprocessMeeting("full")}
             >
               <RefreshCwIcon data-icon="inline-start" className="size-4" />
               Reprocess
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-slate-500">
+            <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
               <CopyIcon data-icon="inline-start" className="size-4" />
               Copy
             </Button>
           </div>
         </div>
-        <p className="max-w-3xl text-sm leading-7 text-slate-700">
+        <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
           {meeting.summary?.overview ?? "Summary will appear after intelligence runs."}
         </p>
       </section>
@@ -64,7 +64,7 @@ export function MeetingSummaryView({
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.decisions}</h2>
-          <Button variant="ghost" size="sm" className="h-8 text-slate-500">
+          <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
             <CopyIcon data-icon="inline-start" className="size-4" />
             Copy
           </Button>
@@ -73,7 +73,7 @@ export function MeetingSummaryView({
           {(meeting.summary?.decisions.length
             ? meeting.summary.decisions
             : ["No decisions extracted yet."]).map((decision) => (
-            <div key={decision} className="flex items-start gap-3 text-sm text-slate-800">
+            <div key={decision} className="flex items-start gap-3 text-sm text-foreground">
               <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-500" />
               <span>{decision}</span>
             </div>
@@ -94,14 +94,14 @@ export function MeetingSummaryView({
                 onCheckedChange={() => onToggleActionItem(item)}
                 className="mt-1"
               />
-              <div className="min-w-0 leading-6 text-slate-800">{item.title}</div>
-              <div className="hidden items-center gap-2 text-slate-600 md:flex">
+              <div className="min-w-0 leading-6 text-foreground">{item.title}</div>
+              <div className="hidden items-center gap-2 text-muted-foreground md:flex">
                 <span className="grid size-6 place-items-center rounded-full bg-rose-200 text-xs font-semibold text-rose-800">
                   {(item.owner ?? "T").slice(0, 1)}
                 </span>
                 <span className="truncate">{item.owner ?? dictionary.unassigned}</span>
               </div>
-              <div className="hidden text-slate-600 md:block">
+              <div className="hidden text-muted-foreground md:block">
                 {item.dueDate ?? `May ${index + 1}`}
               </div>
               <div
@@ -117,7 +117,7 @@ export function MeetingSummaryView({
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Key Quotes</h2>
-          <Button variant="ghost" size="sm" className="h-8 text-slate-500">
+          <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
             <CopyIcon data-icon="inline-start" className="size-4" />
             Copy
           </Button>
@@ -127,18 +127,18 @@ export function MeetingSummaryView({
             quotes.map((segment) => (
               <div
                 key={segment.id}
-                className="grid gap-2 rounded-md border bg-white px-3 py-2 text-sm md:grid-cols-[72px_minmax(0,1fr)]"
+                className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm md:grid-cols-[72px_minmax(0,1fr)]"
               >
-                <span className="font-mono text-xs text-slate-500">
+                <span className="font-mono text-xs text-muted-foreground">
                   {quoteTime(segment.startMs)}
                 </span>
-                <span className="text-slate-700">
+                <span className="text-muted-foreground">
                   {segment.speaker}: “{segment.text}”
                 </span>
               </div>
             ))
           ) : (
-            <div className="rounded-md border border-dashed p-3 text-sm text-slate-500">
+            <div className="rounded-md border border-dashed border-[var(--divider)] p-3 text-sm text-muted-foreground">
               Quotes will appear after transcription.
             </div>
           )}

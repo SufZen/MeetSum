@@ -48,7 +48,7 @@ export function MeetingWorkspace({
 }) {
   if (!meeting) {
     return (
-      <div className="flex min-h-[520px] flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-card/50 p-8 text-center">
+      <div className="flex min-h-[520px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)]/70 p-8 text-center lg:h-full">
         <FileAudioIcon aria-hidden="true" className="size-10 text-muted-foreground" />
         <h2 className="text-xl font-semibold">{dictionary.noMeetingsTitle}</h2>
         <p className="max-w-sm text-sm leading-6 text-muted-foreground">
@@ -73,20 +73,20 @@ export function MeetingWorkspace({
   }
 
   return (
-    <div className="min-w-0 bg-white">
+    <div className="min-h-0 min-w-0 overflow-y-auto bg-[var(--surface)] lg:h-full">
       <MeetingHeader meeting={meeting} locale={locale} />
 
       <Tabs defaultValue="summary" className="min-w-0">
         <TabsList
           variant="line"
-          className="mx-7 mt-5 grid min-h-10 w-[min(640px,calc(100%-3.5rem))] grid-cols-3 border-b border-slate-200 bg-transparent p-0 md:grid-cols-6"
+          className="mx-7 mt-5 grid min-h-10 w-[min(640px,calc(100%-3.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
         >
           <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
           <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>
           <TabsTrigger value="ask">{dictionary.ask}</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
-            <span className="ms-1 rounded-full bg-slate-100 px-2 text-xs">
+            <span className="ms-1 rounded-full bg-[var(--muted)] px-2 text-xs text-muted-foreground">
               {meeting.summary?.actionItems.length ?? 0}
             </span>
           </TabsTrigger>
@@ -120,7 +120,7 @@ export function MeetingWorkspace({
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-0 px-7 py-7">
-          <section className="rounded-md border bg-white p-4">
+          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
             <div className="mb-3 flex items-center gap-2">
               <ListTodoIcon aria-hidden="true" className="size-4 text-primary" />
               <h3 className="text-sm font-semibold">{dictionary.actionItems}</h3>
@@ -134,14 +134,14 @@ export function MeetingWorkspace({
         </TabsContent>
 
         <TabsContent value="prep" className="mt-0 px-7 py-7">
-          <section className="rounded-md border bg-white p-4 text-sm leading-6 text-muted-foreground">
+          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 text-sm leading-6 text-muted-foreground">
             Gmail-aware prep, linked Drive docs, and previous context packets will
             land here after the Calendar/Drive spine is running.
           </section>
         </TabsContent>
 
         <TabsContent value="followup" className="mt-0 px-7 py-7">
-          <section className="rounded-md border bg-white p-4 text-sm leading-6 text-muted-foreground">
+          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 text-sm leading-6 text-muted-foreground">
             {meeting.intelligence?.followUpDraft ??
               "Follow-up draft will appear after structured intelligence runs."}
           </section>

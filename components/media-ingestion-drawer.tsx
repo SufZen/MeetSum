@@ -53,7 +53,7 @@ export function MediaIngestionDrawer({
         </SheetHeader>
         <div className="grid gap-4 p-4">
           {pending && (
-            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-teal-950">
+            <div className="rounded-md border border-[var(--focus)] bg-[var(--selected)] p-3 text-sm text-foreground">
               Upload is queued. Keep this page open while MeetSum stores the media and starts processing.
             </div>
           )}
