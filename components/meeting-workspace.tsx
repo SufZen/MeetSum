@@ -27,7 +27,10 @@ export function MeetingWorkspace({
   onAsk,
   onToggleActionItem,
   onReprocessMeeting,
+  onProcessMeeting,
   onOpenUpload,
+  onFindDriveRecordings,
+  onSyncMeetArtifacts,
   onSyncGoogle,
   onCheckSetup,
   onShareMeeting,
@@ -47,7 +50,10 @@ export function MeetingWorkspace({
   onAsk: () => void
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
+  onProcessMeeting: () => void
   onOpenUpload: () => void
+  onFindDriveRecordings: () => void
+  onSyncMeetArtifacts: () => void
   onSyncGoogle: () => void
   onCheckSetup: () => void
   onShareMeeting: () => void
@@ -117,6 +123,10 @@ export function MeetingWorkspace({
             meeting={meeting}
             onToggleActionItem={onToggleActionItem}
             onReprocessMeeting={onReprocessMeeting}
+            onProcessMeeting={onProcessMeeting}
+            onOpenUpload={onOpenUpload}
+            onFindDriveRecordings={onFindDriveRecordings}
+            onSyncMeetArtifacts={onSyncMeetArtifacts}
             onCopyText={onCopyText}
           />
         </TabsContent>

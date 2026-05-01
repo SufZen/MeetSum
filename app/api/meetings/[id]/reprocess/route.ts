@@ -29,6 +29,31 @@ export async function POST(
 
   const body = (await request.json().catch(() => ({}))) as { mode?: unknown }
   const mode = parseMode(body.mode)
+  const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
+  const hasTranscript = Boolean(meeting.transcript?.length)
+
+  if (mode === "full" && !hasMedia) {
+    return NextResponse.json(
+      {
+        error:
+          "This meeting has no recording attached yet. Import a Drive recording, sync Meet artifacts, or upload audio before full reprocessing.",
+        nextActions: ["find_drive_recordings", "upload_recording", "sync_meet_artifacts"],
+      },
+      { status: 409 }
+    )
+  }
+
+  if (mode !== "full" && !hasTranscript) {
+    return NextResponse.json(
+      {
+        error:
+          "This meeting has no transcript yet. Attach or import a recording before rerunning summary or task extraction.",
+        nextActions: ["find_drive_recordings", "upload_recording", "sync_meet_artifacts"],
+      },
+      { status: 409 }
+    )
+  }
+
   const job = await enqueueMeetSumJob(mode === "full" ? "media.ingest" : "meeting.summarize", {
     meetingId: id,
     mode,

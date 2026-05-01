@@ -633,6 +633,60 @@ export function CommandCenterShell({
     })
   }
 
+  function processMeeting() {
+    if (!selectedMeeting) return
+
+    startTransition(() => {
+      void (async () => {
+        const response = await fetch(`/api/meetings/${selectedMeeting.id}/process`, {
+          method: "POST",
+        })
+        const body = await response.json()
+
+        if (!response.ok) {
+          toast.error(body.error ?? "Unable to process meeting")
+          return
+        }
+
+        setJobs((current) => [body.job, ...current])
+        toast.success(body.message ?? "Processing queued")
+        await refreshMeeting(selectedMeeting.id)
+        await refreshOperationalState()
+      })().catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Unable to process meeting")
+      )
+    })
+  }
+
+  function syncMeetArtifacts() {
+    setSyncing(true)
+    startTransition(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/google/meet/sync", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ subject: "info@realization.co.il" }),
+          })
+          const body = await response.json()
+
+          if (!response.ok) {
+            toast.error(body.error ?? "Unable to sync Meet artifacts")
+            return
+          }
+
+          toast.success(body.message ?? "Meet artifact sync checked")
+          await refreshOperationalState()
+        } finally {
+          setSyncing(false)
+        }
+      })().catch((error) => {
+        setSyncing(false)
+        toast.error(error instanceof Error ? error.message : "Unable to sync Meet artifacts")
+      })
+    })
+  }
+
   function syncGoogle(target: SyncTarget) {
     setSyncing(true)
     startTransition(() => {
@@ -745,7 +799,10 @@ export function CommandCenterShell({
         onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
         onReprocessMeeting={reprocessMeeting}
+        onProcessMeeting={processMeeting}
         onOpenUpload={() => setUploadOpen(true)}
+        onFindDriveRecordings={() => setDrivePickerOpen(true)}
+        onSyncMeetArtifacts={syncMeetArtifacts}
         onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
         onShareMeeting={openShareDialog}
@@ -962,6 +1019,7 @@ export function CommandCenterShell({
                   onQueryChange={setQuery}
                   onSyncCalendar={() => syncGoogle("calendar")}
                   onFindDriveRecordings={() => setDrivePickerOpen(true)}
+                  onSyncMeetArtifacts={syncMeetArtifacts}
                   onRetryJob={retryJob}
                 />
               )}

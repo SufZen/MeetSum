@@ -27,6 +27,12 @@ const legacyStatusByStage: Record<string, MeetingRecord["status"][]> = {
   completed: ["completed"],
 }
 
+const stageAliases: Record<string, string> = {
+  "audio.transcribe": "transcribing",
+  "summary.generate": "summarizing",
+  "meeting.index": "indexing",
+}
+
 export function PipelineTimeline({
   meeting,
   jobs,
@@ -44,6 +50,9 @@ export function PipelineTimeline({
       : typeof latestJob?.result.stage === "string"
         ? latestJob.result.stage
         : undefined
+  const normalizedActiveStage = activeStage
+    ? (stageAliases[activeStage] ?? activeStage)
+    : undefined
   const latestJobLabel = latestJob?.updatedAt
     ? new Date(latestJob.updatedAt).toLocaleString()
     : "Waiting for job update"
@@ -58,7 +67,7 @@ export function PipelineTimeline({
             meeting?.status === "completed" ||
             legacyStatusByStage[status]?.includes(meeting?.status ?? "created") ||
             (flowIndex >= 0 && flowIndex <= currentIndex)
-          const active = activeStage === status
+          const active = normalizedActiveStage === status
 
           return (
             <div key={status} className="grid grid-cols-[18px_minmax(0,1fr)] gap-3">
@@ -75,7 +84,11 @@ export function PipelineTimeline({
               <div className="pb-2">
                 <div className="text-sm font-medium text-foreground">{label}</div>
                 <div className="text-xs text-muted-foreground">
-                  {active ? (latestJob?.status ?? "active") : latestJobLabel}
+                  {latestJob?.status === "failed" && active
+                    ? latestJob.error ?? "Failed"
+                    : active
+                      ? (latestJob?.status ?? "active")
+                      : latestJobLabel}
                 </div>
               </div>
             </div>

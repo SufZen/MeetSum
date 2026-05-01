@@ -1,4 +1,12 @@
-import { CheckCircle2Icon, CopyIcon, RefreshCwIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  CopyIcon,
+  FileAudioIcon,
+  PlayCircleIcon,
+  RadioTowerIcon,
+  RefreshCwIcon,
+  UploadIcon,
+} from "lucide-react"
 
 import { AudioPlaybackBar } from "@/components/audio-playback-bar"
 import { Button } from "@/components/ui/button"
@@ -26,17 +34,29 @@ export function MeetingSummaryView({
   meeting,
   onToggleActionItem,
   onReprocessMeeting,
+  onProcessMeeting,
+  onOpenUpload,
+  onFindDriveRecordings,
+  onSyncMeetArtifacts,
   onCopyText,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
+  onProcessMeeting: () => void
+  onOpenUpload: () => void
+  onFindDriveRecordings: () => void
+  onSyncMeetArtifacts: () => void
   onCopyText: (text: string, label: string) => void
 }) {
   const actionItems = meeting.summary?.actionItems ?? []
   const quotes = meeting.transcript?.slice(0, 2) ?? []
   const isUpcoming = meeting.status === "scheduled" && !meeting.summary
+  const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
+  const hasTranscript = Boolean(meeting.transcript?.length)
+  const canProcess = hasMedia || hasTranscript
+  const showContentGap = !meeting.summary?.overview
 
   return (
     <div className="px-5 py-6 md:px-8">
@@ -49,6 +69,12 @@ export function MeetingSummaryView({
               variant="outline"
               size="sm"
               className="h-8 text-[var(--primary)]"
+              disabled={!hasMedia}
+              title={
+                hasMedia
+                  ? "Run the full media pipeline again"
+                  : "Attach a recording before full reprocessing"
+              }
               onClick={() => onReprocessMeeting("full")}
             >
               <RefreshCwIcon data-icon="inline-start" className="size-4" />
@@ -71,11 +97,45 @@ export function MeetingSummaryView({
             </Button>
           </div>
         </div>
-        {isUpcoming ? (
+        {showContentGap ? (
           <div className="max-w-3xl rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm leading-6 text-muted-foreground">
-            This is an upcoming calendar meeting. Capture will become useful
-            after a Meet recording, transcript, smart note, upload, or PWA
-            recording is attached.
+            <div className="font-medium text-foreground">
+              {isUpcoming
+                ? "This upcoming meeting is ready for capture setup."
+                : "No meeting intelligence has been generated yet."}
+            </div>
+            <p className="mt-1">
+              Attach a recording, import a Google Meet artifact, or process an
+              existing transcript to generate summary, decisions, tasks, and
+              quotes.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={!canProcess}
+                title={
+                  canProcess
+                    ? "Queue processing for this meeting"
+                    : "No recording or transcript is attached yet"
+                }
+                onClick={onProcessMeeting}
+              >
+                <PlayCircleIcon data-icon="inline-start" className="size-4" />
+                Process now
+              </Button>
+              <Button size="sm" variant="outline" onClick={onOpenUpload}>
+                <UploadIcon data-icon="inline-start" className="size-4" />
+                Upload recording
+              </Button>
+              <Button size="sm" variant="outline" onClick={onFindDriveRecordings}>
+                <FileAudioIcon data-icon="inline-start" className="size-4" />
+                Find Drive recordings
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
+                <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                Sync Meet artifacts
+              </Button>
+            </div>
           </div>
         ) : (
           <p className="max-w-3xl text-sm leading-7 text-foreground/80">

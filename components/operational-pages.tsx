@@ -122,6 +122,7 @@ export function OperationalPage({
   onQueryChange,
   onSyncCalendar,
   onFindDriveRecordings,
+  onSyncMeetArtifacts,
   onRetryJob,
 }: {
   panel: MainPanelKey
@@ -134,6 +135,7 @@ export function OperationalPage({
   onQueryChange: (value: string) => void
   onSyncCalendar: () => void
   onFindDriveRecordings: () => void
+  onSyncMeetArtifacts: () => void
   onRetryJob: (job: JobRecord) => void
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
@@ -220,6 +222,10 @@ export function OperationalPage({
                 <Button className="h-10 w-full" variant="outline" onClick={onFindDriveRecordings}>
                   <FileAudioIcon data-icon="inline-start" className="size-4" />
                   Find Drive recordings
+                </Button>
+                <Button className="h-10 w-full" variant="outline" onClick={onSyncMeetArtifacts}>
+                  <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                  Sync Meet artifacts
                 </Button>
               </div>
             </OpsCard>

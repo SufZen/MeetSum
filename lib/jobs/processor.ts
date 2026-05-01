@@ -98,6 +98,14 @@ async function processMediaJob(
     throw new Error(`Meeting not found: ${payload.meetingId}`)
   }
 
+  const mediaAsset = meeting.mediaAssets?.find((asset) => asset.storageKey)
+
+  if (!mediaAsset) {
+    throw new Error(
+      "This meeting has no recording attached yet. Import a Drive recording, sync Meet artifacts, or upload audio before processing."
+    )
+  }
+
   const transcriptionStartedAt = Date.now()
   const transcript = await createTranscriptionProvider().transcribe(meeting)
   await recordAiRun({
