@@ -73,13 +73,13 @@ export function MeetingWorkspace({
   }
 
   return (
-    <div className="min-h-0 min-w-0 overflow-y-auto bg-[var(--surface)] lg:h-full">
+    <div className="ms-scrollbar min-h-0 min-w-0 overflow-y-auto bg-[var(--surface)] lg:h-full">
       <MeetingHeader meeting={meeting} locale={locale} />
 
       <Tabs defaultValue="summary" className="min-w-0">
         <TabsList
           variant="line"
-          className="mx-7 mt-5 grid min-h-10 w-[min(640px,calc(100%-3.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
+          className="mx-auto mt-4 grid min-h-10 w-[min(720px,calc(100%-2.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
         >
           <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
           <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>
@@ -103,24 +103,28 @@ export function MeetingWorkspace({
           />
         </TabsContent>
 
-        <TabsContent value="transcript" className="mt-0 px-7 py-7">
-          <TranscriptTimeline segments={meeting.transcript} />
+        <TabsContent value="transcript" className="mt-0 px-5 py-6 md:px-8">
+          <div className="mx-auto max-w-5xl">
+            <TranscriptTimeline segments={meeting.transcript} />
+          </div>
         </TabsContent>
 
-        <TabsContent value="ask" className="mt-0 px-7 py-7">
-          <AskMeetingPanel
-            dictionary={dictionary}
-            question={question}
-            answer={answer}
-            asking={asking}
-            disabled={!meeting}
-            onQuestionChange={onQuestionChange}
-            onAsk={onAsk}
-          />
+        <TabsContent value="ask" className="mt-0 px-5 py-6 md:px-8">
+          <div className="mx-auto max-w-3xl">
+            <AskMeetingPanel
+              dictionary={dictionary}
+              question={question}
+              answer={answer}
+              asking={asking}
+              disabled={!meeting}
+              onQuestionChange={onQuestionChange}
+              onAsk={onAsk}
+            />
+          </div>
         </TabsContent>
 
-        <TabsContent value="tasks" className="mt-0 px-7 py-7">
-          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+        <TabsContent value="tasks" className="mt-0 px-5 py-6 md:px-8">
+          <section className="ms-card mx-auto max-w-5xl p-4">
             <div className="mb-3 flex items-center gap-2">
               <ListTodoIcon aria-hidden="true" className="size-4 text-primary" />
               <h3 className="text-sm font-semibold">{dictionary.actionItems}</h3>
@@ -133,15 +137,15 @@ export function MeetingWorkspace({
           </section>
         </TabsContent>
 
-        <TabsContent value="prep" className="mt-0 px-7 py-7">
-          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 text-sm leading-6 text-muted-foreground">
+        <TabsContent value="prep" className="mt-0 px-5 py-6 md:px-8">
+          <section className="ms-card mx-auto max-w-3xl p-4 text-sm leading-6 text-muted-foreground">
             Gmail-aware prep, linked Drive docs, and previous context packets will
             land here after the Calendar/Drive spine is running.
           </section>
         </TabsContent>
 
-        <TabsContent value="followup" className="mt-0 px-7 py-7">
-          <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 text-sm leading-6 text-muted-foreground">
+        <TabsContent value="followup" className="mt-0 px-5 py-6 md:px-8">
+          <section className="ms-card mx-auto max-w-3xl p-4 text-sm leading-6 text-muted-foreground">
             {meeting.intelligence?.followUpDraft ??
               "Follow-up draft will appear after structured intelligence runs."}
           </section>

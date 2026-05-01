@@ -50,10 +50,10 @@ export function MeetingRightRail({
     : ["acquisition", "finance", "review", "real-estate", "english", "mixed"]
 
   return (
-    <aside className="grid min-h-0 content-start gap-3 overflow-y-auto bg-[var(--rail)] p-3 lg:h-full lg:border-l lg:border-[var(--divider)]">
+    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-[var(--rail)] p-3 lg:h-full lg:border-l lg:border-[var(--divider)]">
       <PipelineTimeline meeting={meeting} jobs={jobs} />
 
-      <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+      <section className="ms-card p-4">
         <h3 className="mb-4 text-sm font-semibold">AI Confidence</h3>
         <div className="flex items-center gap-4">
           <div
@@ -77,7 +77,7 @@ export function MeetingRightRail({
         </Button>
       </section>
 
-      <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+      <section className="ms-card p-4">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold">Tags</h3>
           <Button variant="ghost" size="sm" className="h-7 text-[var(--primary)]">
@@ -97,7 +97,7 @@ export function MeetingRightRail({
         </div>
       </section>
 
-      <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+      <section className="ms-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Exports & Integrations</h3>
         <div className="grid grid-cols-5 gap-2">
           {[

@@ -42,14 +42,14 @@ export function MeetingHeader({
   const room = meeting.contexts?.[0]?.name ?? "Real Estate Acquisitions"
 
   return (
-    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-7 py-5">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-5 md:px-8">
+      <div className="mx-auto flex max-w-5xl flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="secondary" className="rounded-sm bg-emerald-50 text-emerald-700">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
               {sourceLabel(meeting.source)}
             </Badge>
-            <h1 className="break-words text-xl font-semibold tracking-tight text-foreground md:text-2xl">
+            <h1 className="break-words text-xl font-semibold tracking-tight text-foreground md:text-[1.45rem]">
               {meeting.title}
             </h1>
             <StarIcon aria-hidden="true" className="size-4 text-amber-400" />
@@ -74,7 +74,7 @@ export function MeetingHeader({
               <span className="size-2 rounded-full bg-emerald-500" />
               {room}
             </span>
-            <Button variant="outline" size="sm" className="h-8 border-[var(--focus)] bg-[var(--selected)] text-[var(--primary)]">
+            <Button variant="outline" size="sm" className="h-8 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]">
               Add to room
             </Button>
           </div>

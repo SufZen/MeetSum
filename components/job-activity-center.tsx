@@ -19,17 +19,17 @@ export function JobActivityCenter({
   onRetry: (job: JobRecord) => void
 }) {
   return (
-    <section className="grid gap-2 rounded-md border bg-card p-3">
+    <section className="ms-card grid gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Job activity</h3>
         <span className="font-mono text-xs text-muted-foreground">
           {jobs.length}
         </span>
       </div>
-      <div className="grid max-h-72 gap-2 overflow-y-auto">
+      <div className="ms-scrollbar grid max-h-72 gap-2 overflow-y-auto">
         {jobs.length ? (
           jobs.map((job) => (
-            <article key={job.id} className="grid gap-2 rounded-md border p-2">
+            <article key={job.id} className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="truncate font-medium">{job.name}</span>
                 <span className="capitalize text-muted-foreground">

@@ -15,7 +15,7 @@ export function ProviderHealthPanel({
   providers: ProviderStatusView[]
 }) {
   return (
-    <section className="grid gap-2 rounded-md border bg-card p-3">
+    <section className="ms-card grid gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Provider health</h3>
         <Badge variant="secondary" className="rounded-sm">
@@ -29,7 +29,7 @@ export function ProviderHealthPanel({
           return (
             <div
               key={provider.id}
-              className="flex min-h-14 items-start gap-3 rounded-md border bg-background p-2"
+              className="flex min-h-14 items-start gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
             >
               <Icon
                 aria-hidden="true"

@@ -1,4 +1,5 @@
 import { CalendarSyncIcon, CloudIcon } from "lucide-react"
+import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -6,13 +7,14 @@ import { Button } from "@/components/ui/button"
 export type WorkspaceStatusView = {
   google: {
     subject: string
-    strategy: "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
+    strategy: "user-oauth" | "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
     configured: boolean
     detail: string
     serviceAccountEmail?: string
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
     keyFileConfigured: boolean
+    userOAuthConnected?: boolean
   }
   sync: Array<{
     source: string
@@ -40,7 +42,7 @@ export function WorkspaceSyncPanel({
   onSyncAll: () => void
 }) {
   return (
-    <section className="grid gap-3 rounded-md border bg-card p-3">
+    <section className="ms-card grid gap-4 p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CloudIcon aria-hidden="true" className="size-4 text-primary" />
@@ -59,7 +61,7 @@ export function WorkspaceSyncPanel({
           {status?.google.subject ?? "info@realization.co.il"}
         </span>
       </div>
-      <div className="rounded-md border bg-background p-2 text-xs leading-5 text-muted-foreground">
+      <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs leading-5 text-muted-foreground">
         <div>
           Auth:{" "}
           <span className="font-medium text-foreground">
@@ -71,12 +73,20 @@ export function WorkspaceSyncPanel({
             {status.google.serviceAccountEmail}
           </div>
         )}
-        {status?.google.strategy === "missing" && (
+        {(!status?.google.configured || status.google.strategy === "missing") && (
           <p className="mt-1 text-amber-700">
-            Google sync will fail until Workspace signing is configured.
+            Google sync needs a connected Workspace account.
           </p>
         )}
       </div>
+      {status && !status.google.configured && (
+        <Link
+          href="/api/auth/google/start?returnTo=/en"
+          className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-foreground)] hover:bg-[var(--primary)]/90"
+        >
+          Reconnect Google
+        </Link>
+      )}
       <Button
         variant="outline"
         className="h-9 w-full"
@@ -88,7 +98,7 @@ export function WorkspaceSyncPanel({
       </Button>
       <div className="grid gap-2">
         {(status?.sync.length ? status.sync : []).map((item) => (
-          <div key={item.source} className="rounded-md border bg-background p-2">
+            <div key={item.source} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-medium capitalize">{item.source}</span>
               <span className="text-muted-foreground">{item.status}</span>

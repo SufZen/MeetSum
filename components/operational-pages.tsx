@@ -34,9 +34,9 @@ function PageFrame({
   children: ReactNode
 }) {
   return (
-    <div className="min-h-[calc(100svh-4rem)] overflow-y-auto bg-[var(--surface-subtle)] p-4 lg:h-[calc(100svh-4rem)] lg:p-6">
+    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-[var(--surface-subtle)] p-4 lg:h-[calc(100svh-3.5rem)] lg:p-6">
       <div className="mx-auto grid max-w-7xl gap-5">
-        <header className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
+        <header className="px-1 py-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
             {eyebrow}
           </div>
@@ -67,10 +67,10 @@ function OpsCard({
   children?: ReactNode
 }) {
   return (
-    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4 shadow-[0_1px_0_rgba(15,23,42,0.02)]">
+    <section className="ms-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="grid size-9 place-items-center rounded-md bg-[var(--selected)] text-[var(--primary)]">
+          <div className="grid size-9 place-items-center rounded-lg bg-[var(--selected)] text-[var(--primary)]">
             <Icon aria-hidden="true" className="size-4" />
           </div>
           <div>
@@ -79,7 +79,7 @@ function OpsCard({
           </div>
         </div>
         {status && (
-          <Badge className="rounded-sm bg-[var(--selected)] text-[var(--primary)]">{status}</Badge>
+          <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">{status}</Badge>
         )}
       </div>
       {children && <div className="mt-4">{children}</div>}
@@ -133,9 +133,9 @@ export function OperationalPage({
               status="Google artifacts first"
             >
               <div className="grid gap-2 text-sm text-muted-foreground">
-                <div className="flex items-center justify-between rounded-md border bg-[var(--surface-subtle)] p-2">
+              <div className="flex items-center justify-between rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
                   <span>Recording / transcript / smart notes readiness</span>
-                  <Badge variant="outline" className="rounded-sm">checklist</Badge>
+                <Badge variant="outline" className="rounded-md">checklist</Badge>
                 </div>
                 <Button className="h-10 w-full" variant="outline" onClick={onFindDriveRecordings}>
                   <FileAudioIcon data-icon="inline-start" className="size-4" />
@@ -176,7 +176,7 @@ export function OperationalPage({
             />
             <div className="mt-3 grid gap-2">
               {completed.slice(0, 6).map((meeting) => (
-                <div key={meeting.id} className="rounded-md border bg-[var(--surface-subtle)] p-3">
+                <div key={meeting.id} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
                   <div className="text-sm font-semibold text-foreground">{meeting.title}</div>
                   <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {meeting.summary?.overview}
@@ -204,9 +204,9 @@ export function OperationalPage({
         description="Webhook, n8n, RealizeOS, CLI, and MCP connections should all consume the same structured meeting intelligence."
       >
         <div className="grid gap-4 lg:grid-cols-3">
-          <OpsCard icon={WorkflowIcon} title="Webhooks" description="meeting.completed, summary.created, and action_item.created delivery infrastructure." status="ready" />
-          <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting exports with audit records and retryable jobs." status="connected" />
-          <OpsCard icon={LinkIcon} title="n8n" description="Endpoint-ready, no required live workflow yet." status="prepared" />
+          <OpsCard icon={WorkflowIcon} title="Webhooks" description="Signed delivery for meeting.completed, summary.created, and action_item.created." status="ready" />
+          <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting context exports with auditable retryable jobs." status="connected" />
+          <OpsCard icon={LinkIcon} title="n8n" description="Webhook-ready infrastructure; live workflows can be connected when needed." status="prepared" />
         </div>
         <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
       </PageFrame>
@@ -237,11 +237,35 @@ export function OperationalPage({
       title="Settings"
       description="Configure identity, language, AI provider mode, security, and the live capture model."
     >
-      <div className="grid gap-4 lg:grid-cols-2">
-        <OpsCard icon={KeyRoundIcon} title="Account and access" description="Primary admin: info@realization.co.il. Google login remains the preferred browser auth path." status="Google OAuth" />
-        <OpsCard icon={SparklesIcon} title="AI provider" description="AI Studio Gemini remains active. Vertex AI credential path is prepared but not switched until smoke-tested." status="Gemini" />
-        <OpsCard icon={RadioTowerIcon} title="Live capture preference" description="Google artifacts first; Meet bot deferred until Developer Preview and consent requirements are stable." status="V1" />
-        <OpsCard icon={ShieldCheckIcon} title="Security" description="API keys for machine access, signed webhooks, private secrets on VPS only." status="hardened" />
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <nav className="ms-card grid content-start gap-1 p-2 text-sm">
+          {[
+            "Recording & Privacy",
+            "AI settings",
+            "Live meeting",
+            "Developer/API",
+            "Language",
+            "Account/Security",
+          ].map((item, index) => (
+            <button
+              key={item}
+              type="button"
+              className={
+                index === 0
+                  ? "rounded-lg bg-[var(--selected)] px-3 py-2 text-left font-semibold text-[var(--primary)] rtl:text-right"
+                  : "rounded-lg px-3 py-2 text-left text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground rtl:text-right"
+              }
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+        <div className="grid gap-4">
+          <OpsCard icon={RadioTowerIcon} title="Recording & Privacy" description="Google artifacts first for online meetings, PWA recorder for in-person meetings, and audio-first retention." status="V1" />
+          <OpsCard icon={SparklesIcon} title="AI provider" description="AI Studio Gemini remains active. Vertex AI credential path is prepared but not switched until smoke-tested." status="Gemini" />
+          <OpsCard icon={KeyRoundIcon} title="Account and access" description="Primary admin: info@realization.co.il. Google login is the browser auth and Workspace consent path." status="Google OAuth" />
+          <OpsCard icon={ShieldCheckIcon} title="Security" description="API keys for machine access, signed webhooks, encrypted OAuth token storage, private secrets on VPS only." status="hardened" />
+        </div>
       </div>
     </PageFrame>
   )

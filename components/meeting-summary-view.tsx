@@ -36,7 +36,8 @@ export function MeetingSummaryView({
   const quotes = meeting.transcript?.slice(0, 2) ?? []
 
   return (
-    <div className="px-7 py-7">
+    <div className="px-5 py-6 md:px-8">
+      <div className="mx-auto max-w-5xl">
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.overview}</h2>
@@ -56,12 +57,12 @@ export function MeetingSummaryView({
             </Button>
           </div>
         </div>
-        <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
+        <p className="max-w-3xl text-sm leading-7 text-foreground/80">
           {meeting.summary?.overview ?? "Summary will appear after intelligence runs."}
         </p>
       </section>
 
-      <section className="mt-8">
+      <section className="mt-8 max-w-3xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.decisions}</h2>
           <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
@@ -75,19 +76,19 @@ export function MeetingSummaryView({
             : ["No decisions extracted yet."]).map((decision) => (
             <div key={decision} className="flex items-start gap-3 text-sm text-foreground">
               <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-              <span>{decision}</span>
+              <span className="leading-6">{decision}</span>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="mt-8">
+      <section className="mt-8 max-w-5xl">
         <h2 className="mb-3 text-lg font-semibold">{dictionary.actionItems}</h2>
         <div className="grid gap-3">
-          {actionItems.map((item, index) => (
+          {actionItems.length ? actionItems.map((item, index) => (
             <div
               key={item.id}
-              className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] gap-3 text-sm md:grid-cols-[auto_minmax(0,1fr)_150px_90px_92px]"
+              className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-transparent px-1 py-1 text-sm hover:border-[var(--divider)] hover:bg-[var(--surface-subtle)] md:grid-cols-[auto_minmax(0,1fr)_150px_90px_92px]"
             >
               <Checkbox
                 checked={item.status === "done"}
@@ -110,7 +111,38 @@ export function MeetingSummaryView({
                 {item.priority ?? (index % 2 ? "Medium" : "High")}
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+              No action items extracted yet.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-8 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Risks & Blockers</h2>
+          <div className="grid gap-2">
+            {(meeting.intelligence?.risks.length
+              ? meeting.intelligence.risks
+              : ["No risks identified yet."]).map((risk) => (
+              <div key={risk} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-foreground/80">
+                {risk}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Open Questions</h2>
+          <div className="grid gap-2">
+            {(meeting.intelligence?.openQuestions.length
+              ? meeting.intelligence.openQuestions
+              : ["No open questions extracted yet."]).map((question) => (
+              <div key={question} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-foreground/80">
+                {question}
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -146,6 +178,7 @@ export function MeetingSummaryView({
       </section>
 
       <AudioPlaybackBar meeting={meeting} />
+      </div>
     </div>
   )
 }

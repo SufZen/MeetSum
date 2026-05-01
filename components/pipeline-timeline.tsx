@@ -49,7 +49,7 @@ export function PipelineTimeline({
     : "Waiting for job update"
 
   return (
-    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+    <section className="ms-card p-4">
       <h3 className="mb-3 text-sm font-semibold">Pipeline</h3>
       <div className="grid gap-0">
         {pipeline.map(([status, label], index) => {
@@ -69,7 +69,7 @@ export function PipelineTimeline({
                   <CircleIcon className={active ? "size-4 text-amber-500" : "size-4 text-emerald-500"} />
                 )}
                 {index < pipeline.length - 1 && (
-                  <span className="h-6 w-px bg-emerald-200" />
+                  <span className="h-6 w-px bg-[var(--divider)]" />
                 )}
               </div>
               <div className="pb-2">

@@ -125,8 +125,7 @@ export function CommandCenterShell({
 
   useEffect(() => {
     const saved = window.localStorage.getItem("meetsum_theme")
-    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    const enabled = saved ? saved === "dark" : Boolean(prefersDark)
+    const enabled = saved ? saved === "dark" : false
 
     document.documentElement.classList.toggle("dark", enabled)
     queueMicrotask(() => setDarkMode(enabled))
@@ -459,7 +458,7 @@ export function CommandCenterShell({
   }
 
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-4rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-4rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[348px_minmax(0,1fr)] 2xl:grid-cols-[348px_minmax(0,1fr)_272px]">
+    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)_292px]">
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
@@ -518,8 +517,8 @@ export function CommandCenterShell({
   )
 
   return (
-    <main className="min-h-svh bg-[var(--surface-subtle)] text-foreground lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden">
-      <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[206px_minmax(0,1fr)] lg:overflow-hidden">
+    <main className="ms-page min-h-svh lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden">
+      <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[244px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
           dictionary={dictionary}
           activePanel={activePanel}

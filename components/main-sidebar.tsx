@@ -9,6 +9,7 @@ import {
   WorkflowIcon,
   AudioWaveformIcon,
   ZapIcon,
+  ChevronDownIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -60,15 +61,15 @@ export function MainSidebar({
   ] as const
 
   return (
-    <aside className="flex min-h-0 flex-col bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh lg:p-2">
-      <div className="flex h-12 items-center justify-center gap-3 px-3 lg:h-16 lg:justify-start">
-        <div className="grid size-8 place-items-center text-[var(--sidebar-primary)]">
-          <AudioWaveformIcon aria-hidden="true" className="size-7" />
+    <aside className="flex min-h-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh lg:p-3">
+      <div className="flex h-11 items-center justify-center gap-3 px-1 lg:h-14 lg:justify-start">
+        <div className="grid size-8 place-items-center rounded-lg bg-[var(--primary)]/10 text-[var(--primary)]">
+          <AudioWaveformIcon aria-hidden="true" className="size-5" />
         </div>
-        <div className="text-xl font-semibold tracking-tight">MeetSum</div>
+        <div className="text-xl font-semibold tracking-tight text-foreground">MeetSum</div>
       </div>
 
-      <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:mt-5 lg:grid lg:overflow-visible lg:pb-0">
+      <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-[var(--divider)] py-3 lg:grid lg:overflow-visible">
         {navItems.map((label, index) => {
           const Icon = navIcons[index]
           const panel = panelKeys[index]
@@ -80,8 +81,8 @@ export function MainSidebar({
               variant="ghost"
               className={
                 active
-                  ? "h-10 min-w-fit justify-start rounded-md bg-[var(--sidebar-primary)] px-3 text-[var(--sidebar-primary-foreground)] hover:bg-[var(--sidebar-primary)] hover:text-[var(--sidebar-primary-foreground)] lg:h-11 lg:min-w-0"
-                  : "h-10 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground/90 hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground lg:h-11 lg:min-w-0"
+                  ? "h-10 min-w-fit justify-start rounded-lg bg-[var(--sidebar-primary)] px-3 font-semibold text-[var(--sidebar-primary-foreground)] hover:bg-[var(--sidebar-primary)] hover:text-[var(--sidebar-primary-foreground)] lg:min-w-0"
+                  : "h-10 min-w-fit justify-start rounded-lg px-3 text-sidebar-foreground hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground lg:min-w-0"
               }
               onClick={() => onPanelChange(panel)}
             >
@@ -93,11 +94,11 @@ export function MainSidebar({
       </nav>
 
       <div className="mt-auto hidden px-3 pb-2 lg:block">
-        <div className="mb-4 flex items-center justify-between text-xs uppercase tracking-wide text-sidebar-foreground/60">
+        <div className="mb-4 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           <span>Recent rooms</span>
-          <FolderPlusIcon aria-hidden="true" className="size-4" />
+          <FolderPlusIcon aria-hidden="true" className="size-4 text-[var(--primary)]" />
         </div>
-        <div className="grid gap-3 text-sm text-sidebar-foreground/85">
+        <div className="grid gap-3 text-sm text-sidebar-foreground">
           {rooms.map(([room, color]) => (
             <div key={room} className="flex min-w-0 items-center gap-2">
               <span className={`size-2 rounded-full ${color}`} />
@@ -105,16 +106,17 @@ export function MainSidebar({
             </div>
           ))}
         </div>
-        <div className="mt-10 flex items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3">
-          <div className="grid size-8 place-items-center rounded-full bg-blue-500 text-sm font-semibold">
+        <div className="mt-10 flex items-center gap-3 rounded-lg border border-sidebar-border bg-sidebar-accent/60 p-3">
+          <div className="grid size-8 place-items-center rounded-full bg-[var(--primary)] text-sm font-semibold text-white">
             I
           </div>
           <div className="min-w-0">
             <div className="text-sm font-semibold">Info</div>
-            <div className="truncate text-xs text-sidebar-foreground/65">
+            <div className="truncate text-xs text-muted-foreground">
               info@realization.co.il
             </div>
           </div>
+          <ChevronDownIcon aria-hidden="true" className="ms-auto size-4 text-muted-foreground" />
         </div>
       </div>
     </aside>

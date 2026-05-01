@@ -3,6 +3,9 @@ import {
   FilterIcon,
   SearchIcon,
   SlidersHorizontalIcon,
+  CheckCircle2Icon,
+  Clock3Icon,
+  CircleAlertIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +18,13 @@ import type {
   MeetingRecord,
 } from "@/lib/meetings/repository"
 
-const quickFilters = ["all", "usable", "processing", "failed", "upcoming"] as const
+const quickFilters = [
+  ["all", "All Meetings"],
+  ["usable", "Ready"],
+  ["processing", "Processing"],
+  ["failed", "Failed"],
+  ["upcoming", "Upcoming"],
+] as const
 
 export type MeetingSortMode = MeetingListSortMode
 
@@ -28,8 +37,8 @@ const sortLabels: Record<MeetingSortMode, string> = {
 }
 
 function sourceMeta(source: MeetingRecord["source"]) {
-  if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "M" }
-  if (source === "upload") return { label: "My Drive", dot: "bg-sky-500", icon: "D" }
+  if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "G" }
+  if (source === "upload") return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
   if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-violet-500", icon: "R" }
   return { label: source.replaceAll("_", " "), dot: "bg-amber-500", icon: "A" }
 }
@@ -55,6 +64,57 @@ function tagClass(tag: string) {
   }
 
   return "bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+}
+
+function statusMeta(status: MeetingRecord["status"]) {
+  if (status === "completed") {
+    return {
+      label: "Ready",
+      Icon: CheckCircle2Icon,
+      className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
+    }
+  }
+  if (status === "failed") {
+    return {
+      label: "Failed",
+      Icon: CircleAlertIcon,
+      className: "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-200",
+    }
+  }
+  if (status === "scheduled") {
+    return {
+      label: "Upcoming",
+      Icon: Clock3Icon,
+      className: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200",
+    }
+  }
+
+  return {
+    label: "Processing",
+    Icon: Clock3Icon,
+    className: "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
+  }
+}
+
+function dateGroupLabel(date: Date) {
+  const today = new Date()
+  const yesterday = new Date()
+
+  yesterday.setDate(today.getDate() - 1)
+
+  const sameDay = (left: Date, right: Date) =>
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+
+  if (sameDay(date, today)) return "Today"
+  if (sameDay(date, yesterday)) return "Yesterday"
+
+  return new Intl.DateTimeFormat("en", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(date)
 }
 
 export function MeetingInboxPanel({
@@ -105,12 +165,23 @@ export function MeetingInboxPanel({
   })
   const showingStart = page.total === 0 ? 0 : page.offset + 1
   const showingEnd = Math.min(page.offset + meetings.length, page.total)
+  const meetingRows = meetings.map((meeting, index) => {
+    const group = dateGroupLabel(new Date(meeting.startedAt))
+    const previousGroup =
+      index > 0 ? dateGroupLabel(new Date(meetings[index - 1].startedAt)) : ""
+
+    return {
+      meeting,
+      group,
+      showGroup: group !== previousGroup,
+    }
+  })
 
   return (
     <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-r border-[var(--divider)] bg-[var(--surface)]">
-      <div className="border-b border-[var(--divider)] px-4 py-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
+      <div className="border-b border-[var(--divider)] px-4 py-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold">
             <CalendarDaysIcon aria-hidden="true" className="size-4 text-muted-foreground" />
             {dictionary.navMeetings}
           </h2>
@@ -140,7 +211,7 @@ export function MeetingInboxPanel({
               </select>
           </label>
         </div>
-        <div className="mb-3 flex h-10 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
+        <div className="mb-3 flex h-9 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
           <SearchIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <Input
             value={query}
@@ -149,8 +220,8 @@ export function MeetingInboxPanel({
             className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {quickFilters.map((filter) => (
+        <div className="flex gap-1 overflow-x-auto pb-1">
+          {quickFilters.map(([filter, label]) => (
             <button
               key={filter}
               type="button"
@@ -161,87 +232,85 @@ export function MeetingInboxPanel({
                 variant={activeFilter === filter ? "secondary" : "outline"}
                 className={
                   activeFilter === filter
-                    ? "h-7 justify-center rounded-sm bg-[var(--selected)] px-3 capitalize text-[var(--primary)]"
-                    : "h-7 justify-center rounded-sm border-[var(--divider)] px-3 capitalize text-muted-foreground"
+                    ? "h-7 whitespace-nowrap justify-center rounded-md bg-[var(--selected)] px-3 text-[var(--primary)]"
+                    : "h-7 whitespace-nowrap justify-center rounded-md border-[var(--divider)] px-3 text-muted-foreground"
                 }
               >
-                {filter === "all"
-                  ? dictionary.all
-                  : filter === "usable"
-                    ? "Ready"
-                    : filter === "processing"
-                      ? "Processing"
-                      : filter === "failed"
-                        ? "Failed"
-                        : "Upcoming"}
+                {filter === "all" ? dictionary.all : label}
               </Badge>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:max-h-none">
+      <div className="ms-scrollbar min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:max-h-none">
         <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
           {!loading && meetings.length === 0 && (
             <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)] p-5 text-center text-sm text-muted-foreground">
               No meetings match this view.
             </div>
           )}
-          {meetings.map((meeting) => {
+          {meetingRows.map(({ meeting, group, showGroup }) => {
             const source = sourceMeta(meeting.source)
             const selected = selectedMeetingId === meeting.id
+            const started = new Date(meeting.startedAt)
+            const status = statusMeta(meeting.status)
+            const StatusIcon = status.Icon
 
             return (
-              <button
-                key={meeting.id}
-                type="button"
-                data-selected={selected}
-                className="grid min-h-[108px] gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-left shadow-[0_1px_0_rgba(15,23,42,0.02)] transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/60 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] rtl:text-right"
-                onClick={() => onSelectMeeting(meeting.id)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="grid size-8 shrink-0 place-items-center rounded-md bg-[var(--surface-subtle)] text-sm font-semibold shadow-sm ring-1 ring-[var(--divider)]">
-                    {source.icon}
+              <div key={meeting.id} className="grid gap-2">
+                {showGroup && (
+                  <div className="flex items-center gap-2 px-1 pt-1 text-xs font-medium text-muted-foreground">
+                    <span className="size-3 rounded border border-[var(--divider)] bg-[var(--surface)]" />
+                    {group}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="truncate text-sm font-semibold text-foreground">
-                        {meeting.title}
-                      </h3>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {formatter.format(new Date(meeting.startedAt))}
-                      </span>
+                )}
+                <button
+                  type="button"
+                  data-selected={selected}
+                  className="grid min-h-[82px] gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-3 py-3 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/50 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] rtl:text-right"
+                  onClick={() => onSelectMeeting(meeting.id)}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-subtle)] text-xs font-semibold text-[var(--primary)] ring-1 ring-[var(--divider)]">
+                      {source.icon}
                     </div>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className={`size-2 rounded-full ${source.dot}`} />
-                      <span className="truncate">{source.label}</span>
-                      <span className="ms-auto size-2 rounded-full bg-teal-600" />
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {durationLabel(meeting)} · {meeting.participants.length || 1} participants
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {(meeting.tags?.slice(0, 2) ?? ["review"]).map((tag) => (
-                        <Badge
-                          key={tag}
-                          variant="secondary"
-                          className={`h-6 rounded-sm px-2 text-[11px] font-medium ${tagClass(tag)}`}
-                        >
-                          {tag}
-                        </Badge>
-                      ))}
-                      {(meeting.tags?.length ?? 0) > 2 && (
-                        <Badge
-                          variant="secondary"
-                          className="h-6 rounded-sm bg-[var(--selected)] px-2 text-[11px] text-[var(--primary)]"
-                        >
-                          +{(meeting.tags?.length ?? 0) - 2}
-                        </Badge>
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="truncate text-sm font-semibold text-foreground">
+                          {meeting.title}
+                        </h3>
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {formatter.format(started)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <span className={`size-2 rounded-full ${source.dot}`} />
+                        <span className="truncate">{source.label}</span>
+                        <span>·</span>
+                        <span>{durationLabel(meeting)}</span>
+                        <span>·</span>
+                        <span>{meeting.participants.length || 1} participants</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium ${status.className}`}>
+                          <StatusIcon aria-hidden="true" className="size-3" />
+                          {status.label}
+                        </span>
+                        {(meeting.tags?.slice(0, 2) ?? []).map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant="secondary"
+                            className={`h-6 rounded-md px-2 text-[11px] font-medium ${tagClass(tag)}`}
+                          >
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </button>
+                </button>
+              </div>
             )
           })}
         </div>
