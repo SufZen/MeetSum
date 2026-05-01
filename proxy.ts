@@ -15,6 +15,7 @@ export function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
+    pathname.startsWith("/share") ||
     PUBLIC_FILE.test(pathname)
   ) {
     return NextResponse.next()
