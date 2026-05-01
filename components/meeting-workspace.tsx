@@ -133,7 +133,10 @@ export function MeetingWorkspace({
 
         <TabsContent value="transcript" className="mt-0 px-5 py-6 md:px-8">
           <div className="mx-auto max-w-5xl">
-            <TranscriptTimeline segments={meeting.transcript} />
+            <TranscriptTimeline
+              segments={meeting.transcript}
+              onEditSpeakers={onShowParticipants}
+            />
           </div>
         </TabsContent>
 

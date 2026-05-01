@@ -730,7 +730,23 @@ export function CommandCenterShell({
       toast.error(result.errors[0])
     }
     if (targetMeetingId) {
-      void refreshMeetings(targetMeetingId)
+      void (async () => {
+        try {
+          const response = await fetch(`/api/meetings/${targetMeetingId}`)
+          const body = await response.json()
+
+          if (response.ok && body.meeting) {
+            setMeetingRecords((current) => [
+              body.meeting,
+              ...current.filter((meeting) => meeting.id !== targetMeetingId),
+            ])
+          }
+          selectMeeting(targetMeetingId)
+          setActivePanel("meetings")
+        } catch {
+          selectMeeting(targetMeetingId)
+        }
+      })()
     }
     void refreshOperationalState()
   }

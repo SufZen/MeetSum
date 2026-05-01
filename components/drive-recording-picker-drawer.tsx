@@ -1,7 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState, useTransition } from "react"
-import { CalendarIcon, CheckCircle2Icon, FileAudioIcon, SearchIcon } from "lucide-react"
+import {
+  CalendarIcon,
+  CheckCircle2Icon,
+  FileAudioIcon,
+  Loader2Icon,
+  SearchIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -75,10 +82,20 @@ export function DriveRecordingPickerDrawer({
   const [error, setError] = useState("")
   const [importing, setImporting] = useState(false)
   const [lastImport, setLastImport] = useState<DriveImportResult | null>(null)
+  const [trackedJobs, setTrackedJobs] = useState<Record<string, JobRecord>>({})
   const [loading, startTransition] = useTransition()
   const selectedCount = selected.size
 
   const selectedIds = useMemo(() => [...selected].slice(0, 5), [selected])
+  const activeImportJobs = useMemo(
+    () =>
+      (lastImport?.jobs ?? []).filter((job) => {
+        const tracked = trackedJobs[job.id] ?? job
+
+        return tracked.status === "queued" || tracked.status === "active"
+      }),
+    [lastImport?.jobs, trackedJobs]
+  )
 
   function loadRecordings(nextQuery = query) {
     setError("")
@@ -115,6 +132,36 @@ export function DriveRecordingPickerDrawer({
     // loadRecordings intentionally reads current local state when the drawer opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  useEffect(() => {
+    if (!lastImport?.jobs.length) return
+
+    const jobIds = new Set(lastImport.jobs.map((job) => job.id))
+    let stopped = false
+
+    async function refreshJobs() {
+      const response = await fetch("/api/jobs")
+      const body = await response.json()
+
+      if (!response.ok || stopped) return
+
+      const nextTracked: Record<string, JobRecord> = {}
+
+      for (const job of body.jobs ?? []) {
+        if (jobIds.has(job.id)) nextTracked[job.id] = job
+      }
+
+      setTrackedJobs((current) => ({ ...current, ...nextTracked }))
+    }
+
+    void refreshJobs()
+    const intervalId = window.setInterval(() => void refreshJobs(), 3500)
+
+    return () => {
+      stopped = true
+      window.clearInterval(intervalId)
+    }
+  }, [lastImport])
 
   function toggle(fileId: string) {
     const recording = recordings.find((item) => item.fileId === fileId)
@@ -169,6 +216,9 @@ export function DriveRecordingPickerDrawer({
           files: body.files ?? [],
         } satisfies DriveImportResult
 
+        setTrackedJobs(
+          Object.fromEntries(importResult.jobs.map((job) => [job.id, job]))
+        )
         setLastImport(importResult)
         onImported(importResult)
         setSelected(new Set())
@@ -228,14 +278,51 @@ export function DriveRecordingPickerDrawer({
               <div className="font-semibold">
                 Import result: {lastImport.imported} queued, {lastImport.skipped} skipped
               </div>
+              <div className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">Drive download and audio extraction</span>
+                  <span className="flex items-center gap-1 text-[var(--status-success)]">
+                    <CheckCircle2Icon className="size-3.5" />
+                    Done
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">Worker processing</span>
+                  {activeImportJobs.length ? (
+                    <span className="flex items-center gap-1 text-[var(--primary)]">
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                      {activeImportJobs.length} active
+                    </span>
+                  ) : lastImport.jobs.some((job) => (trackedJobs[job.id] ?? job).status === "failed") ? (
+                    <span className="flex items-center gap-1 text-destructive">
+                      <XCircleIcon className="size-3.5" />
+                      Needs retry
+                    </span>
+                  ) : lastImport.jobs.length ? (
+                    <span className="flex items-center gap-1 text-[var(--status-success)]">
+                      <CheckCircle2Icon className="size-3.5" />
+                      Complete
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No worker job</span>
+                  )}
+                </div>
+              </div>
               <div className="grid gap-1 text-xs">
                 {lastImport.files.map((file) => (
                   <div key={`${file.fileId}-${file.jobId ?? file.status}`} className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0 truncate">{file.name ?? file.fileId}</span>
                     <span className="rounded-sm bg-[var(--surface)]/85 px-2 py-0.5 font-medium text-[var(--primary)]">
                       {file.status}
-                      {file.jobId ? ` · ${file.jobId.slice(0, 8)}` : ""}
+                      {file.jobId
+                        ? ` · ${(trackedJobs[file.jobId]?.status ?? "queued")}`
+                        : ""}
                     </span>
+                    {file.jobId && trackedJobs[file.jobId]?.error ? (
+                      <span className="basis-full text-destructive">
+                        {trackedJobs[file.jobId].error}
+                      </span>
+                    ) : null}
                   </div>
                 ))}
               </div>

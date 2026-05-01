@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { SearchIcon } from "lucide-react"
+import { SearchIcon, UsersIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { TranscriptSegment } from "@/lib/meetings/repository"
 
@@ -17,8 +18,10 @@ function formatTime(ms: number) {
 
 export function TranscriptTimeline({
   segments,
+  onEditSpeakers,
 }: {
   segments?: TranscriptSegment[]
+  onEditSpeakers?: () => void
 }) {
   const [query, setQuery] = useState("")
   const filteredSegments = useMemo(() => {
@@ -46,7 +49,7 @@ export function TranscriptTimeline({
 
   return (
     <div className="grid gap-4">
-      <div className="sticky top-0 z-10 flex min-h-10 items-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
+      <div className="sticky top-0 z-10 flex min-h-10 flex-wrap items-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-1.5">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
           value={query}
@@ -57,6 +60,17 @@ export function TranscriptTimeline({
         <span className="font-mono text-xs text-muted-foreground">
           {filteredSegments.length}/{segments.length}
         </span>
+        {onEditSpeakers ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ms-auto h-8"
+            onClick={onEditSpeakers}
+          >
+            <UsersIcon data-icon="inline-start" className="size-4" />
+            Edit speakers
+          </Button>
+        ) : null}
       </div>
 
       <div className="grid gap-2">
