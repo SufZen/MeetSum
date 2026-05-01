@@ -2,6 +2,7 @@
 
 import {
   BotIcon,
+  BookOpenIcon,
   CloudIcon,
   DatabaseIcon,
   FileAudioIcon,
@@ -107,6 +108,30 @@ function OpsCard({
         )}
       </div>
       {children && <div className="mt-4">{children}</div>}
+    </section>
+  )
+}
+
+function ManualBlock({
+  title,
+  items,
+}: {
+  title: string
+  items: string[]
+}) {
+  return (
+    <section className="ms-card p-4">
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      <div className="mt-3 grid gap-2">
+        {items.map((item) => (
+          <div
+            key={item}
+            className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-muted-foreground"
+          >
+            {item}
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
@@ -395,6 +420,99 @@ export function OperationalPage({
           <OpsCard icon={DatabaseIcon} title="Media assets" description="Imported audio/video-derived assets stored privately in MinIO." status={`${assets} assets`} />
           <OpsCard icon={ShieldCheckIcon} title="Retention policy" description="Audio-first by default. Video retained only when configured." status="active" />
           <OpsCard icon={CloudIcon} title="Backups" description="Postgres backup runs before VPS deploys; restore remains operator-confirmed." status="configured" />
+        </div>
+      </PageFrame>
+    )
+  }
+
+  if (panel === "manual") {
+    return (
+      <PageFrame
+        eyebrow="System manual"
+        title="MeetSum operating guide"
+        description="A practical guide to how MeetSum captures meetings, processes intelligence, stores data, and connects to your business systems."
+      >
+        <div className="grid gap-4 lg:grid-cols-3">
+          <OpsCard
+            icon={BookOpenIcon}
+            title="Basic logic"
+            description="MeetSum turns calendar context and selected recordings into searchable meeting intelligence."
+            status="V0.1"
+          >
+            <ol className="grid list-decimal gap-2 ps-5 text-sm leading-6 text-muted-foreground">
+              <li>Calendar sync creates scheduled meeting records and participant context.</li>
+              <li>Drive picker imports only the recordings you select.</li>
+              <li>The worker extracts audio, transcribes, summarizes, indexes, and emits automation events.</li>
+              <li>The UI shows summary, transcript, tasks, tags, participants, sharing, exports, and memory search.</li>
+            </ol>
+          </OpsCard>
+          <OpsCard
+            icon={RadioTowerIcon}
+            title="Capture model"
+            description="Online meetings use Google artifacts first. In-person meetings use upload or the browser recorder."
+            status="audio-first"
+          >
+            <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+              <p>For Google Meet, enable native recording/transcript/smart notes, then import artifacts after the meeting.</p>
+              <p>For Zoom, Teams, or in-person sessions, upload the recording or use the PWA recorder.</p>
+              <p>MeetSum does not join meetings as a bot in V0.1.0.</p>
+            </div>
+          </OpsCard>
+          <OpsCard
+            icon={WorkflowIcon}
+            title="Automation surfaces"
+            description="Every processed artifact is designed to flow into APIs, webhooks, RealizeOS, n8n, CLI, and MCP."
+            status="connected"
+          >
+            <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+              <p>Use RealizeOS export from the meeting right rail.</p>
+              <p>Use webhooks for meeting.completed, summary.created, and action_item.created.</p>
+              <p>Use CLI/MCP for agents and context-aware workflows once API keys are configured.</p>
+            </div>
+          </OpsCard>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ManualBlock
+            title="Daily workflow"
+            items={[
+              "Start in Meetings. Use Smart sort with 5 items per page for the most useful current meetings.",
+              "Use Sync Calendar for schedule context, then Find Drive recordings to import specific recordings.",
+              "Open a processed meeting, review Summary and Tasks, then use Transcript to search and map speakers.",
+              "Share creates a public read-only transcript/summary page. Audio remains private by default.",
+              "Use AI Memory to search or ask across all indexed summaries and transcripts.",
+            ]}
+          />
+          <ManualBlock
+            title="Meeting intelligence outputs"
+            items={[
+              "Overview: concise narrative summary of what happened and why it matters.",
+              "Decisions: concrete decisions with evidence where available.",
+              "Action items: task title, owner, due date, priority, confidence, and source quote when detected.",
+              "Risks and open questions: blockers, uncertainty, missing owners, and unresolved decisions.",
+              "Key quotes: timestamped transcript snippets used for evidence and follow-up.",
+            ]}
+          />
+          <ManualBlock
+            title="Data and retention"
+            items={[
+              "Postgres is the system of record for meetings, sync state, participants, summaries, actions, shares, jobs, and integrations.",
+              "MinIO stores private media assets. Video is converted to audio-first assets by default.",
+              "Redis/BullMQ handles processing jobs and retries.",
+              "Default retention: transcripts and summaries indefinitely, audio 180 days, video only when explicitly enabled.",
+              "Every deploy runs a Postgres backup before replacing disposable app/worker containers.",
+            ]}
+          />
+          <ManualBlock
+            title="Current limitations and next upgrades"
+            items={[
+              "Google Meet artifact listing works, but deeper artifact-to-meeting import/linking still needs expansion.",
+              "Gmail context is connected conceptually but should remain secondary until Calendar and Drive are fully reliable.",
+              "Notion and DOCX exports are prepared but not active; PDF and Markdown are first-class.",
+              "Vertex AI is prepared as the stable credential path, but production still uses the AI Studio Gemini key until smoke-tested.",
+              "Visible meeting bot/desktop recorder is deferred until consent and Meet Media API requirements are proven.",
+            ]}
+          />
         </div>
       </PageFrame>
     )

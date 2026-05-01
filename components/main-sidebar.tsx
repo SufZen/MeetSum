@@ -4,6 +4,7 @@ import {
   BrainIcon,
   CalendarDaysIcon,
   DatabaseIcon,
+  BookOpenIcon,
   FolderPlusIcon,
   SettingsIcon,
   WorkflowIcon,
@@ -21,6 +22,7 @@ const panelKeys = [
   "workspace",
   "automations",
   "storage",
+  "manual",
   "settings",
 ] as const
 
@@ -32,6 +34,7 @@ const navIcons = [
   WorkflowIcon,
   ZapIcon,
   DatabaseIcon,
+  BookOpenIcon,
   SettingsIcon,
 ]
 
@@ -50,6 +53,7 @@ export function MainSidebar({
     dictionary.navWorkspace,
     dictionary.navAutomations,
     dictionary.navStorage,
+    dictionary.navManual,
     dictionary.navSettings,
   ]
   const rooms = [

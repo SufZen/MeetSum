@@ -16,13 +16,16 @@ This repository currently contains the first working architecture slice:
 - Postgres migration runner and repository adapter, with in-memory demo mode still available for local UI work.
 - API key hashing/verification, bearer-token CLI support, and request validation for meeting creation and protected write routes.
 - REST API scaffold for meetings, uploads, Ask-style Q&A, Google sync, webhooks, and agent runs.
+- Public meeting share pages, meeting favorites, tags, Rooms/context links, participants, and transcript speaker mapping.
+- Google Calendar sync, operator-selected Drive recording import, Meet artifact status checks, and BullMQ worker processing.
+- Gemini-backed audio/summary provider path with AI Studio active and Vertex AI credential path prepared.
 - CLI scaffold in `bin/meetings.mjs`.
 - MCP server scaffold in `mcp/server.mjs`.
 - VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
 - Initial Postgres schema in `db/schema.sql`.
 - Production compose, health endpoint, and Postgres backup/restore scripts.
 
-This is not yet a full production Fireflies replacement. Real Google API sync, media workers, transcription/diarization providers, billing/permissions, and user-facing admin auth are the next build stages.
+This is not yet a full production Fireflies replacement. The next build stages are deeper Meet artifact import/linking, Gmail prep/follow-up, stronger Hebrew evaluation, richer automations, and production-grade admin/security UX.
 
 ## Quick Start
 
@@ -92,6 +95,7 @@ Production VPS deploy uses `docker-compose.prod.yml`, exposes MeetSum on host po
 ## Documentation
 
 - `docs/architecture.md`: current architecture and integration surfaces.
+- `docs/user-manual.md`: basic logic, daily workflow, capture model, integrations, and operating rules.
 - `docs/design-system.md`: UI palette, typography, layout, and component layer.
 - `docs/internationalization.md`: locale routing, language cookie, and RTL policy.
 - `docs/language-intelligence.md`: mixed-language detection, Hebrew cleanup, tags, and smart tasks.
