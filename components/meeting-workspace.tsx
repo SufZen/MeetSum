@@ -30,6 +30,11 @@ export function MeetingWorkspace({
   onOpenUpload,
   onSyncGoogle,
   onCheckSetup,
+  onShareMeeting,
+  onToggleFavorite,
+  onShowParticipants,
+  onAddToRoom,
+  onCopyText,
   locale,
 }: {
   dictionary: Dictionary
@@ -45,6 +50,11 @@ export function MeetingWorkspace({
   onOpenUpload: () => void
   onSyncGoogle: () => void
   onCheckSetup: () => void
+  onShareMeeting: () => void
+  onToggleFavorite: () => void
+  onShowParticipants: () => void
+  onAddToRoom: () => void
+  onCopyText: (text: string, label: string) => void
 }) {
   if (!meeting) {
     return (
@@ -74,7 +84,14 @@ export function MeetingWorkspace({
 
   return (
     <div className="ms-scrollbar min-h-0 min-w-0 overflow-y-auto bg-[var(--surface)] lg:h-full">
-      <MeetingHeader meeting={meeting} locale={locale} />
+      <MeetingHeader
+        meeting={meeting}
+        locale={locale}
+        onShare={onShareMeeting}
+        onToggleFavorite={onToggleFavorite}
+        onShowParticipants={onShowParticipants}
+        onAddToRoom={onAddToRoom}
+      />
 
       <Tabs defaultValue="summary" className="min-w-0">
         <TabsList
@@ -100,6 +117,7 @@ export function MeetingWorkspace({
             meeting={meeting}
             onToggleActionItem={onToggleActionItem}
             onReprocessMeeting={onReprocessMeeting}
+            onCopyText={onCopyText}
           />
         </TabsContent>
 

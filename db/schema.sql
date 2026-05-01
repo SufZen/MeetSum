@@ -84,6 +84,7 @@ create table if not exists meetings (
   retention text not null default 'audio',
   started_at timestamptz not null,
   participants jsonb not null default '[]'::jsonb,
+  is_favorite boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -331,6 +332,49 @@ create table if not exists integration_endpoints (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists meeting_shares (
+  id text primary key,
+  meeting_id text not null references meetings(id) on delete cascade,
+  token text not null unique,
+  visibility text not null default 'public',
+  revoked boolean not null default false,
+  expires_at timestamptz,
+  included_sections jsonb not null default '["summary","decisions","action_items","transcript","participants"]'::jsonb,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists meeting_participants (
+  id text primary key,
+  meeting_id text not null references meetings(id) on delete cascade,
+  name text not null,
+  email text,
+  role text not null default 'attendee',
+  source text not null default 'manual',
+  attendance_status text not null default 'unknown',
+  speaker_label text,
+  confidence numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists export_records (
+  id text primary key,
+  meeting_id text not null references meetings(id) on delete cascade,
+  format text not null,
+  status text not null default 'created',
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table meetings
+  add column if not exists is_favorite boolean not null default false;
+
+alter table contexts
+  add column if not exists color text,
+  add column if not exists kind text not null default 'room';
+
 create unique index if not exists google_identities_workspace_subject_idx
   on google_identities(workspace_account_id, subject_email);
 
@@ -356,8 +400,17 @@ create index if not exists meetings_started_at_idx
 create index if not exists meetings_status_idx
   on meetings(status);
 
+create index if not exists meetings_favorite_idx
+  on meetings(is_favorite, started_at desc);
+
 create index if not exists transcript_segments_meeting_start_idx
   on transcript_segments(meeting_id, start_ms);
+
+create index if not exists meeting_participants_meeting_idx
+  on meeting_participants(meeting_id);
+
+create index if not exists meeting_shares_meeting_idx
+  on meeting_shares(meeting_id);
 
 create index if not exists summaries_meeting_created_idx
   on summaries(meeting_id, created_at desc);

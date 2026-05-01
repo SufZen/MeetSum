@@ -1,3 +1,5 @@
+"use client"
+
 import {
   BotIcon,
   CloudIcon,
@@ -12,6 +14,8 @@ import {
   WorkflowIcon,
 } from "lucide-react"
 import type { ReactNode } from "react"
+import { useState } from "react"
+import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
 import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provider-health-panel"
@@ -114,6 +118,32 @@ export function OperationalPage({
   onFindDriveRecordings: () => void
   onRetryJob: (job: JobRecord) => void
 }) {
+  const [memoryAnswer, setMemoryAnswer] = useState("")
+  const [memoryQuestion, setMemoryQuestion] = useState("")
+
+  async function askMemory() {
+    if (!memoryQuestion.trim()) return
+
+    const response = await fetch("/api/memory/ask", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question: memoryQuestion }),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to ask memory")
+      return
+    }
+
+    setMemoryAnswer(body.answer?.answer ?? body.answer ?? "No answer returned")
+  }
+
+  async function copyAutomationText(value: string, label: string) {
+    await navigator.clipboard.writeText(value)
+    toast.success(`${label} copied`)
+  }
+
   if (panel === "workspace") {
     return (
       <PageFrame
@@ -190,9 +220,24 @@ export function OperationalPage({
           <OpsCard
             icon={SparklesIcon}
             title="Ask all meetings"
-            description="The API surface is ready at /api/memory/ask; the next UI pass will stream answers with citations."
+            description="Ask across indexed summaries and transcripts. Answers include server-side citations when available."
             status={`${completed.length} indexed`}
-          />
+          >
+            <div className="grid gap-2">
+              <Input
+                className="h-10"
+                value={memoryQuestion}
+                onChange={(event) => setMemoryQuestion(event.target.value)}
+                placeholder="What did we decide about RealizeOS?"
+              />
+              <Button onClick={askMemory}>Ask memory</Button>
+              {memoryAnswer ? (
+                <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm leading-6">
+                  {memoryAnswer}
+                </div>
+              ) : null}
+            </div>
+          </OpsCard>
         </div>
       </PageFrame>
     )
@@ -207,13 +252,31 @@ export function OperationalPage({
       >
         <div className="grid gap-4 lg:grid-cols-3">
           <OpsCard icon={WorkflowIcon} title="Webhooks" description="Signed delivery for meeting.completed, summary.created, and action_item.created." status="ready">
-            <Button variant="outline" className="h-8 w-full justify-start">Manage subscriptions</Button>
+            <Button
+              variant="outline"
+              className="h-8 w-full justify-start"
+              onClick={() => copyAutomationText("/api/webhooks/subscriptions", "Webhook API")}
+            >
+              Copy subscription API
+            </Button>
           </OpsCard>
           <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting context exports with auditable retryable jobs." status="connected">
-            <Button variant="outline" className="h-8 w-full justify-start">View export history</Button>
+            <Button
+              variant="outline"
+              className="h-8 w-full justify-start"
+              onClick={() => toast.info("RealizeOS export history is recorded in agent/job activity.")}
+            >
+              View export history
+            </Button>
           </OpsCard>
           <OpsCard icon={LinkIcon} title="n8n" description="Webhook-ready infrastructure; live workflows can be connected when needed." status="prepared">
-            <Button variant="outline" className="h-8 w-full justify-start">Copy endpoint details</Button>
+            <Button
+              variant="outline"
+              className="h-8 w-full justify-start"
+              onClick={() => copyAutomationText("meeting.completed, summary.created, action_item.created", "n8n event list")}
+            >
+              Copy endpoint details
+            </Button>
           </OpsCard>
         </div>
         <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />

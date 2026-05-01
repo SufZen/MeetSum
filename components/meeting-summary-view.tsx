@@ -26,14 +26,17 @@ export function MeetingSummaryView({
   meeting,
   onToggleActionItem,
   onReprocessMeeting,
+  onCopyText,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
+  onCopyText: (text: string, label: string) => void
 }) {
   const actionItems = meeting.summary?.actionItems ?? []
   const quotes = meeting.transcript?.slice(0, 2) ?? []
+  const isUpcoming = meeting.status === "scheduled" && !meeting.summary
 
   return (
     <div className="px-5 py-6 md:px-8">
@@ -51,21 +54,51 @@ export function MeetingSummaryView({
               <RefreshCwIcon data-icon="inline-start" className="size-4" />
               Reprocess
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-muted-foreground"
+              onClick={() =>
+                onCopyText(
+                  meeting.summary?.overview ??
+                    "No summary is available for this meeting yet.",
+                  "Overview"
+                )
+              }
+            >
               <CopyIcon data-icon="inline-start" className="size-4" />
               Copy
             </Button>
           </div>
         </div>
-        <p className="max-w-3xl text-sm leading-7 text-foreground/80">
-          {meeting.summary?.overview ?? "Summary will appear after intelligence runs."}
-        </p>
+        {isUpcoming ? (
+          <div className="max-w-3xl rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm leading-6 text-muted-foreground">
+            This is an upcoming calendar meeting. Capture will become useful
+            after a Meet recording, transcript, smart note, upload, or PWA
+            recording is attached.
+          </div>
+        ) : (
+          <p className="max-w-3xl text-sm leading-7 text-foreground/80">
+            {meeting.summary?.overview ??
+              "Summary will appear after intelligence runs."}
+          </p>
+        )}
       </section>
 
       <section className="mt-8 max-w-3xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.decisions}</h2>
-          <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-muted-foreground"
+            onClick={() =>
+              onCopyText(
+                (meeting.summary?.decisions ?? []).join("\n"),
+                "Decisions"
+              )
+            }
+          >
             <CopyIcon data-icon="inline-start" className="size-4" />
             Copy
           </Button>
@@ -149,7 +182,22 @@ export function MeetingSummaryView({
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Key Quotes</h2>
-          <Button variant="ghost" size="sm" className="h-8 text-muted-foreground">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-muted-foreground"
+            onClick={() =>
+              onCopyText(
+                quotes
+                  .map(
+                    (segment) =>
+                      `${quoteTime(segment.startMs)} ${segment.speaker}: ${segment.text}`
+                  )
+                  .join("\n"),
+                "Key quotes"
+              )
+            }
+          >
             <CopyIcon data-icon="inline-start" className="size-4" />
             Copy
           </Button>

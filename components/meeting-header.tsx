@@ -31,15 +31,25 @@ function durationLabel(meeting: MeetingRecord) {
 export function MeetingHeader({
   meeting,
   locale,
+  onShare,
+  onToggleFavorite,
+  onShowParticipants,
+  onAddToRoom,
 }: {
   meeting: MeetingRecord
   locale: SupportedLocale
+  onShare?: () => void
+  onToggleFavorite?: () => void
+  onShowParticipants?: () => void
+  onAddToRoom?: () => void
 }) {
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     dateStyle: "medium",
     timeStyle: "short",
   })
-  const room = meeting.contexts?.[0]?.name ?? "Real Estate Acquisitions"
+  const room = meeting.contexts?.[0]?.name ?? "No room"
+  const participantCount =
+    meeting.participantDetails?.length || meeting.participants.length || 0
 
   return (
     <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-4 md:px-7">
@@ -52,8 +62,17 @@ export function MeetingHeader({
             <h1 className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl">
               {meeting.title}
             </h1>
-            <StarIcon aria-hidden="true" className="size-4 text-amber-400" />
-            <EllipsisIcon aria-hidden="true" className="size-5 text-muted-foreground" />
+            <button
+              className="rounded p-0.5 text-amber-400 hover:bg-[var(--surface-subtle)]"
+              onClick={onToggleFavorite}
+              title={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
+              type="button"
+            >
+              <StarIcon
+                aria-hidden="true"
+                className={meeting.isFavorite ? "size-4 fill-current" : "size-4"}
+              />
+            </button>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
@@ -64,27 +83,42 @@ export function MeetingHeader({
               <ClockIcon aria-hidden="true" className="size-4" />
               {durationLabel(meeting)}
             </span>
-            <span className="flex items-center gap-2">
+            <button
+              className="flex items-center gap-2 rounded text-left hover:text-foreground"
+              onClick={onShowParticipants}
+              type="button"
+            >
               <UsersIcon aria-hidden="true" className="size-4" />
-              {meeting.participants.length || 1} participants
-            </span>
+              {participantCount || 0} participants
+            </button>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
               <span className="size-2 rounded-full bg-emerald-500" />
               {room}
             </span>
-            <Button variant="outline" size="sm" className="h-7 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]"
+              onClick={onAddToRoom}
+            >
               Add to room
             </Button>
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-8">
+          <Button variant="outline" size="sm" className="h-8" onClick={onShare}>
             <Share2Icon data-icon="inline-start" />
             Share
           </Button>
-          <Button variant="outline" size="icon-sm" className="h-8 w-8">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="h-8 w-8"
+            title="Meeting actions arrive in the next v0.1.0 slice"
+            disabled
+          >
             <EllipsisIcon aria-hidden="true" />
             <span className="sr-only">More</span>
           </Button>

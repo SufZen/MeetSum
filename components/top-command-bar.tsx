@@ -132,6 +132,8 @@ export function TopCommandBar({
           variant="ghost"
           size="icon"
           className="hidden rounded-full border border-[var(--divider)] bg-[var(--surface)] text-[var(--status-ai)] sm:inline-flex"
+          disabled
+          title="Provider details live in Google Workspace"
         >
           <SparklesIcon aria-hidden="true" className="size-5" />
           <span className="sr-only">AI status</span>
@@ -150,7 +152,13 @@ export function TopCommandBar({
           )}
           <span className="sr-only">Toggle dark mode</span>
         </Button>
-        <Button variant="ghost" size="icon" className="relative rounded-full">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative rounded-full"
+          disabled
+          title="Notifications are coming in the next release slice"
+        >
           <BellIcon aria-hidden="true" className="size-5" />
           <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-orange-500 text-[10px] font-semibold text-white">
             3

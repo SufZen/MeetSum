@@ -16,7 +16,13 @@ export function GoogleContextCard({ meeting }: { meeting: MeetingRecord | null }
     <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Google Context</h3>
-        <Button variant="ghost" size="sm" className="h-7 text-[var(--primary)]">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-[var(--primary)]"
+          disabled
+          title="Full Google context explorer is coming next"
+        >
           View all
         </Button>
       </div>

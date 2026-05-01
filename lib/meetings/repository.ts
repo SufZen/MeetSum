@@ -46,6 +46,44 @@ export type MeetingContext = {
   id: string
   name: string
   description?: string
+  color?: string
+  kind?: "room" | "project" | "client" | "topic"
+  createdAt: string
+}
+
+export type MeetingParticipant = {
+  id: string
+  meetingId: string
+  name: string
+  email?: string
+  role: "organizer" | "attendee" | "speaker" | "unknown"
+  source: "calendar" | "transcript" | "manual" | "meet" | "drive"
+  attendanceStatus: "accepted" | "declined" | "tentative" | "needs_action" | "unknown"
+  speakerLabel?: string
+  confidence?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MeetingShare = {
+  id: string
+  meetingId: string
+  token: string
+  visibility: "public"
+  revoked: boolean
+  expiresAt?: string
+  includedSections: string[]
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ExportRecord = {
+  id: string
+  meetingId: string
+  format: "pdf" | "markdown" | "docx" | "notion"
+  status: "created" | "queued" | "sent" | "failed"
+  metadata: Record<string, unknown>
   createdAt: string
 }
 
@@ -105,6 +143,8 @@ export type MeetingRecord = {
   retention: "audio" | "video"
   startedAt: string
   participants: string[]
+  participantDetails?: MeetingParticipant[]
+  isFavorite?: boolean
   summary?: MeetingSummary
   transcript?: TranscriptSegment[]
   tags?: MeetingTag[]
@@ -227,6 +267,37 @@ export type MeetingRepository = {
     meetingId: string,
     contextId: string
   ) => Promise<MeetingRecord>
+  listRooms: () => Promise<Array<MeetingContext & { meetingCount: number }>>
+  updateMeetingTags: (meetingId: string, tags: string[]) => Promise<MeetingRecord>
+  updateMeetingFavorite: (meetingId: string, favorite: boolean) => Promise<MeetingRecord>
+  createMeetingShare: (input: {
+    meetingId: string
+    createdBy?: string
+    includedSections?: string[]
+  }) => Promise<MeetingShare>
+  updateMeetingShare: (
+    meetingId: string,
+    patch: { revoked?: boolean; regenerate?: boolean; includedSections?: string[] }
+  ) => Promise<MeetingShare>
+  getShareByToken: (
+    token: string
+  ) => Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined>
+  listMeetingParticipants: (meetingId: string) => Promise<MeetingParticipant[]>
+  updateMeetingParticipant: (
+    participantId: string,
+    patch: Partial<Pick<MeetingParticipant, "name" | "email" | "role" | "attendanceStatus" | "speakerLabel">>
+  ) => Promise<MeetingParticipant>
+  assignSpeakerToParticipant: (
+    meetingId: string,
+    speakerLabel: string,
+    participantId: string
+  ) => Promise<MeetingParticipant>
+  createExportRecord: (input: {
+    meetingId: string
+    format: ExportRecord["format"]
+    metadata?: Record<string, unknown>
+  }) => Promise<ExportRecord>
+  approveAgentRun: (id: string) => Promise<SuggestedAgentRun>
   createSuggestedAgentRun: (input: {
     meetingId: string
     target: SuggestedAgentRun["target"]
@@ -342,10 +413,53 @@ export function createInMemoryMeetingRepository(
   initialMeetings: MeetingRecord[] = []
 ): MeetingRepository {
   const meetings = new Map<string, MeetingRecord>(
-    initialMeetings.map((meeting) => [meeting.id, meeting])
+    initialMeetings.map((meeting) => [
+      meeting.id,
+      { isFavorite: false, ...meeting },
+    ])
   )
   const contexts = new Map<string, MeetingContext>()
   const jobs = new Map<string, JobRecord>()
+  const shares = new Map<string, MeetingShare>()
+  const participants = new Map<string, MeetingParticipant>()
+  const exportRecords = new Map<string, ExportRecord>()
+  const suggestedRuns = new Map<string, SuggestedAgentRun>()
+
+  function ensureParticipants(meeting: MeetingRecord): MeetingParticipant[] {
+    const existing = [...participants.values()].filter(
+      (participant) => participant.meetingId === meeting.id
+    )
+
+    if (existing.length || !meeting.participants.length) return existing
+
+    const now = new Date().toISOString()
+    return meeting.participants.map((participant, index) => {
+      const email = participant.includes("@") ? participant : undefined
+      const name = email ? participant.split("@")[0] : participant
+      const record: MeetingParticipant = {
+        id: createId("participant"),
+        meetingId: meeting.id,
+        name,
+        email,
+        role: index === 0 ? "organizer" : "attendee",
+        source: "calendar",
+        attendanceStatus: "unknown",
+        confidence: 0.6,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      participants.set(record.id, record)
+      return record
+    })
+  }
+
+  function hydrate(meeting: MeetingRecord): MeetingRecord {
+    return {
+      ...meeting,
+      participantDetails: ensureParticipants(meeting),
+    }
+  }
 
   return {
     async listMeetings(options?: MeetingListOptions): Promise<MeetingRecord[]> {
@@ -359,7 +473,7 @@ export function createInMemoryMeetingRepository(
         .filter((meeting) => meetingMatchesStatus(meeting, options.status))
         .filter((meeting) => meetingMatchesQuery(meeting, options.query))
       const sorted = sortMeetings(filtered, options.sort)
-      const pageMeetings = sorted.slice(offset, offset + limit)
+      const pageMeetings = sorted.slice(offset, offset + limit).map(hydrate)
 
       return {
         meetings: pageMeetings,
@@ -373,7 +487,9 @@ export function createInMemoryMeetingRepository(
     },
 
     async getMeeting(id: string): Promise<MeetingRecord | undefined> {
-      return meetings.get(id)
+      const meeting = meetings.get(id)
+
+      return meeting ? hydrate(meeting) : undefined
     },
 
     async createMeeting(input: CreateMeetingInput): Promise<MeetingRecord> {
@@ -386,10 +502,12 @@ export function createInMemoryMeetingRepository(
         retention: "audio",
         startedAt: input.startedAt,
         participants: input.participants ?? [],
+        isFavorite: false,
       }
 
       meetings.set(meeting.id, meeting)
-      return meeting
+      ensureParticipants(meeting)
+      return hydrate(meeting)
     },
 
     async updateMeetingStatus(
@@ -405,7 +523,7 @@ export function createInMemoryMeetingRepository(
       const updated = { ...meeting, status }
 
       meetings.set(id, updated)
-      return updated
+      return hydrate(updated)
     },
 
     async createMediaAsset(input): Promise<MediaAsset> {
@@ -678,7 +796,202 @@ export function createInMemoryMeetingRepository(
       const updatedMeeting = { ...meeting, contexts: nextContexts }
 
       meetings.set(meetingId, updatedMeeting)
-      return updatedMeeting
+      return hydrate(updatedMeeting)
+    },
+
+    async listRooms(): Promise<Array<MeetingContext & { meetingCount: number }>> {
+      return [...contexts.values()]
+        .map((context) => ({
+          ...context,
+          meetingCount: [...meetings.values()].filter((meeting) =>
+            meeting.contexts?.some((item) => item.id === context.id)
+          ).length,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    },
+
+    async updateMeetingTags(meetingId, tags): Promise<MeetingRecord> {
+      const meeting = meetings.get(meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${meetingId}`)
+      }
+
+      const normalizedTags = [...new Set(tags.map((tag) => tag.trim()))].filter(
+        Boolean
+      ) as MeetingTag[]
+      const updatedMeeting = { ...meeting, tags: normalizedTags }
+
+      meetings.set(meetingId, updatedMeeting)
+      return hydrate(updatedMeeting)
+    },
+
+    async updateMeetingFavorite(meetingId, favorite): Promise<MeetingRecord> {
+      const meeting = meetings.get(meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${meetingId}`)
+      }
+
+      const updatedMeeting = { ...meeting, isFavorite: favorite }
+
+      meetings.set(meetingId, updatedMeeting)
+      return hydrate(updatedMeeting)
+    },
+
+    async createMeetingShare(input): Promise<MeetingShare> {
+      const meeting = meetings.get(input.meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${input.meetingId}`)
+      }
+
+      const existing = [...shares.values()].find(
+        (share) => share.meetingId === input.meetingId && !share.revoked
+      )
+
+      if (existing) return existing
+
+      const now = new Date().toISOString()
+      const share: MeetingShare = {
+        id: createId("share"),
+        meetingId: input.meetingId,
+        token: crypto.randomUUID().replaceAll("-", ""),
+        visibility: "public",
+        revoked: false,
+        includedSections: input.includedSections ?? [
+          "summary",
+          "decisions",
+          "action_items",
+          "transcript",
+          "participants",
+        ],
+        createdBy: input.createdBy,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      shares.set(share.id, share)
+      return share
+    },
+
+    async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
+      const existing = [...shares.values()]
+        .filter((share) => share.meetingId === meetingId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+
+      if (patch.regenerate) {
+        if (existing) {
+          shares.set(existing.id, {
+            ...existing,
+            revoked: true,
+            updatedAt: new Date().toISOString(),
+          })
+        }
+
+        return this.createMeetingShare({
+          meetingId,
+          includedSections: patch.includedSections,
+        })
+      }
+
+      if (!existing) {
+        return this.createMeetingShare({
+          meetingId,
+          includedSections: patch.includedSections,
+        })
+      }
+
+      const updated: MeetingShare = {
+        ...existing,
+        revoked: patch.revoked ?? existing.revoked,
+        includedSections: patch.includedSections ?? existing.includedSections,
+        updatedAt: new Date().toISOString(),
+      }
+
+      shares.set(existing.id, updated)
+      return updated
+    },
+
+    async getShareByToken(token) {
+      const share = [...shares.values()].find(
+        (item) => item.token === token && !item.revoked
+      )
+      const expired =
+        share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
+
+      if (!share || expired) return undefined
+
+      const meeting = meetings.get(share.meetingId)
+
+      return meeting ? { share, meeting: hydrate(meeting) } : undefined
+    },
+
+    async listMeetingParticipants(meetingId) {
+      const meeting = meetings.get(meetingId)
+
+      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
+      return ensureParticipants(meeting)
+    },
+
+    async updateMeetingParticipant(participantId, patch) {
+      const participant = participants.get(participantId)
+
+      if (!participant) {
+        throw new Error(`Participant not found: ${participantId}`)
+      }
+
+      const updated: MeetingParticipant = {
+        ...participant,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      }
+
+      participants.set(participantId, updated)
+      return updated
+    },
+
+    async assignSpeakerToParticipant(meetingId, speakerLabel, participantId) {
+      const participant = participants.get(participantId)
+
+      if (!participant || participant.meetingId !== meetingId) {
+        throw new Error(`Participant not found: ${participantId}`)
+      }
+
+      return this.updateMeetingParticipant(participantId, { speakerLabel })
+    },
+
+    async createExportRecord(input): Promise<ExportRecord> {
+      const meeting = meetings.get(input.meetingId)
+
+      if (!meeting) {
+        throw new Error(`Meeting not found: ${input.meetingId}`)
+      }
+
+      const record: ExportRecord = {
+        id: createId("export"),
+        meetingId: input.meetingId,
+        format: input.format,
+        status: "created",
+        metadata: input.metadata ?? {},
+        createdAt: new Date().toISOString(),
+      }
+
+      exportRecords.set(record.id, record)
+      return record
+    },
+
+    async approveAgentRun(id): Promise<SuggestedAgentRun> {
+      const run = suggestedRuns.get(id)
+
+      if (!run) {
+        throw new Error(`Agent run not found: ${id}`)
+      }
+
+      const updated = { ...run, status: "queued" as const }
+
+      suggestedRuns.set(id, updated)
+      return updated
     },
 
     async createSuggestedAgentRun(input): Promise<SuggestedAgentRun> {
@@ -706,6 +1019,7 @@ export function createInMemoryMeetingRepository(
       }
 
       meetings.set(input.meetingId, updatedMeeting)
+      suggestedRuns.set(suggestion.id, suggestion)
       return suggestion
     },
   }

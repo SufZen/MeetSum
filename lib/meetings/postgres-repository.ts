@@ -3,6 +3,7 @@ import type {
   ActionItem,
   CreateContextInput,
   CreateMeetingInput,
+  ExportRecord,
   JobRecord,
   JobStatus,
   MediaAsset,
@@ -10,8 +11,10 @@ import type {
   MeetingContext,
   MeetingListOptions,
   MeetingListSortMode,
+  MeetingParticipant,
   MeetingRecord,
   MeetingRepository,
+  MeetingShare,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
 import {
@@ -30,6 +33,7 @@ type MeetingRow = {
   retention: MeetingRecord["retention"]
   started_at: string | Date
   participants: string[] | string
+  is_favorite?: boolean
   language_metadata?: MeetingRecord["languageMetadata"]
 }
 
@@ -75,6 +79,44 @@ type ContextRow = {
   id: string
   name: string
   description: string | null
+  color?: string | null
+  kind?: MeetingContext["kind"] | null
+  created_at: string | Date
+}
+
+type ParticipantRow = {
+  id: string
+  meeting_id: string
+  name: string
+  email: string | null
+  role: MeetingParticipant["role"]
+  source: MeetingParticipant["source"]
+  attendance_status: MeetingParticipant["attendanceStatus"]
+  speaker_label: string | null
+  confidence: string | number | null
+  created_at: string | Date
+  updated_at: string | Date
+}
+
+type MeetingShareRow = {
+  id: string
+  meeting_id: string
+  token: string
+  visibility: MeetingShare["visibility"]
+  revoked: boolean
+  expires_at: string | Date | null
+  included_sections: string[] | string
+  created_by: string | null
+  created_at: string | Date
+  updated_at: string | Date
+}
+
+type ExportRecordRow = {
+  id: string
+  meeting_id: string
+  format: ExportRecord["format"]
+  status: ExportRecord["status"]
+  metadata: Record<string, unknown> | null
   created_at: string | Date
 }
 
@@ -249,7 +291,50 @@ function mapMeetingRow(row: MeetingRow): MeetingRecord {
     retention: row.retention,
     startedAt: toIso(row.started_at),
     participants: parseJsonArray(row.participants),
+    isFavorite: row.is_favorite ?? false,
     languageMetadata: row.language_metadata,
+  }
+}
+
+function mapParticipant(row: ParticipantRow): MeetingParticipant {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    name: row.name,
+    email: row.email ?? undefined,
+    role: row.role,
+    source: row.source,
+    attendanceStatus: row.attendance_status,
+    speakerLabel: row.speaker_label ?? undefined,
+    confidence: row.confidence === null ? undefined : Number(row.confidence),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  }
+}
+
+function mapMeetingShare(row: MeetingShareRow): MeetingShare {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    token: row.token,
+    visibility: row.visibility,
+    revoked: row.revoked,
+    expiresAt: row.expires_at ? toIso(row.expires_at) : undefined,
+    includedSections: parseJsonArray(row.included_sections),
+    createdBy: row.created_by ?? undefined,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  }
+}
+
+function mapExportRecord(row: ExportRecordRow): ExportRecord {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    format: row.format,
+    status: row.status,
+    metadata: row.metadata ?? {},
+    createdAt: toIso(row.created_at),
   }
 }
 
@@ -315,6 +400,7 @@ export function createPostgresMeetingRepository(
       intelligenceResult,
       suggestedRunsResult,
       mediaAssetsResult,
+      participantsResult,
     ] = await Promise.all([
       client.query(
         `
@@ -365,7 +451,7 @@ export function createPostgresMeetingRepository(
       ),
       client.query(
         `
-          select c.id, c.name, c.description, c.created_at
+          select c.id, c.name, c.description, c.color, c.kind, c.created_at
           from meeting_contexts mc
           join contexts c on c.id = mc.context_id
           where mc.meeting_id = $1
@@ -399,6 +485,18 @@ export function createPostgresMeetingRepository(
           from media_assets
           where meeting_id = $1
           order by created_at desc
+        `,
+        [base.id]
+      ),
+      client.query(
+        `
+          select id, meeting_id, name, email, role, source, attendance_status,
+                 speaker_label, confidence, created_at, updated_at
+          from meeting_participants
+          where meeting_id = $1
+          order by
+            case role when 'organizer' then 0 when 'attendee' then 1 else 2 end,
+            name asc
         `,
         [base.id]
       ),
@@ -444,6 +542,8 @@ export function createPostgresMeetingRepository(
     const intelligence = (intelligenceResult.rows[0] as
       | IntelligenceRunRow
       | undefined)?.output
+    const participantDetails =
+      (participantsResult.rows as ParticipantRow[]).map(mapParticipant)
 
     return {
       ...base,
@@ -460,6 +560,8 @@ export function createPostgresMeetingRepository(
         id: context.id,
         name: context.name,
         description: context.description ?? undefined,
+        color: context.color ?? undefined,
+        kind: context.kind ?? undefined,
         createdAt: toIso(context.created_at),
       })),
       intelligence,
@@ -476,6 +578,23 @@ export function createPostgresMeetingRepository(
         })
       ),
       mediaAssets: (mediaAssetsResult.rows as MediaAssetRow[]).map(mapMediaAsset),
+      participantDetails:
+        participantDetails.length > 0
+          ? participantDetails
+          : base.participants.map((participant, index) => ({
+              id: `derived_${base.id}_${index}`,
+              meetingId: base.id,
+              name: participant.includes("@")
+                ? participant.split("@")[0]
+                : participant,
+              email: participant.includes("@") ? participant : undefined,
+              role: index === 0 ? "organizer" : "attendee",
+              source: "calendar",
+              attendanceStatus: "unknown",
+              confidence: 0.4,
+              createdAt: base.startedAt,
+              updatedAt: base.startedAt,
+            })),
     }
   }
 
@@ -503,7 +622,7 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
         select m.id, m.title, m.source, m.language, m.status, m.retention, m.started_at,
-               m.participants, m.language_metadata
+               m.participants, m.is_favorite, m.language_metadata
         from meetings m
         left join lateral (
           select max(j.created_at) as last_job_at
@@ -544,7 +663,7 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           select id, title, source, language, status, retention, started_at,
-                 participants, language_metadata
+                 participants, is_favorite, language_metadata
           from meetings
           where id = $1
           limit 1
@@ -564,7 +683,8 @@ export function createPostgresMeetingRepository(
             id, title, source, language, status, retention, started_at, participants
           )
           values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb)
-          returning id, title, source, language, status, retention, started_at, participants
+          returning id, title, source, language, status, retention, started_at,
+                    participants, is_favorite, language_metadata
         `,
         [
           input.title,
@@ -576,7 +696,34 @@ export function createPostgresMeetingRepository(
         ]
       )
 
-      return mapMeetingRow(result.rows[0] as MeetingRow)
+      const meeting = mapMeetingRow(result.rows[0] as MeetingRow)
+      const now = new Date().toISOString()
+
+      for (const [index, participant] of (input.participants ?? []).entries()) {
+        const email = participant.includes("@") ? participant : null
+        const name = email ? participant.split("@")[0] : participant
+
+        await client.query(
+          `
+            insert into meeting_participants (
+              id, meeting_id, name, email, role, source, attendance_status,
+              confidence, created_at, updated_at
+            )
+            values ($1, $2, $3, $4, $5, 'calendar', 'unknown', 0.6, $6, $6)
+            on conflict do nothing
+          `,
+          [
+            createId("participant"),
+            meeting.id,
+            name,
+            email,
+            index === 0 ? "organizer" : "attendee",
+            now,
+          ]
+        )
+      }
+
+      return hydrateMeeting(meeting)
     },
 
     async updateMeetingStatus(id: string, status: MeetingStatus) {
@@ -586,7 +733,7 @@ export function createPostgresMeetingRepository(
           set status = $2
           where id = $1
           returning id, title, source, language, status, retention, started_at,
-                    participants, language_metadata
+                    participants, is_favorite, language_metadata
         `,
         [id, status]
       )
@@ -992,7 +1139,7 @@ export function createPostgresMeetingRepository(
 
     async listContexts(): Promise<MeetingContext[]> {
       const result = await client.query(`
-        select id, name, description, created_at
+        select id, name, description, color, kind, created_at
         from contexts
         order by name asc
       `)
@@ -1001,6 +1148,8 @@ export function createPostgresMeetingRepository(
         id: context.id,
         name: context.name,
         description: context.description ?? undefined,
+        color: context.color ?? undefined,
+        kind: context.kind ?? undefined,
         createdAt: toIso(context.created_at),
       }))
     },
@@ -1010,7 +1159,7 @@ export function createPostgresMeetingRepository(
         `
           insert into contexts (id, name, description)
           values ($1, $2, $3)
-          returning id, name, description, created_at
+          returning id, name, description, color, kind, created_at
         `,
         [createId("ctx"), input.name, input.description ?? null]
       )
@@ -1020,6 +1169,8 @@ export function createPostgresMeetingRepository(
         id: row.id,
         name: row.name,
         description: row.description ?? undefined,
+        color: row.color ?? undefined,
+        kind: row.kind ?? undefined,
         createdAt: toIso(row.created_at),
       }
     },
@@ -1041,6 +1192,317 @@ export function createPostgresMeetingRepository(
       }
 
       return meeting
+    },
+
+    async listRooms(): Promise<Array<MeetingContext & { meetingCount: number }>> {
+      const result = await client.query(`
+        select c.id, c.name, c.description, c.color, c.kind, c.created_at,
+               count(mc.meeting_id)::int as meeting_count
+        from contexts c
+        left join meeting_contexts mc on mc.context_id = c.id
+        group by c.id, c.name, c.description, c.color, c.kind, c.created_at
+        order by c.name asc
+      `)
+
+      return result.rows.map((row) => {
+        const context = row as ContextRow & { meeting_count: number }
+
+        return {
+          id: context.id,
+          name: context.name,
+          description: context.description ?? undefined,
+          color: context.color ?? undefined,
+          kind: context.kind ?? undefined,
+          createdAt: toIso(context.created_at),
+          meetingCount: Number(context.meeting_count ?? 0),
+        }
+      })
+    },
+
+    async updateMeetingTags(meetingId: string, tags: string[]) {
+      const meeting = await this.getMeeting(meetingId)
+
+      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
+
+      const normalizedTags = [...new Set(tags.map((tag) => tag.trim()))].filter(
+        Boolean
+      )
+
+      await client.query(`delete from meeting_tags where meeting_id = $1`, [
+        meetingId,
+      ])
+
+      for (const tag of normalizedTags) {
+        const tagId = `tag_${tag.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`
+
+        await client.query(
+          `
+            insert into tags (id, name)
+            values ($1, $2)
+            on conflict (name) do nothing
+          `,
+          [tagId, tag]
+        )
+        await client.query(
+          `
+            insert into meeting_tags (meeting_id, tag_id)
+            values ($1, coalesce((select id from tags where name = $2), $3))
+            on conflict do nothing
+          `,
+          [meetingId, tag, tagId]
+        )
+      }
+
+      const updated = await this.getMeeting(meetingId)
+
+      if (!updated) throw new Error(`Meeting not found: ${meetingId}`)
+      return updated
+    },
+
+    async updateMeetingFavorite(meetingId: string, favorite: boolean) {
+      const result = await client.query(
+        `
+          update meetings
+          set is_favorite = $2, updated_at = now()
+          where id = $1
+          returning id, title, source, language, status, retention, started_at,
+                    participants, is_favorite, language_metadata
+        `,
+        [meetingId, favorite]
+      )
+      const row = result.rows[0] as MeetingRow | undefined
+
+      if (!row) throw new Error(`Meeting not found: ${meetingId}`)
+      return hydrateMeeting(mapMeetingRow(row))
+    },
+
+    async createMeetingShare(input): Promise<MeetingShare> {
+      const existing = await client.query(
+        `
+          select id, meeting_id, token, visibility, revoked, expires_at,
+                 included_sections, created_by, created_at, updated_at
+          from meeting_shares
+          where meeting_id = $1 and revoked = false
+          order by created_at desc
+          limit 1
+        `,
+        [input.meetingId]
+      )
+
+      if (existing.rows[0]) {
+        return mapMeetingShare(existing.rows[0] as MeetingShareRow)
+      }
+
+      const result = await client.query(
+        `
+          insert into meeting_shares (
+            id, meeting_id, token, included_sections, created_by
+          )
+          values ($1, $2, $3, $4::jsonb, $5)
+          returning id, meeting_id, token, visibility, revoked, expires_at,
+                    included_sections, created_by, created_at, updated_at
+        `,
+        [
+          createId("share"),
+          input.meetingId,
+          crypto.randomUUID().replaceAll("-", ""),
+          JSON.stringify(
+            input.includedSections ?? [
+              "summary",
+              "decisions",
+              "action_items",
+              "transcript",
+              "participants",
+            ]
+          ),
+          input.createdBy ?? null,
+        ]
+      )
+
+      return mapMeetingShare(result.rows[0] as MeetingShareRow)
+    },
+
+    async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
+      const existing = await client.query(
+        `
+          select id, meeting_id, token, visibility, revoked, expires_at,
+                 included_sections, created_by, created_at, updated_at
+          from meeting_shares
+          where meeting_id = $1
+          order by created_at desc
+          limit 1
+        `,
+        [meetingId]
+      )
+      const current = existing.rows[0] as MeetingShareRow | undefined
+
+      if (patch.regenerate) {
+        if (current) {
+          await client.query(
+            `update meeting_shares set revoked = true, updated_at = now() where id = $1`,
+            [current.id]
+          )
+        }
+
+        return this.createMeetingShare({
+          meetingId,
+          includedSections: patch.includedSections,
+        })
+      }
+
+      if (!current) {
+        return this.createMeetingShare({
+          meetingId,
+          includedSections: patch.includedSections,
+        })
+      }
+
+      const result = await client.query(
+        `
+          update meeting_shares
+          set revoked = coalesce($2, revoked),
+              included_sections = coalesce($3::jsonb, included_sections),
+              updated_at = now()
+          where id = $1
+          returning id, meeting_id, token, visibility, revoked, expires_at,
+                    included_sections, created_by, created_at, updated_at
+        `,
+        [
+          current.id,
+          patch.revoked ?? null,
+          patch.includedSections
+            ? JSON.stringify(patch.includedSections)
+            : null,
+        ]
+      )
+
+      return mapMeetingShare(result.rows[0] as MeetingShareRow)
+    },
+
+    async getShareByToken(token) {
+      const result = await client.query(
+        `
+          select id, meeting_id, token, visibility, revoked, expires_at,
+                 included_sections, created_by, created_at, updated_at
+          from meeting_shares
+          where token = $1 and revoked = false
+          limit 1
+        `,
+        [token]
+      )
+      const row = result.rows[0] as MeetingShareRow | undefined
+      const share = row ? mapMeetingShare(row) : undefined
+      const expired =
+        share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
+
+      if (!share || expired) return undefined
+
+      const meeting = await this.getMeeting(share.meetingId)
+
+      return meeting ? { share, meeting } : undefined
+    },
+
+    async listMeetingParticipants(meetingId) {
+      const meeting = await this.getMeeting(meetingId)
+
+      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
+      if (meeting.participantDetails?.length) return meeting.participantDetails
+
+      return []
+    },
+
+    async updateMeetingParticipant(participantId, patch) {
+      const result = await client.query(
+        `
+          update meeting_participants
+          set name = coalesce($2, name),
+              email = coalesce($3, email),
+              role = coalesce($4, role),
+              attendance_status = coalesce($5, attendance_status),
+              speaker_label = coalesce($6, speaker_label),
+              updated_at = now()
+          where id = $1
+          returning id, meeting_id, name, email, role, source, attendance_status,
+                    speaker_label, confidence, created_at, updated_at
+        `,
+        [
+          participantId,
+          patch.name ?? null,
+          patch.email ?? null,
+          patch.role ?? null,
+          patch.attendanceStatus ?? null,
+          patch.speakerLabel ?? null,
+        ]
+      )
+      const row = result.rows[0] as ParticipantRow | undefined
+
+      if (!row) throw new Error(`Participant not found: ${participantId}`)
+      return mapParticipant(row)
+    },
+
+    async assignSpeakerToParticipant(meetingId, speakerLabel, participantId) {
+      const participant = await this.updateMeetingParticipant(participantId, {
+        speakerLabel,
+      })
+
+      if (participant.meetingId !== meetingId) {
+        throw new Error(`Participant not found: ${participantId}`)
+      }
+
+      await client.query(
+        `
+          update speakers
+          set display_name = $3
+          where meeting_id = $1 and label = $2
+        `,
+        [meetingId, speakerLabel, participant.name]
+      )
+
+      return participant
+    },
+
+    async createExportRecord(input): Promise<ExportRecord> {
+      const result = await client.query(
+        `
+          insert into export_records (id, meeting_id, format, status, metadata)
+          values ($1, $2, $3, 'created', $4::jsonb)
+          returning id, meeting_id, format, status, metadata, created_at
+        `,
+        [
+          createId("export"),
+          input.meetingId,
+          input.format,
+          JSON.stringify(input.metadata ?? {}),
+        ]
+      )
+
+      return mapExportRecord(result.rows[0] as ExportRecordRow)
+    },
+
+    async approveAgentRun(id): Promise<SuggestedAgentRun> {
+      const result = await client.query(
+        `
+          update suggested_agent_runs
+          set status = 'queued'
+          where id = $1
+          returning id, meeting_id, target, payload, response, status,
+                    last_error, created_at
+        `,
+        [id]
+      )
+      const row = result.rows[0] as SuggestedAgentRunRow | undefined
+
+      if (!row) throw new Error(`Agent run not found: ${id}`)
+      return {
+        id: row.id,
+        meetingId: row.meeting_id,
+        target: row.target,
+        payload: row.payload ?? {},
+        response: row.response ?? {},
+        status: row.status,
+        lastError: row.last_error ?? undefined,
+        createdAt: toIso(row.created_at),
+      }
     },
 
     async createSuggestedAgentRun(input): Promise<SuggestedAgentRun> {

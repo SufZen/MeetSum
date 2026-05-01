@@ -24,6 +24,7 @@ import { MeetingRightRail } from "@/components/meeting-right-rail"
 import { MeetingWorkspace } from "@/components/meeting-workspace"
 import { OperationalPage } from "@/components/operational-pages"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
+import { Button } from "@/components/ui/button"
 import { TopCommandBar, type SyncTarget } from "@/components/top-command-bar"
 import type { WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
@@ -31,6 +32,7 @@ import type { SupportedLocale } from "@/lib/i18n/locales"
 import type {
   ActionItem,
   JobRecord,
+  MeetingParticipant,
   MeetingRecord,
 } from "@/lib/meetings/repository"
 
@@ -76,6 +78,12 @@ export function CommandCenterShell({
   const [syncing, setSyncing] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareLink, setShareLink] = useState("")
+  const [participantsOpen, setParticipantsOpen] = useState(false)
+  const [participants, setParticipants] = useState<MeetingParticipant[]>([])
+  const [tagsOpen, setTagsOpen] = useState(false)
+  const [tagDraft, setTagDraft] = useState("")
   const [darkMode, setDarkMode] = useState(false)
   const [isPending, startTransition] = useTransition()
 
@@ -365,6 +373,240 @@ export function CommandCenterShell({
     }
   }
 
+  async function copyText(text: string, label: string) {
+    if (!text.trim()) {
+      toast.info(`${label} is empty`)
+      return
+    }
+
+    await navigator.clipboard.writeText(text)
+    toast.success(`${label} copied`)
+  }
+
+  async function openShareDialog() {
+    if (!selectedMeeting) return
+
+    setShareOpen(true)
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to create share link")
+      return
+    }
+
+    setShareLink(body.url)
+  }
+
+  async function regenerateShareLink() {
+    if (!selectedMeeting) return
+
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ regenerate: true }),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to regenerate share link")
+      return
+    }
+
+    setShareLink(body.url)
+    toast.success("Share link regenerated")
+  }
+
+  async function revokeShareLink() {
+    if (!selectedMeeting) return
+
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ revoked: true }),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to revoke share link")
+      return
+    }
+
+    setShareLink("")
+    toast.success("Share link revoked")
+  }
+
+  async function toggleFavorite() {
+    if (!selectedMeeting) return
+
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/favorite`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ favorite: !selectedMeeting.isFavorite }),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to update favorite")
+      return
+    }
+
+    setMeetingRecords((current) =>
+      current.map((meeting) =>
+        meeting.id === selectedMeeting.id ? body.meeting : meeting
+      )
+    )
+  }
+
+  async function openParticipantsDialog() {
+    if (!selectedMeeting) return
+
+    setParticipantsOpen(true)
+    const response = await fetch(
+      `/api/meetings/${selectedMeeting.id}/participants`
+    )
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to load participants")
+      return
+    }
+
+    setParticipants(body.participants ?? [])
+  }
+
+  async function saveParticipant(participant: MeetingParticipant) {
+    const response = await fetch(
+      `/api/meetings/${participant.meetingId}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(participant),
+      }
+    )
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to save participant")
+      return
+    }
+
+    setParticipants((current) =>
+      current.map((item) => (item.id === participant.id ? body.participant : item))
+    )
+    await refreshMeeting(participant.meetingId)
+    toast.success("Participant updated")
+  }
+
+  function openTagsDialog() {
+    if (!selectedMeeting) return
+
+    setTagDraft((selectedMeeting.tags ?? []).join(", "))
+    setTagsOpen(true)
+  }
+
+  async function saveTags() {
+    if (!selectedMeeting) return
+
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/tags`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        tags: tagDraft
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      }),
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to save tags")
+      return
+    }
+
+    setMeetingRecords((current) =>
+      current.map((meeting) =>
+        meeting.id === selectedMeeting.id ? body.meeting : meeting
+      )
+    )
+    setTagsOpen(false)
+    toast.success("Tags updated")
+  }
+
+  async function addToDefaultRoom() {
+    if (!selectedMeeting) return
+
+    const contextsResponse = await fetch("/api/contexts")
+    const contextsBody = await contextsResponse.json()
+    let contextId = contextsBody.contexts?.find(
+      (context: { name: string }) => context.name === "Real Estate Acquisitions"
+    )?.id
+
+    if (!contextId) {
+      const response = await fetch("/api/contexts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Real Estate Acquisitions" }),
+      })
+      const body = await response.json()
+
+      if (!response.ok || !body.context?.id) {
+        toast.error(body.error ?? "Unable to create room")
+        return
+      }
+      contextId = body.context.id
+    }
+
+    const linkResponse = await fetch(
+      `/api/meetings/${selectedMeeting.id}/contexts`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contextId }),
+      }
+    )
+    const linkBody = await linkResponse.json()
+
+    if (!linkResponse.ok) {
+      toast.error(linkBody.error ?? "Unable to add meeting to room")
+      return
+    }
+
+    await refreshMeeting(selectedMeeting.id)
+    toast.success("Meeting added to room")
+  }
+
+  async function downloadExport(format: "pdf" | "markdown") {
+    if (!selectedMeeting) return
+
+    const response = await fetch(
+      `/api/meetings/${selectedMeeting.id}/export/${format}`,
+      { method: "POST" }
+    )
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      toast.error(body.error ?? `Unable to export ${format}`)
+      return
+    }
+
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    const extension = format === "pdf" ? "pdf" : "md"
+
+    anchor.href = url
+    anchor.download = `${selectedMeeting.title.replace(/[^a-z0-9_-]+/gi, "-")}.${extension}`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    toast.success(`${format.toUpperCase()} exported`)
+  }
+
   function reprocessMeeting(mode: "full" | "summary" | "tasks" | "transcript-cleanup") {
     if (!selectedMeeting) return
 
@@ -506,11 +748,19 @@ export function CommandCenterShell({
         onOpenUpload={() => setUploadOpen(true)}
         onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
+        onShareMeeting={openShareDialog}
+        onToggleFavorite={toggleFavorite}
+        onShowParticipants={openParticipantsDialog}
+        onAddToRoom={addToDefaultRoom}
+        onCopyText={copyText}
       />
       <MeetingRightRail
         meeting={selectedMeeting}
         jobs={jobs}
         exporting={exporting}
+        onEditTags={openTagsDialog}
+        onExportMarkdown={() => downloadExport("markdown")}
+        onExportPdf={() => downloadExport("pdf")}
         onExportRealizeOS={exportRealizeOS}
       />
     </div>
@@ -549,6 +799,155 @@ export function CommandCenterShell({
             onOpenChange={setDrivePickerOpen}
             onImported={handleDriveImported}
           />
+          {shareOpen ? (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
+              <section className="w-full max-w-lg rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Share meeting</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Public link includes summary, decisions, action items,
+                      participants, and transcript. Audio remains private.
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setShareOpen(false)}>
+                    Close
+                  </Button>
+                </div>
+                <div className="mt-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                  <input
+                    className="w-full bg-transparent text-sm outline-none"
+                    readOnly
+                    value={shareLink || "Creating link..."}
+                  />
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    disabled={!shareLink}
+                    onClick={() => copyText(shareLink, "Share link")}
+                  >
+                    Copy link
+                  </Button>
+                  <Button
+                    disabled={!shareLink}
+                    variant="outline"
+                    onClick={() => window.open(shareLink, "_blank")}
+                  >
+                    Open
+                  </Button>
+                  <Button variant="outline" onClick={regenerateShareLink}>
+                    Regenerate
+                  </Button>
+                  <Button variant="destructive" onClick={revokeShareLink}>
+                    Revoke
+                  </Button>
+                </div>
+              </section>
+            </div>
+          ) : null}
+          {participantsOpen ? (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
+              <section className="w-full max-w-2xl rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Participants</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Edit attendee names and map speakers when transcript
+                      labels need cleanup.
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setParticipantsOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
+                <div className="mt-4 max-h-[55vh] space-y-3 overflow-y-auto">
+                  {participants.length ? participants.map((participant) => (
+                    <div
+                      className="grid gap-2 rounded-md border border-[var(--divider)] p-3 md:grid-cols-[1fr_1fr_110px_auto]"
+                      key={participant.id}
+                    >
+                      <input
+                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
+                        value={participant.name}
+                        onChange={(event) =>
+                          setParticipants((current) =>
+                            current.map((item) =>
+                              item.id === participant.id
+                                ? { ...item, name: event.target.value }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                      <input
+                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
+                        placeholder="email"
+                        value={participant.email ?? ""}
+                        onChange={(event) =>
+                          setParticipants((current) =>
+                            current.map((item) =>
+                              item.id === participant.id
+                                ? { ...item, email: event.target.value }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                      <input
+                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
+                        placeholder="Speaker"
+                        value={participant.speakerLabel ?? ""}
+                        onChange={(event) =>
+                          setParticipants((current) =>
+                            current.map((item) =>
+                              item.id === participant.id
+                                ? { ...item, speakerLabel: event.target.value }
+                                : item
+                            )
+                          )
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => saveParticipant(participant)}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  )) : (
+                    <div className="rounded-md border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
+                      No participants were found for this meeting yet.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          ) : null}
+          {tagsOpen ? (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
+              <section className="w-full max-w-md rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+                <h2 className="text-lg font-semibold">Edit tags</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Separate tags with commas.
+                </p>
+                <textarea
+                  className="mt-4 min-h-28 w-full rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm"
+                  value={tagDraft}
+                  onChange={(event) => setTagDraft(event.target.value)}
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setTagsOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={saveTags}>Save tags</Button>
+                </div>
+              </section>
+            </div>
+          ) : null}
           {activePanel === "meetings"
             ? defaultMeetingsView
             : (
