@@ -502,6 +502,35 @@ export function CommandCenterShell({
     toast.success("Participant updated")
   }
 
+  async function assignSpeaker(speakerLabel: string, participantId: string) {
+    if (!selectedMeeting) return
+
+    const response = await fetch(
+      `/api/meetings/${selectedMeeting.id}/speakers/assign`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ speakerLabel, participantId }),
+      }
+    )
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to assign speaker")
+      return
+    }
+
+    setParticipants((current) =>
+      current.map((participant) =>
+        participant.id === participantId
+          ? { ...participant, speakerLabel }
+          : participant
+      )
+    )
+    await refreshMeeting(selectedMeeting.id)
+    toast.success("Speaker mapped to participant")
+  }
+
   function openTagsDialog() {
     if (!selectedMeeting) return
 
@@ -824,6 +853,7 @@ export function CommandCenterShell({
         onShareMeeting={openShareDialog}
         onToggleFavorite={toggleFavorite}
         onShowParticipants={openParticipantsDialog}
+        onAssignSpeaker={assignSpeaker}
         onAddToRoom={addToDefaultRoom}
         onCopyText={copyText}
       />

@@ -36,6 +36,7 @@ export function MeetingWorkspace({
   onShareMeeting,
   onToggleFavorite,
   onShowParticipants,
+  onAssignSpeaker,
   onAddToRoom,
   onCopyText,
   locale,
@@ -59,6 +60,7 @@ export function MeetingWorkspace({
   onShareMeeting: () => void
   onToggleFavorite: () => void
   onShowParticipants: () => void
+  onAssignSpeaker: (speakerLabel: string, participantId: string) => void
   onAddToRoom: () => void
   onCopyText: (text: string, label: string) => void
 }) {
@@ -135,7 +137,9 @@ export function MeetingWorkspace({
           <div className="mx-auto max-w-5xl">
             <TranscriptTimeline
               segments={meeting.transcript}
+              participants={meeting.participantDetails}
               onEditSpeakers={onShowParticipants}
+              onAssignSpeaker={onAssignSpeaker}
             />
           </div>
         </TabsContent>

@@ -986,12 +986,23 @@ export function createInMemoryMeetingRepository(
 
     async assignSpeakerToParticipant(meetingId, speakerLabel, participantId) {
       const participant = participants.get(participantId)
+      const meeting = meetings.get(meetingId)
 
-      if (!participant || participant.meetingId !== meetingId) {
+      if (!participant || participant.meetingId !== meetingId || !meeting) {
         throw new Error(`Participant not found: ${participantId}`)
       }
 
-      return this.updateMeetingParticipant(participantId, { speakerLabel })
+      const updatedParticipant = await this.updateMeetingParticipant(participantId, {
+        speakerLabel,
+      })
+      const updatedTranscript = (meeting.transcript ?? []).map((segment) =>
+        segment.speaker === speakerLabel
+          ? { ...segment, speaker: updatedParticipant.name }
+          : segment
+      )
+
+      meetings.set(meetingId, { ...meeting, transcript: updatedTranscript })
+      return updatedParticipant
     },
 
     async createExportRecord(input): Promise<ExportRecord> {

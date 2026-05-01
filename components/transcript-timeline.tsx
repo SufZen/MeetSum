@@ -6,7 +6,10 @@ import { SearchIcon, UsersIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { TranscriptSegment } from "@/lib/meetings/repository"
+import type {
+  MeetingParticipant,
+  TranscriptSegment,
+} from "@/lib/meetings/repository"
 
 function formatTime(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -18,12 +21,27 @@ function formatTime(ms: number) {
 
 export function TranscriptTimeline({
   segments,
+  participants = [],
   onEditSpeakers,
+  onAssignSpeaker,
 }: {
   segments?: TranscriptSegment[]
+  participants?: MeetingParticipant[]
   onEditSpeakers?: () => void
+  onAssignSpeaker?: (speakerLabel: string, participantId: string) => void
 }) {
   const [query, setQuery] = useState("")
+  const speakerLabels = useMemo(
+    () => [...new Set((segments ?? []).map((segment) => segment.speaker))],
+    [segments]
+  )
+  const assignableParticipants = useMemo(
+    () =>
+      participants.filter((participant) =>
+        ["organizer", "attendee", "speaker", "unknown"].includes(participant.role)
+      ),
+    [participants]
+  )
   const filteredSegments = useMemo(() => {
     const needle = query.trim().toLowerCase()
 
@@ -72,6 +90,58 @@ export function TranscriptTimeline({
           </Button>
         ) : null}
       </div>
+
+      {speakerLabels.length && assignableParticipants.length && onAssignSpeaker ? (
+        <section className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Speaker mapping</h3>
+              <p className="text-xs leading-5 text-muted-foreground">
+                Map transcript labels to real participants. The transcript refreshes after saving.
+              </p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={onEditSpeakers}>
+              Manage participants
+            </Button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {speakerLabels.map((speaker) => {
+              const mappedParticipant = participants.find(
+                (participant) =>
+                  participant.speakerLabel === speaker ||
+                  (participant.speakerLabel && participant.name === speaker)
+              )
+              const rawSpeakerLabel = mappedParticipant?.speakerLabel ?? speaker
+
+              return (
+                <label
+                  key={speaker}
+                  className="grid gap-1 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+                >
+                  <span className="font-medium text-foreground">{speaker}</span>
+                  <select
+                    className="h-8 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 text-sm text-foreground"
+                    value={mappedParticipant?.id ?? ""}
+                    onChange={(event) => {
+                      if (event.target.value) {
+                        onAssignSpeaker(rawSpeakerLabel, event.target.value)
+                      }
+                    }}
+                  >
+                    <option value="">Assign participant...</option>
+                    {assignableParticipants.map((participant) => (
+                      <option key={participant.id} value={participant.id}>
+                        {participant.name}
+                        {participant.email ? ` (${participant.email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-2">
       {filteredSegments.map((segment) => (
