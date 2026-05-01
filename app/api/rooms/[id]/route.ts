@@ -17,9 +17,7 @@ export async function GET(
 
   if (!room) return jsonError("Room not found", 404)
 
-  const meetings = await meetingRepository.searchMeetings(room.name, {
-    limit: 20,
-  })
+  const meetings = await meetingRepository.listMeetingsByContext(id)
 
   return NextResponse.json({ room, meetings })
 }

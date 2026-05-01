@@ -14,7 +14,7 @@ import {
   WorkflowIcon,
 } from "lucide-react"
 import type { ReactNode } from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
@@ -25,6 +25,24 @@ import { Input } from "@/components/ui/input"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
+
+type MemorySearchResult = {
+  id: string
+  title: string
+  startedAt: string
+  status: MeetingRecord["status"]
+  tags: string[]
+  overview: string
+  actionItems: Array<{ id: string; title: string; status: string }>
+  transcriptMatches: Array<{ id: string; speaker: string; startMs: number; text: string }>
+}
+
+type RoomResult = {
+  id: string
+  name: string
+  description?: string
+  meetingCount: number
+}
 
 function PageFrame({
   eyebrow,
@@ -120,6 +138,30 @@ export function OperationalPage({
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
   const [memoryQuestion, setMemoryQuestion] = useState("")
+  const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
+  const [rooms, setRooms] = useState<RoomResult[]>([])
+
+  useEffect(() => {
+    if (panel !== "memory") return
+
+    const timeoutId = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        query: query.trim(),
+        limit: "8",
+      })
+
+      void fetch(`/api/memory/search?${params}`)
+        .then((response) => response.json())
+        .then((body) => setMemoryResults(body.results ?? []))
+        .catch(() => setMemoryResults([]))
+      void fetch("/api/rooms")
+        .then((response) => response.json())
+        .then((body) => setRooms(body.rooms ?? []))
+        .catch(() => setRooms([]))
+    }, query.trim() ? 250 : 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [panel, query])
 
   async function askMemory() {
     if (!memoryQuestion.trim()) return
@@ -136,7 +178,13 @@ export function OperationalPage({
       return
     }
 
-    setMemoryAnswer(body.answer?.answer ?? body.answer ?? "No answer returned")
+    const citations = Array.isArray(body.citations) ? body.citations.length : 0
+
+    setMemoryAnswer(
+      `${body.answer ?? "No answer returned"}${
+        citations ? `\n\n${citations} citation${citations === 1 ? "" : "s"} found.` : ""
+      }`
+    )
   }
 
   async function copyAutomationText(value: string, label: string) {
@@ -186,7 +234,7 @@ export function OperationalPage({
   }
 
   if (panel === "memory") {
-    const completed = meetings.filter((meeting) => meeting.summary?.overview)
+    const completedCount = meetings.filter((meeting) => meeting.summary?.overview).length
 
     return (
       <PageFrame
@@ -207,21 +255,38 @@ export function OperationalPage({
               className="h-10"
             />
             <div className="mt-3 grid gap-2">
-              {completed.slice(0, 6).map((meeting) => (
+              {memoryResults.slice(0, 8).map((meeting) => (
                 <div key={meeting.id} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
-                  <div className="text-sm font-semibold text-foreground">{meeting.title}</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 truncate text-sm font-semibold text-foreground">{meeting.title}</div>
+                    <span className="shrink-0 rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] text-[var(--primary)]">
+                      {meeting.status}
+                    </span>
+                  </div>
                   <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                    {meeting.summary?.overview}
+                    {meeting.overview || meeting.transcriptMatches[0]?.text || "No summary yet."}
                   </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {meeting.tags.slice(0, 4).map((tag) => (
+                      <span key={tag} className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
+              {!memoryResults.length ? (
+                <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                  No indexed meeting memory matched this search.
+                </div>
+              ) : null}
             </div>
           </OpsCard>
           <OpsCard
             icon={SparklesIcon}
             title="Ask all meetings"
             description="Ask across indexed summaries and transcripts. Answers include server-side citations when available."
-            status={`${completed.length} indexed`}
+            status={`${completedCount} indexed`}
           >
             <div className="grid gap-2">
               <Input
@@ -238,6 +303,33 @@ export function OperationalPage({
               ) : null}
             </div>
           </OpsCard>
+          <div className="lg:col-span-2">
+            <OpsCard
+              icon={LinkIcon}
+              title="Rooms"
+              description="Rooms group meetings, tasks, context, and future agent runs around recurring workstreams."
+              status={`${rooms.length} rooms`}
+            >
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {rooms.map((room) => (
+                  <div
+                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                    key={room.id}
+                  >
+                    <div className="text-sm font-semibold">{room.name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {room.meetingCount} linked meetings
+                    </div>
+                  </div>
+                ))}
+                {!rooms.length ? (
+                  <div className="rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
+                    Rooms will appear after you add meetings to a room.
+                  </div>
+                ) : null}
+              </div>
+            </OpsCard>
+          </div>
         </div>
       </PageFrame>
     )

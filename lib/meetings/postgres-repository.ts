@@ -203,6 +203,8 @@ function buildMeetingListClauses(options: MeetingListOptions) {
       clauses.push(
         `m.status in ('indexing', 'summarizing', 'transcribing', 'media_uploaded')`
       )
+    } else if (options.status === "favorites") {
+      clauses.push(`m.is_favorite = true`)
     } else {
       values.push(options.status)
       clauses.push(`m.status = $${values.length}`)
@@ -713,7 +715,9 @@ export function createPostgresMeetingRepository(
             on conflict do nothing
           `,
           [
-            createId("participant"),
+            `participant_${Buffer.from(`${meeting.id}:${email ?? name}`)
+              .toString("base64url")
+              .slice(0, 40)}`,
             meeting.id,
             name,
             email,
@@ -810,6 +814,28 @@ export function createPostgresMeetingRepository(
             segment.text,
             segment.confidence ?? null,
             segment.language ?? null,
+          ]
+        )
+      }
+
+      for (const speakerLabel of speakerIds.keys()) {
+        await client.query(
+          `
+            insert into meeting_participants (
+              id, meeting_id, name, role, source, attendance_status,
+              speaker_label, confidence
+            )
+            values ($1, $2, $3, 'speaker', 'transcript', 'unknown', $3, 0.65)
+            on conflict (id) do update set
+              speaker_label = excluded.speaker_label,
+              updated_at = now()
+          `,
+          [
+            `participant_${Buffer.from(`${meetingId}:${speakerLabel}`)
+              .toString("base64url")
+              .slice(0, 40)}`,
+            meetingId,
+            speakerLabel,
           ]
         )
       }
@@ -1219,6 +1245,24 @@ export function createPostgresMeetingRepository(
       })
     },
 
+    async listMeetingsByContext(contextId: string): Promise<MeetingRecord[]> {
+      const result = await client.query(
+        `
+          select m.id, m.title, m.source, m.language, m.status, m.retention,
+                 m.started_at, m.participants, m.is_favorite, m.language_metadata
+          from meetings m
+          join meeting_contexts mc on mc.meeting_id = m.id
+          where mc.context_id = $1
+          order by m.started_at desc
+          limit 100
+        `,
+        [contextId]
+      )
+      const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
+
+      return Promise.all(bases.map((meeting) => hydrateMeeting(meeting)))
+    },
+
     async updateMeetingTags(meetingId: string, tags: string[]) {
       const meeting = await this.getMeeting(meetingId)
 
@@ -1406,7 +1450,45 @@ export function createPostgresMeetingRepository(
       const meeting = await this.getMeeting(meetingId)
 
       if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
-      if (meeting.participantDetails?.length) return meeting.participantDetails
+      if (
+        meeting.participantDetails?.length &&
+        !meeting.participantDetails.every((participant) =>
+          participant.id.startsWith("derived_")
+        )
+      ) {
+        return meeting.participantDetails
+      }
+
+      for (const [index, participant] of meeting.participants.entries()) {
+        const email = participant.includes("@") ? participant : null
+        const name = email ? participant.split("@")[0] : participant
+
+        await client.query(
+          `
+            insert into meeting_participants (
+              id, meeting_id, name, email, role, source, attendance_status,
+              confidence
+            )
+            values ($1, $2, $3, $4, $5, 'calendar', 'unknown', 0.5)
+            on conflict (id) do nothing
+          `,
+          [
+            `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
+              .toString("base64url")
+              .slice(0, 40)}`,
+            meetingId,
+            name,
+            email,
+            index === 0 ? "organizer" : "attendee",
+          ]
+        )
+      }
+
+      if (meeting.participants.length) {
+        const refreshed = await this.getMeeting(meetingId)
+
+        return refreshed?.participantDetails ?? []
+      }
 
       return []
     },

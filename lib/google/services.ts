@@ -180,6 +180,111 @@ function extractMeetLink(event: {
   return event.hangoutLink ?? event.conferenceData?.entryPoints?.[0]?.uri ?? null
 }
 
+type CalendarAttendee = {
+  email?: string | null
+  displayName?: string | null
+  responseStatus?: string | null
+  organizer?: boolean | null
+  self?: boolean | null
+}
+
+function normalizeAttendanceStatus(
+  value?: string | null
+): "accepted" | "declined" | "tentative" | "needs_action" | "unknown" {
+  if (value === "accepted" || value === "declined" || value === "tentative") {
+    return value
+  }
+  if (value === "needsAction") return "needs_action"
+  return "unknown"
+}
+
+function calendarParticipants(event: {
+  organizer?: { email?: string | null; displayName?: string | null } | null
+  attendees?: CalendarAttendee[] | null
+}) {
+  const byEmailOrName = new Map<
+    string,
+    {
+      name: string
+      email?: string
+      role: "organizer" | "attendee"
+      attendanceStatus: "accepted" | "declined" | "tentative" | "needs_action" | "unknown"
+    }
+  >()
+
+  const organizerEmail = event.organizer?.email ?? undefined
+  const organizerName =
+    event.organizer?.displayName ?? organizerEmail?.split("@")[0] ?? undefined
+
+  if (organizerName || organizerEmail) {
+    byEmailOrName.set((organizerEmail ?? organizerName ?? "organizer").toLowerCase(), {
+      name: organizerName ?? organizerEmail ?? "Organizer",
+      email: organizerEmail,
+      role: "organizer",
+      attendanceStatus: "unknown",
+    })
+  }
+
+  for (const attendee of event.attendees ?? []) {
+    const email = attendee.email ?? undefined
+    const name = attendee.displayName ?? email?.split("@")[0] ?? undefined
+
+    if (!name && !email) continue
+
+    byEmailOrName.set((email ?? name ?? "").toLowerCase(), {
+      name: name ?? email ?? "Attendee",
+      email,
+      role: attendee.organizer || email === organizerEmail ? "organizer" : "attendee",
+      attendanceStatus: normalizeAttendanceStatus(attendee.responseStatus),
+    })
+  }
+
+  return [...byEmailOrName.values()]
+}
+
+async function upsertMeetingParticipantsFromCalendar(options: {
+  meetingId: string
+  event: {
+    organizer?: { email?: string | null; displayName?: string | null } | null
+    attendees?: CalendarAttendee[] | null
+  }
+}) {
+  const pool = getDatabasePool()
+  const participants = calendarParticipants(options.event)
+
+  for (const participant of participants) {
+    const stable = `${options.meetingId}:${participant.email ?? participant.name}`
+
+    await pool.query(
+      `
+        insert into meeting_participants (
+          id, meeting_id, name, email, role, source, attendance_status,
+          confidence
+        )
+        values ($1, $2, $3, $4, $5, 'calendar', $6, 0.9)
+        on conflict (id) do update set
+          name = excluded.name,
+          email = excluded.email,
+          role = excluded.role,
+          source = excluded.source,
+          attendance_status = excluded.attendance_status,
+          confidence = excluded.confidence,
+          updated_at = now()
+      `,
+      [
+        createHashedId("participant", stable),
+        options.meetingId,
+        participant.name,
+        participant.email ?? null,
+        participant.role,
+        participant.attendanceStatus,
+      ]
+    )
+  }
+
+  return participants
+}
+
 function shouldSkipCalendar(
   item: { id?: string | null; summary?: string | null },
   importAll: boolean
@@ -937,7 +1042,7 @@ export async function importDriveRecordings(
         result.files.push({
           fileId: file.id,
           name: file.name,
-          status: "imported",
+          status: "queued",
           meetingId: meeting.id,
           jobId: job.id,
         })
@@ -1088,6 +1193,10 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
             const meetingId =
               (existingMeeting.rows[0] as { id?: string } | undefined)?.id ??
               createHashedId("meet_google", calendarEventId)
+            const participantRecords = calendarParticipants({
+              organizer: event.organizer,
+              attendees: event.attendees as CalendarAttendee[] | null | undefined,
+            })
             await pool.query(
               `
                 insert into meetings (
@@ -1110,13 +1219,20 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
                 title,
                 startsAt,
                 JSON.stringify(
-                  (event.attendees ?? [])
-                    .map((attendee) => attendee.displayName ?? attendee.email)
+                  participantRecords
+                    .map((participant) => participant.name || participant.email)
                     .filter(Boolean)
                 ),
                 extractMeetLink(event),
               ]
             )
+            await upsertMeetingParticipantsFromCalendar({
+              meetingId,
+              event: {
+                organizer: event.organizer,
+                attendees: event.attendees as CalendarAttendee[] | null | undefined,
+              },
+            })
           }
         }
       } catch (error) {

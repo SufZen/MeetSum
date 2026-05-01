@@ -162,6 +162,7 @@ export type MeetingListStatusFilter =
   | "usable"
   | "upcoming"
   | "processing"
+  | "favorites"
   | MeetingStatus
 
 export type MeetingListOptions = {
@@ -268,6 +269,7 @@ export type MeetingRepository = {
     contextId: string
   ) => Promise<MeetingRecord>
   listRooms: () => Promise<Array<MeetingContext & { meetingCount: number }>>
+  listMeetingsByContext: (contextId: string) => Promise<MeetingRecord[]>
   updateMeetingTags: (meetingId: string, tags: string[]) => Promise<MeetingRecord>
   updateMeetingFavorite: (meetingId: string, favorite: boolean) => Promise<MeetingRecord>
   createMeetingShare: (input: {
@@ -344,6 +346,9 @@ function meetingMatchesStatus(meeting: MeetingRecord, status?: string) {
     return ["indexing", "summarizing", "transcribing", "media_uploaded"].includes(
       meeting.status
     )
+  }
+  if (status === "favorites") {
+    return meeting.isFavorite === true
   }
 
   return meeting.status === status
@@ -430,21 +435,37 @@ export function createInMemoryMeetingRepository(
       (participant) => participant.meetingId === meeting.id
     )
 
-    if (existing.length || !meeting.participants.length) return existing
+    if (existing.length) return existing
 
     const now = new Date().toISOString()
-    return meeting.participants.map((participant, index) => {
-      const email = participant.includes("@") ? participant : undefined
-      const name = email ? participant.split("@")[0] : participant
+    const sourceParticipants = meeting.participants.length
+      ? meeting.participants.map((participant, index) => ({
+          name: participant,
+          role: index === 0 ? ("organizer" as const) : ("attendee" as const),
+          source: "calendar" as const,
+        }))
+      : [
+          ...new Set((meeting.transcript ?? []).map((segment) => segment.speaker)),
+        ].map((speaker) => ({
+          name: speaker,
+          role: "speaker" as const,
+          source: "transcript" as const,
+        }))
+
+    return sourceParticipants.map((participant) => {
+      const participantName = participant.name
+      const email = participantName.includes("@") ? participantName : undefined
+      const name = email ? participantName.split("@")[0] : participantName
       const record: MeetingParticipant = {
         id: createId("participant"),
         meetingId: meeting.id,
         name,
         email,
-        role: index === 0 ? "organizer" : "attendee",
-        source: "calendar",
+        role: participant.role,
+        source: participant.source,
         attendanceStatus: "unknown",
         confidence: 0.6,
+        speakerLabel: participant.source === "transcript" ? participant.name : undefined,
         createdAt: now,
         updatedAt: now,
       }
@@ -808,6 +829,18 @@ export function createInMemoryMeetingRepository(
           ).length,
         }))
         .sort((a, b) => a.name.localeCompare(b.name))
+    },
+
+    async listMeetingsByContext(contextId: string): Promise<MeetingRecord[]> {
+      return [...meetings.values()]
+        .filter((meeting) =>
+          meeting.contexts?.some((context) => context.id === contextId)
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+        )
+        .map(hydrate)
     },
 
     async updateMeetingTags(meetingId, tags): Promise<MeetingRecord> {

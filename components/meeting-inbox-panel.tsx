@@ -21,6 +21,7 @@ import type {
 const quickFilters = [
   ["all", "All Meetings"],
   ["usable", "Ready"],
+  ["favorites", "Favorites"],
   ["processing", "Processing"],
   ["failed", "Failed"],
   ["upcoming", "Upcoming"],
@@ -220,7 +221,7 @@ export function MeetingInboxPanel({
             className="h-7 min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
           />
         </div>
-        <div className="ms-no-x grid grid-cols-3 gap-1 min-[390px]:grid-cols-5">
+        <div className="ms-no-x grid grid-cols-3 gap-1 min-[390px]:grid-cols-6">
           {quickFilters.map(([filter, label]) => (
             <button
               key={filter}

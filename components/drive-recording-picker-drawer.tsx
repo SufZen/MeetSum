@@ -117,6 +117,17 @@ export function DriveRecordingPickerDrawer({
   }, [open])
 
   function toggle(fileId: string) {
+    const recording = recordings.find((item) => item.fileId === fileId)
+
+    if (recording && !["available", "failed"].includes(recording.status)) {
+      toast.info(
+        recording.status === "processing"
+          ? "This recording is already processing"
+          : "This recording is already imported"
+      )
+      return
+    }
+
     setSelected((current) => {
       const next = new Set(current)
 
@@ -249,13 +260,17 @@ export function DriveRecordingPickerDrawer({
           )}
 
           <div className="grid gap-2">
-            {recordings.map((recording) => (
+            {recordings.map((recording) => {
+              const canSelect = ["available", "failed"].includes(recording.status)
+
+              return (
               <div
                 key={recording.fileId}
                 role="button"
-                tabIndex={0}
-                className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/60 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] disabled:cursor-not-allowed disabled:opacity-70 rtl:text-right"
+                tabIndex={canSelect ? 0 : -1}
+                className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/60 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-70 rtl:text-right"
                 data-selected={selected.has(recording.fileId)}
+                data-disabled={!canSelect}
                 onClick={() => toggle(recording.fileId)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -269,6 +284,7 @@ export function DriveRecordingPickerDrawer({
                     checked={selected.has(recording.fileId)}
                     onCheckedChange={() => toggle(recording.fileId)}
                     onClick={(event) => event.stopPropagation()}
+                    disabled={!canSelect}
                     className="mt-1"
                   />
                   <div className="min-w-0 flex-1">
@@ -314,7 +330,7 @@ export function DriveRecordingPickerDrawer({
                   )}
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         </div>
 
