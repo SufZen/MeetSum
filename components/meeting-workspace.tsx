@@ -79,7 +79,7 @@ export function MeetingWorkspace({
       <Tabs defaultValue="summary" className="min-w-0">
         <TabsList
           variant="line"
-          className="mx-auto mt-4 grid min-h-10 w-[min(720px,calc(100%-2.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
+          className="mx-auto mt-3 grid min-h-9 w-[min(690px,calc(100%-2.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
         >
           <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
           <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>

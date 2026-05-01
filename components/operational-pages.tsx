@@ -34,18 +34,20 @@ function PageFrame({
   children: ReactNode
 }) {
   return (
-    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-[var(--surface-subtle)] p-4 lg:h-[calc(100svh-3.5rem)] lg:p-6">
-      <div className="mx-auto grid max-w-7xl gap-5">
-        <header className="px-1 py-2">
+    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:h-[calc(100svh-3.5rem)] lg:p-5">
+      <div className="mx-auto grid max-w-7xl gap-4">
+        <header className="flex flex-col gap-3 px-1 py-1 lg:flex-row lg:items-end lg:justify-between">
+          <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
             {eyebrow}
           </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
             {title}
           </h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
             {description}
           </p>
+          </div>
         </header>
         {children}
       </div>
@@ -67,15 +69,15 @@ function OpsCard({
   children?: ReactNode
 }) {
   return (
-    <section className="ms-card p-4">
+    <section className="ms-card p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="grid size-9 place-items-center rounded-lg bg-[var(--selected)] text-[var(--primary)]">
+          <div className="grid size-8 place-items-center rounded-md bg-[var(--selected)] text-[var(--primary)]">
             <Icon aria-hidden="true" className="size-4" />
           </div>
           <div>
             <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
           </div>
         </div>
         {status && (
@@ -119,7 +121,7 @@ export function OperationalPage({
         title="Workspace command center"
         description="Calendar creates schedule context, Drive imports are operator-selected, and Meet artifacts are the preferred live-meeting capture path."
       >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
           <WorkspaceSyncPanel
             status={workspaceStatus}
             syncing={syncing}
@@ -204,9 +206,15 @@ export function OperationalPage({
         description="Webhook, n8n, RealizeOS, CLI, and MCP connections should all consume the same structured meeting intelligence."
       >
         <div className="grid gap-4 lg:grid-cols-3">
-          <OpsCard icon={WorkflowIcon} title="Webhooks" description="Signed delivery for meeting.completed, summary.created, and action_item.created." status="ready" />
-          <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting context exports with auditable retryable jobs." status="connected" />
-          <OpsCard icon={LinkIcon} title="n8n" description="Webhook-ready infrastructure; live workflows can be connected when needed." status="prepared" />
+          <OpsCard icon={WorkflowIcon} title="Webhooks" description="Signed delivery for meeting.completed, summary.created, and action_item.created." status="ready">
+            <Button variant="outline" className="h-8 w-full justify-start">Manage subscriptions</Button>
+          </OpsCard>
+          <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting context exports with auditable retryable jobs." status="connected">
+            <Button variant="outline" className="h-8 w-full justify-start">View export history</Button>
+          </OpsCard>
+          <OpsCard icon={LinkIcon} title="n8n" description="Webhook-ready infrastructure; live workflows can be connected when needed." status="prepared">
+            <Button variant="outline" className="h-8 w-full justify-start">Copy endpoint details</Button>
+          </OpsCard>
         </div>
         <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
       </PageFrame>

@@ -178,9 +178,9 @@ export function MeetingInboxPanel({
   })
 
   return (
-    <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-r border-[var(--divider)] bg-[var(--surface)]">
-      <div className="border-b border-[var(--divider)] px-4 py-3">
-        <div className="mb-3 flex items-center justify-between gap-3">
+    <section className="ms-no-x grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--divider)] bg-[var(--surface)]">
+      <div className="ms-no-x border-b border-[var(--divider)] px-3 py-3">
+        <div className="mb-2.5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-base font-semibold">
             <CalendarDaysIcon aria-hidden="true" className="size-4 text-muted-foreground" />
             {dictionary.navMeetings}
@@ -189,7 +189,7 @@ export function MeetingInboxPanel({
             {page.total}
           </span>
         </div>
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-2.5 flex items-center gap-2">
           <Button variant="ghost" size="sm" className="h-8 justify-start px-2">
             <FilterIcon data-icon="inline-start" className="size-4 text-muted-foreground" />
             {dictionary.filter}
@@ -211,16 +211,16 @@ export function MeetingInboxPanel({
               </select>
           </label>
         </div>
-        <div className="mb-3 flex h-9 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
+        <div className="mb-2.5 flex h-8 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
           <SearchIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={dictionary.commandPlaceholder}
-            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            className="h-7 min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
           />
         </div>
-        <div className="flex gap-1 overflow-x-auto pb-1">
+        <div className="ms-no-x grid grid-cols-3 gap-1 min-[390px]:grid-cols-5">
           {quickFilters.map(([filter, label]) => (
             <button
               key={filter}
@@ -232,18 +232,18 @@ export function MeetingInboxPanel({
                 variant={activeFilter === filter ? "secondary" : "outline"}
                 className={
                   activeFilter === filter
-                    ? "h-7 whitespace-nowrap justify-center rounded-md bg-[var(--selected)] px-3 text-[var(--primary)]"
-                    : "h-7 whitespace-nowrap justify-center rounded-md border-[var(--divider)] px-3 text-muted-foreground"
+                    ? "h-7 w-full justify-center rounded-md bg-[var(--selected)] px-1.5 text-[var(--primary)]"
+                    : "h-7 w-full justify-center rounded-md border-[var(--divider)] px-1.5 text-muted-foreground"
                 }
               >
-                {filter === "all" ? dictionary.all : label}
+                {filter === "all" ? dictionary.all : label === "Processing" ? "Process" : label}
               </Badge>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="ms-scrollbar min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:max-h-none">
+      <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-2.5 lg:max-h-none">
         <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
           {!loading && meetings.length === 0 && (
             <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)] p-5 text-center text-sm text-muted-foreground">
@@ -268,31 +268,31 @@ export function MeetingInboxPanel({
                 <button
                   type="button"
                   data-selected={selected}
-                  className="grid min-h-[82px] gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-3 py-3 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/50 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] rtl:text-right"
+                  className="ms-no-x grid min-h-[76px] gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/50 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] rtl:text-right"
                   onClick={() => onSelectMeeting(meeting.id)}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-subtle)] text-xs font-semibold text-[var(--primary)] ring-1 ring-[var(--divider)]">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <div className="grid size-7 shrink-0 place-items-center rounded-md bg-[var(--surface-subtle)] text-xs font-semibold text-[var(--primary)] ring-1 ring-[var(--divider)]">
                       {source.icon}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="truncate text-sm font-semibold text-foreground">
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                        <h3 className="ms-row-title text-sm font-semibold leading-5 text-foreground">
                           {meeting.title}
                         </h3>
                         <span className="shrink-0 font-mono text-xs text-muted-foreground">
                           {formatter.format(started)}
                         </span>
                       </div>
-                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                      <div className="mt-1 flex min-w-0 items-center gap-x-1.5 overflow-hidden text-xs text-muted-foreground">
                         <span className={`size-2 rounded-full ${source.dot}`} />
-                        <span className="truncate">{source.label}</span>
+                        <span className="min-w-0 truncate">{source.label}</span>
                         <span>·</span>
-                        <span>{durationLabel(meeting)}</span>
+                        <span className="shrink-0">{durationLabel(meeting)}</span>
                         <span>·</span>
-                        <span>{meeting.participants.length || 1} participants</span>
+                        <span className="min-w-0 truncate">{meeting.participants.length || 1} participants</span>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
                         <span className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium ${status.className}`}>
                           <StatusIcon aria-hidden="true" className="size-3" />
                           {status.label}
@@ -301,7 +301,7 @@ export function MeetingInboxPanel({
                           <Badge
                             key={tag}
                             variant="secondary"
-                            className={`h-6 rounded-md px-2 text-[11px] font-medium ${tagClass(tag)}`}
+                            className={`h-5 max-w-[112px] truncate rounded-md px-1.5 text-[11px] font-medium ${tagClass(tag)}`}
                           >
                             {tag}
                           </Badge>
@@ -316,7 +316,8 @@ export function MeetingInboxPanel({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--divider)] bg-[var(--surface)] px-4 py-3 text-xs text-muted-foreground">
+      <div className="ms-no-x grid gap-2 border-t border-[var(--divider)] bg-[var(--surface)] px-3 py-2.5 text-xs text-muted-foreground">
+        <div className="flex min-w-0 items-center justify-between gap-2">
         <label className="flex items-center gap-2">
           <span>Show</span>
           <select
@@ -332,9 +333,10 @@ export function MeetingInboxPanel({
             ))}
           </select>
         </label>
-        <span className="font-mono">
+        <span className="min-w-0 truncate font-mono">
           Showing {showingStart}-{showingEnd} of {page.total}
         </span>
+        </div>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"

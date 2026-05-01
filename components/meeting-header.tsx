@@ -42,20 +42,20 @@ export function MeetingHeader({
   const room = meeting.contexts?.[0]?.name ?? "Real Estate Acquisitions"
 
   return (
-    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-5 md:px-8">
-      <div className="mx-auto flex max-w-5xl flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-4 md:px-7">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
               {sourceLabel(meeting.source)}
             </Badge>
-            <h1 className="break-words text-xl font-semibold tracking-tight text-foreground md:text-[1.45rem]">
+            <h1 className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl">
               {meeting.title}
             </h1>
             <StarIcon aria-hidden="true" className="size-4 text-amber-400" />
             <EllipsisIcon aria-hidden="true" className="size-5 text-muted-foreground" />
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
               <CalendarIcon aria-hidden="true" className="size-4" />
               {formatter.format(new Date(meeting.startedAt))}
@@ -69,22 +69,22 @@ export function MeetingHeader({
               {meeting.participants.length || 1} participants
             </span>
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+          <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
               <span className="size-2 rounded-full bg-emerald-500" />
               {room}
             </span>
-            <Button variant="outline" size="sm" className="h-8 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]">
+            <Button variant="outline" size="sm" className="h-7 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]">
               Add to room
             </Button>
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-9">
+          <Button variant="outline" size="sm" className="h-8">
             <Share2Icon data-icon="inline-start" />
             Share
           </Button>
-          <Button variant="outline" size="icon-sm" className="h-9 w-9">
+          <Button variant="outline" size="icon-sm" className="h-8 w-8">
             <EllipsisIcon aria-hidden="true" />
             <span className="sr-only">More</span>
           </Button>

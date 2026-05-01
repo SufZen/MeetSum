@@ -35,7 +35,7 @@ export function AudioPlaybackBar({ meeting }: { meeting: MeetingRecord }) {
   const duration = meetingDuration(meeting)
 
   return (
-    <div className="sticky bottom-3 z-10 mt-8 flex min-h-14 flex-wrap items-center gap-3 rounded-lg border border-[var(--divider)] bg-[color-mix(in_oklch,var(--surface)_97%,transparent)] px-3 py-2 shadow-lg shadow-slate-900/5 backdrop-blur">
+    <div className="sticky bottom-3 z-10 mt-8 flex min-h-14 flex-wrap items-center gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 shadow-lg shadow-slate-900/5 backdrop-blur">
       <Button
         size="icon"
         className="size-9 rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-[var(--primary)]/90"

@@ -458,7 +458,7 @@ export function CommandCenterShell({
   }
 
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)_292px]">
+    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_270px]">
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
@@ -518,7 +518,7 @@ export function CommandCenterShell({
 
   return (
     <main className="ms-page min-h-svh lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden">
-      <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[244px_minmax(0,1fr)] lg:overflow-hidden">
+      <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
           dictionary={dictionary}
           activePanel={activePanel}

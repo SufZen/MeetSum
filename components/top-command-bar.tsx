@@ -60,14 +60,14 @@ export function TopCommandBar({
   onToggleDarkMode: () => void
 }) {
   return (
-    <header className="sticky top-0 z-30 flex min-h-14 flex-col gap-3 border-b border-[var(--divider)] bg-[color-mix(in_oklch,var(--surface)_97%,transparent)] px-4 py-2 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex h-9 w-full items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] lg:max-w-[420px]">
+    <header className="sticky top-0 z-30 flex min-h-14 flex-col gap-2 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-2 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex h-8 w-full items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] lg:max-w-[390px]">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={dictionary.commandPlaceholder}
-          className="h-8 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+          className="h-7 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
         />
         <kbd className="hidden min-w-12 shrink-0 whitespace-nowrap rounded border border-[var(--divider)] bg-[var(--surface-subtle)] px-1.5 py-0.5 text-center font-mono text-[11px] text-muted-foreground sm:inline-flex">
           Ctrl K
@@ -77,7 +77,7 @@ export function TopCommandBar({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
-          className="hidden h-9 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)] md:inline-flex"
+          className="hidden h-8 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)] md:inline-flex"
           disabled
           title="Team invite is prepared for a later team release"
         >
@@ -104,7 +104,7 @@ export function TopCommandBar({
             render={
               <Button
                 variant="outline"
-                className="h-9 min-w-28 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)]"
+                className="h-8 min-w-24 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)]"
                 disabled={syncing}
               />
             }
