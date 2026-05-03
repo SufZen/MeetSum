@@ -7,6 +7,7 @@ export type ProviderStatusView = {
   label: string
   configured: boolean
   detail: string
+  mode?: string
 }
 
 export function ProviderHealthPanel({

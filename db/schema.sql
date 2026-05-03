@@ -206,6 +206,12 @@ create table if not exists api_keys (
   created_at timestamptz not null default now()
 );
 
+create table if not exists app_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists jobs (
   id text primary key,
   name text not null,

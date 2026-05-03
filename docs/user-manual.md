@@ -143,6 +143,18 @@ transcript, summary, tasks, tags, participants, and share metadata.
 - Run a Postgres backup before deployment.
 - Treat every visible button as either functional or explicitly disabled with a reason.
 
+## Settings
+
+The Settings page stores product preferences in Postgres. Current editable
+preferences include UI locale, meeting language mode, summary template, preferred
+AI provider path, Google-artifacts-first capture, PWA recorder availability,
+auto-processing imports, public sharing defaults, audio retention days, video
+retention preference, and machine/API access posture.
+
+Provider secrets are still controlled by production environment variables. For
+example, selecting Vertex AI as a preference does not switch production until the
+Vertex service-account credential path is configured and smoke-tested.
+
 ## Current Limitations
 
 - Meet artifact listing is available, but full artifact-to-meeting import/linking still needs expansion.

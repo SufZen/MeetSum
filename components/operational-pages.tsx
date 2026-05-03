@@ -25,8 +25,11 @@ import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provi
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Switch } from "@/components/ui/switch"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
+import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
 type MemorySearchResult = {
@@ -84,11 +87,51 @@ type MediaAssetView = {
   createdAt: string
 }
 
+type AppSettingsView = {
+  defaultLocale: SupportedLocale
+  meetingLanguageMode: "auto" | SupportedLocale
+  aiProviderPreference: "gemini-developer-api" | "vertex-ai"
+  summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
+  googleArtifactsFirst: boolean
+  pwaRecorderEnabled: boolean
+  autoProcessImportedMedia: boolean
+  publicSharingEnabled: boolean
+  shareTranscriptByDefault: boolean
+  shareActionsByDefault: boolean
+  audioRetentionDays: number
+  retainVideoByDefault: boolean
+  requireApiKeyForMachines: boolean
+}
+
 const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
   { value: "meeting.completed", label: "Meeting completed" },
   { value: "summary.created", label: "Summary created" },
   { value: "action_item.created", label: "Action item created" },
 ]
+
+const localeLabels: Record<SupportedLocale, string> = {
+  en: "English",
+  he: "Hebrew",
+  pt: "Portuguese",
+  es: "Spanish",
+  it: "Italian",
+}
+
+const defaultSettings: AppSettingsView = {
+  defaultLocale: "en",
+  meetingLanguageMode: "auto",
+  aiProviderPreference: "gemini-developer-api",
+  summaryTemplate: "general",
+  googleArtifactsFirst: true,
+  pwaRecorderEnabled: true,
+  autoProcessImportedMedia: true,
+  publicSharingEnabled: true,
+  shareTranscriptByDefault: true,
+  shareActionsByDefault: true,
+  audioRetentionDays: 180,
+  retainVideoByDefault: false,
+  requireApiKeyForMachines: true,
+}
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
@@ -194,6 +237,28 @@ function ManualBlock({
   )
 }
 
+function SettingRow({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
 export function OperationalPage({
   panel,
   meetings,
@@ -237,6 +302,9 @@ export function OperationalPage({
   const [webhookLoading, setWebhookLoading] = useState(false)
   const [mediaAssets, setMediaAssets] = useState<MediaAssetView[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
+  const [settings, setSettings] = useState<AppSettingsView>(defaultSettings)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [settingsSection, setSettingsSection] = useState("Recording & Privacy")
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -270,6 +338,12 @@ export function OperationalPage({
     if (panel !== "storage") return
 
     void refreshStorage()
+  }, [panel])
+
+  useEffect(() => {
+    if (panel !== "settings") return
+
+    void refreshSettings()
   }, [panel])
 
   async function askMemory() {
@@ -448,6 +522,55 @@ export function OperationalPage({
       )
     } finally {
       setStorageLoading(false)
+    }
+  }
+
+  async function refreshSettings() {
+    setSettingsLoading(true)
+    try {
+      const response = await fetch("/api/settings")
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to load settings")
+      }
+
+      setSettings({ ...defaultSettings, ...(body.settings ?? {}) })
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to refresh settings"
+      )
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  async function saveSettingsPatch(patch: Partial<AppSettingsView>) {
+    const optimistic = { ...settings, ...patch }
+
+    setSettings(optimistic)
+    setSettingsLoading(true)
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to update settings")
+      }
+
+      setSettings({ ...defaultSettings, ...(body.settings ?? {}) })
+      toast.success("Settings saved")
+    } catch (error) {
+      setSettings(settings)
+      toast.error(
+        error instanceof Error ? error.message : "Unable to save settings"
+      )
+    } finally {
+      setSettingsLoading(false)
     }
   }
 
@@ -1042,8 +1165,9 @@ export function OperationalPage({
             <button
               key={item}
               type="button"
+              onClick={() => setSettingsSection(item)}
               className={
-                index === 0
+                settingsSection === item || (!settingsSection && index === 0)
                   ? "rounded-lg bg-[var(--selected)] px-3 py-2 text-left font-semibold text-[var(--primary)] rtl:text-right"
                   : "rounded-lg px-3 py-2 text-left text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground rtl:text-right"
               }
@@ -1053,10 +1177,346 @@ export function OperationalPage({
           ))}
         </nav>
         <div className="grid gap-4">
-          <OpsCard icon={RadioTowerIcon} title="Recording & Privacy" description="Google artifacts first for online meetings, PWA recorder for in-person meetings, and audio-first retention." status="V1" />
-          <OpsCard icon={SparklesIcon} title="AI provider" description="AI Studio Gemini remains active. Vertex AI credential path is prepared but not switched until smoke-tested." status="Gemini" />
-          <OpsCard icon={KeyRoundIcon} title="Account and access" description="Primary admin: info@realization.co.il. Google login is the browser auth and Workspace consent path." status="Google OAuth" />
-          <OpsCard icon={ShieldCheckIcon} title="Security" description="API keys for machine access, signed webhooks, encrypted OAuth token storage, private secrets on VPS only." status="hardened" />
+          {settingsSection === "Recording & Privacy" ? (
+            <OpsCard
+              icon={RadioTowerIcon}
+              title="Recording & Privacy"
+              description="Set the default capture and retention behavior. These are product preferences; the worker still enforces safe media handling."
+              status={settingsLoading ? "saving" : "saved"}
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Google artifacts first"
+                  description="Use native Meet recordings, transcripts, and smart notes as the preferred online capture path."
+                >
+                  <Switch
+                    checked={settings.googleArtifactsFirst}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ googleArtifactsFirst: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="PWA recorder enabled"
+                  description="Keep the browser recorder available for in-person meetings and non-Google calls."
+                >
+                  <Switch
+                    checked={settings.pwaRecorderEnabled}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ pwaRecorderEnabled: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Auto-process imported media"
+                  description="Queue transcription and intelligence immediately after manual upload or selected Drive import."
+                >
+                  <Switch
+                    checked={settings.autoProcessImportedMedia}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ autoProcessImportedMedia: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Retain video by default"
+                  description="Recommended off. MeetSum should stay audio-first unless you explicitly need video archives."
+                >
+                  <Switch
+                    checked={settings.retainVideoByDefault}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ retainVideoByDefault: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Audio retention days"
+                  description="Default is 180 days. Transcripts and summaries remain indefinitely unless later changed."
+                >
+                  <Input
+                    className="h-9 w-24"
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={settings.audioRetentionDays}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      setSettings({
+                        ...settings,
+                        audioRetentionDays: Number(event.target.value),
+                      })
+                    }
+                    onBlur={() =>
+                      saveSettingsPatch({
+                        audioRetentionDays: settings.audioRetentionDays,
+                      })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </OpsCard>
+          ) : null}
+          {settingsSection === "AI settings" ? (
+            <OpsCard
+              icon={SparklesIcon}
+              title="AI settings"
+              description="Choose preferred intelligence behavior. Active provider still depends on production secrets and environment validation."
+              status={providers.find((provider) => provider.id === "gemini")?.mode ?? "Gemini"}
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Preferred provider path"
+                  description="AI Studio is active today. Vertex can be selected as a preference, but production switches only after credential smoke test."
+                >
+                  <NativeSelect
+                    value={settings.aiProviderPreference}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        aiProviderPreference: event.target
+                          .value as AppSettingsView["aiProviderPreference"],
+                      })
+                    }
+                  >
+                    <NativeSelectOption value="gemini-developer-api">
+                      Gemini API key
+                    </NativeSelectOption>
+                    <NativeSelectOption value="vertex-ai">
+                      Vertex AI
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </SettingRow>
+                <SettingRow
+                  title="Default summary template"
+                  description="Used as the default intelligence style for future reprocess and summary runs."
+                >
+                  <NativeSelect
+                    value={settings.summaryTemplate}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        summaryTemplate: event.target
+                          .value as AppSettingsView["summaryTemplate"],
+                      })
+                    }
+                  >
+                    {["general", "sales", "real-estate", "product", "operations", "legal"].map((template) => (
+                      <NativeSelectOption key={template} value={template}>
+                        {template}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </SettingRow>
+                <div className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                  {providers.map((provider) => (
+                    <div
+                      key={provider.id}
+                      className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                    >
+                      <span className="font-medium text-foreground">{provider.label}</span>
+                      <span className="text-muted-foreground">{provider.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </OpsCard>
+          ) : null}
+          {settingsSection === "Live meeting" ? (
+            <OpsCard
+              icon={RadioTowerIcon}
+              title="Live meeting capture"
+              description="V0.1.0 stays Google-artifacts-first. Bot capture remains deferred until consent and Meet Media API constraints are proven."
+              status="Google first"
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Online meeting capture"
+                  description="MeetSum imports native recordings/transcripts after meetings instead of joining as a bot."
+                >
+                  <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+                    artifacts first
+                  </Badge>
+                </SettingRow>
+                <SettingRow
+                  title="Meeting content language"
+                  description="Autodetect is recommended for mixed Hebrew/English/Portuguese/Spanish/Italian calls."
+                >
+                  <NativeSelect
+                    value={settings.meetingLanguageMode}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        meetingLanguageMode: event.target
+                          .value as AppSettingsView["meetingLanguageMode"],
+                      })
+                    }
+                  >
+                    <NativeSelectOption value="auto">Auto-detect</NativeSelectOption>
+                    {SUPPORTED_LOCALES.map((locale) => (
+                      <NativeSelectOption key={locale} value={locale}>
+                        {localeLabels[locale]}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </SettingRow>
+              </div>
+            </OpsCard>
+          ) : null}
+          {settingsSection === "Developer/API" ? (
+            <OpsCard
+              icon={KeyRoundIcon}
+              title="Developer/API"
+              description="Machine integrations should use API keys, signed webhooks, CLI, and MCP. Secrets remain configured on the VPS."
+              status="hardened"
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Require API keys for machines"
+                  description="Keep enabled for CLI, MCP, webhook management scripts, and external API clients."
+                >
+                  <Switch
+                    checked={settings.requireApiKeyForMachines}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ requireApiKeyForMachines: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Webhook signing"
+                  description="Outbound events use x-meetsum-signature. The signing secret is stored only in production env."
+                >
+                  <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+                    enabled
+                  </Badge>
+                </SettingRow>
+                <SettingRow
+                  title="MCP and CLI"
+                  description="Use server-side APIs and API keys for automation, not browser session cookies."
+                >
+                  <Button
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => copyAutomationText("MEETSUM_API_KEY", "API key env name")}
+                  >
+                    Copy env name
+                  </Button>
+                </SettingRow>
+              </div>
+            </OpsCard>
+          ) : null}
+          {settingsSection === "Language" ? (
+            <OpsCard
+              icon={BookOpenIcon}
+              title="Language"
+              description="UI language and meeting content language are separate. Hebrew remains RTL; mixed meeting content is detected by the intelligence layer."
+              status={settings.defaultLocale.toUpperCase()}
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Default UI locale"
+                  description="Updates the saved locale cookie and app default preference."
+                >
+                  <NativeSelect
+                    value={settings.defaultLocale}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        defaultLocale: event.target.value as SupportedLocale,
+                      })
+                    }
+                  >
+                    {SUPPORTED_LOCALES.map((locale) => (
+                      <NativeSelectOption key={locale} value={locale}>
+                        {localeLabels[locale]}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </SettingRow>
+                <SettingRow
+                  title="Meeting language handling"
+                  description="Controls the default metadata preference; transcript segments can still be mixed-language."
+                >
+                  <NativeSelect
+                    value={settings.meetingLanguageMode}
+                    disabled={settingsLoading}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        meetingLanguageMode: event.target
+                          .value as AppSettingsView["meetingLanguageMode"],
+                      })
+                    }
+                  >
+                    <NativeSelectOption value="auto">Auto-detect</NativeSelectOption>
+                    {SUPPORTED_LOCALES.map((locale) => (
+                      <NativeSelectOption key={locale} value={locale}>
+                        {localeLabels[locale]}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </SettingRow>
+              </div>
+            </OpsCard>
+          ) : null}
+          {settingsSection === "Account/Security" ? (
+            <OpsCard
+              icon={ShieldCheckIcon}
+              title="Account and security"
+              description="First-admin Google OAuth remains the browser access path. Sharing defaults apply to newly created share links."
+              status="Google OAuth"
+            >
+              <div className="grid gap-3">
+                <SettingRow
+                  title="Primary admin"
+                  description="Browser auth and Workspace consent are tied to the first admin account."
+                >
+                  <span className="font-mono text-xs text-muted-foreground">
+                    info@realization.co.il
+                  </span>
+                </SettingRow>
+                <SettingRow
+                  title="Public sharing enabled"
+                  description="Allows public read-only summary/transcript links. Audio remains private by default."
+                >
+                  <Switch
+                    checked={settings.publicSharingEnabled}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ publicSharingEnabled: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Include transcript by default"
+                  description="Default share-page section preference for future share links."
+                >
+                  <Switch
+                    checked={settings.shareTranscriptByDefault}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ shareTranscriptByDefault: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  title="Include action items by default"
+                  description="Default share-page section preference for future share links."
+                >
+                  <Switch
+                    checked={settings.shareActionsByDefault}
+                    disabled={settingsLoading}
+                    onCheckedChange={(checked) =>
+                      saveSettingsPatch({ shareActionsByDefault: Boolean(checked) })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </OpsCard>
+          ) : null}
         </div>
       </div>
     </PageFrame>
