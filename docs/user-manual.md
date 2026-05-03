@@ -131,6 +131,10 @@ CLI and MCP are intended for agents and automation. Production access should use
 - Video retention: disabled unless explicitly configured.
 - Deployments: app, worker, and migrate containers are disposable; Postgres, Redis, and MinIO persist through named Docker volumes.
 
+The Storage page lists recent MinIO media assets. Deleting a media asset removes
+the private audio/video object and its media record, but keeps the meeting,
+transcript, summary, tasks, tags, participants, and share metadata.
+
 ## Operating Rules
 
 - Do not auto-ingest every Drive video. Use operator-selected imports.

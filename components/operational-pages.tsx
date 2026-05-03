@@ -13,6 +13,7 @@ import {
   SendIcon,
   ShieldCheckIcon,
   SparklesIcon,
+  Trash2Icon,
   WorkflowIcon,
 } from "lucide-react"
 import type { ReactNode } from "react"
@@ -72,11 +73,35 @@ type WebhookDeliveryView = {
   createdAt: string
 }
 
+type MediaAssetView = {
+  id: string
+  meetingId: string
+  meetingTitle: string
+  filename?: string
+  contentType: string
+  sizeBytes: number
+  retention: "audio" | "video"
+  createdAt: string
+}
+
 const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
   { value: "meeting.completed", label: "Meeting completed" },
   { value: "summary.created", label: "Summary created" },
   { value: "action_item.created", label: "Action item created" },
 ]
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+
+  const units = ["B", "KB", "MB", "GB"]
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  )
+  const value = bytes / 1024 ** index
+
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
 
 function PageFrame({
   eyebrow,
@@ -210,6 +235,8 @@ export function OperationalPage({
     WebhookDeliveryView[]
   >([])
   const [webhookLoading, setWebhookLoading] = useState(false)
+  const [mediaAssets, setMediaAssets] = useState<MediaAssetView[]>([])
+  const [storageLoading, setStorageLoading] = useState(false)
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -237,6 +264,12 @@ export function OperationalPage({
     if (panel !== "automations") return
 
     void refreshAutomations()
+  }, [panel])
+
+  useEffect(() => {
+    if (panel !== "storage") return
+
+    void refreshStorage()
   }, [panel])
 
   async function askMemory() {
@@ -366,6 +399,55 @@ export function OperationalPage({
       )
     } finally {
       setWebhookLoading(false)
+    }
+  }
+
+  async function refreshStorage() {
+    setStorageLoading(true)
+    try {
+      const response = await fetch("/api/storage/media-assets?limit=50")
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to load media assets")
+      }
+
+      setMediaAssets(body.assets ?? [])
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to refresh storage"
+      )
+    } finally {
+      setStorageLoading(false)
+    }
+  }
+
+  async function deleteStoredMedia(asset: MediaAssetView) {
+    const confirmed = window.confirm(
+      `Delete ${asset.filename ?? "this media asset"}? Transcripts and summaries stay in MeetSum.`
+    )
+
+    if (!confirmed) return
+
+    setStorageLoading(true)
+    try {
+      const response = await fetch(`/api/storage/media-assets/${asset.id}`, {
+        method: "DELETE",
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to delete media asset")
+      }
+
+      toast.success("Media asset deleted")
+      await refreshStorage()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to delete media asset"
+      )
+    } finally {
+      setStorageLoading(false)
     }
   }
 
@@ -731,7 +813,10 @@ export function OperationalPage({
   }
 
   if (panel === "storage") {
-    const assets = meetings.reduce((sum, meeting) => sum + (meeting.mediaAssets?.length ?? 0), 0)
+    const retainedBytes = mediaAssets.reduce(
+      (sum, asset) => sum + asset.sizeBytes,
+      0
+    )
 
     return (
       <PageFrame
@@ -740,9 +825,106 @@ export function OperationalPage({
         description="Audio is retained for 180 days by default, transcripts and summaries are retained indefinitely, and raw video is not kept unless explicitly enabled."
       >
         <div className="grid gap-4 lg:grid-cols-3">
-          <OpsCard icon={DatabaseIcon} title="Media assets" description="Imported audio/video-derived assets stored privately in MinIO." status={`${assets} assets`} />
-          <OpsCard icon={ShieldCheckIcon} title="Retention policy" description="Audio-first by default. Video retained only when configured." status="active" />
-          <OpsCard icon={CloudIcon} title="Backups" description="Postgres backup runs before VPS deploys; restore remains operator-confirmed." status="configured" />
+          <OpsCard
+            icon={DatabaseIcon}
+            title="Media assets"
+            description="Imported audio/video-derived assets stored privately in MinIO."
+            status={`${mediaAssets.length} assets`}
+          >
+            <div className="text-sm text-muted-foreground">
+              {formatBytes(retainedBytes)} currently tracked by MeetSum.
+            </div>
+          </OpsCard>
+          <OpsCard
+            icon={ShieldCheckIcon}
+            title="Retention policy"
+            description="Audio-first by default. Video retained only when configured."
+            status="active"
+          >
+            <div className="grid gap-2 text-sm text-muted-foreground">
+              <p>Audio: 180 days by default.</p>
+              <p>Transcripts and summaries: retained indefinitely.</p>
+              <p>Raw video: delete or avoid retaining unless explicitly needed.</p>
+            </div>
+          </OpsCard>
+          <OpsCard
+            icon={CloudIcon}
+            title="Backups"
+            description="Postgres backup runs before VPS deploys; restore remains operator-confirmed."
+            status="configured"
+          >
+            <Button
+              variant="outline"
+              className="h-9 w-full justify-start"
+              onClick={() => toast.info("Backups are created by the VPS deploy script before container replacement.")}
+            >
+              View backup policy
+            </Button>
+          </OpsCard>
+          <div className="lg:col-span-3">
+            <OpsCard
+              icon={FileAudioIcon}
+              title="Recent stored media"
+              description="Delete selected audio/video assets without removing transcripts, summaries, tasks, or meeting metadata."
+              status={storageLoading ? "loading" : `${mediaAssets.length} listed`}
+            >
+              <div className="mb-3 flex justify-end">
+                <Button
+                  variant="outline"
+                  className="h-8"
+                  disabled={storageLoading}
+                  onClick={refreshStorage}
+                >
+                  Refresh assets
+                </Button>
+              </div>
+              <div className="grid gap-2">
+                {mediaAssets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                  >
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-foreground">
+                          {asset.filename ?? asset.meetingTitle}
+                        </div>
+                        <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                          {asset.meetingTitle}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          <span className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]">
+                            {asset.retention}
+                          </span>
+                          <span className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                            {asset.contentType}
+                          </span>
+                          <span className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                            {formatBytes(asset.sizeBytes)}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="h-8 shrink-0 text-destructive hover:text-destructive"
+                        disabled={storageLoading}
+                        onClick={() => deleteStoredMedia(asset)}
+                      >
+                        <Trash2Icon data-icon="inline-start" className="size-4" />
+                        Delete media
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {!mediaAssets.length ? (
+                  <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                    No stored media assets were found. Imported recordings and
+                    uploads will appear here after processing starts.
+                  </div>
+                ) : null}
+              </div>
+            </OpsCard>
+          </div>
         </div>
       </PageFrame>
     )
