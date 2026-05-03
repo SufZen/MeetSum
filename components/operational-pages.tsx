@@ -10,6 +10,7 @@ import {
   LinkIcon,
   RadioTowerIcon,
   SearchIcon,
+  SendIcon,
   ShieldCheckIcon,
   SparklesIcon,
   WorkflowIcon,
@@ -44,6 +45,38 @@ type RoomResult = {
   description?: string
   meetingCount: number
 }
+
+type WebhookEventName =
+  | "meeting.completed"
+  | "summary.created"
+  | "action_item.created"
+
+type WebhookSubscriptionView = {
+  id: string
+  url: string
+  events: WebhookEventName[]
+  enabled: boolean
+  secretRef?: string
+  createdAt: string
+}
+
+type WebhookDeliveryView = {
+  id: string
+  subscriptionId: string
+  subscriptionUrl: string
+  eventName: string
+  status: string
+  attempts: number
+  responseStatus?: number
+  lastError?: string
+  createdAt: string
+}
+
+const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
+  { value: "meeting.completed", label: "Meeting completed" },
+  { value: "summary.created", label: "Summary created" },
+  { value: "action_item.created", label: "Action item created" },
+]
 
 function PageFrame({
   eyebrow,
@@ -167,6 +200,16 @@ export function OperationalPage({
   const [memoryQuestion, setMemoryQuestion] = useState("")
   const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
   const [rooms, setRooms] = useState<RoomResult[]>([])
+  const [webhookUrl, setWebhookUrl] = useState("")
+  const [webhookEventSelection, setWebhookEventSelection] =
+    useState<WebhookEventName[]>(["meeting.completed", "summary.created"])
+  const [webhookSubscriptions, setWebhookSubscriptions] = useState<
+    WebhookSubscriptionView[]
+  >([])
+  const [webhookDeliveries, setWebhookDeliveries] = useState<
+    WebhookDeliveryView[]
+  >([])
+  const [webhookLoading, setWebhookLoading] = useState(false)
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -189,6 +232,12 @@ export function OperationalPage({
 
     return () => window.clearTimeout(timeoutId)
   }, [panel, query])
+
+  useEffect(() => {
+    if (panel !== "automations") return
+
+    void refreshAutomations()
+  }, [panel])
 
   async function askMemory() {
     if (!memoryQuestion.trim()) return
@@ -217,6 +266,107 @@ export function OperationalPage({
   async function copyAutomationText(value: string, label: string) {
     await navigator.clipboard.writeText(value)
     toast.success(`${label} copied`)
+  }
+
+  async function refreshAutomations() {
+    setWebhookLoading(true)
+    try {
+      const [subscriptionsResponse, deliveriesResponse] = await Promise.all([
+        fetch("/api/webhooks/subscriptions"),
+        fetch("/api/webhooks/deliveries?limit=12"),
+      ])
+      const subscriptionsBody = await subscriptionsResponse.json()
+      const deliveriesBody = await deliveriesResponse.json()
+
+      if (!subscriptionsResponse.ok) {
+        throw new Error(
+          subscriptionsBody.error ?? "Unable to load webhook subscriptions"
+        )
+      }
+
+      if (!deliveriesResponse.ok) {
+        throw new Error(deliveriesBody.error ?? "Unable to load webhook history")
+      }
+
+      setWebhookSubscriptions(subscriptionsBody.subscriptions ?? [])
+      setWebhookDeliveries(deliveriesBody.deliveries ?? [])
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to refresh automations"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  function toggleWebhookEvent(eventName: WebhookEventName) {
+    setWebhookEventSelection((current) => {
+      if (current.includes(eventName)) {
+        const next = current.filter((event) => event !== eventName)
+        return next.length ? next : current
+      }
+
+      return [...current, eventName]
+    })
+  }
+
+  async function createWebhookSubscription() {
+    if (!webhookUrl.trim()) {
+      toast.error("Webhook URL is required")
+      return
+    }
+
+    setWebhookLoading(true)
+    try {
+      const response = await fetch("/api/webhooks/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: webhookUrl.trim(),
+          events: webhookEventSelection,
+        }),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to create webhook subscription")
+      }
+
+      setWebhookUrl("")
+      toast.success("Webhook subscription created")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to create subscription"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function setWebhookEnabled(subscription: WebhookSubscriptionView) {
+    setWebhookLoading(true)
+    try {
+      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: !subscription.enabled }),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to update webhook subscription")
+      }
+
+      toast.success(subscription.enabled ? "Webhook paused" : "Webhook enabled")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to update subscription"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
   }
 
   if (panel === "workspace") {
@@ -373,36 +523,209 @@ export function OperationalPage({
         title="Automations and integrations"
         description="Webhook, n8n, RealizeOS, CLI, and MCP connections should all consume the same structured meeting intelligence."
       >
-        <div className="grid gap-4 lg:grid-cols-3">
-          <OpsCard icon={WorkflowIcon} title="Webhooks" description="Signed delivery for meeting.completed, summary.created, and action_item.created." status="ready">
-            <Button
-              variant="outline"
-              className="h-8 w-full justify-start"
-              onClick={() => copyAutomationText("/api/webhooks/subscriptions", "Webhook API")}
-            >
-              Copy subscription API
-            </Button>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+          <OpsCard
+            icon={WorkflowIcon}
+            title="Webhook subscriptions"
+            description="Create signed outbound webhooks for completed meetings, summaries, and action items."
+            status={webhookLoading ? "syncing" : `${webhookSubscriptions.length} active`}
+          >
+            <div className="grid gap-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                <Input
+                  className="h-10"
+                  value={webhookUrl}
+                  onChange={(event) => setWebhookUrl(event.target.value)}
+                  placeholder="https://your-n8n-or-system.example/webhook/meetsum"
+                />
+                <Button
+                  className="h-10"
+                  disabled={webhookLoading}
+                  onClick={createWebhookSubscription}
+                >
+                  <SendIcon data-icon="inline-start" className="size-4" />
+                  Add webhook
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {webhookEvents.map((event) => (
+                  <label
+                    key={event.value}
+                    className="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2.5 text-xs font-medium text-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-3.5 accent-[var(--primary)]"
+                      checked={webhookEventSelection.includes(event.value)}
+                      onChange={() => toggleWebhookEvent(event.value)}
+                    />
+                    {event.label}
+                  </label>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                {webhookSubscriptions.map((subscription) => (
+                  <div
+                    key={subscription.id}
+                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs text-foreground">
+                          {subscription.url}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {subscription.events.map((event) => (
+                            <span
+                              key={event}
+                              className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]"
+                            >
+                              {event}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          className={
+                            subscription.enabled
+                              ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+                              : "rounded-md bg-[var(--surface)] text-muted-foreground"
+                          }
+                        >
+                          {subscription.enabled ? "enabled" : "paused"}
+                        </Badge>
+                        <Button
+                          className="h-8"
+                          variant="outline"
+                          disabled={webhookLoading}
+                          onClick={() => setWebhookEnabled(subscription)}
+                        >
+                          {subscription.enabled ? "Pause" : "Enable"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!webhookSubscriptions.length ? (
+                  <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                    No webhook subscriptions yet. Add your n8n webhook URL or
+                    another API endpoint to start receiving signed MeetSum
+                    events.
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </OpsCard>
-          <OpsCard icon={BotIcon} title="RealizeOS" description="Structured meeting context exports with auditable retryable jobs." status="connected">
-            <Button
-              variant="outline"
-              className="h-8 w-full justify-start"
-              onClick={() => toast.info("RealizeOS export history is recorded in agent/job activity.")}
+
+          <div className="grid gap-4">
+            <OpsCard
+              icon={BotIcon}
+              title="RealizeOS"
+              description="Structured meeting context exports with auditable retryable jobs."
+              status="connected"
             >
-              View export history
-            </Button>
-          </OpsCard>
-          <OpsCard icon={LinkIcon} title="n8n" description="Webhook-ready infrastructure; live workflows can be connected when needed." status="prepared">
-            <Button
-              variant="outline"
-              className="h-8 w-full justify-start"
-              onClick={() => copyAutomationText("meeting.completed, summary.created, action_item.created", "n8n event list")}
+              <div className="grid gap-2">
+                <Button
+                  variant="outline"
+                  className="h-9 w-full justify-start"
+                  onClick={() => toast.info("Use a meeting's right rail to queue a RealizeOS export. Export jobs appear below.")}
+                >
+                  View export flow
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-9 w-full justify-start"
+                  onClick={() => copyAutomationText("meeting, summary, transcript references, action items, tags, language metadata, Google context", "RealizeOS payload fields")}
+                >
+                  Copy payload fields
+                </Button>
+              </div>
+            </OpsCard>
+            <OpsCard
+              icon={LinkIcon}
+              title="n8n"
+              description="Paste a production n8n webhook URL above. MeetSum will sign each event with x-meetsum-signature."
+              status="prepared"
             >
-              Copy endpoint details
-            </Button>
+              <div className="grid gap-2">
+                <Button
+                  variant="outline"
+                  className="h-9 w-full justify-start"
+                  onClick={() => copyAutomationText("x-meetsum-signature", "Webhook signature header")}
+                >
+                  Copy signature header
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-9 w-full justify-start"
+                  onClick={() => copyAutomationText(webhookEvents.map((event) => event.value).join(", "), "n8n event list")}
+                >
+                  Copy event names
+                </Button>
+              </div>
+            </OpsCard>
+          </div>
+
+          <OpsCard
+            icon={CloudIcon}
+            title="Delivery history"
+            description="Recent webhook attempts with status, response code, and retry clues."
+            status={`${webhookDeliveries.length} recent`}
+          >
+            <div className="grid gap-2">
+              <Button
+                variant="outline"
+                className="h-8 w-fit"
+                disabled={webhookLoading}
+                onClick={refreshAutomations}
+              >
+                Refresh history
+              </Button>
+              {webhookDeliveries.map((delivery) => (
+                <div
+                  key={delivery.id}
+                  className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-foreground">
+                      {delivery.eventName}
+                    </div>
+                    <Badge
+                      className={
+                        delivery.status === "sent"
+                          ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+                          : delivery.status === "failed"
+                            ? "rounded-md bg-destructive/10 text-destructive"
+                            : "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+                      }
+                    >
+                      {delivery.status}
+                      {delivery.responseStatus ? ` ${delivery.responseStatus}` : ""}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                    {delivery.subscriptionUrl}
+                  </div>
+                  {delivery.lastError ? (
+                    <div className="mt-2 rounded-md bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                      {delivery.lastError}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {!webhookDeliveries.length ? (
+                <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                  Delivery attempts will appear after a subscribed event fires.
+                </div>
+              ) : null}
+            </div>
           </OpsCard>
+
+          <div className="xl:col-span-2">
+            <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
+          </div>
         </div>
-        <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
       </PageFrame>
     )
   }

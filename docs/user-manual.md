@@ -103,12 +103,18 @@ RealizeOS is the first deep business integration. Meeting exports include struct
 
 ### n8n And Webhooks
 
-MeetSum stores webhook infrastructure for:
+MeetSum can create signed webhook subscriptions from the Automations page. Paste
+an n8n production webhook URL or another API endpoint, choose the events, and
+MeetSum will POST signed event payloads to that endpoint.
+
+Supported v0.1.0 events:
 
 - `meeting.completed`
 - `summary.created`
 - `action_item.created`
 
+Each delivery includes an `x-meetsum-signature` HMAC header. The Automations page
+also shows recent delivery attempts, response status codes, and failure messages.
 n8n workflows can consume these signed events once workflows are created.
 
 ### CLI And MCP

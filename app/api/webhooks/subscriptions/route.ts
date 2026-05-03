@@ -1,19 +1,30 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
-import { createApiKeyHash } from "@/lib/auth/api-keys"
-import { getDatabasePool } from "@/lib/db/client"
-import { createPlatformEvent, signWebhookPayload } from "@/lib/platform/events"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import {
+  createWebhookSubscription,
+  createWebhookTestSignature,
+  listWebhookSubscriptions,
+} from "@/lib/webhooks/management"
+
+export async function GET(request: Request) {
+  const unauthorized = await requireAppAccess(request)
+
+  if (unauthorized) return unauthorized
+
+  const subscriptions = await listWebhookSubscriptions()
+
+  return NextResponse.json({ subscriptions })
+}
 
 export async function POST(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
-  if (unauthorized) {
-    return unauthorized
-  }
+  if (unauthorized) return unauthorized
 
-  const { url, secret = "dev-secret" } = (await request.json()) as {
+  const { url, events, secret } = (await request.json()) as {
     url?: string
+    events?: unknown
     secret?: string
   }
 
@@ -21,35 +32,22 @@ export async function POST(request: Request) {
     return jsonError("Webhook URL is required", 400)
   }
 
-  const event = createPlatformEvent("summary.created", { url })
-  const subscription = {
-    id: `wh_${crypto.randomUUID()}`,
-    url,
-    events: ["meeting.completed", "summary.created", "action_item.created"],
-  }
+  try {
+    const subscription = await createWebhookSubscription({ url, events, secret })
+    const { event, signature } = createWebhookTestSignature(subscription.url)
 
-  if (process.env.MEETSUM_STORAGE === "postgres") {
-    await getDatabasePool().query(
-      `
-        insert into webhook_subscriptions (id, url, events, secret_ref, secret_hash, enabled)
-        values ($1, $2, $3::jsonb, $4, $5, true)
-      `,
-      [
-        subscription.id,
-        subscription.url,
-        JSON.stringify(subscription.events),
-        secret ? "provided" : null,
-        secret ? createApiKeyHash(secret) : null,
-      ]
+    return NextResponse.json(
+      {
+        subscription,
+        testEvent: event,
+        signature,
+      },
+      { status: 201 }
+    )
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Unable to create webhook subscription",
+      400
     )
   }
-
-  return NextResponse.json(
-    {
-      subscription,
-      testEvent: event,
-      signature: signWebhookPayload(event, secret),
-    },
-    { status: 201 }
-  )
 }

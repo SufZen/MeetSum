@@ -175,6 +175,7 @@ create table if not exists webhook_subscriptions (
   secret_ref text,
   secret_hash text,
   enabled boolean not null default true,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
 
@@ -451,3 +452,9 @@ create index if not exists idx_intelligence_runs_meeting_id
 
 create index if not exists idx_suggested_agent_runs_meeting_id
   on suggested_agent_runs(meeting_id, created_at desc);
+
+create index if not exists idx_webhook_deliveries_subscription_created
+  on webhook_deliveries(webhook_subscription_id, created_at desc);
+
+create index if not exists idx_webhook_deliveries_status_created
+  on webhook_deliveries(status, created_at desc);
