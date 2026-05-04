@@ -87,6 +87,35 @@ type MediaAssetView = {
   createdAt: string
 }
 
+type MeetArtifactView = {
+  id: string
+  artifactType: "recording" | "transcript" | "smart_notes"
+  artifactName: string
+  state?: string
+  driveFileName?: string
+  documentName?: string
+}
+
+type MeetConferenceRecordView = {
+  id: string
+  conferenceRecordName: string
+  meetingId?: string
+  meetingTitle?: string
+  calendarTitle?: string
+  startTime?: string
+  artifacts: MeetArtifactView[]
+}
+
+type MeetArtifactStatusView = {
+  setup?: {
+    authorized: boolean
+    message?: string
+    requiredScope?: string
+  }
+  conferenceRecords: unknown[]
+  persistedRecords: MeetConferenceRecordView[]
+}
+
 type AppSettingsView = {
   defaultLocale: SupportedLocale
   meetingLanguageMode: "auto" | SupportedLocale
@@ -144,6 +173,27 @@ function formatBytes(bytes: number) {
   const value = bytes / 1024 ** index
 
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+function formatShortDate(value?: string) {
+  if (!value) return "No time"
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return "No time"
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function formatArtifactType(value: MeetArtifactView["artifactType"]) {
+  if (value === "smart_notes") return "Smart notes"
+
+  return value[0].toUpperCase() + value.slice(1)
 }
 
 function PageFrame({
@@ -305,6 +355,8 @@ export function OperationalPage({
   const [settings, setSettings] = useState<AppSettingsView>(defaultSettings)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsSection, setSettingsSection] = useState("Recording & Privacy")
+  const [meetArtifacts, setMeetArtifacts] = useState<MeetArtifactStatusView>()
+  const [meetArtifactsLoading, setMeetArtifactsLoading] = useState(false)
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -344,6 +396,12 @@ export function OperationalPage({
     if (panel !== "settings") return
 
     void refreshSettings()
+  }, [panel])
+
+  useEffect(() => {
+    if (panel !== "workspace") return
+
+    void refreshMeetArtifacts()
   }, [panel])
 
   async function askMemory() {
@@ -545,6 +603,37 @@ export function OperationalPage({
     }
   }
 
+  async function refreshMeetArtifacts() {
+    setMeetArtifactsLoading(true)
+    try {
+      const response = await fetch("/api/google/meet/artifacts?limit=10")
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to load Meet artifact status")
+      }
+
+      setMeetArtifacts({
+        setup: body.setup,
+        conferenceRecords: body.conferenceRecords ?? [],
+        persistedRecords: body.persistedRecords ?? [],
+      })
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to refresh Meet artifact status"
+      )
+    } finally {
+      setMeetArtifactsLoading(false)
+    }
+  }
+
+  function syncMeetArtifactsAndRefresh() {
+    onSyncMeetArtifacts()
+    window.setTimeout(() => void refreshMeetArtifacts(), 1500)
+  }
+
   async function saveSettingsPatch(patch: Partial<AppSettingsView>) {
     const optimistic = { ...settings, ...patch }
 
@@ -592,21 +681,111 @@ export function OperationalPage({
               icon={RadioTowerIcon}
               title="Live meeting capture"
               description="V1 uses native Google Meet recordings, transcripts, and smart notes. MeetSum imports artifacts after the meeting and does not join as a bot yet."
-              status="Google artifacts first"
+              status={
+                meetArtifacts?.setup?.authorized
+                  ? "Artifacts authorized"
+                  : "Google artifacts first"
+              }
             >
               <div className="grid gap-2 text-sm text-muted-foreground">
-              <div className="flex items-center justify-between rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                <div className="flex items-center justify-between rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
                   <span>Recording / transcript / smart notes readiness</span>
-                <Badge variant="outline" className="rounded-md">checklist</Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      meetArtifacts?.setup?.authorized
+                        ? "rounded-md border-[var(--status-success)] text-[var(--status-success)]"
+                        : "rounded-md"
+                    }
+                  >
+                    {meetArtifacts?.setup?.authorized ? "authorized" : "checklist"}
+                  </Badge>
                 </div>
+                {meetArtifacts?.setup?.message ? (
+                  <div className="rounded-md border border-[var(--status-warning)]/40 bg-[var(--surface-subtle)] px-3 py-2 text-xs leading-5 text-[var(--status-warning)]">
+                    {meetArtifacts.setup.message}
+                  </div>
+                ) : null}
+                {meetArtifacts ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                      <div className="text-xs text-muted-foreground">Live records</div>
+                      <div className="mt-1 font-semibold text-foreground">
+                        {meetArtifacts.conferenceRecords.length}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                      <div className="text-xs text-muted-foreground">Persisted</div>
+                      <div className="mt-1 font-semibold text-foreground">
+                        {meetArtifacts.persistedRecords.length}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                      <div className="text-xs text-muted-foreground">Artifacts</div>
+                      <div className="mt-1 font-semibold text-foreground">
+                        {meetArtifacts.persistedRecords.reduce(
+                          (total, record) => total + record.artifacts.length,
+                          0
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <Button className="h-10 w-full" variant="outline" onClick={onFindDriveRecordings}>
                   <FileAudioIcon data-icon="inline-start" className="size-4" />
                   Find Drive recordings
                 </Button>
-                <Button className="h-10 w-full" variant="outline" onClick={onSyncMeetArtifacts}>
+                <Button
+                  className="h-10 w-full"
+                  variant="outline"
+                  disabled={meetArtifactsLoading || syncing}
+                  onClick={syncMeetArtifactsAndRefresh}
+                >
                   <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                  Sync Meet artifacts
+                  {meetArtifactsLoading ? "Checking artifacts..." : "Sync Meet artifacts"}
                 </Button>
+                {meetArtifacts?.persistedRecords.length ? (
+                  <div className="mt-2 grid gap-2">
+                    {meetArtifacts.persistedRecords.slice(0, 4).map((record) => (
+                      <div
+                        key={record.id}
+                        className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-foreground">
+                              {record.meetingTitle ??
+                                record.calendarTitle ??
+                                record.conferenceRecordName}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {formatShortDate(record.startTime)}
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="shrink-0 rounded-md">
+                            {record.artifacts.length} artifacts
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {record.artifacts.length ? (
+                            record.artifacts.slice(0, 5).map((artifact) => (
+                              <span
+                                key={artifact.id}
+                                className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]"
+                              >
+                                {formatArtifactType(artifact.artifactType)}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              No recordings/transcripts returned for this record yet.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </OpsCard>
             <ProviderHealthPanel providers={providers} />
