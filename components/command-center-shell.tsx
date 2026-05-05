@@ -865,6 +865,7 @@ export function CommandCenterShell({
         onExportMarkdown={() => downloadExport("markdown")}
         onExportPdf={() => downloadExport("pdf")}
         onExportRealizeOS={exportRealizeOS}
+        onProcessMeeting={processMeeting}
       />
     </div>
   )

@@ -40,6 +40,7 @@ export function MeetingRightRail({
   onExportMarkdown,
   onExportPdf,
   onExportRealizeOS,
+  onProcessMeeting,
 }: {
   meeting: MeetingRecord | null
   jobs: JobRecord[]
@@ -48,6 +49,7 @@ export function MeetingRightRail({
   onExportMarkdown: () => void
   onExportPdf: () => void
   onExportRealizeOS: () => void
+  onProcessMeeting?: () => void
 }) {
   const confidence = computeConfidence(meeting)
   const percent = confidence ? Math.round(confidence * 100) : undefined
@@ -180,7 +182,10 @@ export function MeetingRightRail({
         </div>
       </section>
 
-      <GoogleContextCard meeting={meeting} />
+      <GoogleContextCard
+        meeting={meeting}
+        onProcessMeeting={onProcessMeeting}
+      />
     </aside>
   )
 }

@@ -7,6 +7,8 @@ import type {
   JobRecord,
   JobStatus,
   MediaAsset,
+  MeetArtifact,
+  MeetConferenceRecord,
   MeetingAnswer,
   MeetingContext,
   MeetingListOptions,
@@ -140,6 +142,26 @@ type MediaAssetRow = {
   size_bytes: string | number
   retention: MediaAsset["retention"]
   created_at: string | Date
+}
+
+type MeetArtifactRow = {
+  conference_record_id: string
+  conference_record_name: string
+  meeting_id: string | null
+  calendar_event_id: string | null
+  space_name: string | null
+  conference_start_time: string | Date | null
+  conference_end_time: string | Date | null
+  expire_time: string | Date | null
+  artifact_id: string | null
+  artifact_type: MeetArtifact["artifactType"] | null
+  artifact_name: string | null
+  state: string | null
+  drive_file_id: string | null
+  drive_file_name: string | null
+  document_name: string | null
+  artifact_start_time: string | Date | null
+  artifact_end_time: string | Date | null
 }
 
 type JobRow = {
@@ -389,6 +411,51 @@ function mapJob(row: JobRow): JobRecord {
   }
 }
 
+function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord[] {
+  const records = new Map<string, MeetConferenceRecord>()
+
+  for (const row of rows) {
+    const existing = records.get(row.conference_record_id)
+    const record =
+      existing ??
+      {
+        id: row.conference_record_id,
+        conferenceRecordName: row.conference_record_name,
+        meetingId: row.meeting_id ?? undefined,
+        calendarEventId: row.calendar_event_id ?? undefined,
+        spaceName: row.space_name ?? undefined,
+        startTime: row.conference_start_time
+          ? toIso(row.conference_start_time)
+          : undefined,
+        endTime: row.conference_end_time ? toIso(row.conference_end_time) : undefined,
+        expireTime: row.expire_time ? toIso(row.expire_time) : undefined,
+        artifacts: [],
+      }
+
+    if (!existing) records.set(record.id, record)
+
+    if (row.artifact_id && row.artifact_type && row.artifact_name) {
+      record.artifacts.push({
+        id: row.artifact_id,
+        conferenceRecordId: row.conference_record_id,
+        conferenceRecordName: row.conference_record_name,
+        artifactType: row.artifact_type,
+        artifactName: row.artifact_name,
+        state: row.state ?? undefined,
+        driveFileId: row.drive_file_id ?? undefined,
+        driveFileName: row.drive_file_name ?? undefined,
+        documentName: row.document_name ?? undefined,
+        startTime: row.artifact_start_time
+          ? toIso(row.artifact_start_time)
+          : undefined,
+        endTime: row.artifact_end_time ? toIso(row.artifact_end_time) : undefined,
+      })
+    }
+  }
+
+  return [...records.values()]
+}
+
 export function createPostgresMeetingRepository(
   client: Queryable
 ): MeetingRepository {
@@ -403,6 +470,7 @@ export function createPostgresMeetingRepository(
       suggestedRunsResult,
       mediaAssetsResult,
       participantsResult,
+      meetArtifactsResult,
     ] = await Promise.all([
       client.query(
         `
@@ -502,6 +570,37 @@ export function createPostgresMeetingRepository(
         `,
         [base.id]
       ),
+      client.query(
+        `
+          select
+            mcr.id as conference_record_id,
+            mcr.conference_record_name,
+            mcr.meeting_id,
+            mcr.calendar_event_id,
+            mcr.space_name,
+            mcr.start_time as conference_start_time,
+            mcr.end_time as conference_end_time,
+            mcr.expire_time,
+            ma.id as artifact_id,
+            ma.artifact_type,
+            ma.artifact_name,
+            ma.state,
+            ma.drive_file_id,
+            df.name as drive_file_name,
+            ma.document_name,
+            ma.start_time as artifact_start_time,
+            ma.end_time as artifact_end_time
+          from meet_conference_records mcr
+          left join meet_artifacts ma on ma.conference_record_id = mcr.id
+          left join drive_files df on df.id = ma.drive_file_id
+          where mcr.meeting_id = $1
+             or mcr.calendar_event_id = (
+              select calendar_event_id from meetings where id = $1
+             )
+          order by mcr.start_time desc nulls last, ma.created_at desc
+        `,
+        [base.id]
+      ),
     ])
 
     const transcript = (transcriptResult.rows as TranscriptRow[]).map(
@@ -580,6 +679,9 @@ export function createPostgresMeetingRepository(
         })
       ),
       mediaAssets: (mediaAssetsResult.rows as MediaAssetRow[]).map(mapMediaAsset),
+      meetConferenceRecords: mapMeetConferenceRecords(
+        meetArtifactsResult.rows as MeetArtifactRow[]
+      ),
       participantDetails:
         participantDetails.length > 0
           ? participantDetails

@@ -114,6 +114,32 @@ export type MediaAsset = {
   createdAt: string
 }
 
+export type MeetArtifact = {
+  id: string
+  conferenceRecordId: string
+  conferenceRecordName: string
+  artifactType: "recording" | "transcript" | "smart_notes"
+  artifactName: string
+  state?: string
+  driveFileId?: string
+  driveFileName?: string
+  documentName?: string
+  startTime?: string
+  endTime?: string
+}
+
+export type MeetConferenceRecord = {
+  id: string
+  conferenceRecordName: string
+  meetingId?: string
+  calendarEventId?: string
+  spaceName?: string
+  startTime?: string
+  endTime?: string
+  expireTime?: string
+  artifacts: MeetArtifact[]
+}
+
 export type JobStatus = "queued" | "active" | "completed" | "failed"
 
 export type JobRecord = {
@@ -153,6 +179,7 @@ export type MeetingRecord = {
   intelligence?: MeetingIntelligence
   suggestedAgentRuns?: SuggestedAgentRun[]
   mediaAssets?: MediaAsset[]
+  meetConferenceRecords?: MeetConferenceRecord[]
 }
 
 export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"
