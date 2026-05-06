@@ -44,9 +44,13 @@ Import behavior:
 
 Processed meetings move through:
 
+`artifact.import -> transcript.clean -> summary.generate -> tasks.extract -> meeting.index -> quality.review -> completed`
+
+or, when using uploaded/imported media:
+
 `drive.import -> audio.extract -> audio.transcribe -> transcript.clean -> summary.generate -> tasks.extract -> meeting.index -> quality.review -> completed`
 
-If a meeting has no recording or transcript, MeetSum should not fake content. It shows next actions: upload recording, find Drive recordings, or sync Meet artifacts.
+If a linked Google Meet transcript artifact exists, **Process now** imports structured transcript entries directly from Google Meet and then runs intelligence. If a meeting has no recording, transcript, or transcript artifact, MeetSum should not fake content. It shows next actions: upload recording, find Drive recordings, or sync Meet artifacts.
 
 ### 5. Review The Meeting
 
@@ -157,7 +161,7 @@ Vertex service-account credential path is configured and smoke-tested.
 
 ## Current Limitations
 
-- Meet artifact listing is available, but full artifact-to-meeting import/linking still needs expansion.
+- Meet transcript artifact import is available for linked transcript artifacts. Smart notes import and direct recording artifact import still need expansion.
 - Gmail-aware prep and follow-up are not first-priority until Calendar and Drive paths are reliable.
 - DOCX and Notion exports are prepared but not active.
 - Vertex AI is not the active production provider yet.

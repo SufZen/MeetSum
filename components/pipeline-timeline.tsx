@@ -4,6 +4,7 @@ import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 import { MEETING_STATUS_FLOW } from "@/lib/meetings/state"
 
 const pipeline = [
+  ["artifact.import", "Artifact import"],
   ["drive.import", "Drive import"],
   ["audio.extract", "Audio extracted"],
   ["transcribing", "Audio transcription"],
@@ -16,6 +17,7 @@ const pipeline = [
 ] as const
 
 const legacyStatusByStage: Record<string, MeetingRecord["status"][]> = {
+  "artifact.import": ["transcribing", "summarizing", "indexing", "completed"],
   "drive.import": ["media_uploaded", "transcribing", "summarizing", "indexing", "completed"],
   "audio.extract": ["media_uploaded", "transcribing", "summarizing", "indexing", "completed"],
   transcribing: ["transcribing", "summarizing", "indexing", "completed"],

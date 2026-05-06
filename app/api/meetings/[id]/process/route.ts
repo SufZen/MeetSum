@@ -19,6 +19,9 @@ export async function POST(
 
   const mediaAsset = meeting.mediaAssets?.find((asset) => asset.storageKey)
   const hasTranscript = Boolean(meeting.transcript?.length)
+  const hasMeetTranscriptArtifact = meeting.meetConferenceRecords?.some((record) =>
+    record.artifacts.some((artifact) => artifact.artifactType === "transcript")
+  )
 
   if (mediaAsset) {
     const job = await enqueueMeetSumJob("media.ingest", {
@@ -52,6 +55,24 @@ export async function POST(
         job,
         mode: "transcript",
         message: "Summary generation queued from the existing transcript.",
+      },
+      { status: 202 }
+    )
+  }
+
+  if (hasMeetTranscriptArtifact) {
+    const job = await enqueueMeetSumJob("artifact.import", {
+      meetingId: id,
+      stage: "artifact.import",
+      source: "manual-process",
+    })
+
+    return NextResponse.json(
+      {
+        job,
+        mode: "meet-transcript-artifact",
+        message:
+          "Google Meet transcript artifact import queued. MeetSum will import transcript entries and generate intelligence from them.",
       },
       { status: 202 }
     )

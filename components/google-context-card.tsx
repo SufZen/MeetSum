@@ -45,7 +45,8 @@ export function GoogleContextCard({
   const smartNotes = artifacts.filter((artifact) => artifact.artifactType === "smart_notes")
   const hasProcessSource = Boolean(
     meeting?.mediaAssets?.some((asset) => asset.storageKey) ||
-      meeting?.transcript?.length
+      meeting?.transcript?.length ||
+      transcripts.length
   )
   const hasArtifactContext = artifacts.length > 0 || conferenceRecords.length > 0
   const primaryConferenceRecord = conferenceRecords[0]
@@ -157,14 +158,16 @@ export function GoogleContextCard({
           onClick={onProcessMeeting}
           title={
             hasProcessSource
-              ? "Queue processing from the attached media/transcript"
+              ? "Queue processing from the attached media, transcript, or Google Meet transcript artifact"
               : hasArtifactContext
                 ? "Artifact metadata is linked. Import the Drive recording or transcript content before processing."
                 : "Sync Meet artifacts or import a recording first."
           }
         >
-          {hasProcessSource
-            ? "Process from attached source"
+          {transcripts.length && !meeting?.transcript?.length && !meeting?.mediaAssets?.length
+            ? "Import transcript artifact"
+            : hasProcessSource
+              ? "Process from attached source"
             : hasArtifactContext
               ? "Artifact linked; source needed"
               : "No Google source attached"}

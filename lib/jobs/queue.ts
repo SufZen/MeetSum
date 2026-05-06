@@ -4,6 +4,7 @@ import { meetingRepository } from "@/lib/meetings/store"
 
 export type MeetSumJobName =
   | "media.ingest"
+  | "artifact.import"
   | "meeting.transcribe"
   | "meeting.summarize"
   | "meeting.index"

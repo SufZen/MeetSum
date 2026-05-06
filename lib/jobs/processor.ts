@@ -6,6 +6,7 @@ import {
   getGeminiProviderMode,
 } from "@/lib/ai/providers"
 import { getDatabasePool } from "@/lib/db/client"
+import { importMeetTranscriptArtifactsForMeeting } from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
 import { cleanupTranscriptSegments } from "@/lib/intelligence"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
@@ -242,6 +243,51 @@ async function processIntelligenceOnlyJob(
   }
 }
 
+async function processArtifactImportJob(
+  payload: MeetSumJobPayload,
+  jobRecordId?: string
+) {
+  if (!payload.meetingId) {
+    throw new Error("meetingId is required")
+  }
+
+  await meetingRepository.updateMeetingStatus(payload.meetingId, "transcribing")
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: { stage: "artifact.import" },
+    })
+  }
+
+  const imported = await importMeetTranscriptArtifactsForMeeting({
+    meetingId: payload.meetingId,
+    subject: typeof payload.subject === "string" ? payload.subject : undefined,
+    artifactIds: Array.isArray(payload.artifactIds)
+      ? payload.artifactIds.filter(
+          (artifactId): artifactId is string => typeof artifactId === "string"
+        )
+      : undefined,
+  })
+
+  await meetingRepository.replaceTranscriptSegments(
+    payload.meetingId,
+    imported.transcriptSegments
+  )
+  if (jobRecordId) {
+    await meetingRepository.updateJob(jobRecordId, {
+      result: {
+        stage: "summary.generate",
+        importedEntries: imported.importedEntries,
+        artifactIds: imported.artifactIds,
+      },
+    })
+  }
+
+  return processIntelligenceOnlyJob(
+    { ...payload, mode: "summary", source: "meet-artifact" },
+    jobRecordId
+  )
+}
+
 async function processGoogleJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload
@@ -280,6 +326,8 @@ async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) 
       job.name === "meeting.index"
     ) {
       result = await processMediaJob(job.data, jobRecordId)
+    } else if (job.name === "artifact.import") {
+      result = await processArtifactImportJob(job.data, jobRecordId)
     } else if (job.name === "meeting.summarize") {
       result =
         job.data.mode === "full"

@@ -1,6 +1,7 @@
 import { createDelegatedGoogleClient, getWorkspaceSubject } from "@/lib/google/auth"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
+import type { TranscriptSegment } from "@/lib/meetings/repository"
 
 type SyncStatus = "idle" | "running" | "completed" | "failed"
 
@@ -21,6 +22,15 @@ type MeetApiArtifact = {
   driveDestination?: { file?: string; exportUri?: string }
   docsDestination?: { document?: string; exportUri?: string }
   [key: string]: unknown
+}
+
+type MeetApiTranscriptEntry = {
+  name?: string
+  participant?: string
+  text?: string
+  languageCode?: string
+  startTime?: string
+  endTime?: string
 }
 
 export type MeetArtifactType = "recording" | "transcript" | "smart_notes"
@@ -57,6 +67,21 @@ export type PersistedMeetConferenceRecord = {
   endTime?: string
   expireTime?: string
   artifacts: PersistedMeetArtifact[]
+}
+
+export type MeetTranscriptArtifactCandidate = {
+  id: string
+  artifactName: string
+  conferenceRecordName: string
+  conferenceStartTime?: string
+  artifactStartTime?: string
+}
+
+export type MeetTranscriptArtifactImportResult = {
+  meetingId: string
+  artifactIds: string[]
+  transcriptSegments: TranscriptSegment[]
+  importedEntries: number
 }
 
 export type MeetArtifactListResult = {
@@ -114,6 +139,69 @@ function safeDate(value?: string | null) {
   const date = new Date(value)
 
   return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function languageFromCode(value?: string) {
+  return value?.split("-")[0]?.toLowerCase() || undefined
+}
+
+function transcriptEntryId(value: string | undefined, index: number) {
+  const suffix = value?.split("/").filter(Boolean).at(-1) ?? String(index + 1)
+
+  return `meet_entry_${suffix.replace(/[^\w-]+/g, "_")}`
+}
+
+function participantLabel(value: string | undefined, index: number) {
+  const raw = value?.split("/").filter(Boolean).at(-1)
+
+  if (!raw) return `Speaker ${index + 1}`
+
+  return decodeURIComponent(raw)
+    .replace(/[._-]+/g, " ")
+    .trim() || `Speaker ${index + 1}`
+}
+
+function msFromBase(value: string | undefined, baseMs: number, fallbackMs: number) {
+  const date = value ? new Date(value) : undefined
+  const time = date && !Number.isNaN(date.getTime()) ? date.getTime() : undefined
+
+  return Math.max(0, time === undefined ? fallbackMs : time - baseMs)
+}
+
+export function convertMeetTranscriptEntriesToSegments(
+  entries: MeetApiTranscriptEntry[],
+  options: { baseTime?: string } = {}
+): TranscriptSegment[] {
+  const baseDate = options.baseTime ? new Date(options.baseTime) : undefined
+  const firstEntryDate = entries[0]?.startTime
+    ? new Date(entries[0].startTime)
+    : undefined
+  const baseMs =
+    baseDate && !Number.isNaN(baseDate.getTime())
+      ? baseDate.getTime()
+      : firstEntryDate && !Number.isNaN(firstEntryDate.getTime())
+        ? firstEntryDate.getTime()
+        : Date.now()
+
+  return entries
+    .filter((entry) => entry.text?.trim())
+    .map((entry, index) => {
+      const startMs = msFromBase(entry.startTime, baseMs, index * 5000)
+      const endMs = Math.max(
+        startMs + 1000,
+        msFromBase(entry.endTime, baseMs, startMs + 5000)
+      )
+
+      return {
+        id: transcriptEntryId(entry.name, index),
+        speaker: participantLabel(entry.participant, index),
+        startMs,
+        endMs,
+        text: entry.text?.trim() ?? "",
+        confidence: 0.95,
+        language: languageFromCode(entry.languageCode),
+      }
+    })
 }
 
 export function classifyMeetArtifactType(value: string): MeetArtifactType {
@@ -294,6 +382,32 @@ async function listArtifactsForRecord(
   return body[resource] ?? []
 }
 
+async function listTranscriptEntriesForArtifact(
+  token: string,
+  transcriptArtifactName: string,
+  limit = Number(process.env.MEETSUM_MEET_TRANSCRIPT_ENTRY_LIMIT ?? 2000)
+) {
+  const entries: MeetApiTranscriptEntry[] = []
+  let pageToken: string | undefined
+
+  while (entries.length < limit) {
+    const body = await fetchMeetJson<{
+      transcriptEntries?: MeetApiTranscriptEntry[]
+      nextPageToken?: string
+    }>(token, `${transcriptArtifactName}/entries`, {
+      pageSize: Math.min(100, limit - entries.length),
+      pageToken,
+    })
+
+    entries.push(...(body.transcriptEntries ?? []))
+    pageToken = body.nextPageToken
+
+    if (!pageToken) break
+  }
+
+  return entries
+}
+
 async function findMeetCalendarMatch(options: {
   identityId: string
   startTime?: string
@@ -450,9 +564,25 @@ async function upsertMeetArtifact(options: {
 export async function listPersistedMeetArtifacts(options: {
   subject?: string
   limit?: number
+  meetingId?: string
 } = {}): Promise<PersistedMeetConferenceRecord[]> {
   const subject = options.subject ?? getWorkspaceSubject()
   const identityId = await getIdentityId(subject)
+  const values: unknown[] = [identityId]
+  const meetingFilter = options.meetingId
+    ? (() => {
+        values.push(options.meetingId)
+        return `
+          and (
+            mcr.meeting_id = $${values.length}
+            or mcr.calendar_event_id = (
+              select calendar_event_id from meetings where id = $${values.length}
+            )
+          )
+        `
+      })()
+    : ""
+  values.push(Math.max(1, Math.min(options.limit ?? 10, 50)))
   const result = await getDatabasePool().query(
     `
       select
@@ -489,11 +619,12 @@ export async function listPersistedMeetArtifacts(options: {
       left join meetings m on m.id = mcr.meeting_id
       left join calendar_events ce on ce.id = mcr.calendar_event_id
       where mcr.google_identity_id = $1
+        ${meetingFilter}
       group by mcr.id, m.title, ce.title
       order by mcr.start_time desc nulls last, mcr.updated_at desc
-      limit $2
+      limit $${values.length}
     `,
-    [identityId, Math.max(1, Math.min(options.limit ?? 10, 50))]
+    values
   )
 
   return result.rows.map((row) => {
@@ -553,15 +684,133 @@ export async function listPersistedMeetArtifacts(options: {
   })
 }
 
+export async function listMeetingTranscriptArtifactCandidates(options: {
+  meetingId: string
+  artifactIds?: string[]
+}): Promise<MeetTranscriptArtifactCandidate[]> {
+  const values: unknown[] = [options.meetingId]
+  const idFilter =
+    options.artifactIds?.length
+      ? (() => {
+          values.push(options.artifactIds)
+          return `and ma.id = any($${values.length}::text[])`
+        })()
+      : ""
+  const result = await getDatabasePool().query(
+    `
+      select
+        ma.id,
+        ma.artifact_name,
+        mcr.conference_record_name,
+        mcr.start_time as conference_start_time,
+        ma.start_time as artifact_start_time
+      from meet_artifacts ma
+      join meet_conference_records mcr on mcr.id = ma.conference_record_id
+      where ma.artifact_type = 'transcript'
+        and (
+          mcr.meeting_id = $1
+          or mcr.calendar_event_id = (
+            select calendar_event_id from meetings where id = $1
+          )
+        )
+        ${idFilter}
+      order by ma.start_time asc nulls last, ma.created_at asc
+    `,
+    values
+  )
+
+  return result.rows.map((row) => {
+    const candidate = row as {
+      id: string
+      artifact_name: string
+      conference_record_name: string
+      conference_start_time?: string | Date | null
+      artifact_start_time?: string | Date | null
+    }
+
+    return {
+      id: candidate.id,
+      artifactName: candidate.artifact_name,
+      conferenceRecordName: candidate.conference_record_name,
+      conferenceStartTime: candidate.conference_start_time
+        ? new Date(candidate.conference_start_time).toISOString()
+        : undefined,
+      artifactStartTime: candidate.artifact_start_time
+        ? new Date(candidate.artifact_start_time).toISOString()
+        : undefined,
+    }
+  })
+}
+
+export async function importMeetTranscriptArtifactsForMeeting(options: {
+  subject?: string
+  meetingId: string
+  artifactIds?: string[]
+}): Promise<MeetTranscriptArtifactImportResult> {
+  const subject = options.subject ?? getWorkspaceSubject()
+  const candidates = await listMeetingTranscriptArtifactCandidates({
+    meetingId: options.meetingId,
+    artifactIds: options.artifactIds,
+  })
+
+  if (!candidates.length) {
+    throw new Error(
+      "No Google Meet transcript artifacts are linked to this meeting yet. Sync Meet artifacts first or import the Drive recording."
+    )
+  }
+
+  const token = await getMeetAccessToken(subject)
+  const transcriptSegments: TranscriptSegment[] = []
+
+  for (const candidate of candidates) {
+    const entries = await listTranscriptEntriesForArtifact(
+      token,
+      candidate.artifactName
+    )
+    const baseTime = candidate.conferenceStartTime ?? candidate.artifactStartTime
+
+    transcriptSegments.push(
+      ...convertMeetTranscriptEntriesToSegments(entries, { baseTime })
+    )
+  }
+
+  if (!transcriptSegments.length) {
+    throw new Error(
+      "Google Meet returned transcript artifacts, but no transcript entries were available yet."
+    )
+  }
+
+  return {
+    meetingId: options.meetingId,
+    artifactIds: candidates.map((candidate) => candidate.id),
+    transcriptSegments: transcriptSegments.sort((a, b) => a.startMs - b.startMs),
+    importedEntries: transcriptSegments.length,
+  }
+}
+
 export async function listMeetArtifacts(options: {
   subject?: string
   limit?: number
   pageToken?: string
+  meetingId?: string
 } = {}): Promise<MeetArtifactListResult> {
   const subject = options.subject ?? getWorkspaceSubject()
   const limit = Math.max(1, Math.min(options.limit ?? 20, 50))
 
   try {
+    if (options.meetingId) {
+      return {
+        subject,
+        conferenceRecords: [],
+        persistedRecords: await listPersistedMeetArtifacts({
+          subject,
+          limit,
+          meetingId: options.meetingId,
+        }),
+        setup: setupState(true),
+      }
+    }
+
     const live = await listConferenceRecordsFromGoogle({
       subject,
       limit,
@@ -589,6 +838,7 @@ export async function listMeetArtifacts(options: {
       persistedRecords: await listPersistedMeetArtifacts({
         subject,
         limit: 10,
+        meetingId: options.meetingId,
       }).catch(() => []),
       setup: setupState(false, message),
     }

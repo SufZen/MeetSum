@@ -55,7 +55,11 @@ export function MeetingSummaryView({
   const isUpcoming = meeting.status === "scheduled" && !meeting.summary
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
   const hasTranscript = Boolean(meeting.transcript?.length)
-  const canProcess = hasMedia || hasTranscript
+  const hasMeetTranscriptArtifact = meeting.meetConferenceRecords?.some((record) =>
+    record.artifacts.some((artifact) => artifact.artifactType === "transcript")
+  )
+  const canFullReprocess = hasMedia || hasMeetTranscriptArtifact
+  const canProcess = hasMedia || hasTranscript || hasMeetTranscriptArtifact
   const showContentGap = !meeting.summary?.overview
 
   return (
@@ -69,11 +73,13 @@ export function MeetingSummaryView({
               variant="outline"
               size="sm"
               className="h-8 text-[var(--primary)]"
-              disabled={!hasMedia}
+              disabled={!canFullReprocess}
               title={
                 hasMedia
                   ? "Run the full media pipeline again"
-                  : "Attach a recording before full reprocessing"
+                  : hasMeetTranscriptArtifact
+                    ? "Import Google Meet transcript entries and rerun intelligence"
+                    : "Attach a recording or sync a Meet transcript artifact before full reprocessing"
               }
               onClick={() => onReprocessMeeting("full")}
             >
@@ -116,7 +122,7 @@ export function MeetingSummaryView({
                 title={
                   canProcess
                     ? "Queue processing for this meeting"
-                    : "No recording or transcript is attached yet"
+                    : "No recording, transcript, or Google Meet transcript artifact is attached yet"
                 }
                 onClick={onProcessMeeting}
               >

@@ -13,12 +13,14 @@ export async function GET(request: Request) {
   const subject = searchParams.get("subject") ?? getWorkspaceSubject()
   const pageSize = Math.max(1, Math.min(Number(searchParams.get("limit") ?? 20), 50))
   const pageToken = searchParams.get("pageToken") ?? undefined
+  const meetingId = searchParams.get("meetingId") ?? undefined
 
   try {
     const result = await listMeetArtifacts({
       subject,
       limit: pageSize,
       pageToken,
+      meetingId,
     })
 
     return NextResponse.json(result)
