@@ -34,6 +34,7 @@ import type {
   JobRecord,
   MeetingParticipant,
   MeetingRecord,
+  SuggestedAgentRun,
 } from "@/lib/meetings/repository"
 
 type MeetingPageState = {
@@ -75,6 +76,7 @@ export function CommandCenterShell({
   const [providers, setProviders] = useState<ProviderStatusView[]>([])
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatusView>()
   const [exporting, setExporting] = useState(false)
+  const [suggestingAgents, setSuggestingAgents] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
@@ -371,6 +373,58 @@ export function CommandCenterShell({
     } finally {
       setExporting(false)
     }
+  }
+
+  async function suggestAgents() {
+    if (!selectedMeeting) return
+
+    setSuggestingAgents(true)
+    try {
+      const response = await fetch(
+        `/api/meetings/${selectedMeeting.id}/agents/suggest`,
+        { method: "POST" }
+      )
+      const body = await response.json()
+
+      if (!response.ok) {
+        toast.error(body.error ?? "Unable to suggest agents")
+        return
+      }
+
+      await refreshMeeting(selectedMeeting.id)
+      const count = body.suggestions?.length ?? 0
+
+      toast.success(
+        count
+          ? `${count} agent suggestion${count === 1 ? "" : "s"} prepared`
+          : "No new agent suggestions needed"
+      )
+    } finally {
+      setSuggestingAgents(false)
+    }
+  }
+
+  async function approveAgentRun(run: SuggestedAgentRun) {
+    const response = await fetch(`/api/agent-runs/${run.id}/approve`, {
+      method: "POST",
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to approve agent")
+      return
+    }
+
+    if (body.job) {
+      setJobs((current) => [body.job, ...current])
+    }
+    await refreshMeeting(run.meetingId)
+    await refreshOperationalState()
+    toast.success(
+      body.job
+        ? "Agent approved and queued"
+        : "Agent approved. Execution connector is prepared."
+    )
   }
 
   async function copyText(text: string, label: string) {
@@ -861,11 +915,14 @@ export function CommandCenterShell({
         meeting={selectedMeeting}
         jobs={jobs}
         exporting={exporting}
+        suggestingAgents={suggestingAgents}
         onEditTags={openTagsDialog}
         onExportMarkdown={() => downloadExport("markdown")}
         onExportPdf={() => downloadExport("pdf")}
         onExportRealizeOS={exportRealizeOS}
         onProcessMeeting={processMeeting}
+        onSuggestAgents={suggestAgents}
+        onApproveAgentRun={approveAgentRun}
       />
     </div>
   )

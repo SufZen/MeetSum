@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { meetingRepository } from "@/lib/meetings/store"
 
 export async function POST(
@@ -15,8 +16,15 @@ export async function POST(
 
   try {
     const run = await meetingRepository.approveAgentRun(id)
+    const job =
+      run.target === "realizeos"
+        ? await enqueueMeetSumJob("realizeos.export", {
+            meetingId: run.meetingId,
+            suggestionId: run.id,
+          })
+        : undefined
 
-    return NextResponse.json({ run })
+    return NextResponse.json({ run, job })
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to approve agent run",

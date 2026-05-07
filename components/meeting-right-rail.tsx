@@ -1,10 +1,20 @@
-import { FileTextIcon, MoreHorizontalIcon, NotepadTextIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  FileTextIcon,
+  MoreHorizontalIcon,
+  NotepadTextIcon,
+  SparklesIcon,
+} from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
+import type {
+  JobRecord,
+  MeetingRecord,
+  SuggestedAgentRun,
+} from "@/lib/meetings/repository"
 
 function computeConfidence(meeting: MeetingRecord | null) {
   const transcript = meeting?.transcript ?? []
@@ -36,24 +46,31 @@ export function MeetingRightRail({
   meeting,
   jobs,
   exporting,
+  suggestingAgents,
   onEditTags,
   onExportMarkdown,
   onExportPdf,
   onExportRealizeOS,
   onProcessMeeting,
+  onSuggestAgents,
+  onApproveAgentRun,
 }: {
   meeting: MeetingRecord | null
   jobs: JobRecord[]
   exporting?: boolean
+  suggestingAgents?: boolean
   onEditTags: () => void
   onExportMarkdown: () => void
   onExportPdf: () => void
   onExportRealizeOS: () => void
   onProcessMeeting?: () => void
+  onSuggestAgents: () => void
+  onApproveAgentRun: (run: SuggestedAgentRun) => void
 }) {
   const confidence = computeConfidence(meeting)
   const percent = confidence ? Math.round(confidence * 100) : undefined
   const tags = meeting?.tags ?? []
+  const suggestedRuns = meeting?.suggestedAgentRuns ?? []
 
   return (
     <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-[var(--rail)] p-3 lg:h-full lg:border-l lg:border-[var(--divider)]">
@@ -180,6 +197,80 @@ export function MeetingRightRail({
           <span>RealizeOS</span>
           <span />
         </div>
+      </section>
+
+      <section className="ms-card p-4">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Suggested agents</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Approval-gated outputs for follow-up, context, and automations.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={onSuggestAgents}
+            disabled={!meeting || suggestingAgents}
+          >
+            <SparklesIcon aria-hidden="true" className="size-3.5" />
+            Suggest
+          </Button>
+        </div>
+        {suggestedRuns.length ? (
+          <div className="space-y-2">
+            {suggestedRuns.slice(0, 4).map((run) => {
+              const title =
+                typeof run.payload.title === "string"
+                  ? run.payload.title
+                  : run.target
+              const description =
+                typeof run.payload.description === "string"
+                  ? run.payload.description
+                  : "Approval required before this agent can affect external systems."
+              const canApprove = run.status === "suggested"
+
+              return (
+                <div
+                  key={run.id}
+                  className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{title}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {description}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="rounded-sm">
+                      {run.status}
+                    </Badge>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-8 w-full gap-1.5"
+                    onClick={() => onApproveAgentRun(run)}
+                    disabled={!canApprove}
+                    title={
+                      canApprove
+                        ? "Approve this suggested agent run"
+                        : "This suggestion has already moved forward"
+                    }
+                  >
+                    <CheckCircle2Icon aria-hidden="true" className="size-3.5" />
+                    Approve
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm text-muted-foreground">
+            Suggestions appear after a meeting has transcript or summary content.
+          </div>
+        )}
       </section>
 
       <GoogleContextCard
