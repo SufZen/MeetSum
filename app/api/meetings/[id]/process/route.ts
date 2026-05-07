@@ -19,8 +19,10 @@ export async function POST(
 
   const mediaAsset = meeting.mediaAssets?.find((asset) => asset.storageKey)
   const hasTranscript = Boolean(meeting.transcript?.length)
-  const hasMeetTranscriptArtifact = meeting.meetConferenceRecords?.some((record) =>
-    record.artifacts.some((artifact) => artifact.artifactType === "transcript")
+  const hasMeetContentArtifact = meeting.meetConferenceRecords?.some((record) =>
+    record.artifacts.some((artifact) =>
+      ["transcript", "smart_notes"].includes(artifact.artifactType)
+    )
   )
 
   if (mediaAsset) {
@@ -60,7 +62,7 @@ export async function POST(
     )
   }
 
-  if (hasMeetTranscriptArtifact) {
+  if (hasMeetContentArtifact) {
     const job = await enqueueMeetSumJob("artifact.import", {
       meetingId: id,
       stage: "artifact.import",
@@ -70,9 +72,9 @@ export async function POST(
     return NextResponse.json(
       {
         job,
-        mode: "meet-transcript-artifact",
+        mode: "meet-content-artifact",
         message:
-          "Google Meet transcript artifact import queued. MeetSum will import transcript entries and generate intelligence from them.",
+          "Google Meet artifact import queued. MeetSum will import transcript entries or smart notes and generate intelligence from them.",
       },
       { status: 202 }
     )

@@ -18,7 +18,7 @@ The `app`, `worker`, and `migrate` containers are disposable. Postgres, Redis, M
 
 Use domain-wide delegation with narrow scope groups from `lib/google/workspace.ts`. Calendar, Gmail, Drive, and Meet each keep their own sync state. Calendar identifies meetings, Drive imports selected Google Meet recordings, Meet artifacts provide conference records/transcript metadata, and Gmail supplies prep/follow-up context after the core capture path is reliable.
 
-Meet transcript artifacts can be imported through `POST /api/meetings/:id/artifacts/import`. The worker fetches structured transcript entries from Google Meet, stores them as transcript segments, and queues summary generation. `GET /api/google/meet/artifacts?meetingId=...` returns the artifacts linked to one meeting.
+Meet transcript and smart-notes artifacts can be imported through `POST /api/meetings/:id/artifacts/import`. The worker fetches structured transcript entries from Google Meet, or exports the linked smart-notes document through Drive, stores the resulting source as transcript-like segments, and queues summary generation. `GET /api/google/meet/artifacts?meetingId=...` returns the artifacts linked to one meeting.
 
 ## AI Layer
 

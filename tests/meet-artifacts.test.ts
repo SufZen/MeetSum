@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   classifyMeetArtifactType,
+  convertMeetSmartNotesTextToSegments,
   convertMeetTranscriptEntriesToSegments,
+  extractMeetSmartNotesDocumentId,
 } from "@/lib/google/meet-artifacts"
 
 describe("Meet artifacts", () => {
@@ -60,6 +62,58 @@ describe("Meet artifacts", () => {
         endMs: 11500,
         text: "The RealizeOS export should run after the summary.",
         confidence: 0.95,
+        language: "en",
+      },
+    ])
+  })
+
+  it("extracts smart-notes document ids from Meet artifact destinations", () => {
+    expect(extractMeetSmartNotesDocumentId("documents/1abcDEF_234")).toBe(
+      "1abcDEF_234"
+    )
+    expect(extractMeetSmartNotesDocumentId("files/drive-file-123")).toBe(
+      "drive-file-123"
+    )
+    expect(
+      extractMeetSmartNotesDocumentId(
+        "https://docs.google.com/document/d/doc-id-456/edit"
+      )
+    ).toBe("doc-id-456")
+    expect(extractMeetSmartNotesDocumentId(undefined)).toBeUndefined()
+  })
+
+  it("converts exported smart notes text into synthetic meeting segments", () => {
+    const segments = convertMeetSmartNotesTextToSegments(
+      `
+      Summary
+      The team approved the RealizeOS export flow.
+
+      Action items
+      Ran will test the public share link by Friday.
+      `,
+      {
+        artifactId: "meetartifact_123",
+        artifactStartTime: "2026-05-07T10:00:00.000Z",
+      }
+    )
+
+    expect(segments).toEqual([
+      {
+        id: "meet_smart_note_meetartifact_123_1",
+        speaker: "Google Meet smart notes",
+        startMs: 0,
+        endMs: 4000,
+        text: "Summary\nThe team approved the RealizeOS export flow.",
+        confidence: 0.9,
+        language: "en",
+      },
+      {
+        id: "meet_smart_note_meetartifact_123_2",
+        speaker: "Google Meet smart notes",
+        startMs: 4000,
+        endMs: 8000,
+        text: "Action items\nRan will test the public share link by Friday.",
+        confidence: 0.9,
         language: "en",
       },
     ])

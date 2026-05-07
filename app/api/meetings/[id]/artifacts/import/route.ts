@@ -38,19 +38,20 @@ export async function POST(
     subject?: string
   }
   const artifactIds = normalizeArtifactIds(body.artifactIds)
-  const hasTranscriptArtifact = meeting.meetConferenceRecords?.some((record) =>
+  const hasContentArtifact = meeting.meetConferenceRecords?.some((record) =>
     record.artifacts.some((artifact) =>
       artifactIds?.length
-        ? artifact.artifactType === "transcript" && artifactIds.includes(artifact.id)
-        : artifact.artifactType === "transcript"
+        ? ["transcript", "smart_notes"].includes(artifact.artifactType) &&
+          artifactIds.includes(artifact.id)
+        : ["transcript", "smart_notes"].includes(artifact.artifactType)
     )
   )
 
-  if (!hasTranscriptArtifact) {
+  if (!hasContentArtifact) {
     return NextResponse.json(
       {
         error:
-          "This meeting has no linked Google Meet transcript artifact yet. Sync Meet artifacts first, or import the Drive recording if only a recording artifact is available.",
+          "This meeting has no linked Google Meet transcript or smart notes artifact yet. Sync Meet artifacts first, or import the Drive recording if only a recording artifact is available.",
         nextActions: ["sync_meet_artifacts", "find_drive_recordings", "upload_recording"],
       },
       { status: 409 }
@@ -68,9 +69,9 @@ export async function POST(
   return NextResponse.json(
     {
       job,
-      mode: "meet-transcript-artifact",
+      mode: "meet-content-artifact",
       message:
-        "Google Meet transcript artifact import queued. MeetSum will import transcript entries and generate intelligence from them.",
+        "Google Meet artifact import queued. MeetSum will import transcript entries or smart notes and generate intelligence from them.",
     },
     { status: 202 }
   )

@@ -277,6 +277,7 @@ async function processArtifactImportJob(
       result: {
         stage: "summary.generate",
         importedEntries: imported.importedEntries,
+        importedSmartNotes: imported.importedSmartNotes,
         artifactIds: imported.artifactIds,
       },
     })

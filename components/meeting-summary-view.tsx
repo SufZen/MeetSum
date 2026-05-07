@@ -55,11 +55,13 @@ export function MeetingSummaryView({
   const isUpcoming = meeting.status === "scheduled" && !meeting.summary
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
   const hasTranscript = Boolean(meeting.transcript?.length)
-  const hasMeetTranscriptArtifact = meeting.meetConferenceRecords?.some((record) =>
-    record.artifacts.some((artifact) => artifact.artifactType === "transcript")
+  const hasMeetContentArtifact = meeting.meetConferenceRecords?.some((record) =>
+    record.artifacts.some((artifact) =>
+      ["transcript", "smart_notes"].includes(artifact.artifactType)
+    )
   )
-  const canFullReprocess = hasMedia || hasMeetTranscriptArtifact
-  const canProcess = hasMedia || hasTranscript || hasMeetTranscriptArtifact
+  const canFullReprocess = hasMedia || hasMeetContentArtifact
+  const canProcess = hasMedia || hasTranscript || hasMeetContentArtifact
   const showContentGap = !meeting.summary?.overview
 
   return (
@@ -77,9 +79,9 @@ export function MeetingSummaryView({
               title={
                 hasMedia
                   ? "Run the full media pipeline again"
-                  : hasMeetTranscriptArtifact
-                    ? "Import Google Meet transcript entries and rerun intelligence"
-                    : "Attach a recording or sync a Meet transcript artifact before full reprocessing"
+                  : hasMeetContentArtifact
+                    ? "Import Google Meet transcript entries or smart notes and rerun intelligence"
+                    : "Attach a recording or sync a Meet transcript/smart-notes artifact before full reprocessing"
               }
               onClick={() => onReprocessMeeting("full")}
             >
@@ -122,7 +124,7 @@ export function MeetingSummaryView({
                 title={
                   canProcess
                     ? "Queue processing for this meeting"
-                    : "No recording, transcript, or Google Meet transcript artifact is attached yet"
+                    : "No recording, transcript, or Google Meet transcript/smart-notes artifact is attached yet"
                 }
                 onClick={onProcessMeeting}
               >

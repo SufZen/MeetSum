@@ -71,10 +71,12 @@ export type PersistedMeetConferenceRecord = {
 
 export type MeetTranscriptArtifactCandidate = {
   id: string
+  artifactType: Extract<MeetArtifactType, "transcript" | "smart_notes">
   artifactName: string
   conferenceRecordName: string
   conferenceStartTime?: string
   artifactStartTime?: string
+  documentName?: string
 }
 
 export type MeetTranscriptArtifactImportResult = {
@@ -82,6 +84,7 @@ export type MeetTranscriptArtifactImportResult = {
   artifactIds: string[]
   transcriptSegments: TranscriptSegment[]
   importedEntries: number
+  importedSmartNotes: number
 }
 
 export type MeetArtifactListResult = {
@@ -145,6 +148,10 @@ function languageFromCode(value?: string) {
   return value?.split("-")[0]?.toLowerCase() || undefined
 }
 
+function detectTextLanguage(value: string) {
+  return /[\u0590-\u05ff]/.test(value) ? "he" : "en"
+}
+
 function transcriptEntryId(value: string | undefined, index: number) {
   const suffix = value?.split("/").filter(Boolean).at(-1) ?? String(index + 1)
 
@@ -204,6 +211,47 @@ export function convertMeetTranscriptEntriesToSegments(
     })
 }
 
+export function extractMeetSmartNotesDocumentId(value?: string) {
+  if (!value) return undefined
+
+  const documentMatch = value.match(/\/document\/d\/([^/?#]+)/)
+  if (documentMatch?.[1]) return documentMatch[1]
+
+  const resourceMatch = value.match(/(?:documents|files)\/([^/?#]+)/)
+  if (resourceMatch?.[1]) return resourceMatch[1]
+
+  return undefined
+}
+
+export function convertMeetSmartNotesTextToSegments(
+  text: string,
+  options: {
+    artifactId: string
+    artifactStartTime?: string
+  }
+): TranscriptSegment[] {
+  const chunks = text
+    .split(/\n\s*\n/g)
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join("\n")
+    )
+    .filter(Boolean)
+
+  return chunks.map((chunk, index) => ({
+    id: `meet_smart_note_${options.artifactId.replace(/[^\w-]+/g, "_")}_${index + 1}`,
+    speaker: "Google Meet smart notes",
+    startMs: index * 4000,
+    endMs: (index + 1) * 4000,
+    text: chunk,
+    confidence: 0.9,
+    language: detectTextLanguage(chunk),
+  }))
+}
+
 export function classifyMeetArtifactType(value: string): MeetArtifactType {
   if (value.includes("/recordings/")) return "recording"
   if (value.includes("/transcripts/")) return "transcript"
@@ -223,15 +271,23 @@ function extractDocumentName(artifact: MeetApiArtifact) {
   return artifact.docsDestination?.document ?? artifact.driveDestination?.file
 }
 
-async function getMeetAccessToken(subject: string) {
-  const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.meet)
+async function getGoogleAccessToken(subject: string, scopes: readonly string[]) {
+  const auth = await createDelegatedGoogleClient(subject, scopes)
   const tokenResponse = await auth.getAccessToken()
   const token =
     typeof tokenResponse === "string" ? tokenResponse : tokenResponse?.token
 
-  if (!token) throw new Error("Unable to get Google Meet access token")
+  if (!token) throw new Error("Unable to get Google access token")
 
   return token
+}
+
+async function getMeetAccessToken(subject: string) {
+  return getGoogleAccessToken(subject, GOOGLE_WORKSPACE_SCOPES.meet)
+}
+
+async function getDriveAccessToken(subject: string) {
+  return getGoogleAccessToken(subject, GOOGLE_WORKSPACE_SCOPES.drive)
 }
 
 async function getIdentityId(subject: string) {
@@ -700,13 +756,15 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
     `
       select
         ma.id,
+        ma.artifact_type,
         ma.artifact_name,
         mcr.conference_record_name,
         mcr.start_time as conference_start_time,
-        ma.start_time as artifact_start_time
+        ma.start_time as artifact_start_time,
+        ma.document_name
       from meet_artifacts ma
       join meet_conference_records mcr on mcr.id = ma.conference_record_id
-      where ma.artifact_type = 'transcript'
+      where ma.artifact_type in ('transcript', 'smart_notes')
         and (
           mcr.meeting_id = $1
           or mcr.calendar_event_id = (
@@ -714,7 +772,10 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
           )
         )
         ${idFilter}
-      order by ma.start_time asc nulls last, ma.created_at asc
+      order by
+        case ma.artifact_type when 'transcript' then 0 else 1 end,
+        ma.start_time asc nulls last,
+        ma.created_at asc
     `,
     values
   )
@@ -722,14 +783,17 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
   return result.rows.map((row) => {
     const candidate = row as {
       id: string
+      artifact_type: "transcript" | "smart_notes"
       artifact_name: string
       conference_record_name: string
       conference_start_time?: string | Date | null
       artifact_start_time?: string | Date | null
+      document_name?: string | null
     }
 
     return {
       id: candidate.id,
+      artifactType: candidate.artifact_type,
       artifactName: candidate.artifact_name,
       conferenceRecordName: candidate.conference_record_name,
       conferenceStartTime: candidate.conference_start_time
@@ -738,8 +802,29 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
       artifactStartTime: candidate.artifact_start_time
         ? new Date(candidate.artifact_start_time).toISOString()
         : undefined,
+      documentName: candidate.document_name ?? undefined,
     }
   })
+}
+
+async function fetchDriveTextExport(token: string, fileId: string) {
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}/export`)
+  url.searchParams.set("mimeType", "text/plain")
+
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string }
+    }
+    throw new Error(
+      body.error?.message ?? "Unable to export Google Meet smart notes document"
+    )
+  }
+
+  return response.text()
 }
 
 export async function importMeetTranscriptArtifactsForMeeting(options: {
@@ -755,28 +840,51 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
 
   if (!candidates.length) {
     throw new Error(
-      "No Google Meet transcript artifacts are linked to this meeting yet. Sync Meet artifacts first or import the Drive recording."
+      "No Google Meet transcript or smart notes artifacts are linked to this meeting yet. Sync Meet artifacts first or import the Drive recording."
     )
   }
 
-  const token = await getMeetAccessToken(subject)
+  const meetToken = await getMeetAccessToken(subject)
+  let driveToken: string | undefined
   const transcriptSegments: TranscriptSegment[] = []
+  let importedEntries = 0
+  let importedSmartNotes = 0
 
   for (const candidate of candidates) {
-    const entries = await listTranscriptEntriesForArtifact(
-      token,
-      candidate.artifactName
-    )
     const baseTime = candidate.conferenceStartTime ?? candidate.artifactStartTime
 
-    transcriptSegments.push(
-      ...convertMeetTranscriptEntriesToSegments(entries, { baseTime })
-    )
+    if (candidate.artifactType === "transcript") {
+      const entries = await listTranscriptEntriesForArtifact(
+        meetToken,
+        candidate.artifactName
+      )
+      const segments = convertMeetTranscriptEntriesToSegments(entries, {
+        baseTime,
+      })
+
+      importedEntries += segments.length
+      transcriptSegments.push(...segments)
+      continue
+    }
+
+    const documentId = extractMeetSmartNotesDocumentId(candidate.documentName)
+
+    if (!documentId) continue
+
+    driveToken ??= await getDriveAccessToken(subject)
+    const text = await fetchDriveTextExport(driveToken, documentId)
+    const segments = convertMeetSmartNotesTextToSegments(text, {
+      artifactId: candidate.id,
+      artifactStartTime: baseTime,
+    })
+
+    importedSmartNotes += segments.length
+    transcriptSegments.push(...segments)
   }
 
   if (!transcriptSegments.length) {
     throw new Error(
-      "Google Meet returned transcript artifacts, but no transcript entries were available yet."
+      "Google Meet returned artifacts, but no transcript entries or smart notes text were available yet."
     )
   }
 
@@ -784,7 +892,8 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
     meetingId: options.meetingId,
     artifactIds: candidates.map((candidate) => candidate.id),
     transcriptSegments: transcriptSegments.sort((a, b) => a.startMs - b.startMs),
-    importedEntries: transcriptSegments.length,
+    importedEntries,
+    importedSmartNotes,
   }
 }
 
