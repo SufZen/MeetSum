@@ -24,6 +24,8 @@ Use filters:
 - Failed: meetings that need a retry or manual action.
 - Upcoming: scheduled meetings waiting for capture.
 
+Upcoming and empty meetings show a capture-readiness checklist instead of blank summary content. The checklist tells you whether MeetSum sees Calendar context, a Meet conference record, a recording, transcript, smart notes, or imported media, and it recommends the next action: sync artifacts, upload/record, or process now.
+
 ### 2. Sync Calendar
 
 Use Sync -> Calendar sync to pull current schedule context from Google Workspace. Calendar sync should not import media by itself; it creates or updates meeting records and participant context.

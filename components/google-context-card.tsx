@@ -9,6 +9,7 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
 function formatArtifactType(value: string) {
@@ -53,6 +54,7 @@ export function GoogleContextCard({
   const hasArtifactContext = artifacts.length > 0 || conferenceRecords.length > 0
   const primaryConferenceRecord = conferenceRecords[0]
   const importedRecording = meeting?.mediaAssets?.[0]
+  const readiness = meeting ? getMeetingCaptureReadiness(meeting) : undefined
   const items = [
     {
       icon: CalendarDaysIcon,
@@ -115,6 +117,16 @@ export function GoogleContextCard({
           {hasArtifactContext ? "linked" : "pending"}
         </Badge>
       </div>
+      {readiness ? (
+        <div className="mb-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+          <div className="text-xs font-semibold text-foreground">
+            {readiness.title}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {readiness.description}
+          </p>
+        </div>
+      ) : null}
       <div className="grid gap-3">
         {items.map((item) => {
           const Icon = item.icon

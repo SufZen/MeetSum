@@ -9,9 +9,11 @@ import {
 } from "lucide-react"
 
 import { AudioPlaybackBar } from "@/components/audio-playback-bar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
 import type { ActionItem, MeetingRecord } from "@/lib/meetings/repository"
 
 function quoteTime(ms: number) {
@@ -27,6 +29,24 @@ function priorityClass(priority?: ActionItem["priority"]) {
     return "border-[var(--status-success)] bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
   }
   return "border-[var(--accent)] bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+}
+
+function readinessBadgeClass(status: ReturnType<typeof getMeetingCaptureReadiness>["status"]) {
+  if (status === "ready_to_process" || status === "processed") {
+    return "border-[var(--status-success)]/40 bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+  }
+  if (status === "capture_armed") {
+    return "border-[var(--primary)]/30 bg-[var(--selected)] text-[var(--primary)]"
+  }
+
+  return "border-[var(--accent)]/40 bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+}
+
+function checkDotClass(state: "ready" | "pending" | "missing") {
+  if (state === "ready") return "bg-[var(--status-success)]"
+  if (state === "missing") return "bg-[var(--status-error)]"
+
+  return "bg-[var(--muted-foreground)]/40"
 }
 
 export function MeetingSummaryView({
@@ -63,6 +83,7 @@ export function MeetingSummaryView({
   const canFullReprocess = hasMedia || hasMeetImportableArtifact
   const canProcess = hasMedia || hasTranscript || hasMeetImportableArtifact
   const showContentGap = !meeting.summary?.overview
+  const readiness = getMeetingCaptureReadiness(meeting)
 
   return (
     <div className="px-5 py-6 md:px-8">
@@ -107,42 +128,80 @@ export function MeetingSummaryView({
         </div>
         {showContentGap ? (
           <div className="max-w-3xl rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm leading-6 text-muted-foreground">
-            <div className="font-medium text-foreground">
-              {isUpcoming
-                ? "This upcoming meeting is ready for capture setup."
-                : "No meeting intelligence has been generated yet."}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-medium text-foreground">
+                {isUpcoming ? readiness.title : "No meeting intelligence has been generated yet."}
+              </div>
+              <Badge
+                variant="outline"
+                className={`rounded-md ${readinessBadgeClass(readiness.status)}`}
+              >
+                {readiness.title}
+              </Badge>
             </div>
             <p className="mt-1">
-              Attach a recording, import a Google Meet artifact, or process an
-              existing transcript to generate summary, decisions, tasks, and
-              quotes.
+              {isUpcoming
+                ? readiness.description
+                : "Attach a recording, import a Google Meet artifact, or process an existing transcript to generate summary, decisions, tasks, and quotes."}
             </p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {readiness.checks.slice(0, 6).map((check) => (
+                <div
+                  key={check.key}
+                  className="flex items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-xs text-foreground"
+                >
+                  <span className={`size-2 rounded-full ${checkDotClass(check.state)}`} />
+                  <span className="min-w-0 truncate">{check.label}</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {check.state}
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                disabled={!canProcess}
-                title={
-                  canProcess
-                    ? "Queue processing for this meeting"
-                    : "No recording, transcript, or importable Google Meet artifact is attached yet"
-                }
-                onClick={onProcessMeeting}
-              >
-                <PlayCircleIcon data-icon="inline-start" className="size-4" />
-                Process now
-              </Button>
-              <Button size="sm" variant="outline" onClick={onOpenUpload}>
-                <UploadIcon data-icon="inline-start" className="size-4" />
-                Upload recording
-              </Button>
+              {readiness.primaryAction === "process" ? (
+                <Button
+                  size="sm"
+                  disabled={!canProcess}
+                  title={
+                    canProcess
+                      ? "Queue processing for this meeting"
+                      : "No recording, transcript, or importable Google Meet artifact is attached yet"
+                  }
+                  onClick={onProcessMeeting}
+                >
+                  <PlayCircleIcon data-icon="inline-start" className="size-4" />
+                  Process now
+                </Button>
+              ) : null}
+              {readiness.primaryAction === "sync_artifacts" ? (
+                <Button size="sm" onClick={onSyncMeetArtifacts}>
+                  <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                  Sync Meet artifacts
+                </Button>
+              ) : null}
+              {readiness.primaryAction === "upload" ? (
+                <Button size="sm" onClick={onOpenUpload}>
+                  <UploadIcon data-icon="inline-start" className="size-4" />
+                  Upload recording
+                </Button>
+              ) : null}
+              {readiness.primaryAction !== "upload" ? (
+                <Button size="sm" variant="outline" onClick={onOpenUpload}>
+                  <UploadIcon data-icon="inline-start" className="size-4" />
+                  Upload recording
+                </Button>
+              ) : null}
               <Button size="sm" variant="outline" onClick={onFindDriveRecordings}>
                 <FileAudioIcon data-icon="inline-start" className="size-4" />
                 Find Drive recordings
               </Button>
-              <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
-                <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                Sync Meet artifacts
-              </Button>
+              {readiness.primaryAction !== "sync_artifacts" ? (
+                <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
+                  <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                  Sync Meet artifacts
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
