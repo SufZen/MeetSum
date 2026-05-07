@@ -86,7 +86,7 @@ By default, media/audio is private and is not exposed on the public share page.
 
 ### 8. Search Memory
 
-Use AI Memory to search across summaries, transcript snippets, tags, action items, and rooms. Ask all meetings returns an answer with citations where available.
+Use AI Memory to search across summaries, decisions, transcript snippets, tags, action items, and rooms. Search results show the strongest matching evidence. Ask all meetings returns an answer with citations that name the source meeting, source type, and transcript timestamp when available.
 
 ## Integrations
 

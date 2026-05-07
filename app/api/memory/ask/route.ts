@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { buildMeetingMemoryAnswer } from "@/lib/memory"
 import { meetingRepository } from "@/lib/meetings/store"
 
 export async function POST(request: Request) {
@@ -13,33 +14,7 @@ export async function POST(request: Request) {
 
   if (!question) return jsonError("Question is required", 400)
 
-  const meetings = await meetingRepository.searchMeetings(question, { limit: 8 })
-  const citations = meetings.flatMap((meeting) =>
-    (meeting.transcript ?? [])
-      .filter((segment) =>
-        question
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((token) => token.length > 3)
-          .some((token) => segment.text.toLowerCase().includes(token))
-      )
-      .slice(0, 2)
-      .map((segment) => ({
-        meetingId: meeting.id,
-        meetingTitle: meeting.title,
-        segmentId: segment.id,
-        startMs: segment.startMs,
-      }))
-  )
+  const meetings = await meetingRepository.searchMeetings(question, { limit: 12 })
 
-  return NextResponse.json({
-    answer:
-      meetings.length > 0
-        ? meetings
-            .slice(0, 3)
-            .map((meeting) => `${meeting.title}: ${meeting.summary?.overview ?? "No summary yet."}`)
-            .join("\n\n")
-        : "No matching meeting memory was found yet.",
-    citations,
-  })
+  return NextResponse.json(buildMeetingMemoryAnswer(question, meetings))
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { requireAppAccess } from "@/lib/api/responses"
+import { buildMeetingMemoryResults } from "@/lib/memory"
 import { meetingRepository } from "@/lib/meetings/store"
 
 export async function GET(request: Request) {
@@ -20,15 +21,6 @@ export async function GET(request: Request) {
     : await meetingRepository.listMeetings({ limit })
 
   return NextResponse.json({
-    results: meetings.map((meeting) => ({
-      id: meeting.id,
-      title: meeting.title,
-      startedAt: meeting.startedAt,
-      status: meeting.status,
-      tags: meeting.tags ?? [],
-      overview: meeting.summary?.overview ?? "",
-      actionItems: meeting.summary?.actionItems ?? [],
-      transcriptMatches: (meeting.transcript ?? []).slice(0, 3),
-    })),
+    results: buildMeetingMemoryResults(meetings, query, { limit }),
   })
 }

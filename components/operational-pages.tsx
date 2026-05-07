@@ -41,6 +41,18 @@ type MemorySearchResult = {
   overview: string
   actionItems: Array<{ id: string; title: string; status: string }>
   transcriptMatches: Array<{ id: string; speaker: string; startMs: number; text: string }>
+  matches: MemoryCitationView[]
+  matchCount: number
+}
+
+type MemoryCitationView = {
+  meetingId: string
+  meetingTitle: string
+  source: "summary" | "decision" | "action_item" | "transcript" | "tag"
+  text: string
+  segmentId?: string
+  actionItemId?: string
+  startMs?: number
 }
 
 type RoomResult = {
@@ -196,6 +208,21 @@ function formatArtifactType(value: MeetArtifactView["artifactType"]) {
   return value[0].toUpperCase() + value.slice(1)
 }
 
+function formatMemoryTime(ms?: number) {
+  if (ms === undefined) return undefined
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
+}
+
+function formatMemorySource(value: MemoryCitationView["source"]) {
+  if (value === "action_item") return "Action"
+
+  return value.replace("_", " ")
+}
+
 function PageFrame({
   eyebrow,
   title,
@@ -338,6 +365,7 @@ export function OperationalPage({
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
   const [memoryQuestion, setMemoryQuestion] = useState("")
+  const [memoryCitations, setMemoryCitations] = useState<MemoryCitationView[]>([])
   const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
   const [rooms, setRooms] = useState<RoomResult[]>([])
   const [webhookUrl, setWebhookUrl] = useState("")
@@ -419,13 +447,8 @@ export function OperationalPage({
       return
     }
 
-    const citations = Array.isArray(body.citations) ? body.citations.length : 0
-
-    setMemoryAnswer(
-      `${body.answer ?? "No answer returned"}${
-        citations ? `\n\n${citations} citation${citations === 1 ? "" : "s"} found.` : ""
-      }`
-    )
+    setMemoryAnswer(body.answer ?? "No answer returned")
+    setMemoryCitations(Array.isArray(body.citations) ? body.citations : [])
   }
 
   async function copyAutomationText(value: string, label: string) {
@@ -831,7 +854,32 @@ export function OperationalPage({
                   <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {meeting.overview || meeting.transcriptMatches[0]?.text || "No summary yet."}
                   </p>
+                  {meeting.matches?.length ? (
+                    <div className="mt-2 grid gap-1.5">
+                      {meeting.matches.slice(0, 3).map((match, index) => (
+                        <div
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 py-1.5 text-xs leading-5"
+                          key={`${match.source}-${match.segmentId ?? match.actionItemId ?? index}`}
+                        >
+                          <div className="mb-0.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[var(--primary)]">
+                            <span>{formatMemorySource(match.source)}</span>
+                            {formatMemoryTime(match.startMs) ? (
+                              <span>{formatMemoryTime(match.startMs)}</span>
+                            ) : null}
+                          </div>
+                          <div className="line-clamp-2 text-muted-foreground">
+                            {match.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="mt-2 flex flex-wrap gap-1">
+                    {meeting.matchCount ? (
+                      <span className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] text-[var(--primary)]">
+                        {meeting.matchCount} matches
+                      </span>
+                    ) : null}
                     {meeting.tags.slice(0, 4).map((tag) => (
                       <span key={tag} className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
                         {tag}
@@ -863,7 +911,35 @@ export function OperationalPage({
               <Button onClick={askMemory}>Ask memory</Button>
               {memoryAnswer ? (
                 <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm leading-6">
-                  {memoryAnswer}
+                  <div className="whitespace-pre-wrap">{memoryAnswer}</div>
+                  {memoryCitations.length ? (
+                    <div className="mt-3 grid gap-2 border-t border-[var(--divider)] pt-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Citations
+                      </div>
+                      {memoryCitations.slice(0, 6).map((citation, index) => (
+                        <div
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+                          key={`${citation.meetingId}-${citation.source}-${citation.segmentId ?? citation.actionItemId ?? index}`}
+                        >
+                          <div className="flex flex-wrap items-center gap-2 font-medium text-foreground">
+                            <span>{citation.meetingTitle}</span>
+                            <Badge variant="outline" className="rounded-sm text-[10px]">
+                              {formatMemorySource(citation.source)}
+                            </Badge>
+                            {formatMemoryTime(citation.startMs) ? (
+                              <span className="text-muted-foreground">
+                                {formatMemoryTime(citation.startMs)}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 line-clamp-2 text-muted-foreground">
+                            {citation.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
