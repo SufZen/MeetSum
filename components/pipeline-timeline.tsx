@@ -2,6 +2,7 @@ import { CheckCircle2Icon, CircleIcon } from "lucide-react"
 
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 import { MEETING_STATUS_FLOW } from "@/lib/meetings/state"
+import { getMeetingWorkStatus } from "@/lib/meetings/work-status"
 
 const pipeline = [
   ["artifact.import", "Artifact import"],
@@ -42,6 +43,7 @@ export function PipelineTimeline({
   meeting: MeetingRecord | null
   jobs: JobRecord[]
 }) {
+  const workStatus = meeting ? getMeetingWorkStatus(meeting, jobs) : undefined
   const currentIndex = meeting
     ? Math.max(0, MEETING_STATUS_FLOW.indexOf(meeting.status))
     : 0
@@ -61,7 +63,29 @@ export function PipelineTimeline({
 
   return (
     <section className="ms-card p-4">
-      <h3 className="mb-3 text-sm font-semibold">Pipeline</h3>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Pipeline</h3>
+          {workStatus ? (
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {workStatus.title}
+            </p>
+          ) : null}
+        </div>
+        {workStatus?.kind === "failed" ? (
+          <span className="rounded-md bg-[var(--tag-action)] px-2 py-1 text-[11px] font-medium text-[var(--tag-action-fg)]">
+            failed
+          </span>
+        ) : null}
+      </div>
+      {workStatus?.kind === "processing" && typeof workStatus.progress === "number" ? (
+        <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+          <div
+            className="h-full rounded-full bg-[var(--primary)]"
+            style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
+          />
+        </div>
+      ) : null}
       <div className="grid gap-0">
         {pipeline.map(([status, label], index) => {
           const flowIndex = MEETING_STATUS_FLOW.indexOf(status as MeetingRecord["status"])

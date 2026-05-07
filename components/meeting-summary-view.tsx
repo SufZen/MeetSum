@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
-import type { ActionItem, MeetingRecord } from "@/lib/meetings/repository"
+import type { ActionItem, JobRecord, MeetingRecord } from "@/lib/meetings/repository"
+import { getMeetingWorkStatus } from "@/lib/meetings/work-status"
 
 function quoteTime(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -52,9 +53,11 @@ function checkDotClass(state: "ready" | "pending" | "missing") {
 export function MeetingSummaryView({
   dictionary,
   meeting,
+  jobs,
   onToggleActionItem,
   onReprocessMeeting,
   onProcessMeeting,
+  onRetryJob,
   onOpenUpload,
   onFindDriveRecordings,
   onSyncMeetArtifacts,
@@ -62,9 +65,11 @@ export function MeetingSummaryView({
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
+  jobs: JobRecord[]
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
   onProcessMeeting: () => void
+  onRetryJob: (job: JobRecord) => void
   onOpenUpload: () => void
   onFindDriveRecordings: () => void
   onSyncMeetArtifacts: () => void
@@ -84,10 +89,52 @@ export function MeetingSummaryView({
   const canProcess = hasMedia || hasTranscript || hasMeetImportableArtifact
   const showContentGap = !meeting.summary?.overview
   const readiness = getMeetingCaptureReadiness(meeting)
+  const workStatus = getMeetingWorkStatus(meeting, jobs)
+  const latestJob = workStatus.jobId
+    ? jobs.find((job) => job.id === workStatus.jobId)
+    : undefined
+  const showWorkStatus =
+    workStatus.kind === "processing" || workStatus.kind === "failed"
 
   return (
     <div className="px-5 py-6 md:px-8">
       <div className="mx-auto max-w-5xl">
+      {showWorkStatus ? (
+        <section
+          className={`mb-5 rounded-lg border p-4 text-sm leading-6 ${
+            workStatus.kind === "failed"
+              ? "border-[var(--status-error)]/40 bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+              : "border-[var(--primary)]/30 bg-[var(--selected)] text-[var(--primary)]"
+          }`}
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="font-semibold">{workStatus.title}</div>
+              <p className="mt-1 opacity-90">{workStatus.description}</p>
+              {workStatus.stage ? (
+                <div className="mt-2 font-mono text-xs opacity-80">
+                  {workStatus.stage}
+                  {workStatus.jobId ? ` · ${workStatus.jobId}` : ""}
+                </div>
+              ) : null}
+            </div>
+            {workStatus.primaryAction === "retry" && latestJob ? (
+              <Button size="sm" variant="outline" onClick={() => onRetryJob(latestJob)}>
+                <RefreshCwIcon data-icon="inline-start" className="size-4" />
+                Retry job
+              </Button>
+            ) : null}
+          </div>
+          {workStatus.kind === "processing" && typeof workStatus.progress === "number" ? (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface)]/70">
+              <div
+                className="h-full rounded-full bg-[var(--primary)]"
+                style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.overview}</h2>
@@ -130,18 +177,18 @@ export function MeetingSummaryView({
           <div className="max-w-3xl rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm leading-6 text-muted-foreground">
             <div className="flex flex-wrap items-center gap-2">
               <div className="font-medium text-foreground">
-                {isUpcoming ? readiness.title : "No meeting intelligence has been generated yet."}
+                {isUpcoming ? workStatus.title : "No meeting intelligence has been generated yet."}
               </div>
               <Badge
                 variant="outline"
                 className={`rounded-md ${readinessBadgeClass(readiness.status)}`}
               >
-                {readiness.title}
+                {workStatus.title}
               </Badge>
             </div>
             <p className="mt-1">
               {isUpcoming
-                ? readiness.description
+                ? workStatus.description
                 : "Attach a recording, import a Google Meet artifact, or process an existing transcript to generate summary, decisions, tasks, and quotes."}
             </p>
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -159,7 +206,7 @@ export function MeetingSummaryView({
               ))}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {readiness.primaryAction === "process" ? (
+              {workStatus.primaryAction === "process" ? (
                 <Button
                   size="sm"
                   disabled={!canProcess}
@@ -174,19 +221,19 @@ export function MeetingSummaryView({
                   Process now
                 </Button>
               ) : null}
-              {readiness.primaryAction === "sync_artifacts" ? (
+              {workStatus.primaryAction === "sync_artifacts" ? (
                 <Button size="sm" onClick={onSyncMeetArtifacts}>
                   <RadioTowerIcon data-icon="inline-start" className="size-4" />
                   Sync Meet artifacts
                 </Button>
               ) : null}
-              {readiness.primaryAction === "upload" ? (
+              {workStatus.primaryAction === "upload" ? (
                 <Button size="sm" onClick={onOpenUpload}>
                   <UploadIcon data-icon="inline-start" className="size-4" />
                   Upload recording
                 </Button>
               ) : null}
-              {readiness.primaryAction !== "upload" ? (
+              {workStatus.primaryAction !== "upload" ? (
                 <Button size="sm" variant="outline" onClick={onOpenUpload}>
                   <UploadIcon data-icon="inline-start" className="size-4" />
                   Upload recording
@@ -196,7 +243,7 @@ export function MeetingSummaryView({
                 <FileAudioIcon data-icon="inline-start" className="size-4" />
                 Find Drive recordings
               </Button>
-              {readiness.primaryAction !== "sync_artifacts" ? (
+              {workStatus.primaryAction !== "sync_artifacts" ? (
                 <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
                   <RadioTowerIcon data-icon="inline-start" className="size-4" />
                   Sync Meet artifacts

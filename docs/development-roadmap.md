@@ -173,14 +173,12 @@ Provide these when you are ready to wire real systems:
 
 ## Recommended Next Sprint
 
-Start with Phase 1 and part of Phase 2:
+The next work should prioritize daily usability over feature breadth:
 
-1. Finish persistent meeting detail storage for summaries, transcript segments, tags, contexts, intelligence runs, and enriched action items.
-2. Add first-admin login/session auth and an API-key management screen.
-3. Add Google Workspace credential adapter and sync-state persistence.
-4. Implement Calendar polling first.
-5. Add Drive recording discovery second.
-6. Add Gemini/Gemma provider adapters for Hebrew-first summarization and regression tests.
-7. Keep Gmail context after meeting identity matching is stable.
+1. Prove the real Google-first capture path: new Google Meet -> Calendar sync -> Meet artifact discovery -> selected import/process -> transcript/summary/tasks -> share/export.
+2. Make every meeting show one clear state: capture armed, waiting for artifacts, ready to process, processing with exact stage, failed with retry, or completed.
+3. Improve Hebrew/mixed-language intelligence quality with private regression examples, stricter task extraction, and clearer quality warnings.
+4. Polish share pages, participant/speaker correction, and meeting recovery actions before adding secondary integrations.
+5. Expand Memory, Rooms, Gmail context, advanced agents, DOCX/Notion, Vertex switch, and analytics only after the core meeting loop is reliable.
 
-This order creates a reliable product spine before expensive AI/media processing work begins.
+This order makes MeetSum useful first: capture real meetings, produce useful intelligence, recover from failures, and share or export the result.

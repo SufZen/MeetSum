@@ -15,11 +15,12 @@ import { Button } from "@/components/ui/button"
 import { TranscriptTimeline } from "@/components/transcript-timeline"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import type { ActionItem, MeetingRecord } from "@/lib/meetings/repository"
+import type { ActionItem, JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
 export function MeetingWorkspace({
   dictionary,
   meeting,
+  jobs,
   question,
   answer,
   asking,
@@ -28,6 +29,7 @@ export function MeetingWorkspace({
   onToggleActionItem,
   onReprocessMeeting,
   onProcessMeeting,
+  onRetryJob,
   onOpenUpload,
   onFindDriveRecordings,
   onSyncMeetArtifacts,
@@ -44,6 +46,7 @@ export function MeetingWorkspace({
   dictionary: Dictionary
   locale: SupportedLocale
   meeting: MeetingRecord | null
+  jobs: JobRecord[]
   question: string
   answer?: string
   asking?: boolean
@@ -52,6 +55,7 @@ export function MeetingWorkspace({
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: "full" | "summary" | "tasks" | "transcript-cleanup") => void
   onProcessMeeting: () => void
+  onRetryJob: (job: JobRecord) => void
   onOpenUpload: () => void
   onFindDriveRecordings: () => void
   onSyncMeetArtifacts: () => void
@@ -123,9 +127,11 @@ export function MeetingWorkspace({
           <MeetingSummaryView
             dictionary={dictionary}
             meeting={meeting}
+            jobs={jobs}
             onToggleActionItem={onToggleActionItem}
             onReprocessMeeting={onReprocessMeeting}
             onProcessMeeting={onProcessMeeting}
+            onRetryJob={onRetryJob}
             onOpenUpload={onOpenUpload}
             onFindDriveRecordings={onFindDriveRecordings}
             onSyncMeetArtifacts={onSyncMeetArtifacts}

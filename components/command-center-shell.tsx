@@ -891,6 +891,7 @@ export function CommandCenterShell({
         dictionary={dictionary}
         locale={locale}
         meeting={selectedMeeting}
+        jobs={jobs}
         question={askQuestion}
         answer={askAnswer}
         asking={isPending}
@@ -899,6 +900,7 @@ export function CommandCenterShell({
         onToggleActionItem={toggleActionItem}
         onReprocessMeeting={reprocessMeeting}
         onProcessMeeting={processMeeting}
+        onRetryJob={retryJob}
         onOpenUpload={() => setUploadOpen(true)}
         onFindDriveRecordings={() => setDrivePickerOpen(true)}
         onSyncMeetArtifacts={syncMeetArtifacts}
