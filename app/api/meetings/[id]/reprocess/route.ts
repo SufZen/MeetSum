@@ -31,13 +31,13 @@ export async function POST(
   const mode = parseMode(body.mode)
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
   const hasTranscript = Boolean(meeting.transcript?.length)
-  const hasMeetContentArtifact = meeting.meetConferenceRecords?.some((record) =>
+  const hasMeetImportableArtifact = meeting.meetConferenceRecords?.some((record) =>
     record.artifacts.some((artifact) =>
-      ["transcript", "smart_notes"].includes(artifact.artifactType)
+      ["transcript", "smart_notes", "recording"].includes(artifact.artifactType)
     )
   )
 
-  if (mode === "full" && !hasMedia && !hasMeetContentArtifact) {
+  if (mode === "full" && !hasMedia && !hasMeetImportableArtifact) {
     return NextResponse.json(
       {
         error:
@@ -48,7 +48,7 @@ export async function POST(
     )
   }
 
-  if (mode === "full" && !hasMedia && hasMeetContentArtifact) {
+  if (mode === "full" && !hasMedia && hasMeetImportableArtifact) {
     const job = await enqueueMeetSumJob("artifact.import", {
       meetingId: id,
       mode,

@@ -6,7 +6,10 @@ import {
   getGeminiProviderMode,
 } from "@/lib/ai/providers"
 import { getDatabasePool } from "@/lib/db/client"
-import { importMeetTranscriptArtifactsForMeeting } from "@/lib/google/meet-artifacts"
+import {
+  importMeetRecordingArtifactsForMeeting,
+  importMeetTranscriptArtifactsForMeeting,
+} from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
 import { cleanupTranscriptSegments } from "@/lib/intelligence"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
@@ -258,15 +261,56 @@ async function processArtifactImportJob(
     })
   }
 
-  const imported = await importMeetTranscriptArtifactsForMeeting({
-    meetingId: payload.meetingId,
-    subject: typeof payload.subject === "string" ? payload.subject : undefined,
-    artifactIds: Array.isArray(payload.artifactIds)
-      ? payload.artifactIds.filter(
-          (artifactId): artifactId is string => typeof artifactId === "string"
-        )
-      : undefined,
-  })
+  const artifactIds = Array.isArray(payload.artifactIds)
+    ? payload.artifactIds.filter(
+        (artifactId): artifactId is string => typeof artifactId === "string"
+      )
+    : undefined
+  const subject = typeof payload.subject === "string" ? payload.subject : undefined
+  let imported: Awaited<ReturnType<typeof importMeetTranscriptArtifactsForMeeting>>
+
+  try {
+    imported = await importMeetTranscriptArtifactsForMeeting({
+      meetingId: payload.meetingId,
+      subject,
+      artifactIds,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    if (
+      !message.includes("No Google Meet transcript or smart notes artifacts")
+    ) {
+      throw error
+    }
+
+    const recordingImport = await importMeetRecordingArtifactsForMeeting({
+      meetingId: payload.meetingId,
+      subject,
+      artifactIds,
+    })
+
+    if (jobRecordId) {
+      await meetingRepository.updateJob(jobRecordId, {
+        result: {
+          stage: "drive.import",
+          artifactIds: recordingImport.artifactIds,
+          importedFiles: recordingImport.importedFiles,
+          skippedFiles: recordingImport.skippedFiles,
+          errors: recordingImport.errors,
+        },
+      })
+    }
+
+    return {
+      meetingId: payload.meetingId,
+      mode: "meet-recording-artifact",
+      importedFiles: recordingImport.importedFiles,
+      skippedFiles: recordingImport.skippedFiles,
+      jobs: recordingImport.jobs,
+      errors: recordingImport.errors,
+    }
+  }
 
   await meetingRepository.replaceTranscriptSegments(
     payload.meetingId,

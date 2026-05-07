@@ -836,7 +836,8 @@ export async function listDriveRecordings(
 
 export async function importDriveRecordings(
   subject: string,
-  fileIds: string[]
+  fileIds: string[],
+  options: { preferredMeetingId?: string } = {}
 ): Promise<DriveRecordingImportResult> {
   const selectedFileIds = validateDriveImportFileIds(fileIds)
   const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
@@ -958,8 +959,10 @@ export async function importDriveRecordings(
         }
 
         const meeting =
-          match?.meeting_id
-            ? await meetingRepository.getMeeting(match.meeting_id)
+          options.preferredMeetingId
+            ? await meetingRepository.getMeeting(options.preferredMeetingId)
+            : match?.meeting_id
+              ? await meetingRepository.getMeeting(match.meeting_id)
             : await meetingRepository.createMeeting({
                 title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),
                 source: "google_meet",
@@ -969,7 +972,7 @@ export async function importDriveRecordings(
               })
 
         if (!meeting) {
-          throw new Error(`Matched meeting not found for Drive file ${file.id}`)
+          throw new Error(`Target meeting not found for Drive file ${file.id}`)
         }
 
         if (match?.id) {

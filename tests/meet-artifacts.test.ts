@@ -4,6 +4,7 @@ import {
   classifyMeetArtifactType,
   convertMeetSmartNotesTextToSegments,
   convertMeetTranscriptEntriesToSegments,
+  extractMeetRecordingDriveFileId,
   extractMeetSmartNotesDocumentId,
 } from "@/lib/google/meet-artifacts"
 
@@ -80,6 +81,21 @@ describe("Meet artifacts", () => {
       )
     ).toBe("doc-id-456")
     expect(extractMeetSmartNotesDocumentId(undefined)).toBeUndefined()
+  })
+
+  it("extracts recording Drive file ids from Meet artifact destinations", () => {
+    expect(extractMeetRecordingDriveFileId("driveFiles/drive-rec-123")).toBe(
+      "drive-rec-123"
+    )
+    expect(extractMeetRecordingDriveFileId("files/drive-rec-456")).toBe(
+      "drive-rec-456"
+    )
+    expect(
+      extractMeetRecordingDriveFileId(
+        "https://drive.google.com/file/d/drive-rec-789/view"
+      )
+    ).toBe("drive-rec-789")
+    expect(extractMeetRecordingDriveFileId(undefined)).toBeUndefined()
   })
 
   it("converts exported smart notes text into synthetic meeting segments", () => {

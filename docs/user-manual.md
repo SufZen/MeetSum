@@ -50,7 +50,7 @@ or, when using uploaded/imported media:
 
 `drive.import -> audio.extract -> audio.transcribe -> transcript.clean -> summary.generate -> tasks.extract -> meeting.index -> quality.review -> completed`
 
-If a linked Google Meet transcript artifact exists, **Process now** imports structured transcript entries directly from Google Meet and then runs intelligence. If a linked Google Meet smart-notes artifact exists, MeetSum exports the notes document, converts it into timestamped source segments, and runs the same intelligence pipeline. If a meeting has no recording, transcript, transcript artifact, or smart-notes artifact, MeetSum should not fake content. It shows next actions: upload recording, find Drive recordings, or sync Meet artifacts.
+If a linked Google Meet transcript artifact exists, **Process now** imports structured transcript entries directly from Google Meet and then runs intelligence. If a linked Google Meet smart-notes artifact exists, MeetSum exports the notes document, converts it into timestamped source segments, and runs the same intelligence pipeline. If only a linked Google Meet recording artifact exists, MeetSum imports the artifact's Drive recording into the normal media pipeline for transcription and summarization. If a meeting has no recording, transcript, or importable Meet artifact, MeetSum should not fake content. It shows next actions: upload recording, find Drive recordings, or sync Meet artifacts.
 
 ### 5. Review The Meeting
 
@@ -161,7 +161,7 @@ Vertex service-account credential path is configured and smoke-tested.
 
 ## Current Limitations
 
-- Meet transcript and smart-notes artifact import is available for linked artifacts. Direct recording artifact import still needs expansion.
+- Meet transcript, smart-notes, and direct recording artifact import are available for linked artifacts.
 - Gmail-aware prep and follow-up are not first-priority until Calendar and Drive paths are reliable.
 - DOCX and Notion exports are prepared but not active.
 - Vertex AI is not the active production provider yet.

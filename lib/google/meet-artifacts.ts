@@ -1,4 +1,5 @@
 import { createDelegatedGoogleClient, getWorkspaceSubject } from "@/lib/google/auth"
+import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
 import type { TranscriptSegment } from "@/lib/meetings/repository"
@@ -85,6 +86,15 @@ export type MeetTranscriptArtifactImportResult = {
   transcriptSegments: TranscriptSegment[]
   importedEntries: number
   importedSmartNotes: number
+}
+
+export type MeetRecordingArtifactImportResult = {
+  meetingId: string
+  artifactIds: string[]
+  importedFiles: number
+  skippedFiles: number
+  jobs: unknown[]
+  errors: string[]
 }
 
 export type MeetArtifactListResult = {
@@ -218,6 +228,18 @@ export function extractMeetSmartNotesDocumentId(value?: string) {
   if (documentMatch?.[1]) return documentMatch[1]
 
   const resourceMatch = value.match(/(?:documents|files)\/([^/?#]+)/)
+  if (resourceMatch?.[1]) return resourceMatch[1]
+
+  return undefined
+}
+
+export function extractMeetRecordingDriveFileId(value?: string) {
+  if (!value) return undefined
+
+  const driveFileMatch = value.match(/\/file\/d\/([^/?#]+)/)
+  if (driveFileMatch?.[1]) return driveFileMatch[1]
+
+  const resourceMatch = value.match(/(?:driveFiles|files)\/([^/?#]+)/)
   if (resourceMatch?.[1]) return resourceMatch[1]
 
   return undefined
@@ -807,6 +829,64 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
   })
 }
 
+export async function listMeetingRecordingArtifactCandidates(options: {
+  meetingId: string
+  artifactIds?: string[]
+}): Promise<
+  Array<{
+    id: string
+    artifactName: string
+    driveFileId?: string
+  }>
+> {
+  const values: unknown[] = [options.meetingId]
+  const idFilter =
+    options.artifactIds?.length
+      ? (() => {
+          values.push(options.artifactIds)
+          return `and ma.id = any($${values.length}::text[])`
+        })()
+      : ""
+  const result = await getDatabasePool().query(
+    `
+      select
+        ma.id,
+        ma.artifact_name,
+        ma.document_name,
+        ma.raw #>> '{driveDestination,file}' as drive_destination_file
+      from meet_artifacts ma
+      join meet_conference_records mcr on mcr.id = ma.conference_record_id
+      where ma.artifact_type = 'recording'
+        and (
+          mcr.meeting_id = $1
+          or mcr.calendar_event_id = (
+            select calendar_event_id from meetings where id = $1
+          )
+        )
+        ${idFilter}
+      order by ma.start_time asc nulls last, ma.created_at asc
+    `,
+    values
+  )
+
+  return result.rows.map((row) => {
+    const candidate = row as {
+      id: string
+      artifact_name: string
+      document_name?: string | null
+      drive_destination_file?: string | null
+    }
+
+    return {
+      id: candidate.id,
+      artifactName: candidate.artifact_name,
+      driveFileId: extractMeetRecordingDriveFileId(
+        candidate.drive_destination_file ?? candidate.document_name ?? undefined
+      ),
+    }
+  })
+}
+
 async function fetchDriveTextExport(token: string, fileId: string) {
   const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}/export`)
   url.searchParams.set("mimeType", "text/plain")
@@ -825,6 +905,45 @@ async function fetchDriveTextExport(token: string, fileId: string) {
   }
 
   return response.text()
+}
+
+export async function importMeetRecordingArtifactsForMeeting(options: {
+  subject?: string
+  meetingId: string
+  artifactIds?: string[]
+}): Promise<MeetRecordingArtifactImportResult> {
+  const subject = options.subject ?? getWorkspaceSubject()
+  const candidates = await listMeetingRecordingArtifactCandidates({
+    meetingId: options.meetingId,
+    artifactIds: options.artifactIds,
+  })
+  const artifactIds = candidates.map((candidate) => candidate.id)
+  const driveFileIds = [
+    ...new Set(
+      candidates
+        .map((candidate) => candidate.driveFileId)
+        .filter((fileId): fileId is string => Boolean(fileId))
+    ),
+  ]
+
+  if (!driveFileIds.length) {
+    throw new Error(
+      "No importable Google Drive recording file is linked to this Meet recording artifact yet."
+    )
+  }
+
+  const imported = await importDriveRecordings(subject, driveFileIds, {
+    preferredMeetingId: options.meetingId,
+  })
+
+  return {
+    meetingId: options.meetingId,
+    artifactIds,
+    importedFiles: imported.imported,
+    skippedFiles: imported.skipped,
+    jobs: imported.jobs,
+    errors: imported.errors,
+  }
 }
 
 export async function importMeetTranscriptArtifactsForMeeting(options: {
