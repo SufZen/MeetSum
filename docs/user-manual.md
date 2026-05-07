@@ -88,6 +88,8 @@ By default, media/audio is private and is not exposed on the public share page.
 
 Use AI Memory to search across summaries, decisions, transcript snippets, tags, action items, and rooms. Search results show the strongest matching evidence. Ask all meetings returns an answer with citations that name the source meeting, source type, and transcript timestamp when available.
 
+Rooms in AI Memory are workstream hubs. Select a room to see linked meeting stats, recent meetings, open tasks, recurring participants, and Meet artifact counts.
+
 ## Integrations
 
 ### Google Workspace

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
+import { buildRoomDetail } from "@/lib/rooms"
 
 export async function GET(
   request: Request,
@@ -19,5 +20,5 @@ export async function GET(
 
   const meetings = await meetingRepository.listMeetingsByContext(id)
 
-  return NextResponse.json({ room, meetings })
+  return NextResponse.json(buildRoomDetail(room, meetings))
 }

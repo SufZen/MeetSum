@@ -62,6 +62,50 @@ type RoomResult = {
   meetingCount: number
 }
 
+type RoomDetailView = {
+  room: RoomResult
+  stats: {
+    meetings: number
+    completedMeetings: number
+    processingMeetings: number
+    openTasks: number
+    participants: number
+    artifacts: number
+  }
+  meetings: Array<{
+    id: string
+    title: string
+    status: MeetingRecord["status"]
+    startedAt: string
+    overview: string
+    openTasks: number
+    participants: number
+    artifacts: number
+  }>
+  openTasks: Array<{
+    id: string
+    title: string
+    owner?: string
+    status: string
+    priority?: string
+    meetingId: string
+    meetingTitle: string
+  }>
+  participants: Array<{
+    name: string
+    email?: string
+    role: string
+    meetingCount: number
+  }>
+  artifacts: Array<{
+    id: string
+    meetingId: string
+    meetingTitle: string
+    artifactType: "recording" | "transcript" | "smart_notes"
+    artifactName: string
+  }>
+}
+
 type WebhookEventName =
   | "meeting.completed"
   | "summary.created"
@@ -368,6 +412,9 @@ export function OperationalPage({
   const [memoryCitations, setMemoryCitations] = useState<MemoryCitationView[]>([])
   const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
   const [rooms, setRooms] = useState<RoomResult[]>([])
+  const [selectedRoomId, setSelectedRoomId] = useState("")
+  const [roomDetail, setRoomDetail] = useState<RoomDetailView>()
+  const [roomLoading, setRoomLoading] = useState(false)
   const [webhookUrl, setWebhookUrl] = useState("")
   const [webhookEventSelection, setWebhookEventSelection] =
     useState<WebhookEventName[]>(["meeting.completed", "summary.created"])
@@ -449,6 +496,26 @@ export function OperationalPage({
 
     setMemoryAnswer(body.answer ?? "No answer returned")
     setMemoryCitations(Array.isArray(body.citations) ? body.citations : [])
+  }
+
+  async function openRoom(roomId: string) {
+    setSelectedRoomId(roomId)
+    setRoomLoading(true)
+    try {
+      const response = await fetch(`/api/rooms/${roomId}`)
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to load room")
+      }
+
+      setRoomDetail(body)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load room")
+      setRoomDetail(undefined)
+    } finally {
+      setRoomLoading(false)
+    }
   }
 
   async function copyAutomationText(value: string, label: string) {
@@ -953,15 +1020,22 @@ export function OperationalPage({
             >
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {rooms.map((room) => (
-                  <div
-                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                  <button
+                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-left transition hover:border-[var(--primary)]/50 hover:bg-[var(--selected)]"
                     key={room.id}
+                    onClick={() => openRoom(room.id)}
+                    type="button"
                   >
-                    <div className="text-sm font-semibold">{room.name}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 truncate text-sm font-semibold">{room.name}</div>
+                      {selectedRoomId === room.id ? (
+                        <Badge className="rounded-sm">open</Badge>
+                      ) : null}
+                    </div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       {room.meetingCount} linked meetings
                     </div>
-                  </div>
+                  </button>
                 ))}
                 {!rooms.length ? (
                   <div className="rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
@@ -969,6 +1043,121 @@ export function OperationalPage({
                   </div>
                 ) : null}
               </div>
+              {roomLoading ? (
+                <div className="mt-4 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                  Loading room context...
+                </div>
+              ) : roomDetail ? (
+                <div className="mt-4 grid gap-4">
+                  <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-base font-semibold text-foreground">
+                          {roomDetail.room.name}
+                        </div>
+                        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                          {roomDetail.room.description ??
+                            "Room context built from linked meetings."}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="rounded-md">
+                        {roomDetail.stats.meetings} meetings
+                      </Badge>
+                    </div>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                      {[
+                        ["Completed", roomDetail.stats.completedMeetings],
+                        ["Processing", roomDetail.stats.processingMeetings],
+                        ["Open tasks", roomDetail.stats.openTasks],
+                        ["People", roomDetail.stats.participants],
+                        ["Artifacts", roomDetail.stats.artifacts],
+                        ["Meetings", roomDetail.stats.meetings],
+                      ].map(([label, value]) => (
+                        <div
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3"
+                          key={label}
+                        >
+                          <div className="text-lg font-semibold">{value}</div>
+                          <div className="text-[11px] text-muted-foreground">{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    <div className="xl:col-span-2">
+                      <div className="mb-2 text-sm font-semibold">Recent meetings</div>
+                      <div className="grid gap-2">
+                        {roomDetail.meetings.slice(0, 6).map((meeting) => (
+                          <div
+                            className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                            key={meeting.id}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 truncate text-sm font-semibold">
+                                {meeting.title}
+                              </div>
+                              <Badge variant="outline" className="rounded-sm">
+                                {meeting.status}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {meeting.overview || "No summary yet."}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                              <span>{formatShortDate(meeting.startedAt)}</span>
+                              <span>{meeting.openTasks} open tasks</span>
+                              <span>{meeting.participants} people</span>
+                              <span>{meeting.artifacts} artifacts</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid content-start gap-4">
+                      <div>
+                        <div className="mb-2 text-sm font-semibold">Open tasks</div>
+                        <div className="grid gap-2">
+                          {roomDetail.openTasks.slice(0, 5).map((task) => (
+                            <div
+                              className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs"
+                              key={task.id}
+                            >
+                              <div className="font-medium text-foreground">{task.title}</div>
+                              <div className="mt-1 text-muted-foreground">
+                                {task.meetingTitle}
+                                {task.owner ? ` · ${task.owner}` : ""}
+                              </div>
+                            </div>
+                          ))}
+                          {!roomDetail.openTasks.length ? (
+                            <div className="rounded-lg border border-dashed border-[var(--divider)] p-3 text-xs text-muted-foreground">
+                              No open tasks in this room.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-2 text-sm font-semibold">People</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {roomDetail.participants.slice(0, 8).map((participant) => (
+                            <span
+                              className="rounded-sm bg-[var(--selected)] px-2 py-1 text-[11px] text-[var(--primary)]"
+                              key={participant.email ?? participant.name}
+                            >
+                              {participant.name} · {participant.meetingCount}
+                            </span>
+                          ))}
+                          {!roomDetail.participants.length ? (
+                            <span className="text-xs text-muted-foreground">
+                              No participants linked yet.
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </OpsCard>
           </div>
         </div>
