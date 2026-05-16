@@ -230,6 +230,8 @@ export function convertMeetTranscriptEntriesToSegments(
 export function extractMeetSmartNotesDocumentId(value?: string) {
   if (!value) return undefined
 
+  if (/^[A-Za-z0-9_-]{8,}$/.test(value)) return value
+
   const documentMatch = value.match(/\/document\/d\/([^/?#]+)/)
   if (documentMatch?.[1]) return documentMatch[1]
 
@@ -241,6 +243,8 @@ export function extractMeetSmartNotesDocumentId(value?: string) {
 
 export function extractMeetRecordingDriveFileId(value?: string) {
   if (!value) return undefined
+
+  if (/^[A-Za-z0-9_-]{8,}$/.test(value)) return value
 
   const driveFileMatch = value.match(/\/file\/d\/([^/?#]+)/)
   if (driveFileMatch?.[1]) return driveFileMatch[1]

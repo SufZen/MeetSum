@@ -81,6 +81,7 @@ describe("Meet artifacts", () => {
   })
 
   it("extracts smart-notes document ids from Meet artifact destinations", () => {
+    expect(extractMeetSmartNotesDocumentId("1abcDEF_234")).toBe("1abcDEF_234")
     expect(extractMeetSmartNotesDocumentId("documents/1abcDEF_234")).toBe(
       "1abcDEF_234"
     )
@@ -96,6 +97,7 @@ describe("Meet artifacts", () => {
   })
 
   it("extracts recording Drive file ids from Meet artifact destinations", () => {
+    expect(extractMeetRecordingDriveFileId("drive-rec-123")).toBe("drive-rec-123")
     expect(extractMeetRecordingDriveFileId("driveFiles/drive-rec-123")).toBe(
       "drive-rec-123"
     )
