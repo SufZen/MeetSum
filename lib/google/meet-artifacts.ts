@@ -318,9 +318,10 @@ async function getDriveAccessToken(subject: string) {
   return getGoogleAccessToken(subject, GOOGLE_WORKSPACE_SCOPES.drive)
 }
 
-async function getIdentityId(subject: string) {
+export async function getMeetGoogleIdentityId(subject: string) {
   const pool = getDatabasePool()
   const workspaceAccountId = "workspace_realization"
+  const normalizedSubject = subject.trim().toLowerCase()
 
   await pool.query(
     `
@@ -330,13 +331,13 @@ async function getIdentityId(subject: string) {
     `,
     [
       workspaceAccountId,
-      subject.split("@")[1] ?? "realization.co.il",
-      process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ?? subject,
+      normalizedSubject.split("@")[1] ?? "realization.co.il",
+      process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ?? normalizedSubject,
     ]
   )
 
-  const identityId = createId("gident", subject)
-  await pool.query(
+  const identityId = createId("gident", normalizedSubject)
+  const result = await pool.query(
     `
       insert into google_identities (
         id, workspace_account_id, subject_email, sync_enabled
@@ -344,11 +345,12 @@ async function getIdentityId(subject: string) {
       values ($1, $2, $3, true)
       on conflict (workspace_account_id, subject_email)
       do update set sync_enabled = excluded.sync_enabled
+      returning id
     `,
-    [identityId, workspaceAccountId, subject]
+    [identityId, workspaceAccountId, normalizedSubject]
   )
 
-  return identityId
+  return (result.rows[0] as { id?: string } | undefined)?.id ?? identityId
 }
 
 async function setMeetSyncState(
@@ -361,7 +363,7 @@ async function setMeetSyncState(
   }
 ) {
   const pool = getDatabasePool()
-  const identityId = await getIdentityId(subject)
+  const identityId = await getMeetGoogleIdentityId(subject)
   const id = createSyncStateId(identityId, "meet")
 
   await pool.query(
@@ -651,7 +653,7 @@ export async function listPersistedMeetArtifacts(options: {
   meetingId?: string
 } = {}): Promise<PersistedMeetConferenceRecord[]> {
   const subject = options.subject ?? getWorkspaceSubject()
-  const identityId = await getIdentityId(subject)
+  const identityId = await getMeetGoogleIdentityId(subject)
   const values: unknown[] = [identityId]
   const meetingFilter = options.meetingId
     ? (() => {
@@ -1099,7 +1101,7 @@ export async function syncMeetArtifacts(options: {
   }
 
   try {
-    const identityId = await getIdentityId(subject)
+    const identityId = await getMeetGoogleIdentityId(subject)
     const live = await listConferenceRecordsFromGoogle({ subject, limit })
 
     for (const record of live.conferenceRecords) {
