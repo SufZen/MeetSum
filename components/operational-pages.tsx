@@ -391,7 +391,6 @@ export function OperationalPage({
   onQueryChange,
   onSyncCalendar,
   onFindDriveRecordings,
-  onSyncMeetArtifacts,
   onRetryJob,
 }: {
   panel: MainPanelKey
@@ -404,7 +403,6 @@ export function OperationalPage({
   onQueryChange: (value: string) => void
   onSyncCalendar: () => void
   onFindDriveRecordings: () => void
-  onSyncMeetArtifacts: () => void
   onRetryJob: (job: JobRecord) => void
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
@@ -432,6 +430,7 @@ export function OperationalPage({
   const [settingsSection, setSettingsSection] = useState("Recording & Privacy")
   const [meetArtifacts, setMeetArtifacts] = useState<MeetArtifactStatusView>()
   const [meetArtifactsLoading, setMeetArtifactsLoading] = useState(false)
+  const [meetArtifactsError, setMeetArtifactsError] = useState("")
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -703,12 +702,18 @@ export function OperationalPage({
         throw new Error(body.error ?? "Unable to load Meet artifact status")
       }
 
+      setMeetArtifactsError("")
       setMeetArtifacts({
         setup: body.setup,
         conferenceRecords: body.conferenceRecords ?? [],
         persistedRecords: body.persistedRecords ?? [],
       })
     } catch (error) {
+      setMeetArtifactsError(
+        error instanceof Error
+          ? error.message
+          : "Unable to refresh Meet artifact status"
+      )
       toast.error(
         error instanceof Error
           ? error.message
@@ -719,9 +724,33 @@ export function OperationalPage({
     }
   }
 
-  function syncMeetArtifactsAndRefresh() {
-    onSyncMeetArtifacts()
-    window.setTimeout(() => void refreshMeetArtifacts(), 1500)
+  async function syncMeetArtifactsAndRefresh() {
+    setMeetArtifactsLoading(true)
+    setMeetArtifactsError("")
+    try {
+      const response = await fetch("/api/google/meet/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 10 }),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to sync Meet artifacts")
+      }
+
+      toast.success(body.message ?? "Meet artifacts synced")
+      await refreshMeetArtifacts()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to sync Meet artifacts"
+
+      setMeetArtifactsError(message)
+      toast.error(message)
+      await refreshMeetArtifacts()
+    } finally {
+      setMeetArtifactsLoading(false)
+    }
   }
 
   async function saveSettingsPatch(patch: Partial<AppSettingsView>) {
@@ -794,6 +823,11 @@ export function OperationalPage({
                 {meetArtifacts?.setup?.message ? (
                   <div className="rounded-md border border-[var(--status-warning)]/40 bg-[var(--surface-subtle)] px-3 py-2 text-xs leading-5 text-[var(--status-warning)]">
                     {meetArtifacts.setup.message}
+                  </div>
+                ) : null}
+                {meetArtifactsError ? (
+                  <div className="rounded-md border border-[var(--status-error)]/40 bg-[var(--tag-action)] px-3 py-2 text-xs leading-5 text-[var(--tag-action-fg)]">
+                    {meetArtifactsError}
                   </div>
                 ) : null}
                 {meetArtifacts ? (

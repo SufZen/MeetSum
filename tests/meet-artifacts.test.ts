@@ -6,9 +6,21 @@ import {
   convertMeetTranscriptEntriesToSegments,
   extractMeetRecordingDriveFileId,
   extractMeetSmartNotesDocumentId,
+  createMeetResourceId,
 } from "@/lib/google/meet-artifacts"
 
 describe("Meet artifacts", () => {
+  it("creates distinct stable ids for long Google resources with identical prefixes", () => {
+    const prefix =
+      "gident_aW5mb0ByZWFsaXphdGlvbi5jby5pbDpjb25mZXJlbmNlUmVjb3Jkcy/"
+    const first = createMeetResourceId("meetconf", `${prefix}aaaaaaaaaaaaaaaaaaaa`)
+    const second = createMeetResourceId("meetconf", `${prefix}bbbbbbbbbbbbbbbbbbbb`)
+
+    expect(first).not.toBe(second)
+    expect(first).toMatch(/^meetconf_[A-Za-z0-9_-]{16,}$/)
+    expect(second).toMatch(/^meetconf_[A-Za-z0-9_-]{16,}$/)
+  })
+
   it("classifies Google Meet artifact resource names", () => {
     expect(
       classifyMeetArtifactType("conferenceRecords/abc/recordings/rec-1")

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { createDelegatedGoogleClient, getWorkspaceSubject } from "@/lib/google/auth"
 import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
@@ -122,8 +124,12 @@ export type MeetArtifactSyncResult = {
 
 const MEET_BASE_URL = "https://meet.googleapis.com/v2"
 
+export function createMeetResourceId(prefix: string, stable: string) {
+  return `${prefix}_${createHash("sha256").update(stable).digest("base64url").slice(0, 32)}`
+}
+
 function createId(prefix: string, stable: string) {
-  return `${prefix}_${Buffer.from(stable).toString("base64url").slice(0, 40)}`
+  return createMeetResourceId(prefix, stable)
 }
 
 function createSyncStateId(identityId: string, source: string) {

@@ -1125,7 +1125,6 @@ export function CommandCenterShell({
                   onQueryChange={setQuery}
                   onSyncCalendar={() => syncGoogle("calendar")}
                   onFindDriveRecordings={() => setDrivePickerOpen(true)}
-                  onSyncMeetArtifacts={syncMeetArtifacts}
                   onRetryJob={retryJob}
                 />
               )}
