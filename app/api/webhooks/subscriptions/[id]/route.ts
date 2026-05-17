@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
 import { updateWebhookSubscription } from "@/lib/webhooks/management"
 
 export async function PATCH(
@@ -19,6 +20,12 @@ export async function PATCH(
 
   try {
     const subscription = await updateWebhookSubscription(id, body)
+    await recordAuditLog({
+      action: "webhook.subscription.updated",
+      targetType: "webhook_subscription",
+      targetId: id,
+      metadata: { enabled: subscription.enabled, events: subscription.events },
+    })
 
     return NextResponse.json({ subscription })
   } catch (error) {

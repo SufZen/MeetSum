@@ -110,6 +110,9 @@ type WebhookEventName =
   | "meeting.completed"
   | "summary.created"
   | "action_item.created"
+  | "meeting.process_failed"
+  | "realizeos.export.sent"
+  | "realizeos.export.failed"
 
 type WebhookSubscriptionView = {
   id: string
@@ -140,6 +143,24 @@ type MediaAssetView = {
   contentType: string
   sizeBytes: number
   retention: "audio" | "video"
+  createdAt: string
+}
+
+type RealizeOSStatusView = {
+  configured: boolean
+  baseUrl?: string
+  path: string
+  authConfigured: boolean
+  mode: string
+  message: string
+}
+
+type RealizeOSExportView = {
+  id: string
+  meetingId: string
+  status: string
+  response?: Record<string, unknown>
+  lastError?: string
   createdAt: string
 }
 
@@ -192,6 +213,9 @@ const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
   { value: "meeting.completed", label: "Meeting completed" },
   { value: "summary.created", label: "Summary created" },
   { value: "action_item.created", label: "Action item created" },
+  { value: "meeting.process_failed", label: "Processing failed" },
+  { value: "realizeos.export.sent", label: "RealizeOS sent" },
+  { value: "realizeos.export.failed", label: "RealizeOS failed" },
 ]
 
 const localeLabels: Record<SupportedLocale, string> = {
@@ -427,6 +451,8 @@ export function OperationalPage({
     WebhookDeliveryView[]
   >([])
   const [webhookLoading, setWebhookLoading] = useState(false)
+  const [realizeOSStatus, setRealizeOSStatus] = useState<RealizeOSStatusView>()
+  const [realizeOSExports, setRealizeOSExports] = useState<RealizeOSExportView[]>([])
   const [mediaAssets, setMediaAssets] = useState<MediaAssetView[]>([])
   const [storageLoading, setStorageLoading] = useState(false)
   const [settings, setSettings] = useState<AppSettingsView>(defaultSettings)
@@ -529,12 +555,21 @@ export function OperationalPage({
   async function refreshAutomations() {
     setWebhookLoading(true)
     try {
-      const [subscriptionsResponse, deliveriesResponse] = await Promise.all([
+      const [
+        subscriptionsResponse,
+        deliveriesResponse,
+        realizeOSStatusResponse,
+        realizeOSExportsResponse,
+      ] = await Promise.all([
         fetch("/api/webhooks/subscriptions"),
         fetch("/api/webhooks/deliveries?limit=12"),
+        fetch("/api/integrations/realizeos/status"),
+        fetch("/api/integrations/realizeos/exports?limit=8"),
       ])
       const subscriptionsBody = await subscriptionsResponse.json()
       const deliveriesBody = await deliveriesResponse.json()
+      const realizeOSStatusBody = await realizeOSStatusResponse.json()
+      const realizeOSExportsBody = await realizeOSExportsResponse.json()
 
       if (!subscriptionsResponse.ok) {
         throw new Error(
@@ -548,6 +583,12 @@ export function OperationalPage({
 
       setWebhookSubscriptions(subscriptionsBody.subscriptions ?? [])
       setWebhookDeliveries(deliveriesBody.deliveries ?? [])
+      if (realizeOSStatusResponse.ok) {
+        setRealizeOSStatus(realizeOSStatusBody.status)
+      }
+      if (realizeOSExportsResponse.ok) {
+        setRealizeOSExports(realizeOSExportsBody.exports ?? [])
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to refresh automations"
@@ -621,6 +662,84 @@ export function OperationalPage({
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to update subscription"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function sendWebhookTest(subscription?: WebhookSubscriptionView) {
+    if (!subscription && !webhookUrl.trim()) {
+      toast.error("Add a webhook URL or choose an existing subscription")
+      return
+    }
+
+    setWebhookLoading(true)
+    try {
+      const response = await fetch("/api/webhooks/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          subscription
+            ? { subscriptionId: subscription.id }
+            : { url: webhookUrl.trim(), eventName: webhookEventSelection[0] }
+        ),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Webhook test failed")
+      }
+
+      toast.success(`Webhook test sent (${body.responseStatus})`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Webhook test failed")
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function retryWebhookDelivery(delivery: WebhookDeliveryView) {
+    setWebhookLoading(true)
+    try {
+      const response = await fetch(`/api/webhooks/deliveries/${delivery.id}/retry`, {
+        method: "POST",
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to retry webhook delivery")
+      }
+
+      toast.success("Webhook delivery retried")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to retry delivery"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function retryRealizeOSExport(run: RealizeOSExportView) {
+    setWebhookLoading(true)
+    try {
+      const response = await fetch(
+        `/api/integrations/realizeos/exports/${run.id}/retry`,
+        { method: "POST" }
+      )
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to retry RealizeOS export")
+      }
+
+      toast.success("RealizeOS export retried")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to retry RealizeOS export"
       )
     } finally {
       setWebhookLoading(false)
@@ -1258,6 +1377,14 @@ export function OperationalPage({
                   Add webhook
                 </Button>
               </div>
+              <Button
+                variant="outline"
+                className="h-9 w-fit"
+                disabled={webhookLoading || !webhookUrl.trim()}
+                onClick={() => sendWebhookTest()}
+              >
+                Send test payload to URL
+              </Button>
               <div className="flex flex-wrap gap-2">
                 {webhookEvents.map((event) => (
                   <label
@@ -1314,6 +1441,14 @@ export function OperationalPage({
                         >
                           {subscription.enabled ? "Pause" : "Enable"}
                         </Button>
+                        <Button
+                          className="h-8"
+                          variant="outline"
+                          disabled={webhookLoading || !subscription.enabled}
+                          onClick={() => sendWebhookTest(subscription)}
+                        >
+                          Test
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1334,13 +1469,24 @@ export function OperationalPage({
               icon={BotIcon}
               title="RealizeOS"
               description="Structured meeting context exports with auditable retryable jobs."
-              status="connected"
+              status={realizeOSStatus?.configured ? "configured" : "needs setup"}
             >
               <div className="grid gap-2">
+                <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm">
+                  <div className="font-medium text-foreground">
+                    {realizeOSStatus?.configured
+                      ? `${realizeOSStatus.baseUrl}${realizeOSStatus.path}`
+                      : "REALIZEOS_API_URL missing"}
+                  </div>
+                  <p className="mt-1 leading-5 text-muted-foreground">
+                    {realizeOSStatus?.message ??
+                      "RealizeOS status will appear after the integration status endpoint loads."}
+                  </p>
+                </div>
                 <Button
                   variant="outline"
                   className="h-9 w-full justify-start"
-                  onClick={() => toast.info("Use a meeting's right rail to queue a RealizeOS export. Export jobs appear below.")}
+                  onClick={() => toast.info("Open a processed meeting and use RealizeOS export from the right rail. Export history appears here.")}
                 >
                   View export flow
                 </Button>
@@ -1351,6 +1497,49 @@ export function OperationalPage({
                 >
                   Copy payload fields
                 </Button>
+                <div className="grid gap-2 pt-1">
+                  {realizeOSExports.map((run) => (
+                    <div
+                      key={run.id}
+                      className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-muted-foreground">
+                          {run.meetingId}
+                        </span>
+                        <Badge
+                          className={
+                            run.status === "sent"
+                              ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+                              : run.status === "failed"
+                                ? "rounded-md bg-destructive/10 text-destructive"
+                                : "rounded-md bg-[var(--surface)] text-muted-foreground"
+                          }
+                        >
+                          {run.status}
+                        </Badge>
+                      </div>
+                      {run.lastError ? (
+                        <div className="mt-2 rounded-sm bg-destructive/10 px-2 py-1 text-destructive">
+                          {run.lastError}
+                        </div>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        className="mt-2 h-7"
+                        disabled={webhookLoading || !realizeOSStatus?.configured}
+                        onClick={() => retryRealizeOSExport(run)}
+                      >
+                        Retry export
+                      </Button>
+                    </div>
+                  ))}
+                  {!realizeOSExports.length ? (
+                    <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs text-muted-foreground">
+                      No RealizeOS exports yet. Export a processed meeting to create the first auditable run.
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </OpsCard>
             <OpsCard
@@ -1423,6 +1612,19 @@ export function OperationalPage({
                       {delivery.lastError}
                     </div>
                   ) : null}
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Attempts: {delivery.attempts}
+                    </span>
+                    <Button
+                      variant="outline"
+                      className="h-7"
+                      disabled={webhookLoading || delivery.status !== "failed"}
+                      onClick={() => retryWebhookDelivery(delivery)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
                 </div>
               ))}
               {!webhookDeliveries.length ? (

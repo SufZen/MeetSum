@@ -19,6 +19,7 @@ import {
   signWebhookPayload,
   verifyWebhookSignature,
 } from "@/lib/platform/events"
+import { WEBHOOK_EVENT_NAMES } from "@/lib/webhooks/management"
 
 describe("meeting state machine", () => {
   it("allows the planned audio-first meeting pipeline in order", () => {
@@ -163,5 +164,16 @@ describe("platform events and webhooks", () => {
         "secret",
       ),
     ).toBe(false)
+  })
+
+  it("exposes v0.1.0 automation and RealizeOS events for webhook subscriptions", () => {
+    expect(WEBHOOK_EVENT_NAMES).toEqual([
+      "meeting.completed",
+      "summary.created",
+      "action_item.created",
+      "meeting.process_failed",
+      "realizeos.export.sent",
+      "realizeos.export.failed",
+    ])
   })
 })

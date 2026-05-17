@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
 import { meetingRepository } from "@/lib/meetings/store"
 import { getAppSettings } from "@/lib/settings/app-settings"
 
@@ -41,6 +42,12 @@ export async function POST(
         ? body.includedSections.map(String)
         : defaultSections,
     })
+    await recordAuditLog({
+      action: "meeting.share.created",
+      targetType: "meeting",
+      targetId: id,
+      metadata: { shareId: share.id, includedSections: share.includedSections },
+    })
 
     return NextResponse.json({ share, url: shareUrl(request, share.token) })
   } catch (error) {
@@ -75,6 +82,17 @@ export async function PATCH(
       includedSections: Array.isArray(body.includedSections)
         ? body.includedSections.map(String)
         : undefined,
+    })
+    await recordAuditLog({
+      action: "meeting.share.updated",
+      targetType: "meeting",
+      targetId: id,
+      metadata: {
+        shareId: share.id,
+        revoked: share.revoked,
+        regenerate: body.regenerate === true,
+        includedSections: share.includedSections,
+      },
     })
 
     return NextResponse.json({ share, url: shareUrl(request, share.token) })

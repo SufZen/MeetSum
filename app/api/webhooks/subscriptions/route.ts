@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
 import {
   createWebhookSubscription,
   createWebhookTestSignature,
@@ -35,6 +36,12 @@ export async function POST(request: Request) {
   try {
     const subscription = await createWebhookSubscription({ url, events, secret })
     const { event, signature } = createWebhookTestSignature(subscription.url)
+    await recordAuditLog({
+      action: "webhook.subscription.created",
+      targetType: "webhook_subscription",
+      targetId: subscription.id,
+      metadata: { url: subscription.url, events: subscription.events },
+    })
 
     return NextResponse.json(
       {

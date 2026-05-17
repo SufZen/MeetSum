@@ -46,6 +46,17 @@ async function failJob(jobRecordId: string, error: unknown) {
   })
 }
 
+async function deliverPlatformEvent(
+  eventName: Parameters<typeof deliverWebhookEvent>[0]["eventName"],
+  data: Record<string, unknown>
+) {
+  try {
+    await deliverWebhookEvent({ eventName, data })
+  } catch {
+    // Webhook delivery must never hide the primary processing result.
+  }
+}
+
 async function recordAiRun(options: {
   meetingId: string
   task: string
@@ -168,9 +179,23 @@ async function processMediaJob(
     getGeminiProviderMode(),
     process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1"
   )
-  await deliverWebhookEvent({
-    eventName: "meeting.completed",
-    data: { meetingId: meeting.id, title: meeting.title },
+  await deliverPlatformEvent("summary.created", {
+    meetingId: meeting.id,
+    title: meeting.title,
+    tags: intelligence.tags,
+  })
+  for (const item of intelligence.actionItems) {
+    await deliverPlatformEvent("action_item.created", {
+      meetingId: meeting.id,
+      actionItemId: item.id,
+      title: item.title,
+      owner: item.owner,
+      priority: item.priority,
+    })
+  }
+  await deliverPlatformEvent("meeting.completed", {
+    meetingId: meeting.id,
+    title: meeting.title,
   })
 
   return {
@@ -238,6 +263,26 @@ async function processIntelligenceOnlyJob(
     getGeminiProviderMode(),
     process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "heuristic-v1"
   )
+  await deliverPlatformEvent("summary.created", {
+    meetingId: meeting.id,
+    title: meeting.title,
+    mode: payload.mode,
+    tags: intelligence.tags,
+  })
+  for (const item of intelligence.actionItems) {
+    await deliverPlatformEvent("action_item.created", {
+      meetingId: meeting.id,
+      actionItemId: item.id,
+      title: item.title,
+      owner: item.owner,
+      priority: item.priority,
+    })
+  }
+  await deliverPlatformEvent("meeting.completed", {
+    meetingId: meeting.id,
+    title: meeting.title,
+    mode: payload.mode,
+  })
 
   return {
     meetingId: meeting.id,
@@ -279,17 +324,22 @@ async function processArtifactImportJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
 
-    if (
-      !message.includes("No Google Meet transcript or smart notes artifacts")
-    ) {
-      throw error
-    }
+    let recordingImport: Awaited<ReturnType<typeof importMeetRecordingArtifactsForMeeting>>
 
-    const recordingImport = await importMeetRecordingArtifactsForMeeting({
-      meetingId: payload.meetingId,
-      subject,
-      artifactIds,
-    })
+    try {
+      recordingImport = await importMeetRecordingArtifactsForMeeting({
+        meetingId: payload.meetingId,
+        subject,
+        artifactIds,
+      })
+    } catch (recordingError) {
+      const recordingMessage =
+        recordingError instanceof Error ? recordingError.message : String(recordingError)
+
+      throw new Error(
+        `${message} Recording fallback also failed: ${recordingMessage}`
+      )
+    }
 
     if (jobRecordId) {
       await meetingRepository.updateJob(jobRecordId, {
@@ -420,6 +470,12 @@ async function processJob(job: Job<MeetSumJobPayload, unknown, MeetSumJobName>) 
     await failJob(jobRecordId, error)
     if (job.data.meetingId) {
       await meetingRepository.updateMeetingStatus(job.data.meetingId, "failed")
+      await deliverPlatformEvent("meeting.process_failed", {
+        meetingId: job.data.meetingId,
+        jobId: jobRecordId,
+        jobName: job.name,
+        error: error instanceof Error ? error.message : "Unknown job failure",
+      })
     }
     throw error
   }

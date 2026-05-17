@@ -10,6 +10,9 @@ export const WEBHOOK_EVENT_NAMES = [
   "meeting.completed",
   "summary.created",
   "action_item.created",
+  "meeting.process_failed",
+  "realizeos.export.sent",
+  "realizeos.export.failed",
 ] as const satisfies readonly PlatformEventName[]
 
 export type WebhookEventName = (typeof WEBHOOK_EVENT_NAMES)[number]
@@ -299,4 +302,162 @@ export async function listWebhookDeliveries(options: {
   )
 
   return (result.rows as DeliveryRow[]).map(mapDelivery)
+}
+
+export async function retryWebhookDelivery(id: string) {
+  if (process.env.MEETSUM_STORAGE !== "postgres") {
+    const delivery = memoryDeliveries.get(id)
+
+    if (!delivery) throw new Error("Webhook delivery not found")
+
+    const updated = {
+      ...delivery,
+      status: "sent",
+      attempts: delivery.attempts + 1,
+      responseStatus: 200,
+      lastError: undefined,
+      updatedAt: new Date().toISOString(),
+    } satisfies WebhookDeliveryView
+
+    memoryDeliveries.set(id, updated)
+    return updated
+  }
+
+  const pool = getDatabasePool()
+  const result = await pool.query(
+    `
+      select d.id, d.webhook_subscription_id, s.url as subscription_url,
+             d.event_name, d.status, d.attempts, d.event_payload,
+             s.enabled
+      from webhook_deliveries d
+      join webhook_subscriptions s on s.id = d.webhook_subscription_id
+      where d.id = $1
+      limit 1
+    `,
+    [id]
+  )
+  const row = result.rows[0] as
+    | {
+        id: string
+        webhook_subscription_id: string
+        subscription_url: string
+        event_name: string
+        attempts: number
+        event_payload: Record<string, unknown>
+        enabled: boolean
+      }
+    | undefined
+
+  if (!row) throw new Error("Webhook delivery not found")
+  if (!row.enabled) throw new Error("Webhook subscription is disabled")
+
+  await pool.query(
+    `
+      update webhook_deliveries
+      set status = 'active',
+          attempts = attempts + 1,
+          last_error = null,
+          updated_at = now()
+      where id = $1
+    `,
+    [id]
+  )
+
+  try {
+    const event = row.event_payload as Parameters<typeof signWebhookPayload>[0]
+    const response = await fetch(row.subscription_url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-meetsum-signature": signWebhookPayload(
+          event,
+          process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
+        ),
+      },
+      body: JSON.stringify(event),
+    })
+
+    const updateResult = await pool.query(
+      `
+        update webhook_deliveries
+        set status = $2,
+            response_status = $3,
+            updated_at = now()
+        where id = $1
+        returning id, webhook_subscription_id, $4::text as subscription_url,
+                  event_name, status, attempts, response_status, last_error,
+                  created_at, updated_at
+      `,
+      [id, response.ok ? "sent" : "failed", response.status, row.subscription_url]
+    )
+
+    return mapDelivery(updateResult.rows[0] as DeliveryRow)
+  } catch (error) {
+    const updateResult = await pool.query(
+      `
+        update webhook_deliveries
+        set status = 'failed',
+            last_error = $2,
+            updated_at = now()
+        where id = $1
+        returning id, webhook_subscription_id, $3::text as subscription_url,
+                  event_name, status, attempts, response_status, last_error,
+                  created_at, updated_at
+      `,
+      [
+        id,
+        error instanceof Error ? error.message : "Webhook delivery failed",
+        row.subscription_url,
+      ]
+    )
+
+    return mapDelivery(updateResult.rows[0] as DeliveryRow)
+  }
+}
+
+export async function sendWebhookTest(input: {
+  url?: string
+  subscriptionId?: string
+  eventName?: WebhookEventName
+}) {
+  const eventName = normalizeEvents(
+    input.eventName ? [input.eventName] : ["meeting.completed"]
+  )[0]
+  let url = input.url ? validateWebhookUrl(input.url) : undefined
+
+  if (!url && input.subscriptionId) {
+    const subscription = (await listWebhookSubscriptions()).find(
+      (item) => item.id === input.subscriptionId
+    )
+
+    if (!subscription) throw new Error("Webhook subscription not found")
+    if (!subscription.enabled) throw new Error("Webhook subscription is disabled")
+    url = subscription.url
+  }
+
+  if (!url) throw new Error("Webhook URL or subscriptionId is required")
+
+  const event = createPlatformEvent(eventName, {
+    test: true,
+    source: "meetsum",
+    sentAt: new Date().toISOString(),
+  })
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-meetsum-signature": signWebhookPayload(
+        event,
+        process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
+      ),
+    },
+    body: JSON.stringify(event),
+  })
+
+  return {
+    event,
+    url,
+    status: response.ok ? "sent" : "failed",
+    responseStatus: response.status,
+  }
 }

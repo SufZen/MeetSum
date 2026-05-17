@@ -6,9 +6,12 @@ export type PlatformEventName =
   | "google.drive.recording_found"
   | "meeting.created"
   | "meeting.completed"
+  | "meeting.process_failed"
   | "summary.created"
   | "action_item.created"
   | "agent.triggered"
+  | "realizeos.export.sent"
+  | "realizeos.export.failed"
 
 export type PlatformEvent<TData extends Record<string, unknown>> = {
   id: string

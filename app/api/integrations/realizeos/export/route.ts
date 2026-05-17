@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { meetingRepository } from "@/lib/meetings/store"
 import { createPlatformEvent } from "@/lib/platform/events"
@@ -37,6 +38,16 @@ export async function POST(request: Request) {
       meetingId,
       contextId,
       suggestionId: suggestion.id,
+    })
+    await recordAuditLog({
+      action: "realizeos.export.queued",
+      targetType: "meeting",
+      targetId: meetingId,
+      metadata: {
+        contextId,
+        suggestionId: suggestion.id,
+        jobId: job.id,
+      },
     })
 
     return NextResponse.json({
