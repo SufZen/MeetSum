@@ -1,5 +1,6 @@
 import { createMeetSumWorker } from "@/lib/jobs/processor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { getGoogleSyncScheduleConfig } from "@/lib/jobs/scheduler-config"
 import { getWorkspaceSubject } from "@/lib/google/auth"
 
 const worker = createMeetSumWorker()
@@ -26,35 +27,42 @@ process.on("SIGINT", async () => {
 })
 
 function scheduleGoogleSync() {
-  if (process.env.MEETSUM_SCHEDULE_GOOGLE_SYNC === "false") return
+  const config = getGoogleSyncScheduleConfig()
+
+  if (!config.enabled) return
 
   const subject = getWorkspaceSubject()
-  const calendarMinutes = Number(process.env.MEETSUM_CALENDAR_POLL_MINUTES ?? 15)
-  const driveMinutes = Number(process.env.MEETSUM_DRIVE_POLL_MINUTES ?? 30)
-  const scheduleCalendar = process.env.MEETSUM_SCHEDULE_CALENDAR_SYNC !== "false"
-  const scheduleDrive = process.env.MEETSUM_SCHEDULE_DRIVE_SYNC === "true"
 
-  if (scheduleCalendar) {
+  if (config.calendar.enabled) {
     scheduledTimers.push(
       setInterval(() => {
         void enqueueMeetSumJob("google.calendar.poll", {
           subject,
-          source: "calendar",
-          scheduled: true,
+          ...config.calendar.payload,
         }).catch((error) => console.error("Scheduled Calendar sync failed", error))
-      }, calendarMinutes * 60 * 1000)
+      }, config.calendar.minutes * 60 * 1000)
     )
   }
 
-  if (scheduleDrive) {
+  if (config.drive.enabled) {
     scheduledTimers.push(
       setInterval(() => {
         void enqueueMeetSumJob("google.drive.poll", {
           subject,
-          source: "drive",
-          scheduled: true,
+          ...config.drive.payload,
         }).catch((error) => console.error("Scheduled Drive sync failed", error))
-      }, driveMinutes * 60 * 1000)
+      }, config.drive.minutes * 60 * 1000)
+    )
+  }
+
+  if (config.meet.enabled) {
+    scheduledTimers.push(
+      setInterval(() => {
+        void enqueueMeetSumJob("google.meet.poll", {
+          subject,
+          ...config.meet.payload,
+        }).catch((error) => console.error("Scheduled Meet artifact sync failed", error))
+      }, config.meet.minutes * 60 * 1000)
     )
   }
 }

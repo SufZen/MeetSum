@@ -79,24 +79,6 @@ export function getMeetingWorkStatus(
   const readiness = getMeetingCaptureReadiness(meeting)
   const latestJob = latestMeetingJob(meeting, jobs)
 
-  if (latestJob?.status === "failed" || meeting.status === "failed") {
-    const stage = latestJob ? jobStage(latestJob) : undefined
-
-    return {
-      kind: "failed",
-      title: "Processing failed",
-      description:
-        latestJob?.error ??
-        "The last processing attempt failed. Review the job error and retry when ready.",
-      primaryAction: latestJob?.retryable === false ? "none" : "retry",
-      checks: readiness.checks,
-      jobId: latestJob?.id,
-      stage,
-      progress: 0,
-      retryable: latestJob?.retryable !== false,
-    }
-  }
-
   if (latestJob?.status === "queued" || latestJob?.status === "active") {
     const stage = jobStage(latestJob)
     const details = stageDetails[stage] ?? {
@@ -125,6 +107,24 @@ export function getMeetingWorkStatus(
       primaryAction: readiness.primaryAction,
       checks: readiness.checks,
       progress: 1,
+    }
+  }
+
+  if (latestJob?.status === "failed" || meeting.status === "failed") {
+    const stage = latestJob ? jobStage(latestJob) : undefined
+
+    return {
+      kind: "failed",
+      title: "Processing failed",
+      description:
+        latestJob?.error ??
+        "The last processing attempt failed. Review the job error and retry when ready.",
+      primaryAction: latestJob?.retryable === false ? "none" : "retry",
+      checks: readiness.checks,
+      jobId: latestJob?.id,
+      stage,
+      progress: 0,
+      retryable: latestJob?.retryable !== false,
     }
   }
 

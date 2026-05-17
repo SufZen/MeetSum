@@ -392,6 +392,8 @@ export function OperationalPage({
   onSyncCalendar,
   onFindDriveRecordings,
   onRetryJob,
+  onOpenMeeting,
+  onProcessMeeting,
 }: {
   panel: MainPanelKey
   meetings: MeetingRecord[]
@@ -404,6 +406,8 @@ export function OperationalPage({
   onSyncCalendar: () => void
   onFindDriveRecordings: () => void
   onRetryJob: (job: JobRecord) => void
+  onOpenMeeting: (meetingId: string) => void
+  onProcessMeeting: (meetingId: string) => void
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
   const [memoryQuestion, setMemoryQuestion] = useState("")
@@ -906,6 +910,25 @@ export function OperationalPage({
                             </span>
                           )}
                         </div>
+                        {record.meetingId && record.artifacts.length ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              onClick={() => onOpenMeeting(record.meetingId!)}
+                            >
+                              Open meeting
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="h-8"
+                              onClick={() => onProcessMeeting(record.meetingId!)}
+                            >
+                              Process artifacts
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -915,7 +938,12 @@ export function OperationalPage({
             <ProviderHealthPanel providers={providers} />
           </div>
           <div className="xl:col-span-2">
-            <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
+            <JobActivityCenter
+              jobs={jobs}
+              meetings={meetings}
+              onRetry={onRetryJob}
+              onOpenMeeting={onOpenMeeting}
+            />
           </div>
         </div>
       </PageFrame>

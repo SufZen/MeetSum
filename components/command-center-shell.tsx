@@ -44,6 +44,16 @@ type MeetingPageState = {
   hasMore: boolean
 }
 
+function hasImportableMeetArtifacts(meeting: MeetingRecord | null) {
+  return Boolean(
+    meeting?.meetConferenceRecords?.some((record) =>
+      record.artifacts.some((artifact) =>
+        ["transcript", "smart_notes", "recording"].includes(artifact.artifactType)
+      )
+    )
+  )
+}
+
 export function CommandCenterShell({
   dictionary,
   locale,
@@ -716,13 +726,19 @@ export function CommandCenterShell({
     })
   }
 
-  function processMeeting() {
-    if (!selectedMeeting) return
+  function processMeeting(meetingToProcess: MeetingRecord | null = selectedMeeting) {
+    if (!meetingToProcess) return
 
     startTransition(() => {
       void (async () => {
-        const response = await fetch(`/api/meetings/${selectedMeeting.id}/process`, {
+        const useArtifacts = hasImportableMeetArtifacts(meetingToProcess)
+        const endpoint = useArtifacts
+          ? `/api/meetings/${meetingToProcess.id}/artifacts/import`
+          : `/api/meetings/${meetingToProcess.id}/process`
+        const response = await fetch(endpoint, {
           method: "POST",
+          headers: { "content-type": "application/json" },
+          body: useArtifacts ? JSON.stringify({}) : undefined,
         })
         const body = await response.json()
 
@@ -732,8 +748,13 @@ export function CommandCenterShell({
         }
 
         setJobs((current) => [body.job, ...current])
-        toast.success(body.message ?? "Processing queued")
-        await refreshMeeting(selectedMeeting.id)
+        toast.success(
+          body.message ??
+            (useArtifacts
+              ? "Google Meet artifact processing queued"
+              : "Processing queued")
+        )
+        await refreshMeeting(meetingToProcess.id)
         await refreshOperationalState()
       })().catch((error) =>
         toast.error(error instanceof Error ? error.message : "Unable to process meeting")
@@ -984,6 +1005,13 @@ export function CommandCenterShell({
                     value={shareLink || "Creating link..."}
                   />
                 </div>
+                {selectedMeeting && !selectedMeeting.summary?.overview ? (
+                  <div className="mt-3 rounded-md border border-[var(--status-warning)]/40 bg-[var(--tag-action)] px-3 py-2 text-xs leading-5 text-[var(--tag-action-fg)]">
+                    This meeting has no generated summary yet. The public page
+                    will still open, but it may only show metadata, participants,
+                    and any transcript that exists.
+                  </div>
+                ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
                     disabled={!shareLink}
@@ -998,10 +1026,28 @@ export function CommandCenterShell({
                   >
                     Open
                   </Button>
-                  <Button variant="outline" onClick={regenerateShareLink}>
+                  <Button
+                    disabled={!shareLink}
+                    variant="outline"
+                    onClick={regenerateShareLink}
+                    title={
+                      shareLink
+                        ? "Regenerate the public share token"
+                        : "Create the first share link before regenerating"
+                    }
+                  >
                     Regenerate
                   </Button>
-                  <Button variant="destructive" onClick={revokeShareLink}>
+                  <Button
+                    disabled={!shareLink}
+                    variant="destructive"
+                    onClick={revokeShareLink}
+                    title={
+                      shareLink
+                        ? "Revoke this public share link"
+                        : "No active public link to revoke"
+                    }
+                  >
                     Revoke
                   </Button>
                 </div>
@@ -1033,49 +1079,59 @@ export function CommandCenterShell({
                       className="grid gap-2 rounded-md border border-[var(--divider)] p-3 md:grid-cols-[1fr_1fr_110px_auto]"
                       key={participant.id}
                     >
-                      <input
-                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
-                        value={participant.name}
-                        onChange={(event) =>
-                          setParticipants((current) =>
-                            current.map((item) =>
-                              item.id === participant.id
-                                ? { ...item, name: event.target.value }
-                                : item
+                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                        Name
+                        <input
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          value={participant.name}
+                          onChange={(event) =>
+                            setParticipants((current) =>
+                              current.map((item) =>
+                                item.id === participant.id
+                                  ? { ...item, name: event.target.value }
+                                  : item
+                              )
                             )
-                          )
-                        }
-                      />
-                      <input
-                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
-                        placeholder="email"
-                        value={participant.email ?? ""}
-                        onChange={(event) =>
-                          setParticipants((current) =>
-                            current.map((item) =>
-                              item.id === participant.id
-                                ? { ...item, email: event.target.value }
-                                : item
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                        Email
+                        <input
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          placeholder="email"
+                          value={participant.email ?? ""}
+                          onChange={(event) =>
+                            setParticipants((current) =>
+                              current.map((item) =>
+                                item.id === participant.id
+                                  ? { ...item, email: event.target.value }
+                                  : item
+                              )
                             )
-                          )
-                        }
-                      />
-                      <input
-                        className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm"
-                        placeholder="Speaker"
-                        value={participant.speakerLabel ?? ""}
-                        onChange={(event) =>
-                          setParticipants((current) =>
-                            current.map((item) =>
-                              item.id === participant.id
-                                ? { ...item, speakerLabel: event.target.value }
-                                : item
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                        Speaker
+                        <input
+                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          placeholder="Speaker"
+                          value={participant.speakerLabel ?? ""}
+                          onChange={(event) =>
+                            setParticipants((current) =>
+                              current.map((item) =>
+                                item.id === participant.id
+                                  ? { ...item, speakerLabel: event.target.value }
+                                  : item
+                              )
                             )
-                          )
-                        }
-                      />
+                          }
+                        />
+                      </label>
                       <Button
                         variant="outline"
+                        className="self-end"
                         onClick={() => saveParticipant(participant)}
                       >
                         Save
@@ -1126,6 +1182,14 @@ export function CommandCenterShell({
                   onSyncCalendar={() => syncGoogle("calendar")}
                   onFindDriveRecordings={() => setDrivePickerOpen(true)}
                   onRetryJob={retryJob}
+                  onOpenMeeting={selectMeeting}
+                  onProcessMeeting={(meetingId) => {
+                    const meetingToProcess = meetingRecords.find(
+                      (meeting) => meeting.id === meetingId
+                    )
+                    selectMeeting(meetingId)
+                    processMeeting(meetingToProcess ?? null)
+                  }}
                 />
               )}
         </section>

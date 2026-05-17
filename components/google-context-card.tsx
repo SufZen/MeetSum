@@ -44,6 +44,9 @@ export function GoogleContextCard({
   const recordings = artifacts.filter((artifact) => artifact.artifactType === "recording")
   const transcripts = artifacts.filter((artifact) => artifact.artifactType === "transcript")
   const smartNotes = artifacts.filter((artifact) => artifact.artifactType === "smart_notes")
+  const artifactCountLabel = artifacts.length
+    ? `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} linked`
+    : "No artifacts linked"
   const hasProcessSource = Boolean(
       meeting?.mediaAssets?.some((asset) => asset.storageKey) ||
       meeting?.transcript?.length ||
@@ -117,6 +120,12 @@ export function GoogleContextCard({
           {hasArtifactContext ? "linked" : "pending"}
         </Badge>
       </div>
+      <div className="mb-3 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-xs leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground">{artifactCountLabel}</span>
+        {primaryConferenceRecord?.startTime
+          ? ` · Meet record ${formatDate(primaryConferenceRecord.startTime)}`
+          : " · Sync Meet artifacts after the call to refresh this context."}
+      </div>
       {readiness ? (
         <div className="mb-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
           <div className="text-xs font-semibold text-foreground">
@@ -187,7 +196,9 @@ export function GoogleContextCard({
                 ? "Import smart notes"
                 : "Import recording artifact"
             : hasProcessSource
-              ? "Process from attached source"
+              ? transcripts.length || smartNotes.length || recordings.length
+                ? "Process from Google artifacts"
+                : "Process from attached source"
             : hasArtifactContext
               ? "Artifact linked; source needed"
               : "No Google source attached"}

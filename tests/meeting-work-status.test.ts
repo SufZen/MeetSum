@@ -108,6 +108,46 @@ describe("meeting work status", () => {
     })
   })
 
+  it("keeps processed meetings completed even when an old failed job remains", () => {
+    const status = getMeetingWorkStatus(
+      meeting({
+        status: "completed",
+        summary: {
+          overview: "The team agreed on the next setup step.",
+          decisions: ["Proceed with the VPS setup."],
+          actionItems: [],
+        },
+        transcript: [
+          {
+            id: "segment_1",
+            speaker: "Ran",
+            startMs: 0,
+            endMs: 5000,
+            text: "We should continue with the VPS setup.",
+            language: "en",
+            confidence: 0.9,
+          },
+        ],
+      }),
+      [
+        job({
+          id: "job_old_failed",
+          status: "failed",
+          result: { stage: "audio.transcribe" },
+          error: "Old provider timeout",
+          updatedAt: "2026-05-07T10:05:00.000Z",
+        }),
+      ]
+    )
+
+    expect(status).toMatchObject({
+      kind: "completed",
+      title: "Processed",
+      primaryAction: "none",
+      progress: 1,
+    })
+  })
+
   it("marks future Google meetings as capture armed", () => {
     const status = getMeetingWorkStatus(meeting(), [])
 

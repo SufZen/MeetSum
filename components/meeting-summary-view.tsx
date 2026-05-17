@@ -154,7 +154,9 @@ export function MeetingSummaryView({
               onClick={() => onReprocessMeeting("full")}
             >
               <RefreshCwIcon data-icon="inline-start" className="size-4" />
-              Reprocess
+              {hasMeetImportableArtifact && !hasMedia
+                ? "Process from Google artifacts"
+                : "Reprocess"}
             </Button>
             <Button
               variant="ghost"
@@ -218,7 +220,9 @@ export function MeetingSummaryView({
                   onClick={onProcessMeeting}
                 >
                   <PlayCircleIcon data-icon="inline-start" className="size-4" />
-                  Process now
+                  {hasMeetImportableArtifact
+                    ? "Process from Google artifacts"
+                    : "Process now"}
                 </Button>
               ) : null}
               {workStatus.primaryAction === "sync_artifacts" ? (

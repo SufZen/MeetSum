@@ -9,6 +9,7 @@ import { getDatabasePool } from "@/lib/db/client"
 import {
   importMeetRecordingArtifactsForMeeting,
   importMeetTranscriptArtifactsForMeeting,
+  syncMeetArtifacts,
 } from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
 import { cleanupTranscriptSegments } from "@/lib/intelligence"
@@ -354,6 +355,16 @@ async function processGoogleJob(
 
   if (name === "google.gmail.poll") {
     return pollGmail(subject)
+  }
+
+  if (name === "google.meet.poll") {
+    return syncMeetArtifacts({
+      subject,
+      limit:
+        typeof payload.limit === "number"
+          ? payload.limit
+          : Number(process.env.MEETSUM_MEET_POLL_LIMIT ?? 10),
+    })
   }
 
   return { source: name, status: "ignored" }

@@ -11,6 +11,7 @@ export type MeetSumJobName =
   | "google.calendar.poll"
   | "google.drive.poll"
   | "google.gmail.poll"
+  | "google.meet.poll"
   | "webhook.deliver"
   | "realizeos.export"
 
