@@ -43,15 +43,139 @@ Coolify's Traefik entrypoints are named `http` and `https`.
 
 RealizeOS currently runs directly on the VPS host at port `8082`. The production compose file maps `host.docker.internal` to the Docker host gateway for `app` and `worker`, so MeetSum can use `REALIZEOS_API_URL=http://host.docker.internal:8082` without exposing RealizeOS publicly.
 
+Google Workspace signing material is mounted read-only from:
+
+```text
+/opt/meetsum/secrets
+```
+
+Production should prefer keyless domain-wide delegation. Leave
+`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` and `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`
+empty, set `GOOGLE_SERVICE_ACCOUNT_EMAIL`, and give the runtime Application
+Default Credentials permission to call IAM Credentials `signJwt` for that
+service account.
+
+```env
+GOOGLE_WORKSPACE_ADMIN_EMAIL=info@realization.co.il
+GOOGLE_WORKSPACE_SUBJECT=info@realization.co.il
+GOOGLE_SERVICE_ACCOUNT_EMAIL=meetsum-workspace-sync@meetsum-494211.iam.gserviceaccount.com
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=
+GOOGLE_SERVICE_ACCOUNT_KEY_FILE=
+MEETSUM_SCHEDULE_GOOGLE_SYNC=true
+MEETSUM_SCHEDULE_CALENDAR_SYNC=true
+MEETSUM_SCHEDULE_DRIVE_SYNC=false
+MEETSUM_CALENDAR_POLL_MINUTES=15
+MEETSUM_CALENDAR_LOOKBACK_DAYS=30
+MEETSUM_CALENDAR_LOOKAHEAD_DAYS=60
+MEETSUM_CALENDAR_IMPORT_ALL=false
+MEETSUM_CALENDAR_EXCLUDED_CALENDAR_PATTERNS=holiday,birthday,reminder,task
+MEETSUM_CALENDAR_EXCLUDED_TITLE_PATTERNS=break,brunch,dinner,gym,lunch,me time,sleep,workout
+MEETSUM_DRIVE_POLL_MINUTES=30
+MEETSUM_DRIVE_MAX_IMPORTS_PER_POLL=2
+MEETSUM_DRIVE_MAX_IMPORT_BYTES=2000000000
+```
+
+Calendar polling should stay on for the first production phase, but keep it
+selective. With `MEETSUM_CALENDAR_IMPORT_ALL=false`, MeetSum imports events that
+look like meetings, primarily events with Google Meet links or attendees, and
+skips all-day holidays and routine personal blocks. Set
+`MEETSUM_CALENDAR_IMPORT_ALL=true` only for an operator-controlled backfill.
+
+Drive imports should remain manual or explicitly enabled for small batches until
+retention, operator review, and storage expansion are in place. The importer
+stores extracted audio for video recordings by default; raw video archiving
+should only be enabled deliberately.
+
+If an early broad Calendar sync imports personal blocks or holidays before the
+selective importer is enabled, run a dry-run cleanup first:
+
+```bash
+npm run calendar:cleanup -- --limit=200
+```
+
+Then execute only after reviewing the listed rows:
+
+```bash
+npm run calendar:cleanup -- --limit=200 --execute
+```
+
+The cleanup only deletes unprocessed Google Calendar placeholder meetings with
+no participants, no Meet link, no media, no transcript, no summary, and no
+action items.
+
+If keyless signing is not available, development may still use
+`GOOGLE_SERVICE_ACCOUNT_KEY_FILE=/opt/meetsum/secrets/google-service-account.json`
+or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`. Do not commit service-account JSON
+files, Gemini keys, OAuth secrets, or meeting media.
+
+For the temporary AI Studio Gemini key path, keep Gemini available as the
+fallback provider:
+
+```env
+MEETSUM_TRANSCRIPTION_PROVIDER=auto
+GOOGLE_GENAI_USE_VERTEXAI=false
+GOOGLE_GEMINI_API_KEY=...
+```
+
+For the production Vertex AI path, create a dedicated `meetsum-ai-runtime` service account, grant `roles/aiplatform.user`, store the JSON at `/opt/meetsum/secrets/vertex-ai-runtime.json`, and switch:
+
+```env
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=meetsum-494211
+GOOGLE_CLOUD_LOCATION=global
+GOOGLE_APPLICATION_CREDENTIALS=/opt/meetsum/secrets/vertex-ai-runtime.json
+```
+
 Because the app joins both the MeetSum network and Coolify's network, internal service URLs use unique aliases:
 
 - `meetsum-postgres`
 - `meetsum-redis`
 - `meetsum-minio`
 
+## Optional Local Hebrew ASR
+
+`auto` is the recommended first-user production mode: Hebrew and mixed-language
+meetings try local ivrit-ai ASR first, clearly non-Hebrew meetings use Gemini,
+and Gemini remains the fallback if local ASR fails. Run the optional
+faster-whisper service with:
+
+```bash
+docker compose --env-file .env.local -f docker-compose.prod.yml --profile local-asr up -d faster-whisper
+```
+
+Then set:
+
+```env
+MEETSUM_TRANSCRIPTION_PROVIDER=auto
+LOCAL_TRANSCRIPTION_URL=http://faster-whisper:8000
+LOCAL_TRANSCRIPTION_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
+LOCAL_TRANSCRIPTION_LANGUAGE=he
+LOCAL_TRANSCRIPTION_TIMEOUT_MS=900000
+```
+
+Use `local-whisper` only for deliberate local-only tests. A Ryzen AI MAX laptop
+can be used as an external ASR host by pointing `LOCAL_TRANSCRIPTION_URL` at a
+private VPN/LAN URL; it is not required for the VPS deployment.
+
+Run private benchmarks from uncommitted samples:
+
+```bash
+npm run asr:evaluate -- --manifest .secrets/asr-eval/manifest.json
+```
+
+The manifest should reference local audio files and reference transcripts under
+`.secrets/asr-eval`; that directory is gitignored and must remain private.
+
 ## Health
 
 `GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.
+
+Operational UI status comes from:
+
+- `GET /api/ai/providers/status`
+- `GET /api/workspace/status`
+- `GET /api/google/sync/status`
+- `GET /api/jobs`
 
 ## Deploy Flow
 
@@ -65,9 +189,8 @@ docker compose --env-file .env.local -f docker-compose.prod.yml up -d --remove-o
 
 The helper `scripts/deploy-vps.sh` performs the same flow.
 
-The `worker` and bundled `n8n` services are profile-gated. Start them only when they are ready to do useful work:
+The `worker` runs by default because uploads, Gemini transcription, Google polling, RealizeOS export, and retryable jobs all depend on it. The bundled `n8n` service remains profile-gated until a live workflow is created:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.prod.yml --profile worker up -d worker
 docker compose --env-file .env.local -f docker-compose.prod.yml --profile automation up -d n8n
 ```

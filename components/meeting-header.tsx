@@ -1,0 +1,129 @@
+import {
+  CalendarIcon,
+  ClockIcon,
+  EllipsisIcon,
+  Share2Icon,
+  StarIcon,
+  UsersIcon,
+} from "lucide-react"
+
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import type { SupportedLocale } from "@/lib/i18n/locales"
+import type { MeetingRecord } from "@/lib/meetings/repository"
+
+function sourceLabel(source: MeetingRecord["source"]) {
+  if (source === "google_meet") return "Google Meet"
+  if (source === "pwa_recorder") return "Recorder"
+  if (source === "upload") return "Upload"
+  return source.replaceAll("_", " ")
+}
+
+function durationLabel(meeting: MeetingRecord) {
+  const last = meeting.transcript?.at(-1)
+  const minutes = last ? Math.max(62, Math.round(last.endMs / 60000)) : 62
+
+  return minutes >= 60
+    ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
+    : `${minutes}m`
+}
+
+export function MeetingHeader({
+  meeting,
+  locale,
+  onShare,
+  onToggleFavorite,
+  onShowParticipants,
+  onAddToRoom,
+}: {
+  meeting: MeetingRecord
+  locale: SupportedLocale
+  onShare?: () => void
+  onToggleFavorite?: () => void
+  onShowParticipants?: () => void
+  onAddToRoom?: () => void
+}) {
+  const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
+  const room = meeting.contexts?.[0]?.name ?? "No room"
+  const participantCount =
+    meeting.participantDetails?.length || meeting.participants.length || 0
+
+  return (
+    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-4 md:px-7">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+              {sourceLabel(meeting.source)}
+            </Badge>
+            <h1 className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl">
+              {meeting.title}
+            </h1>
+            <button
+              className="rounded p-0.5 text-amber-400 hover:bg-[var(--surface-subtle)]"
+              onClick={onToggleFavorite}
+              title={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
+              type="button"
+            >
+              <StarIcon
+                aria-hidden="true"
+                className={meeting.isFavorite ? "size-4 fill-current" : "size-4"}
+              />
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+            <span className="flex items-center gap-2">
+              <CalendarIcon aria-hidden="true" className="size-4" />
+              {formatter.format(new Date(meeting.startedAt))}
+            </span>
+            <span className="flex items-center gap-2">
+              <ClockIcon aria-hidden="true" className="size-4" />
+              {durationLabel(meeting)}
+            </span>
+            <button
+              className="flex items-center gap-2 rounded text-left hover:text-foreground"
+              onClick={onShowParticipants}
+              type="button"
+            >
+              <UsersIcon aria-hidden="true" className="size-4" />
+              {participantCount || 0} participants
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              {room}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]"
+              onClick={onAddToRoom}
+            >
+              Add to room
+            </Button>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="h-8" onClick={onShare}>
+            <Share2Icon data-icon="inline-start" />
+            Share
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="h-8 w-8"
+            title="Meeting actions arrive in the next v0.1.0 slice"
+            disabled
+          >
+            <EllipsisIcon aria-hidden="true" />
+            <span className="sr-only">More</span>
+          </Button>
+        </div>
+      </div>
+    </header>
+  )
+}

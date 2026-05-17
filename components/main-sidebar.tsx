@@ -1,0 +1,128 @@
+"use client"
+
+import {
+  BrainIcon,
+  CalendarDaysIcon,
+  DatabaseIcon,
+  BookOpenIcon,
+  FolderPlusIcon,
+  SettingsIcon,
+  WorkflowIcon,
+  AudioWaveformIcon,
+  ZapIcon,
+  ChevronDownIcon,
+} from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+
+const panelKeys = [
+  "meetings",
+  "memory",
+  "workspace",
+  "automations",
+  "storage",
+  "manual",
+  "settings",
+] as const
+
+export type MainPanelKey = (typeof panelKeys)[number]
+
+const navIcons = [
+  CalendarDaysIcon,
+  BrainIcon,
+  WorkflowIcon,
+  ZapIcon,
+  DatabaseIcon,
+  BookOpenIcon,
+  SettingsIcon,
+]
+
+export function MainSidebar({
+  dictionary,
+  activePanel,
+  onPanelChange,
+}: {
+  dictionary: Dictionary
+  activePanel: MainPanelKey
+  onPanelChange: (panel: MainPanelKey) => void
+}) {
+  const navItems = [
+    dictionary.navMeetings,
+    dictionary.navMemory,
+    dictionary.navWorkspace,
+    dictionary.navAutomations,
+    dictionary.navStorage,
+    dictionary.navManual,
+    dictionary.navSettings,
+  ]
+  const rooms = [
+    ["Real Estate Acquisitions", "bg-emerald-400"],
+    ["Project Horizon", "bg-sky-400"],
+    ["Operations", "bg-violet-400"],
+    ["Finance", "bg-amber-400"],
+    ["Product", "bg-slate-400"],
+  ] as const
+
+  return (
+    <aside className="flex min-h-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
+      <div className="flex h-11 items-center justify-center gap-3 px-1 lg:h-12 lg:justify-start">
+        <div className="grid size-7 place-items-center rounded-md bg-[var(--primary)]/10 text-[var(--primary)]">
+          <AudioWaveformIcon aria-hidden="true" className="size-4" />
+        </div>
+        <div className="text-lg font-semibold tracking-tight text-foreground">MeetSum</div>
+      </div>
+
+      <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-[var(--divider)] py-3 lg:grid lg:gap-1.5 lg:overflow-visible">
+        {navItems.map((label, index) => {
+          const Icon = navIcons[index]
+          const panel = panelKeys[index]
+          const active = activePanel === panel
+
+          return (
+            <Button
+              key={panel}
+              variant="ghost"
+              className={
+                active
+                  ? "h-9 min-w-fit justify-start rounded-md bg-[var(--sidebar-primary)] px-3 font-semibold text-[var(--sidebar-primary-foreground)] hover:bg-[var(--sidebar-primary)] hover:text-[var(--sidebar-primary-foreground)] lg:min-w-0"
+                  : "h-9 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground lg:min-w-0"
+              }
+              onClick={() => onPanelChange(panel)}
+            >
+              <Icon data-icon="inline-start" className="size-4" />
+              {label}
+            </Button>
+          )
+        })}
+      </nav>
+
+      <div className="mt-auto hidden px-3 pb-2 lg:block">
+        <div className="mb-4 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>Recent rooms</span>
+          <FolderPlusIcon aria-hidden="true" className="size-4 text-[var(--primary)]" />
+        </div>
+        <div className="grid gap-2.5 text-sm text-sidebar-foreground">
+          {rooms.map(([room, color]) => (
+            <div key={room} className="flex min-w-0 items-center gap-2">
+              <span className={`size-2 rounded-full ${color}`} />
+              <span className="truncate">{room}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-8 flex items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3">
+          <div className="grid size-8 place-items-center rounded-full bg-[var(--primary)] text-sm font-semibold text-white">
+            I
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Info</div>
+            <div className="truncate text-xs text-muted-foreground">
+              info@realization.co.il
+            </div>
+          </div>
+          <ChevronDownIcon aria-hidden="true" className="ms-auto size-4 text-muted-foreground" />
+        </div>
+      </div>
+    </aside>
+  )
+}

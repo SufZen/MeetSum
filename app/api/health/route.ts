@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { getDatabasePool } from "@/lib/db/client"
 import { createHealthReport, type HealthState } from "@/lib/health/status"
+import { validateRuntimeEnvironment } from "@/lib/ops/environment"
 
 const startedAt = Date.now()
 
@@ -26,6 +27,7 @@ export async function GET() {
           process.env.MINIO_ENDPOINT ??
           process.env.AWS_ENDPOINT_URL_S3
       ),
+    warnings: () => validateRuntimeEnvironment().warnings,
   })
 
   return NextResponse.json(report)

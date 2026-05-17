@@ -216,20 +216,41 @@ export function extractSmartTasks(
   segments: TranscriptSegment[]
 ): SmartTask[] {
   const taskPatterns =
-    /(צריך|נדרש|לשלוח|להכין|need|should|must|precisamos|necesitamos|dobbiamo|enviar|inviare)/i
+    /(צריך|צריכה|נדרש|חייב|אפשר לשלוח|לשלוח|להכין|תקבע|לקבוע|תבדוק|לבדוק|need\b|needs to|should|must|please send|send|prepare|schedule|follow up|precisamos|necesitamos|dobbiamo|enviar|inviare)/i
+  const weakDiscussionPatterns =
+    /^(uh|um|okay|yeah|yes|no|so|but|and|i think|you know|maybe|right)\b/i
 
   return segments
     .filter((segment) => taskPatterns.test(segment.text))
-    .map((segment, index) => {
+    .map((segment) => {
+      const candidate =
+        segment.text
+          .split(/(?<=[.!?])\s+/)
+          .find((sentence) => taskPatterns.test(sentence)) ?? segment.text
+      const title = candidate
+        .replace(/\s+/g, " ")
+        .replace(/^[-–•\s]+/, "")
+        .trim()
+        .slice(0, 160)
+
+      return { segment, title }
+    })
+    .filter(({ title }) => {
+      const wordCount = title.split(/\s+/).filter(Boolean).length
+
+      return wordCount >= 4 && !weakDiscussionPatterns.test(title)
+    })
+    .slice(0, 12)
+    .map(({ segment, title }, index) => {
       const urgent = /urgent|דחוף|דחופה|critico|urgente/i.test(segment.text)
 
       return {
         id: `task_${segment.id}_${index}`,
-        title: segment.text.slice(0, 140),
+        title,
         owner: segment.speaker,
         status: "open",
         priority: urgent ? "urgent" : "normal",
-        confidence: urgent ? 0.87 : 0.78,
+        confidence: urgent ? 0.87 : 0.68,
         sourceQuote: segment.text,
         sourceStartMs: segment.startMs,
         kind: "explicit",

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import {
   buildGoogleSyncPlan,
   type GoogleSyncSource,
 } from "@/lib/google/workspace"
+import { getWorkspaceSubject } from "@/lib/google/auth"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 const eventBySource: Record<
@@ -20,14 +22,14 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ source: string }> }
 ) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
   }
 
   const { source } = await params
-  const { subject = "admin@example.com" } = (await request
+  const { subject = getWorkspaceSubject() } = (await request
     .json()
     .catch(() => ({}))) as {
     subject?: string
@@ -38,15 +40,28 @@ export async function POST(
   }
 
   const syncSource = source as GoogleSyncSource
+
+  if (syncSource === "drive") {
+    return jsonError(
+      "Drive auto-import is disabled. Use /api/google/drive/recordings to review candidates and /api/google/drive/import to import selected files.",
+      409
+    )
+  }
+
   const syncItem = buildGoogleSyncPlan(subject).find(
     (item) => item.source === syncSource
   )
+  const job = await enqueueMeetSumJob(`google.${syncSource}.poll`, {
+    subject,
+    source: syncSource,
+  })
 
   return NextResponse.json({
     sync: {
       ...syncItem,
       status: "queued",
     },
+    job,
     event: createPlatformEvent(eventBySource[syncSource], {
       subject,
       source: syncSource,

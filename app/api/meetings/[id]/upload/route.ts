@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { meetingRepository } from "@/lib/meetings/store"
 import { createPlatformEvent } from "@/lib/platform/events"
+import { storeMeetingObject } from "@/lib/storage/object-storage"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
@@ -21,15 +24,35 @@ export async function POST(
     return jsonError("Audio or video file is required", 400)
   }
 
-  return NextResponse.json({
-    asset: {
-      meetingId: id,
-      filename: file.name,
-      contentType: file.type || "application/octet-stream",
-      size: file.size,
-      retention: "audio",
-      nextStatus: "media_uploaded",
-    },
-    event: createPlatformEvent("meeting.created", { meetingId: id }),
+  const contentType = file.type || "application/octet-stream"
+  const bytes = Buffer.from(await file.arrayBuffer())
+  const stored = await storeMeetingObject({
+    meetingId: id,
+    filename: file.name,
+    contentType,
+    bytes,
   })
+  const asset = await meetingRepository.createMediaAsset({
+    meetingId: id,
+    storageKey: stored.key,
+    filename: file.name,
+    contentType,
+    sizeBytes: stored.sizeBytes,
+    retention: contentType.startsWith("video/") ? "video" : "audio",
+  })
+  const job = await enqueueMeetSumJob("media.ingest", {
+    meetingId: id,
+    assetId: asset.id,
+    storageKey: stored.key,
+    bucket: stored.bucket,
+  })
+
+  return NextResponse.json(
+    {
+      asset,
+      job,
+      event: createPlatformEvent("meeting.created", { meetingId: id }),
+    },
+    { status: 202 }
+  )
 }

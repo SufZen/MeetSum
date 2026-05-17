@@ -4,6 +4,7 @@ import {
   GOOGLE_WORKSPACE_SCOPES,
   buildGoogleSyncPlan,
 } from "@/lib/google/workspace"
+import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import {
   shouldEscalateTranscription,
   summarizeInHebrewPrompt,
@@ -18,6 +19,7 @@ import {
   signWebhookPayload,
   verifyWebhookSignature,
 } from "@/lib/platform/events"
+import { WEBHOOK_EVENT_NAMES } from "@/lib/webhooks/management"
 
 describe("meeting state machine", () => {
   it("allows the planned audio-first meeting pipeline in order", () => {
@@ -93,6 +95,9 @@ describe("Google Workspace connector policy", () => {
     expect(GOOGLE_WORKSPACE_SCOPES.drive).toContain(
       "https://www.googleapis.com/auth/drive.readonly",
     )
+    expect(GOOGLE_WORKSPACE_SCOPES.meet).toContain(
+      "https://www.googleapis.com/auth/meetings.space.readonly",
+    )
   })
 
   it("builds a sync plan for all first-class Google sources", () => {
@@ -100,7 +105,7 @@ describe("Google Workspace connector policy", () => {
       {
         source: "calendar",
         subject: "admin@example.com",
-        mode: "incremental-watch",
+        mode: "incremental-polling",
       },
       {
         source: "gmail",
@@ -110,9 +115,37 @@ describe("Google Workspace connector policy", () => {
       {
         source: "drive",
         subject: "admin@example.com",
-        mode: "changes-watch",
+        mode: "recording-polling",
       },
     ])
+  })
+
+  it("defaults Workspace DWD to keyless IAM signing when no private key is present", () => {
+    const previousEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    const previousWorkspace = process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT
+    const previousPrivateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    const previousKeyFile = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE
+
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL =
+      "meetsum-workspace-sync@meetsum-494211.iam.gserviceaccount.com"
+    delete process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE
+
+    expect(getWorkspaceAuthStatus("info@realization.co.il")).toMatchObject({
+      subject: "info@realization.co.il",
+      strategy: "keyless-iam-signjwt",
+      configured: true,
+    })
+
+    if (previousEmail === undefined) delete process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    else process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL = previousEmail
+    if (previousWorkspace === undefined) delete process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT
+    else process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT = previousWorkspace
+    if (previousPrivateKey === undefined) delete process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    else process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY = previousPrivateKey
+    if (previousKeyFile === undefined) delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE
+    else process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE = previousKeyFile
   })
 })
 
@@ -131,5 +164,16 @@ describe("platform events and webhooks", () => {
         "secret",
       ),
     ).toBe(false)
+  })
+
+  it("exposes v0.1.0 automation and RealizeOS events for webhook subscriptions", () => {
+    expect(WEBHOOK_EVENT_NAMES).toEqual([
+      "meeting.completed",
+      "summary.created",
+      "action_item.created",
+      "meeting.process_failed",
+      "realizeos.export.sent",
+      "realizeos.export.failed",
+    ])
   })
 })

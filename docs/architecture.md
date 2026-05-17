@@ -16,7 +16,11 @@ The `app`, `worker`, and `migrate` containers are disposable. Postgres, Redis, M
 
 ## Google Workspace
 
-Use domain-wide delegation with narrow scope groups from `lib/google/workspace.ts`. Calendar, Gmail, and Drive each keep their own sync state and watch-channel metadata. Calendar identifies meetings, Drive imports Google Meet recordings, and Gmail supplies prep/follow-up context.
+Use domain-wide delegation with narrow scope groups from `lib/google/workspace.ts`. Calendar, Gmail, Drive, and Meet each keep their own sync state. Calendar identifies meetings, Drive imports selected Google Meet recordings, Meet artifacts provide conference records/transcript metadata, and Gmail supplies prep/follow-up context after the core capture path is reliable.
+
+Meet recording, transcript, and smart-notes artifacts can be imported through `POST /api/meetings/:id/artifacts/import`. The worker fetches structured transcript entries from Google Meet, exports the linked smart-notes document through Drive, or imports the linked recording Drive file into MinIO and the media pipeline. Transcript-like sources queue summary generation directly; recording artifacts enqueue the normal audio transcription pipeline. `GET /api/google/meet/artifacts?meetingId=...` returns the artifacts linked to one meeting.
+
+Meeting capture readiness is derived in `lib/meetings/capture-readiness.ts`. It classifies meetings as processed, ready to process, capture armed, needing artifact sync, or needing manual capture. The UI uses this model to show upcoming meetings as capture/prep objects instead of empty summaries.
 
 ## AI Layer
 

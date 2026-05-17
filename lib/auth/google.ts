@@ -8,6 +8,12 @@ export type GoogleOAuthConfig = {
   redirectUri: string
 }
 
+export type GoogleOAuthIdentity = SessionIdentity & {
+  googleUserId?: string
+  refreshToken?: string | null
+  scope?: string | null
+}
+
 export function getGoogleOAuthConfig(
   env: NodeJS.ProcessEnv = process.env
 ): GoogleOAuthConfig {
@@ -28,7 +34,7 @@ export function getGoogleOAuthConfig(
 export async function exchangeGoogleCodeForIdentity(
   code: string,
   config: GoogleOAuthConfig
-): Promise<SessionIdentity> {
+): Promise<GoogleOAuthIdentity> {
   const client = new OAuth2Client(
     config.clientId,
     config.clientSecret,
@@ -54,5 +60,8 @@ export async function exchangeGoogleCodeForIdentity(
     email: payload.email,
     name: payload.name,
     picture: payload.picture,
+    googleUserId: payload.sub,
+    refreshToken: tokens.refresh_token ?? null,
+    scope: tokens.scope ?? null,
   }
 }

@@ -3,6 +3,7 @@ import { ActivityIcon, FileAudioIcon } from "lucide-react"
 import { ActionItemList } from "@/components/action-item-list"
 import { TagList } from "@/components/tag-list"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
@@ -11,10 +12,16 @@ export function MeetingIntelligencePanel({
   dictionary,
   meeting,
   totalActionItems,
+  onToggleActionItem,
+  onExportRealizeOS,
+  exporting,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord | null
   totalActionItems: number
+  onToggleActionItem?: Parameters<typeof ActionItemList>[0]["onToggle"]
+  onExportRealizeOS?: () => void
+  exporting?: boolean
 }) {
   return (
     <div className="grid gap-5">
@@ -56,6 +63,7 @@ export function MeetingIntelligencePanel({
         <ActionItemList
           items={meeting?.intelligence?.actionItems ?? meeting?.summary?.actionItems}
           unassigned={dictionary.unassigned}
+          onToggle={onToggleActionItem}
         />
       </section>
 
@@ -75,6 +83,14 @@ export function MeetingIntelligencePanel({
             REST
           </Badge>
         </div>
+        <Button
+          size="sm"
+          className="mt-3 w-full"
+          disabled={!meeting || exporting}
+          onClick={onExportRealizeOS}
+        >
+          {exporting ? "Exporting..." : "Export to RealizeOS"}
+        </Button>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           {totalActionItems} open action items can trigger agents, webhooks,
           RealizeOS context packets, or follow-up drafts.

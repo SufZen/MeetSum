@@ -23,7 +23,7 @@ export default async function Page({
   }
 
   const dictionary = getDictionary(supportedLocale)
-  const meetings = (await meetingRepository.listMeetings()).map((meeting) => {
+  const meetings = (await meetingRepository.listMeetings({ limit: 5 })).map((meeting) => {
     const intelligence = meeting.intelligence ?? buildMeetingIntelligence(meeting)
 
     return {

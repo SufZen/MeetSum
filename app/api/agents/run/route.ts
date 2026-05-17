@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 export async function POST(request: Request) {
-  const unauthorized = requireApiKey(request)
+  const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) {
     return unauthorized
@@ -19,14 +20,20 @@ export async function POST(request: Request) {
     return jsonError("meetingId is required", 400)
   }
 
+  const job = await enqueueMeetSumJob("realizeos.export", {
+    agent,
+    meetingId,
+  })
+
   return NextResponse.json(
     {
       run: {
-        id: `run_${crypto.randomUUID()}`,
+        id: job.id,
         agent,
         meetingId,
         status: "queued",
       },
+      job,
       event: createPlatformEvent("agent.triggered", { agent, meetingId }),
     },
     { status: 202 }

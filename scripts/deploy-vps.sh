@@ -9,6 +9,6 @@ cd "$APP_DIR"
 
 ./scripts/backup-postgres.sh
 git pull --ff-only
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build app migrate
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build app migrate worker
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps

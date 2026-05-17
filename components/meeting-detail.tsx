@@ -13,9 +13,21 @@ import type { MeetingRecord } from "@/lib/meetings/repository"
 export function MeetingDetail({
   dictionary,
   meeting,
+  askQuestion,
+  askAnswer,
+  asking,
+  onAskQuestionChange,
+  onAsk,
+  onToggleActionItem,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord | null
+  askQuestion?: string
+  askAnswer?: string
+  asking?: boolean
+  onAskQuestionChange?: (value: string) => void
+  onAsk?: () => void
+  onToggleActionItem?: Parameters<typeof ActionItemList>[0]["onToggle"]
 }) {
   if (!meeting) {
     return (
@@ -82,6 +94,7 @@ export function MeetingDetail({
             <ActionItemList
               items={meeting.summary?.actionItems}
               unassigned={dictionary.unassigned}
+              onToggle={onToggleActionItem}
             />
           </section>
         </TabsContent>
@@ -104,11 +117,19 @@ export function MeetingDetail({
               <CardTitle>{dictionary.askMeetingMemory}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <Input defaultValue={dictionary.askDefaultQuestion} />
-              <Button className="w-fit">
+              <Input
+                value={askQuestion ?? dictionary.askDefaultQuestion}
+                onChange={(event) => onAskQuestionChange?.(event.target.value)}
+              />
+              <Button className="w-fit" onClick={onAsk} disabled={asking}>
                 <BotIcon data-icon="inline-start" />
-                {dictionary.ask}
+                {asking ? "Thinking..." : dictionary.ask}
               </Button>
+              {askAnswer && (
+                <p className="rounded-md border bg-muted p-3 text-sm leading-6 text-muted-foreground">
+                  {askAnswer}
+                </p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

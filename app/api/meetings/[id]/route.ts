@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireApiKey } from "@/lib/api/responses"
+import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { meetingRepository } from "@/lib/meetings/store"
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = requireApiKey(_request)
+  const unauthorized = await requireAppAccess(_request)
 
   if (unauthorized) {
     return unauthorized

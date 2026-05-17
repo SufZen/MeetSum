@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 
 import "../globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
 import {
   getLocaleDirection,
   isSupportedLocale,
@@ -55,7 +56,10 @@ export default async function LocaleLayout({
       )}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <Toaster position="top-right" richColors />
+        </ThemeProvider>
       </body>
     </html>
   )

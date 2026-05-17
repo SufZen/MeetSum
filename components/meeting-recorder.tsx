@@ -28,10 +28,13 @@ const defaultLabels: MeetingRecorderLabels = {
 
 export function MeetingRecorder({
   labels = defaultLabels,
+  onRecordingReady,
 }: {
   labels?: MeetingRecorderLabels
+  onRecordingReady?: (file: File) => void
 }) {
   const mediaRecorder = useRef<MediaRecorder | null>(null)
+  const chunks = useRef<BlobPart[]>([])
   const [state, setState] = useState<RecorderState>("idle")
   const [seconds, setSeconds] = useState(0)
 
@@ -52,15 +55,33 @@ export function MeetingRecorder({
   }, [labels, seconds, state])
 
   async function startRecording() {
-    if (!("MediaRecorder" in window)) {
+    if (
+      !("MediaRecorder" in window) ||
+      !navigator.mediaDevices?.getUserMedia ||
+      !window.isSecureContext
+    ) {
       setState("unsupported")
       return
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaRecorder.current = new MediaRecorder(stream)
-      mediaRecorder.current.start()
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : ""
+      mediaRecorder.current = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      )
+      chunks.current = []
+      mediaRecorder.current.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          chunks.current.push(event.data)
+        }
+      })
+      mediaRecorder.current.start(1000)
       setState("recording")
       setSeconds(0)
 
@@ -71,6 +92,17 @@ export function MeetingRecorder({
       mediaRecorder.current.addEventListener("stop", () => {
         window.clearInterval(intervalId)
         stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(chunks.current, {
+          type: mediaRecorder.current?.mimeType || "audio/webm",
+        })
+
+        if (blob.size > 0) {
+          onRecordingReady?.(
+            new File([blob], `meetsum-recording-${Date.now()}.webm`, {
+              type: blob.type,
+            })
+          )
+        }
         setState("idle")
       })
     } catch {
