@@ -108,9 +108,11 @@ If keyless signing is not available, development may still use
 or `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`. Do not commit service-account JSON
 files, Gemini keys, OAuth secrets, or meeting media.
 
-For the temporary AI Studio Gemini key path, keep:
+For the temporary AI Studio Gemini key path, keep Gemini available as the
+fallback provider:
 
 ```env
+MEETSUM_TRANSCRIPTION_PROVIDER=auto
 GOOGLE_GENAI_USE_VERTEXAI=false
 GOOGLE_GEMINI_API_KEY=...
 ```
@@ -129,6 +131,40 @@ Because the app joins both the MeetSum network and Coolify's network, internal s
 - `meetsum-postgres`
 - `meetsum-redis`
 - `meetsum-minio`
+
+## Optional Local Hebrew ASR
+
+`auto` is the recommended first-user production mode: Hebrew and mixed-language
+meetings try local ivrit-ai ASR first, clearly non-Hebrew meetings use Gemini,
+and Gemini remains the fallback if local ASR fails. Run the optional
+faster-whisper service with:
+
+```bash
+docker compose --env-file .env.local -f docker-compose.prod.yml --profile local-asr up -d faster-whisper
+```
+
+Then set:
+
+```env
+MEETSUM_TRANSCRIPTION_PROVIDER=auto
+LOCAL_TRANSCRIPTION_URL=http://faster-whisper:8000
+LOCAL_TRANSCRIPTION_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
+LOCAL_TRANSCRIPTION_LANGUAGE=he
+LOCAL_TRANSCRIPTION_TIMEOUT_MS=900000
+```
+
+Use `local-whisper` only for deliberate local-only tests. A Ryzen AI MAX laptop
+can be used as an external ASR host by pointing `LOCAL_TRANSCRIPTION_URL` at a
+private VPN/LAN URL; it is not required for the VPS deployment.
+
+Run private benchmarks from uncommitted samples:
+
+```bash
+npm run asr:evaluate -- --manifest .secrets/asr-eval/manifest.json
+```
+
+The manifest should reference local audio files and reference transcripts under
+`.secrets/asr-eval`; that directory is gitignored and must remain private.
 
 ## Health
 

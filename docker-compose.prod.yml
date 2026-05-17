@@ -130,11 +130,20 @@ services:
     volumes:
       - n8n-data:/home/node/.n8n
 
+  faster-whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    profiles:
+      - local-asr
+    restart: unless-stopped
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   n8n-data:
+  huggingface-cache:
 
 networks:
   coolify:

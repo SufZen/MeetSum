@@ -1,4 +1,9 @@
-import { getGeminiProviderMode, isGeminiConfigured } from "@/lib/ai/providers"
+import {
+  getGeminiProviderMode,
+  getTranscriptionProviderMode,
+  isGeminiConfigured,
+  isLocalWhisperConfigured,
+} from "@/lib/ai/providers"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 
 export type RuntimeEnvironmentReport = {
@@ -14,6 +19,7 @@ export function validateRuntimeEnvironment(): RuntimeEnvironmentReport {
   const warnings: string[] = []
   const workspace = getWorkspaceAuthStatus()
   const geminiConfigured = isGeminiConfigured()
+  const transcriptionMode = getTranscriptionProviderMode()
 
   if (!workspace.configured) {
     warnings.push("Google Workspace sync is missing an auth strategy.")
@@ -33,6 +39,14 @@ export function validateRuntimeEnvironment(): RuntimeEnvironmentReport {
   }
   if (!geminiConfigured) {
     warnings.push("Gemini is not configured; AI actions will use fallbacks.")
+  }
+  if (
+    (transcriptionMode === "local-whisper" || transcriptionMode === "auto") &&
+    !isLocalWhisperConfigured()
+  ) {
+    warnings.push(
+      "Local Whisper transcription is selected but LOCAL_TRANSCRIPTION_URL is missing."
+    )
   }
   if (!process.env.REALIZEOS_API_URL) {
     warnings.push("RealizeOS export is not configured.")

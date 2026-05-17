@@ -1,5 +1,11 @@
 import { getDatabasePool } from "@/lib/db/client"
-import { getGeminiProviderMode, isGeminiConfigured } from "@/lib/ai/providers"
+import {
+  getGeminiProviderMode,
+  getLocalWhisperProviderConfig,
+  getTranscriptionProviderMode,
+  isGeminiConfigured,
+  isLocalWhisperConfigured,
+} from "@/lib/ai/providers"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
 
@@ -47,6 +53,9 @@ export type WorkspaceStatus = {
 export function getProviderStatus(): ProviderStatus[] {
   const geminiMode = getGeminiProviderMode()
   const geminiConfigured = isGeminiConfigured()
+  const transcriptionMode = getTranscriptionProviderMode()
+  const localWhisperConfig = getLocalWhisperProviderConfig()
+  const localWhisperConfigured = isLocalWhisperConfigured()
   const workspaceAuth = getWorkspaceAuthStatus()
 
   return [
@@ -60,6 +69,15 @@ export function getProviderStatus(): ProviderStatus[] {
         : geminiMode === "vertex-ai"
           ? "Missing Vertex project/location or GOOGLE_APPLICATION_CREDENTIALS"
           : "Missing GOOGLE_GEMINI_API_KEY",
+    },
+    {
+      id: "local-whisper",
+      label: "Local Hebrew ASR",
+      configured: localWhisperConfigured,
+      mode: localWhisperConfig.model,
+      detail: localWhisperConfigured
+        ? `Optional transcription provider configured at ${localWhisperConfig.baseUrl} (${transcriptionMode})`
+        : "Optional ivrit-ai faster-whisper server not configured",
     },
     {
       id: "workspace",

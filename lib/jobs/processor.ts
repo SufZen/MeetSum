@@ -4,6 +4,7 @@ import {
   createSummaryProvider,
   createTranscriptionProvider,
   getGeminiProviderMode,
+  getTranscriptionRunMetadata,
 } from "@/lib/ai/providers"
 import { getDatabasePool } from "@/lib/db/client"
 import {
@@ -62,6 +63,7 @@ async function recordAiRun(options: {
   task: string
   status: "completed" | "failed"
   startedAt: number
+  provider?: string
   model?: string
   metadata?: Record<string, unknown>
   error?: string
@@ -79,7 +81,7 @@ async function recordAiRun(options: {
     [
       `airun_${crypto.randomUUID()}`,
       options.meetingId,
-      getGeminiProviderMode(),
+      options.provider ?? getGeminiProviderMode(),
       options.task,
       options.status,
       JSON.stringify(options.metadata ?? {}),
@@ -123,16 +125,21 @@ async function processMediaJob(
   }
 
   const transcriptionStartedAt = Date.now()
-  const transcript = await createTranscriptionProvider().transcribe(meeting)
+  const transcriptionProvider = createTranscriptionProvider()
+  const transcript = await transcriptionProvider.transcribe(meeting)
+  const transcriptionRun = getTranscriptionRunMetadata(transcriptionProvider)
   await recordAiRun({
     meetingId: meeting.id,
     task: "audio.transcribe",
     status: "completed",
     startedAt: transcriptionStartedAt,
-    model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "heuristic-v1",
+    model: transcriptionRun.model,
+    provider: transcriptionRun.provider,
     metadata: {
       segments: transcript.length,
-      providerMode: getGeminiProviderMode(),
+      providerMode: transcriptionRun.provider,
+      fallbackUsed: transcriptionRun.fallbackUsed ?? false,
+      attemptedProvider: transcriptionRun.attemptedProvider,
       inputAsset: payload.assetId ?? payload.storageKey,
       confidence:
         transcript.length > 0

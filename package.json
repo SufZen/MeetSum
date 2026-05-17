@@ -18,6 +18,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "calendar:cleanup": "tsx scripts/calendar-noise-cleanup.ts",
     "media:retention": "tsx scripts/media-retention.ts",
+    "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
   },

@@ -22,11 +22,91 @@ import {
 const execFileAsync = promisify(execFile)
 
 export type TranscriptionProvider = {
+  id: string
+  model: string
   transcribe: (meeting: MeetingRecord) => Promise<TranscriptSegment[]>
+  getLastRun?: () => TranscriptionRunMetadata
 }
 
 export type SummaryProvider = {
   summarize: (meeting: MeetingRecord) => Promise<ReturnType<typeof buildMeetingIntelligence>>
+}
+
+export type TranscriptionProviderMode = "gemini" | "local-whisper" | "auto"
+
+export type TranscriptionRunMetadata = {
+  provider: string
+  model: string
+  fallbackUsed?: boolean
+  attemptedProvider?: string
+}
+
+export type LocalWhisperProviderConfig = {
+  baseUrl: string
+  model: string
+  language: string
+  timeoutMs: number
+}
+
+const DEFAULT_LOCAL_WHISPER_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"
+const DEFAULT_LOCAL_WHISPER_LANGUAGE = "he"
+const DEFAULT_LOCAL_WHISPER_TIMEOUT_MS = 900_000
+
+function positiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number(value)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+export function getTranscriptionProviderMode(
+  env: Record<string, string | undefined> = process.env
+): TranscriptionProviderMode {
+  const requested = env.MEETSUM_TRANSCRIPTION_PROVIDER?.trim().toLowerCase()
+
+  if (
+    requested === "local-whisper" ||
+    requested === "auto" ||
+    requested === "gemini"
+  ) {
+    return requested
+  }
+
+  return "auto"
+}
+
+export function isLocalWhisperConfigured(
+  env: Record<string, string | undefined> = process.env
+) {
+  return Boolean(env.LOCAL_TRANSCRIPTION_URL?.trim())
+}
+
+export function getLocalWhisperProviderConfig(
+  env: Record<string, string | undefined> = process.env
+): LocalWhisperProviderConfig {
+  return {
+    baseUrl: (env.LOCAL_TRANSCRIPTION_URL ?? "").replace(/\/+$/, ""),
+    model: env.LOCAL_TRANSCRIPTION_MODEL ?? DEFAULT_LOCAL_WHISPER_MODEL,
+    language: env.LOCAL_TRANSCRIPTION_LANGUAGE ?? DEFAULT_LOCAL_WHISPER_LANGUAGE,
+    timeoutMs: positiveNumber(
+      env.LOCAL_TRANSCRIPTION_TIMEOUT_MS,
+      DEFAULT_LOCAL_WHISPER_TIMEOUT_MS
+    ),
+  }
+}
+
+export function getTranscriptionRunMetadata(
+  provider: TranscriptionProvider
+): TranscriptionRunMetadata {
+  return provider.getLastRun?.() ?? {
+    provider: provider.id,
+    model: provider.model,
+  }
+}
+
+function shouldPreferLocalHebrewAsr(meeting: MeetingRecord) {
+  const language = meeting.language.toLowerCase()
+
+  return language === "he" || language === "heb" || language === "iw" || language === "mixed"
 }
 
 function inferSpeaker(participant: string | undefined, index: number) {
@@ -107,6 +187,86 @@ function normalizeGeminiSegments(
     }))
 
   return cleanupTranscriptSegments(normalized)
+}
+
+type LocalWhisperSegment = {
+  id?: number | string
+  start?: number
+  end?: number
+  startMs?: number
+  endMs?: number
+  text?: string
+  language?: string
+  confidence?: number
+  speaker?: string
+}
+
+type LocalWhisperResponse = {
+  text?: string
+  language?: string
+  segments?: LocalWhisperSegment[]
+}
+
+function normalizeConfidence(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : fallback
+}
+
+export function normalizeLocalWhisperResponse(
+  raw: string | LocalWhisperResponse,
+  meeting: MeetingRecord
+): TranscriptSegment[] {
+  const parsed =
+    typeof raw === "string"
+      ? raw.trim().startsWith("{")
+        ? (JSON.parse(raw) as LocalWhisperResponse)
+        : ({ text: raw } satisfies LocalWhisperResponse)
+      : raw
+  const responseLanguage = parsed.language ?? meeting.language
+  const segments = Array.isArray(parsed.segments) ? parsed.segments : []
+
+  if (segments.length) {
+    return cleanupTranscriptSegments(
+      segments
+        .filter((segment) => segment.text?.trim())
+        .map((segment, index) => {
+          const startMs =
+            typeof segment.startMs === "number"
+              ? segment.startMs
+              : Math.round(Number(segment.start ?? index * 5) * 1000)
+          const endMs =
+            typeof segment.endMs === "number"
+              ? segment.endMs
+              : Math.round(Number(segment.end ?? index * 5 + 5) * 1000)
+
+          return {
+            id: `seg_${crypto.randomUUID()}`,
+            speaker: segment.speaker?.trim() || inferSpeaker(undefined, index),
+            startMs: Math.max(0, startMs),
+            endMs: Math.max(startMs + 1000, endMs),
+            text: segment.text?.trim() ?? "",
+            confidence: normalizeConfidence(segment.confidence, 0.72),
+            language: segment.language ?? responseLanguage,
+          }
+        })
+    )
+  }
+
+  const text = parsed.text?.trim()
+  if (!text) return []
+
+  return cleanupTranscriptSegments([
+    {
+      id: `seg_${crypto.randomUUID()}`,
+      speaker: inferSpeaker(undefined, 0),
+      startMs: 0,
+      endMs: 5000,
+      text,
+      confidence: 0.72,
+      language: responseLanguage,
+    },
+  ])
 }
 
 function getAudioPrompt(meeting: MeetingRecord, compactTimeline = false) {
@@ -261,6 +421,9 @@ async function waitForGeminiFile(
 export class HeuristicFallbackProvider
   implements TranscriptionProvider, SummaryProvider
 {
+  readonly id = "heuristic"
+  readonly model = "heuristic-v1"
+
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
     if (meeting.transcript?.length) {
       return cleanupTranscriptSegments(meeting.transcript)
@@ -281,6 +444,138 @@ export class HeuristicFallbackProvider
 
   async summarize(meeting: MeetingRecord) {
     return buildMeetingIntelligence(meeting)
+  }
+}
+
+export class LocalWhisperTranscriptionProvider implements TranscriptionProvider {
+  readonly id = "local-whisper"
+  readonly model: string
+  private readonly fallback = new HeuristicFallbackProvider()
+
+  constructor(
+    private readonly config = getLocalWhisperProviderConfig(),
+    private readonly options: {
+      fetch?: typeof fetch
+      downloadMeetingObjectToFile?: typeof downloadMeetingObjectToFile
+    } = {}
+  ) {
+    this.model = config.model
+  }
+
+  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
+    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
+
+    if (!this.config.baseUrl) {
+      throw new Error("LOCAL_TRANSCRIPTION_URL is required for local Whisper")
+    }
+
+    if (!asset?.storageKey) {
+      return this.fallback.transcribe(meeting)
+    }
+
+    let tempDir: string | undefined
+
+    try {
+      tempDir = await mkdtemp(path.join(tmpdir(), "meetsum-whisper-"))
+      const inputPath = path.join(
+        tempDir,
+        safeTempFilename(asset.filename, `${meeting.id}.media`)
+      )
+      await (this.options.downloadMeetingObjectToFile ?? downloadMeetingObjectToFile)(
+        asset.storageKey,
+        inputPath
+      )
+
+      const bytes = await readFile(inputPath)
+      const formData = new FormData()
+      formData.set("file", new Blob([bytes], { type: asset.contentType }), asset.filename)
+      formData.set("model", this.config.model)
+      formData.set("language", this.config.language || meeting.language)
+      formData.set("response_format", "verbose_json")
+
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
+
+      try {
+        const response = await (this.options.fetch ?? fetch)(
+          `${this.config.baseUrl}/v1/audio/transcriptions`,
+          {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => "")
+          throw new Error(
+            `Local Whisper transcription failed with ${response.status}: ${body}`
+          )
+        }
+
+        const contentType = response.headers.get("content-type") ?? ""
+        const raw = contentType.includes("application/json")
+          ? ((await response.json()) as LocalWhisperResponse)
+          : await response.text()
+        const segments = normalizeLocalWhisperResponse(raw, meeting)
+
+        return segments.length ? segments : this.fallback.transcribe(meeting)
+      } finally {
+        clearTimeout(timeout)
+      }
+    } finally {
+      if (typeof tempDir === "string") {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+      }
+    }
+  }
+}
+
+export class AutoTranscriptionProvider implements TranscriptionProvider {
+  readonly id = "auto"
+  readonly model: string
+  private lastRun: TranscriptionRunMetadata
+
+  constructor(
+    private readonly primary: TranscriptionProvider,
+    private readonly fallback: TranscriptionProvider
+  ) {
+    this.model = primary.model
+    this.lastRun = {
+      provider: primary.id,
+      model: primary.model,
+    }
+  }
+
+  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
+    if (!shouldPreferLocalHebrewAsr(meeting)) {
+      const segments = await this.fallback.transcribe(meeting)
+      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
+      this.lastRun = {
+        ...fallbackRun,
+        fallbackUsed: false,
+      }
+      return segments
+    }
+
+    try {
+      const segments = await this.primary.transcribe(meeting)
+      this.lastRun = getTranscriptionRunMetadata(this.primary)
+      return segments
+    } catch {
+      const segments = await this.fallback.transcribe(meeting)
+      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
+      this.lastRun = {
+        ...fallbackRun,
+        fallbackUsed: true,
+        attemptedProvider: this.primary.id,
+      }
+      return segments
+    }
+  }
+
+  getLastRun() {
+    return this.lastRun
   }
 }
 
@@ -413,6 +708,8 @@ export class GeminiSummaryProvider implements SummaryProvider {
 }
 
 export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
+  readonly id = "gemini"
+  readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-2.5-flash"
   private readonly fallback = new HeuristicFallbackProvider()
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
@@ -571,9 +868,23 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
 }
 
 export function createTranscriptionProvider(): TranscriptionProvider {
-  return isGeminiConfigured()
+  const mode = getTranscriptionProviderMode()
+  const geminiProvider = isGeminiConfigured()
     ? new GeminiAudioTranscriptionProvider()
     : new HeuristicFallbackProvider()
+
+  if (mode === "local-whisper" && isLocalWhisperConfigured()) {
+    return new LocalWhisperTranscriptionProvider()
+  }
+
+  if (mode === "auto" && isLocalWhisperConfigured()) {
+    return new AutoTranscriptionProvider(
+      new LocalWhisperTranscriptionProvider(),
+      geminiProvider
+    )
+  }
+
+  return geminiProvider
 }
 
 export function createSummaryProvider(): SummaryProvider {
