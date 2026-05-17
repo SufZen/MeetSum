@@ -1,4 +1,6 @@
 import {
+  AlertTriangleIcon,
+  ActivityIcon,
   CheckCircle2Icon,
   FileTextIcon,
   MoreHorizontalIcon,
@@ -26,6 +28,17 @@ function computeConfidence(meeting: MeetingRecord | null) {
 
   if (!values.length) return undefined
   return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function latestAiRun(meeting: MeetingRecord | null, task: string) {
+  return meeting?.aiRuns?.find((run) => run.task === task)
+}
+
+function formatLatency(value: number | undefined) {
+  if (!value) return undefined
+  if (value < 1000) return `${value}ms`
+
+  return `${Math.round(value / 100) / 10}s`
 }
 
 function tagClass(tag: string) {
@@ -71,6 +84,14 @@ export function MeetingRightRail({
   const percent = confidence ? Math.round(confidence * 100) : undefined
   const tags = meeting?.tags ?? []
   const suggestedRuns = meeting?.suggestedAgentRuns ?? []
+  const transcriptionRun = latestAiRun(meeting, "audio.transcribe")
+  const summaryRun = latestAiRun(meeting, "summary.generate")
+  const fallbackUsed = transcriptionRun?.metadata.fallbackUsed === true
+  const attemptedProvider =
+    typeof transcriptionRun?.metadata.attemptedProvider === "string"
+      ? transcriptionRun.metadata.attemptedProvider
+      : undefined
+  const qualityWarnings = meeting?.qualityWarnings ?? []
 
   return (
     <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-[var(--rail)] p-3 lg:h-full lg:border-l lg:border-[var(--divider)]">
@@ -114,6 +135,78 @@ export function MeetingRightRail({
           Details
         </Button>
       </section>
+
+      <section className="ms-card p-4">
+        <h3 className="mb-3 text-sm font-semibold">Provider run</h3>
+        {transcriptionRun || summaryRun ? (
+          <div className="grid gap-2">
+            {transcriptionRun ? (
+              <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                <div className="flex items-start gap-2">
+                  <ActivityIcon aria-hidden="true" className="mt-0.5 size-4 text-[var(--primary)]" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">
+                      {transcriptionRun.provider}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {transcriptionRun.model ?? "default model"}
+                      {formatLatency(transcriptionRun.latencyMs)
+                        ? ` · ${formatLatency(transcriptionRun.latencyMs)}`
+                        : ""}
+                    </p>
+                    {fallbackUsed ? (
+                      <p className="mt-1 text-xs leading-5 text-[var(--status-warning)]">
+                        Fallback used{attemptedProvider ? ` after ${attemptedProvider}` : ""}.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            {summaryRun ? (
+              <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs leading-5 text-muted-foreground">
+                Summary: <span className="font-medium text-foreground">{summaryRun.provider}</span>
+                {summaryRun.model ? ` · ${summaryRun.model}` : ""}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm text-muted-foreground">
+            Provider metadata appears after transcription or summarization.
+          </div>
+        )}
+      </section>
+
+      {qualityWarnings.length ? (
+        <section className="ms-card p-4">
+          <h3 className="mb-3 text-sm font-semibold">Quality review</h3>
+          <div className="grid gap-2">
+            {qualityWarnings.slice(0, 4).map((warning) => (
+              <div
+                key={warning.code}
+                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangleIcon
+                    aria-hidden="true"
+                    className={
+                      warning.severity === "warning"
+                        ? "mt-0.5 size-4 text-[var(--status-warning)]"
+                        : "mt-0.5 size-4 text-[var(--primary)]"
+                    }
+                  />
+                  <div>
+                    <div className="text-sm font-medium">{warning.title}</div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {warning.detail}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="ms-card p-4">
         <div className="mb-3 flex items-center justify-between">

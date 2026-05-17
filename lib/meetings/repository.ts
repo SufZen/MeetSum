@@ -160,6 +160,33 @@ export type JobRecord = {
   updatedAt: string
 }
 
+export type AiRunRecord = {
+  id: string
+  meetingId: string
+  provider: string
+  task: string
+  status: "queued" | "running" | "completed" | "failed"
+  metadata: Record<string, unknown>
+  model?: string
+  latencyMs?: number
+  confidence?: number
+  startedAt: string
+  completedAt?: string
+  error?: string
+}
+
+export type MeetingQualityWarning = {
+  code:
+    | "smart_notes_only"
+    | "transcription_fallback"
+    | "weak_transcript_confidence"
+    | "no_speaker_diarization"
+    | "task_missing_owner_or_due_date"
+  severity: "info" | "warning"
+  title: string
+  detail: string
+}
+
 export type MeetingRecord = {
   id: string
   title: string
@@ -180,6 +207,8 @@ export type MeetingRecord = {
   suggestedAgentRuns?: SuggestedAgentRun[]
   mediaAssets?: MediaAsset[]
   meetConferenceRecords?: MeetConferenceRecord[]
+  aiRuns?: AiRunRecord[]
+  qualityWarnings?: MeetingQualityWarning[]
 }
 
 export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"

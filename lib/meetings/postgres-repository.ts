@@ -9,6 +9,7 @@ import type {
   MediaAsset,
   MeetArtifact,
   MeetConferenceRecord,
+  AiRunRecord,
   MeetingAnswer,
   MeetingContext,
   MeetingListOptions,
@@ -19,6 +20,7 @@ import type {
   MeetingShare,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
+import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
 import {
   buildMeetingIntelligence,
   type MeetingIntelligence,
@@ -179,6 +181,21 @@ type JobRow = {
   completed_at: string | Date | null
   created_at: string | Date
   updated_at: string | Date
+}
+
+type AiRunRow = {
+  id: string
+  meeting_id: string
+  provider: string
+  task: string
+  status: AiRunRecord["status"]
+  metadata: Record<string, unknown> | null
+  model: string | null
+  latency_ms: number | null
+  confidence: string | number | null
+  started_at: string | Date
+  completed_at: string | Date | null
+  error: string | null
 }
 
 function createId(prefix: string): string {
@@ -411,6 +428,23 @@ function mapJob(row: JobRow): JobRecord {
   }
 }
 
+function mapAiRun(row: AiRunRow): AiRunRecord {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    provider: row.provider,
+    task: row.task,
+    status: row.status,
+    metadata: row.metadata ?? {},
+    model: row.model ?? undefined,
+    latencyMs: row.latency_ms ?? undefined,
+    confidence: row.confidence === null ? undefined : Number(row.confidence),
+    startedAt: toIso(row.started_at),
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
+    error: row.error ?? undefined,
+  }
+}
+
 function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord[] {
   const records = new Map<string, MeetConferenceRecord>()
 
@@ -471,6 +505,7 @@ export function createPostgresMeetingRepository(
       mediaAssetsResult,
       participantsResult,
       meetArtifactsResult,
+      aiRunsResult,
     ] = await Promise.all([
       client.query(
         `
@@ -601,6 +636,17 @@ export function createPostgresMeetingRepository(
         `,
         [base.id]
       ),
+      client.query(
+        `
+          select id, meeting_id, provider, task, status, metadata, model,
+                 latency_ms, confidence, started_at, completed_at, error
+          from ai_runs
+          where meeting_id = $1
+          order by started_at desc
+          limit 20
+        `,
+        [base.id]
+      ),
     ])
 
     const transcript = (transcriptResult.rows as TranscriptRow[]).map(
@@ -646,7 +692,7 @@ export function createPostgresMeetingRepository(
     const participantDetails =
       (participantsResult.rows as ParticipantRow[]).map(mapParticipant)
 
-    return {
+    const hydrated: MeetingRecord = {
       ...base,
       transcript,
       summary: latestSummary
@@ -682,6 +728,7 @@ export function createPostgresMeetingRepository(
       meetConferenceRecords: mapMeetConferenceRecords(
         meetArtifactsResult.rows as MeetArtifactRow[]
       ),
+      aiRuns: (aiRunsResult.rows as AiRunRow[]).map(mapAiRun),
       participantDetails:
         participantDetails.length > 0
           ? participantDetails
@@ -699,6 +746,11 @@ export function createPostgresMeetingRepository(
               createdAt: base.startedAt,
               updatedAt: base.startedAt,
             })),
+    }
+
+    return {
+      ...hydrated,
+      qualityWarnings: deriveMeetingQualityWarnings(hydrated),
     }
   }
 

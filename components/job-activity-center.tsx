@@ -11,6 +11,20 @@ const progressByStatus = {
   failed: 100,
 } as const
 
+function jobStage(job: JobRecord) {
+  if (typeof job.result.stage === "string") return job.result.stage
+  if (typeof job.payload.stage === "string") return job.payload.stage
+
+  return job.name
+}
+
+function formatJobTime(value?: string) {
+  if (!value) return "unknown"
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString()
+}
+
 export function JobActivityCenter({
   jobs,
   meetings = [],
@@ -87,6 +101,10 @@ export function JobActivityCenter({
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-destructive">
                         {latest.error ?? "Processing failed without a stored error."}
                       </p>
+                      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                        {jobStage(latest)} · {latest.id} · updated{" "}
+                        {formatJobTime(latest.updatedAt)}
+                      </p>
                     </div>
                     <span className="shrink-0 rounded-md border border-[var(--divider)] px-2 py-1 text-xs text-muted-foreground">
                       {group.jobs.length}
@@ -134,6 +152,11 @@ export function JobActivityCenter({
                 <span className="capitalize text-muted-foreground">
                   {job.status}
                 </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span>{jobStage(job)}</span>
+                <span className="font-mono">{job.id}</span>
+                <span>updated {formatJobTime(job.updatedAt)}</span>
               </div>
               <Progress value={progressByStatus[job.status]} />
               {job.error && (
