@@ -148,4 +148,25 @@ describe("Meet artifacts", () => {
       },
     ])
   })
+
+  it("removes Google smart notes boilerplate before creating segments", () => {
+    const segments = convertMeetSmartNotesTextToSegments(
+      `
+      Summary
+      The team approved the RealizeOS export flow.
+
+      You should review Gemini's notes to make sure they're accurate. Get tips and learn how Gemini takes notes.
+      How is the quality of these specific notes? Take a short survey to let us know your feedback.
+      `,
+      {
+        artifactId: "meetartifact_123",
+        artifactStartTime: "2026-05-07T10:00:00.000Z",
+      }
+    )
+
+    expect(segments).toHaveLength(1)
+    expect(segments[0]?.text).toBe(
+      "Summary\nThe team approved the RealizeOS export flow."
+    )
+  })
 })

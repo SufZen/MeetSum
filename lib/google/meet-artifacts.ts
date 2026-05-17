@@ -255,6 +255,17 @@ export function extractMeetRecordingDriveFileId(value?: string) {
   return undefined
 }
 
+function isGoogleSmartNotesBoilerplate(chunk: string) {
+  const normalized = chunk.toLowerCase()
+
+  return [
+    "you should review gemini's notes",
+    "get tips and learn how gemini takes notes",
+    "how is the quality of these specific notes",
+    "take a short survey to let us know your feedback",
+  ].some((marker) => normalized.includes(marker))
+}
+
 export function convertMeetSmartNotesTextToSegments(
   text: string,
   options: {
@@ -272,6 +283,7 @@ export function convertMeetSmartNotesTextToSegments(
         .join("\n")
     )
     .filter(Boolean)
+    .filter((chunk) => !isGoogleSmartNotesBoilerplate(chunk))
 
   return chunks.map((chunk, index) => ({
     id: `meet_smart_note_${options.artifactId.replace(/[^\w-]+/g, "_")}_${index + 1}`,
