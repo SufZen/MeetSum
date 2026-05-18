@@ -216,17 +216,40 @@ export function extractSmartTasks(
   segments: TranscriptSegment[]
 ): SmartTask[] {
   const taskPatterns =
-    /(צריך|צריכה|נדרש|חייב|אפשר לשלוח|לשלוח|להכין|תקבע|לקבוע|תבדוק|לבדוק|need\b|needs to|should|must|please send|send|prepare|schedule|follow up|precisamos|necesitamos|dobbiamo|enviar|inviare)/i
+    /(צריך|צריכה|נדרש|חייב|אפשר לשלוח|לשלוח|להכין|תקבע|לקבוע|תבדוק|לבדוק|need\b|needs to|must|please send|prepare|schedule|follow up|precisamos|necesitamos|dobbiamo|enviar|inviare)/i
+
+  /**
+   * "send" and "should" need more context to be actionable.
+   * - "send" is valid with an object: "send the report", "send a follow-up"
+   * - "should" is valid with an action: "should prepare", "should send"
+   */
+  const contextualTaskPatterns =
+    /\bsend\s+(the|a|an|this|that|it|them)\b|\bshould\s+(send|prepare|schedule|review|follow|update|check|fix|create|write|submit|complete)\b/i
+
   const weakDiscussionPatterns =
     /^(uh|um|okay|yeah|yes|no|so|but|and|i think|you know|maybe|right)\b/i
 
+  /** Reject sentences that are questions — they are not actionable tasks */
+  const questionPattern = /\?\s*$/
+
+  const seen = new Set<string>()
+
   return segments
-    .filter((segment) => taskPatterns.test(segment.text))
+    .filter(
+      (segment) =>
+        taskPatterns.test(segment.text) ||
+        contextualTaskPatterns.test(segment.text)
+    )
     .map((segment) => {
       const candidate =
         segment.text
           .split(/(?<=[.!?])\s+/)
-          .find((sentence) => taskPatterns.test(sentence)) ?? segment.text
+          .find(
+            (sentence) =>
+              (taskPatterns.test(sentence) ||
+                contextualTaskPatterns.test(sentence)) &&
+              !questionPattern.test(sentence)
+          ) ?? segment.text
       const title = candidate
         .replace(/\s+/g, " ")
         .replace(/^[-–•\s]+/, "")
@@ -238,7 +261,17 @@ export function extractSmartTasks(
     .filter(({ title }) => {
       const wordCount = title.split(/\s+/).filter(Boolean).length
 
-      return wordCount >= 4 && !weakDiscussionPatterns.test(title)
+      if (wordCount < 4) return false
+      if (weakDiscussionPatterns.test(title)) return false
+      if (questionPattern.test(title)) return false
+
+      // Deduplicate similar task titles (e.g. repeated statements across segments)
+      const normalized = title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+
+      if (seen.has(normalized)) return false
+
+      seen.add(normalized)
+      return true
     })
     .slice(0, 12)
     .map(({ segment, title }, index) => {
