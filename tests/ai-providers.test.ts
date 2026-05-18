@@ -136,6 +136,7 @@ describe("AI transcription provider selection", () => {
       model: "gemini-model",
       fallbackUsed: true,
       attemptedProvider: "local-whisper",
+      fallbackReason: "local-whisper unavailable",
     })
   })
 

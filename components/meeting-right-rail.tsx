@@ -91,6 +91,10 @@ export function MeetingRightRail({
     typeof transcriptionRun?.metadata.attemptedProvider === "string"
       ? transcriptionRun.metadata.attemptedProvider
       : undefined
+  const fallbackReason =
+    typeof transcriptionRun?.metadata.fallbackReason === "string"
+      ? transcriptionRun.metadata.fallbackReason
+      : undefined
   const qualityWarnings = meeting?.qualityWarnings ?? []
 
   return (
@@ -157,6 +161,7 @@ export function MeetingRightRail({
                     {fallbackUsed ? (
                       <p className="mt-1 text-xs leading-5 text-[var(--status-warning)]">
                         Fallback used{attemptedProvider ? ` after ${attemptedProvider}` : ""}.
+                        {fallbackReason ? ` Reason: ${fallbackReason}` : ""}
                       </p>
                     ) : null}
                   </div>

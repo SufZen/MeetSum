@@ -21,6 +21,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
+import { JobRecoveryPanel } from "@/components/job-recovery-panel"
 import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provider-health-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -131,6 +132,7 @@ type WebhookDeliveryView = {
   status: string
   attempts: number
   responseStatus?: number
+  responseBody?: string
   lastError?: string
   createdAt: string
 }
@@ -1524,14 +1526,40 @@ export function OperationalPage({
                           {run.lastError}
                         </div>
                       ) : null}
-                      <Button
-                        variant="outline"
-                        className="mt-2 h-7"
-                        disabled={webhookLoading || !realizeOSStatus?.configured}
-                        onClick={() => retryRealizeOSExport(run)}
-                      >
-                        Retry export
-                      </Button>
+                      {run.response && Object.keys(run.response).length > 0 ? (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-[11px] font-medium text-[var(--primary)] hover:underline">
+                            Response payload
+                          </summary>
+                          <pre className="mt-1.5 max-h-40 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-4 text-muted-foreground">
+                            {JSON.stringify(run.response, null, 2)}
+                          </pre>
+                        </details>
+                      ) : null}
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-7"
+                          disabled={webhookLoading || !realizeOSStatus?.configured}
+                          onClick={() => retryRealizeOSExport(run)}
+                        >
+                          Retry export
+                        </Button>
+                        {run.response ? (
+                          <Button
+                            variant="outline"
+                            className="h-7"
+                            onClick={() =>
+                              copyAutomationText(
+                                JSON.stringify(run.response, null, 2),
+                                "RealizeOS response"
+                              )
+                            }
+                          >
+                            Copy response
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                   {!realizeOSExports.length ? (
@@ -1612,6 +1640,16 @@ export function OperationalPage({
                       {delivery.lastError}
                     </div>
                   ) : null}
+                  {delivery.responseBody ? (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--primary)] hover:underline">
+                        Response body
+                      </summary>
+                      <pre className="mt-1.5 max-h-32 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-4 text-muted-foreground">
+                        {delivery.responseBody}
+                      </pre>
+                    </details>
+                  ) : null}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-muted-foreground">
                       Attempts: {delivery.attempts}
@@ -1635,6 +1673,14 @@ export function OperationalPage({
             </div>
           </OpsCard>
 
+          <div className="xl:col-span-2">
+            <JobRecoveryPanel
+              jobs={jobs}
+              meetings={meetings}
+              onRetry={onRetryJob}
+              onOpenMeeting={onOpenMeeting}
+            />
+          </div>
           <div className="xl:col-span-2">
             <JobActivityCenter jobs={jobs} onRetry={onRetryJob} />
           </div>

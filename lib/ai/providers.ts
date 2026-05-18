@@ -39,6 +39,7 @@ export type TranscriptionRunMetadata = {
   model: string
   fallbackUsed?: boolean
   attemptedProvider?: string
+  fallbackReason?: string
 }
 
 export type LocalWhisperProviderConfig = {
@@ -562,13 +563,17 @@ export class AutoTranscriptionProvider implements TranscriptionProvider {
       const segments = await this.primary.transcribe(meeting)
       this.lastRun = getTranscriptionRunMetadata(this.primary)
       return segments
-    } catch {
+    } catch (error) {
+      const fallbackReason = error instanceof Error ? error.message : String(error)
+      console.error(`[AutoTranscriptionProvider] Primary provider '${this.primary.id}' failed, falling back to '${this.fallback.id}':`, error)
+      
       const segments = await this.fallback.transcribe(meeting)
       const fallbackRun = getTranscriptionRunMetadata(this.fallback)
       this.lastRun = {
         ...fallbackRun,
         fallbackUsed: true,
         attemptedProvider: this.primary.id,
+        fallbackReason,
       }
       return segments
     }

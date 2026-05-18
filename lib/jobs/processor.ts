@@ -140,6 +140,7 @@ async function processMediaJob(
       providerMode: transcriptionRun.provider,
       fallbackUsed: transcriptionRun.fallbackUsed ?? false,
       attemptedProvider: transcriptionRun.attemptedProvider,
+      fallbackReason: transcriptionRun.fallbackReason,
       inputAsset: payload.assetId ?? payload.storageKey,
       confidence:
         transcript.length > 0

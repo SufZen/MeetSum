@@ -27,6 +27,7 @@ export default async function PublicMeetingSharePage({
   const participants =
     meeting.participantDetails?.map((participant) => participant.name) ??
     meeting.participants
+  const transcribeRun = meeting.aiRuns?.find((r) => r.task === "audio.transcribe")
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-5 py-8 text-[var(--text-primary)]">
@@ -111,6 +112,16 @@ export default async function PublicMeetingSharePage({
         {includes.has("transcript") ? (
           <section>
             <h2 className="mb-3 text-xl font-semibold">Transcript</h2>
+            {transcribeRun ? (
+              <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-sm">
+                <div className="font-medium">Transcription provided by {transcribeRun.provider}</div>
+                {transcribeRun.metadata?.fallbackUsed ? (
+                  <div className="mt-1 text-xs text-[var(--status-warning)]">
+                    Fallback used after {transcribeRun.metadata.attemptedProvider as string}. Reason: {(transcribeRun.metadata.fallbackReason as string) || "Unknown error"}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-3">
               {(meeting.transcript?.length ? meeting.transcript : []).map(
                 (segment) => (
