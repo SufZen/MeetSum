@@ -43,6 +43,17 @@ export function renderMeetingMarkdown(meeting: MeetingRecord): string {
       : ["- No action items extracted yet."]),
     "",
     "## Transcript",
+    ...(() => {
+      const transcribeRun = meeting.aiRuns?.find((r) => r.task === "audio.transcribe")
+      if (transcribeRun) {
+        let metaLine = `> Transcription provided by **${transcribeRun.provider}**`
+        if (transcribeRun.metadata?.fallbackUsed) {
+          metaLine += ` (Fallback from ${transcribeRun.metadata.attemptedProvider}. Reason: ${transcribeRun.metadata.fallbackReason || "Unknown error"})`
+        }
+        return [metaLine, ""]
+      }
+      return []
+    })(),
     ...(meeting.transcript?.length
       ? meeting.transcript.map(
           (segment) =>

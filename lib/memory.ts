@@ -1,3 +1,4 @@
+import type { MeetingTag } from "@/lib/intelligence"
 import type { ActionItem, MeetingRecord, TranscriptSegment } from "@/lib/meetings/repository"
 
 export type MemoryMatchSource =
@@ -103,15 +104,69 @@ function meetingMatches(meeting: MeetingRecord, tokens: string[]) {
   return matches
 }
 
+export type MemorySearchFilters = {
+  /** Only return results from meetings linked to this room/context */
+  roomId?: string
+  /** Only return results from meetings with this tag */
+  tag?: string
+  /** Only return results from meetings that include this participant name (case-insensitive) */
+  participant?: string
+  /** Only return results from meetings with this primary language */
+  language?: string
+}
+
+function matchesFilters(
+  meeting: MeetingRecord,
+  filters: MemorySearchFilters
+): boolean {
+  if (
+    filters.roomId &&
+    !meeting.contexts?.some((context) => context.id === filters.roomId)
+  ) {
+    return false
+  }
+
+  if (filters.tag && !(meeting.tags ?? []).includes(filters.tag as MeetingTag)) {
+    return false
+  }
+
+  if (filters.participant) {
+    const lower = filters.participant.toLowerCase()
+    const participantNames = [
+      ...meeting.participants,
+      ...(meeting.participantDetails?.map((p) => p.name) ?? []),
+    ]
+
+    if (!participantNames.some((name) => name.toLowerCase().includes(lower))) {
+      return false
+    }
+  }
+
+  if (
+    filters.language &&
+    meeting.languageMetadata?.primaryLanguage !== filters.language
+  ) {
+    return false
+  }
+
+  return true
+}
+
 export function buildMeetingMemoryResults(
   meetings: MeetingRecord[],
   query: string,
-  options: { limit?: number } = {}
+  options: { limit?: number; filters?: MemorySearchFilters } = {}
 ): MemorySearchResult[] {
   const tokens = tokenize(query)
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 8), 20))
+  const filters = options.filters ?? {}
+  const hasFilters = Object.values(filters).some(Boolean)
 
-  return meetings
+  const filtered = hasFilters
+    ? meetings.filter((meeting) => matchesFilters(meeting, filters))
+    : meetings
+
+  return filtered
     .map((meeting) => {
       const matches = tokens.length ? meetingMatches(meeting, tokens) : []
 
