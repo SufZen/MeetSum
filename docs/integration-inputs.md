@@ -2,6 +2,8 @@
 
 This file tracks non-secret setup details already provided. Do not commit API keys, private keys, OAuth tokens, service-account JSON, SSH keys, or real passwords.
 
+Historical note, May 18, 2026: this document records early integration inputs. For current operational integration status, use `docs/project-state-report.md`, `docs/architecture.md`, and `docs/user-manual.md`.
+
 ## Google Workspace
 
 - Admin/contact email: `info@realization.co.il`

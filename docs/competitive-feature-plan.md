@@ -2,6 +2,8 @@
 
 Last updated: 2026-04-23
 
+Historical note, May 18, 2026: this document captures the original Fireflies/Timeless-inspired product analysis. For current implementation status and priorities, use `docs/project-state-report.md`, `docs/development-roadmap.md`, and `docs/v0.1.0-development-plan.md`.
+
 ## Goal
 
 Use the best parts of Fireflies and Timeless without copying their entire product surface too early. MeetSum should first become a reliable, Hebrew-strong, Google-native meeting intelligence platform. Only then should it widen into deeper workflow automation and agent orchestration.

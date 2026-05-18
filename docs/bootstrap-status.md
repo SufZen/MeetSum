@@ -2,6 +2,8 @@
 
 Last updated: 2026-04-23
 
+Historical note, May 18, 2026: this document records early bootstrap decisions. It is not the current state report. Use `docs/project-state-report.md` for current production status and `docs/antigravity-handoff.md` for continuing development.
+
 ## GitHub
 
 - Repository: `SufZen/MeetSum`
