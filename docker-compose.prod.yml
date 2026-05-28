@@ -37,23 +37,6 @@ services:
       - default
       - coolify
 
-  migrate:
-    build: .
-    profiles:
-      - tools
-    command: ["npm", "run", "db:migrate"]
-    env_file:
-      - .env.local
-    volumes:
-      - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    dns:
-      - 127.0.0.11
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   worker:
     build: .
     command: ["npm", "run", "worker"]
