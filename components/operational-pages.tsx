@@ -441,10 +441,16 @@ export function OperationalPage({
   const [memoryQuestion, setMemoryQuestion] = useState("")
   const [memoryCitations, setMemoryCitations] = useState<MemoryCitationView[]>([])
   const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
+  const [filterRoom, setFilterRoom] = useState("")
+  const [filterTag, setFilterTag] = useState("")
+  const [filterParticipant, setFilterParticipant] = useState("")
+  const [filterLanguage, setFilterLanguage] = useState("")
   const [rooms, setRooms] = useState<RoomResult[]>([])
   const [selectedRoomId, setSelectedRoomId] = useState("")
   const [roomDetail, setRoomDetail] = useState<RoomDetailView>()
   const [roomLoading, setRoomLoading] = useState(false)
+  const [newRoomName, setNewRoomName] = useState("")
+  const [roomCreating, setRoomCreating] = useState(false)
   const [webhookUrl, setWebhookUrl] = useState("")
   const [webhookEventSelection, setWebhookEventSelection] =
     useState<WebhookEventName[]>(["meeting.completed", "summary.created"])
@@ -474,6 +480,10 @@ export function OperationalPage({
         query: query.trim(),
         limit: "8",
       })
+      if (filterRoom) params.set("roomId", filterRoom)
+      if (filterTag) params.set("tag", filterTag)
+      if (filterParticipant) params.set("participant", filterParticipant)
+      if (filterLanguage) params.set("language", filterLanguage)
 
       void fetch(`/api/memory/search?${params}`)
         .then((response) => response.json())
@@ -486,7 +496,7 @@ export function OperationalPage({
     }, query.trim() ? 250 : 0)
 
     return () => window.clearTimeout(timeoutId)
-  }, [panel, query])
+  }, [panel, query, filterRoom, filterTag, filterParticipant, filterLanguage])
 
   useEffect(() => {
     if (panel !== "automations") return
@@ -548,6 +558,35 @@ export function OperationalPage({
       setRoomDetail(undefined)
     } finally {
       setRoomLoading(false)
+    }
+  }
+
+  async function createRoom() {
+    if (!newRoomName.trim()) return
+
+    setRoomCreating(true)
+    try {
+      const response = await fetch("/api/contexts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: newRoomName.trim() }),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to create room")
+      }
+
+      toast.success(`Room "${newRoomName.trim()}" created`)
+      setNewRoomName("")
+      // Refresh rooms list
+      const roomsResponse = await fetch("/api/rooms")
+      const roomsBody = await roomsResponse.json()
+      setRooms(roomsBody.rooms ?? [])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create room")
+    } finally {
+      setRoomCreating(false)
     }
   }
 
@@ -1118,6 +1157,51 @@ export function OperationalPage({
               placeholder="Search summaries, transcripts, tags, and decisions"
               className="h-10"
             />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground"
+                value={filterRoom}
+                onChange={(e) => setFilterRoom(e.target.value)}
+              >
+                <option value="">All rooms</option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>{room.name}</option>
+                ))}
+              </select>
+              <input
+                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
+                placeholder="Filter by tag..."
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+              />
+              <input
+                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
+                placeholder="Filter by participant..."
+                value={filterParticipant}
+                onChange={(e) => setFilterParticipant(e.target.value)}
+              />
+              <select
+                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground"
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+              >
+                <option value="">All languages</option>
+                <option value="he">Hebrew</option>
+                <option value="en">English</option>
+                <option value="pt">Portuguese</option>
+                <option value="es">Spanish</option>
+                <option value="it">Italian</option>
+              </select>
+              {(filterRoom || filterTag || filterParticipant || filterLanguage) ? (
+                <button
+                  className="text-xs text-[var(--primary)] hover:underline"
+                  onClick={() => { setFilterRoom(""); setFilterTag(""); setFilterParticipant(""); setFilterLanguage("") }}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+              ) : null}
+            </div>
             <div className="mt-3 grid gap-2">
               {memoryResults.slice(0, 8).map((meeting) => (
                 <div key={meeting.id} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
@@ -1199,7 +1283,13 @@ export function OperationalPage({
                           key={`${citation.meetingId}-${citation.source}-${citation.segmentId ?? citation.actionItemId ?? index}`}
                         >
                           <div className="flex flex-wrap items-center gap-2 font-medium text-foreground">
-                            <span>{citation.meetingTitle}</span>
+                            <button
+                              className="text-left text-[var(--primary)] hover:underline"
+                              onClick={() => onOpenMeeting(citation.meetingId)}
+                              type="button"
+                            >
+                              {citation.meetingTitle}
+                            </button>
                             <Badge variant="outline" className="rounded-sm text-[10px]">
                               {formatMemorySource(citation.source)}
                             </Badge>
@@ -1248,9 +1338,28 @@ export function OperationalPage({
                 ))}
                 {!rooms.length ? (
                   <div className="rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
-                    Rooms will appear after you add meetings to a room.
+                    No rooms yet. Create one below to start grouping meetings.
                   </div>
                 ) : null}
+                <div className="col-span-full mt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="flex-1 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-[var(--primary)] focus:outline-none"
+                      placeholder="New room name..."
+                      value={newRoomName}
+                      onChange={(e) => setNewRoomName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void createRoom() }}
+                    />
+                    <button
+                      className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] transition hover:opacity-90 disabled:opacity-50"
+                      disabled={!newRoomName.trim() || roomCreating}
+                      onClick={() => void createRoom()}
+                      type="button"
+                    >
+                      {roomCreating ? "Creating..." : "Create Room"}
+                    </button>
+                  </div>
+                </div>
               </div>
               {roomLoading ? (
                 <div className="mt-4 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
