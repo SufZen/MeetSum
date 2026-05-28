@@ -13,7 +13,23 @@ if (!databaseUrl) {
 const client = new pg.Client({ connectionString: databaseUrl })
 const migrationsDir = resolve(process.cwd(), process.argv[2] ?? "db/migrations")
 
-await client.connect()
+const maxRetries = 10
+const retryDelayMs = 2000
+
+for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  try {
+    await client.connect()
+    break
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (attempt < maxRetries && (code === "EAI_AGAIN" || code === "ECONNREFUSED" || code === "ENOTFOUND")) {
+      console.log(`Migration attempt ${attempt}/${maxRetries} failed (${code}), retrying in ${retryDelayMs}ms...`)
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+    } else {
+      throw error
+    }
+  }
+}
 
 try {
   const migrations = listMigrationFiles(migrationsDir)
