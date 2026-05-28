@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { renderMeetingMarkdown } from "@/lib/meetings/export"
+import { renderMeetingMarkdown, renderMeetingPdf } from "@/lib/meetings/export"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
 function makeMeeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
@@ -154,3 +154,51 @@ describe("renderMeetingMarkdown", () => {
     expect(md).toContain("CUDA out of memory")
   })
 })
+
+describe("renderMeetingPdf", () => {
+  it("includes provider metadata in PDF output", () => {
+    const pdf = renderMeetingPdf(
+      makeMeeting({
+        aiRuns: [
+          {
+            id: "run_1",
+            meetingId: "meet_test",
+            provider: "gemini",
+            task: "audio.transcribe",
+            model: "gemini-3.5-flash",
+            status: "completed",
+            latencyMs: 3200,
+            confidence: 0.9,
+            metadata: {},
+            startedAt: "2026-05-27T09:05:00Z",
+            completedAt: "2026-05-27T09:05:03Z",
+          },
+        ],
+      })
+    )
+    const text = pdf.toString("utf8")
+
+    expect(text).toContain("%PDF-1.4")
+    expect(text).toContain("Processing Metadata")
+    expect(text).toContain("gemini-3.5-flash")
+    expect(text).toContain("Processed by MeetSum")
+  })
+
+  it("generates multi-page PDFs for long content", () => {
+    const longTranscript = Array.from({ length: 120 }, (_, i) => ({
+      id: `seg_${i}`,
+      speaker: "Speaker",
+      startMs: i * 5000,
+      endMs: (i + 1) * 5000,
+      text: `Line of transcript content number ${i + 1}`,
+    }))
+    const pdf = renderMeetingPdf(makeMeeting({ transcript: longTranscript }))
+    const text = pdf.toString("utf8")
+
+    expect(text).toContain("%PDF-1.4")
+    // Multi-page: should have /Count > 1
+    expect(text).toMatch(/\/Count [2-9]/)
+    expect(text).toContain("%%EOF")
+  })
+})
+
