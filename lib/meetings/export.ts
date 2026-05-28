@@ -10,6 +10,44 @@ function formatMs(ms: number) {
   return `${minutes}:${seconds}`
 }
 
+const taskLabels: Record<string, string> = {
+  "audio.transcribe": "Transcription",
+  "transcript.clean": "Transcript cleanup",
+  "summary.generate": "Summary generation",
+  "tasks.extract": "Task extraction",
+  "meeting.index": "Memory indexing",
+  "quality.review": "Quality review",
+}
+
+function renderProviderMetadata(meeting: MeetingRecord): string[] {
+  const runs = meeting.aiRuns?.filter((r) => r.status === "completed") ?? []
+
+  if (!runs.length) return []
+
+  const lines = [
+    "## Processing Metadata",
+    "",
+    "| Stage | Provider | Model | Latency | Confidence |",
+    "|-------|----------|-------|---------|------------|",
+  ]
+
+  for (const run of runs) {
+    const stage = taskLabels[run.task] ?? run.task
+    const provider = run.provider
+    const model = run.model ?? "—"
+    const latency = run.latencyMs ? `${(run.latencyMs / 1000).toFixed(1)}s` : "—"
+    const confidence = run.confidence != null ? `${Math.round(run.confidence * 100)}%` : "—"
+
+    lines.push(`| ${stage} | ${provider} | ${model} | ${latency} | ${confidence} |`)
+  }
+
+  lines.push("")
+  lines.push(`> Processed by MeetSum on ${new Date().toISOString().split("T")[0]}`)
+  lines.push("")
+
+  return lines
+}
+
 export function renderMeetingMarkdown(meeting: MeetingRecord): string {
   const lines = [
     `# ${meeting.title}`,
@@ -47,8 +85,11 @@ export function renderMeetingMarkdown(meeting: MeetingRecord): string {
       const transcribeRun = meeting.aiRuns?.find((r) => r.task === "audio.transcribe")
       if (transcribeRun) {
         let metaLine = `> Transcription provided by **${transcribeRun.provider}**`
+        if (transcribeRun.model) {
+          metaLine += ` (model: ${transcribeRun.model})`
+        }
         if (transcribeRun.metadata?.fallbackUsed) {
-          metaLine += ` (Fallback from ${transcribeRun.metadata.attemptedProvider}. Reason: ${transcribeRun.metadata.fallbackReason || "Unknown error"})`
+          metaLine += ` — Fallback from ${transcribeRun.metadata.attemptedProvider}. Reason: ${transcribeRun.metadata.fallbackReason || "Unknown error"}`
         }
         return [metaLine, ""]
       }
@@ -61,6 +102,7 @@ export function renderMeetingMarkdown(meeting: MeetingRecord): string {
         )
       : ["No transcript is available yet."]),
     "",
+    ...renderProviderMetadata(meeting),
   ]
 
   return lines.join("\n")
