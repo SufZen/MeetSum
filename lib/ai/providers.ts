@@ -40,6 +40,91 @@ export type TranscriptionRunMetadata = {
   fallbackUsed?: boolean
   attemptedProvider?: string
   fallbackReason?: string
+  fallbackCategory?: WhisperErrorCategory
+  fallbackElapsedMs?: number
+}
+
+export type WhisperErrorCategory =
+  | "timeout"
+  | "connection"
+  | "cuda_oom"
+  | "model_load"
+  | "server_error"
+  | "client_error"
+  | "config"
+  | "no_media"
+  | "unknown"
+
+export type WhisperDiagnostic = {
+  success: boolean
+  error?: string
+  errorCategory?: WhisperErrorCategory
+  httpStatus?: number
+  elapsedMs: number
+  segmentCount?: number
+  fileSizeBytes?: number
+}
+
+export function classifyWhisperError(error: unknown): WhisperErrorCategory {
+  const message = error instanceof Error ? error.message : String(error)
+  const lower = message.toLowerCase()
+
+  if (error instanceof Error && error.name === "AbortError") return "timeout"
+  if (lower.includes("etimedout") || lower.includes("timeout")) return "timeout"
+  if (lower.includes("econnrefused") || lower.includes("enotfound") || lower.includes("fetch failed"))
+    return "connection"
+  if (lower.includes("cuda") && lower.includes("memory")) return "cuda_oom"
+  if (lower.includes("out of memory") || lower.includes("oom")) return "cuda_oom"
+  if (lower.includes("model") && (lower.includes("load") || lower.includes("not found")))
+    return "model_load"
+  if (lower.includes("500") || lower.includes("502") || lower.includes("503"))
+    return "server_error"
+  if (lower.includes("400") || lower.includes("422"))
+    return "client_error"
+
+  return "unknown"
+}
+
+export async function whisperHealthCheck(
+  config = getLocalWhisperProviderConfig()
+): Promise<WhisperDiagnostic> {
+  if (!config.baseUrl) {
+    return { success: false, error: "LOCAL_TRANSCRIPTION_URL not configured", errorCategory: "config", elapsedMs: 0 }
+  }
+
+  const startTime = Date.now()
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
+
+    try {
+      const response = await fetch(`${config.baseUrl}/v1/models`, {
+        signal: controller.signal,
+      })
+      const elapsedMs = Date.now() - startTime
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `Health check returned ${response.status}`,
+          errorCategory: response.status >= 500 ? "server_error" : "client_error",
+          httpStatus: response.status,
+          elapsedMs,
+        }
+      }
+
+      return { success: true, elapsedMs }
+    } finally {
+      clearTimeout(timeout)
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      errorCategory: classifyWhisperError(error),
+      elapsedMs: Date.now() - startTime,
+    }
+  }
 }
 
 export type LocalWhisperProviderConfig = {
@@ -452,6 +537,7 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
   readonly id = "local-whisper"
   readonly model: string
   private readonly fallback = new HeuristicFallbackProvider()
+  private lastDiagnostic: WhisperDiagnostic | undefined
 
   constructor(
     private readonly config = getLocalWhisperProviderConfig(),
@@ -463,14 +549,31 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
     this.model = config.model
   }
 
+  getLastDiagnostic() {
+    return this.lastDiagnostic
+  }
+
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
     const asset = meeting.mediaAssets?.find((item) => item.storageKey)
+    const startTime = Date.now()
 
     if (!this.config.baseUrl) {
+      this.lastDiagnostic = {
+        success: false,
+        error: "LOCAL_TRANSCRIPTION_URL is required for local Whisper",
+        errorCategory: "config",
+        elapsedMs: 0,
+      }
       throw new Error("LOCAL_TRANSCRIPTION_URL is required for local Whisper")
     }
 
     if (!asset?.storageKey) {
+      this.lastDiagnostic = {
+        success: false,
+        error: "No media asset found",
+        errorCategory: "no_media",
+        elapsedMs: 0,
+      }
       return this.fallback.transcribe(meeting)
     }
 
@@ -488,6 +591,14 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
       )
 
       const bytes = await readFile(inputPath)
+      const fileSizeBytes = bytes.length
+      console.log(
+        `[LocalWhisper] Starting transcription for ${meeting.id}`,
+        `file=${asset.filename} size=${(fileSizeBytes / 1024 / 1024).toFixed(1)}MB`,
+        `model=${this.config.model} lang=${this.config.language || meeting.language}`,
+        `timeout=${this.config.timeoutMs}ms`
+      )
+
       const formData = new FormData()
       formData.set("file", new Blob([bytes], { type: asset.contentType }), asset.filename)
       formData.set("model", this.config.model)
@@ -507,11 +618,21 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
           }
         )
 
+        const elapsedMs = Date.now() - startTime
+
         if (!response.ok) {
           const body = await response.text().catch(() => "")
-          throw new Error(
-            `Local Whisper transcription failed with ${response.status}: ${body}`
-          )
+          const error = `Local Whisper transcription failed with ${response.status}: ${body}`
+          console.error(`[LocalWhisper] Failed after ${elapsedMs}ms:`, error)
+          this.lastDiagnostic = {
+            success: false,
+            error,
+            errorCategory: response.status >= 500 ? "server_error" : "client_error",
+            httpStatus: response.status,
+            elapsedMs,
+            fileSizeBytes,
+          }
+          throw new Error(error)
         }
 
         const contentType = response.headers.get("content-type") ?? ""
@@ -520,10 +641,37 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
           : await response.text()
         const segments = normalizeLocalWhisperResponse(raw, meeting)
 
+        console.log(
+          `[LocalWhisper] Completed in ${elapsedMs}ms:`,
+          `segments=${segments.length}`,
+          `meeting=${meeting.id}`
+        )
+
+        this.lastDiagnostic = {
+          success: segments.length > 0,
+          elapsedMs,
+          segmentCount: segments.length,
+          fileSizeBytes,
+        }
+
         return segments.length ? segments : this.fallback.transcribe(meeting)
       } finally {
         clearTimeout(timeout)
       }
+    } catch (error) {
+      const elapsedMs = Date.now() - startTime
+
+      if (!this.lastDiagnostic || this.lastDiagnostic.elapsedMs === 0) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.lastDiagnostic = {
+          success: false,
+          error: message,
+          errorCategory: classifyWhisperError(error),
+          elapsedMs,
+        }
+      }
+
+      throw error
     } finally {
       if (typeof tempDir === "string") {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
@@ -559,13 +707,21 @@ export class AutoTranscriptionProvider implements TranscriptionProvider {
       return segments
     }
 
+    const startTime = Date.now()
     try {
       const segments = await this.primary.transcribe(meeting)
       this.lastRun = getTranscriptionRunMetadata(this.primary)
       return segments
     } catch (error) {
+      const elapsedMs = Date.now() - startTime
+      const errorCategory = classifyWhisperError(error)
       const fallbackReason = error instanceof Error ? error.message : String(error)
-      console.error(`[AutoTranscriptionProvider] Primary provider '${this.primary.id}' failed, falling back to '${this.fallback.id}':`, error)
+      console.error(
+        `[AutoTranscriptionProvider] Primary provider '${this.primary.id}' failed after ${elapsedMs}ms`,
+        `category=${errorCategory}`,
+        `falling back to '${this.fallback.id}':`,
+        error
+      )
       
       const segments = await this.fallback.transcribe(meeting)
       const fallbackRun = getTranscriptionRunMetadata(this.fallback)
@@ -574,6 +730,8 @@ export class AutoTranscriptionProvider implements TranscriptionProvider {
         fallbackUsed: true,
         attemptedProvider: this.primary.id,
         fallbackReason,
+        fallbackCategory: errorCategory,
+        fallbackElapsedMs: elapsedMs,
       }
       return segments
     }
