@@ -2,7 +2,7 @@
 
 ## Status Snapshot
 
-Last audited: 2026-05-16.
+Last audited: 2026-05-28.
 
 MeetSum is now a real self-hosted product spine, not only a prototype. The VPS deployment is healthy, the worker is running, Calendar polling is stable, Google Meet artifact discovery works in production, and one real Google Meet smart-notes artifact was imported through the worker into transcript-style segments, summary intelligence, action items, and tags.
 
@@ -95,20 +95,31 @@ The most important remaining work is daily usability: every real meeting should 
 
 - Architecture, production deployment, backup/restore, design system, internationalization, language intelligence, Google setup, and user manual docs exist.
 
+### Production Hardening (2026-05-28)
+
+- Phase 1: Capture loop — workspace artifact discovery and meeting-grouped job recovery with stale-failure prevention.
+- Phase 2: Observability — processing metadata (provider, model, latency, confidence) in Markdown exports and public share footers.
+- Phase 3: Whisper diagnostics — 9-category error classification for LocalWhisperTranscriptionProvider, `/v1/models` health probing.
+- Phase 4: Testing — 26 new tests across RealizeOS, Rooms, Export Metadata, and Whisper Error integration suites.
+- Phase 5: CI/CD — GitHub Actions CI pipeline (lint, test, typecheck) on `main` with Node.js 24.
+- Phase 6: Gate closure — multi-page PDF export with provider metadata, room creation UX, memory search filters (room/tag/participant/language), Whisper root-cause diagnosis.
+- Phase 7: Participant & automation polish — participant hover popover with role/attendance, "Retry all failed" bulk action.
+- Phase 8: Documentation — development roadmap, project state report, and v0.1.0 plan updated.
+
 ## Key Gaps
 
 ### Critical Gaps For Usability
 
-1. Meet artifact sync is not scheduled or promoted as the main capture recovery loop.
-2. Workspace UI does not yet guide the user from "artifacts found" to "process this meeting" strongly enough.
-3. Failed historical jobs are numerous and need cleanup, grouping, and retry/reprocess UX.
+1. ~~Meet artifact sync is not scheduled or promoted as the main capture recovery loop.~~ → Resolved in Phase 1.
+2. ~~Workspace UI does not yet guide the user from "artifacts found" to "process this meeting" strongly enough.~~ → Resolved in Phase 1.
+3. ~~Failed historical jobs are numerous and need cleanup, grouping, and retry/reprocess UX.~~ → Resolved in Phase 1 + Phase 7 ("Retry all failed").
 4. Completed meetings exist, but many scheduled/upcoming meetings still look empty unless the user understands the capture/import path.
 5. Public sharing exists technically, but the Share modal/workflow needs a full smoke test and production UX polish.
-6. Rooms exist technically, but production has no rooms; creation, suggestions, and daily room workflows need to be made obvious.
-7. Memory Ask exists, but needs stronger ranking, filters, and cited answer UI before it feels dependable.
-8. Participant hydration and editing exist, but need a tighter header/popover/speaker assignment flow.
-9. PDF/Markdown exports exist as endpoints but need user-facing polish and smoke tests.
-10. RealizeOS export exists, but needs payload preview, status history, and retry visibility.
+6. ~~Rooms exist technically, but production has no rooms; creation, suggestions, and daily room workflows need to be made obvious.~~ → Resolved in Phase 6 (room creation UX).
+7. ~~Memory Ask exists, but needs stronger ranking, filters, and cited answer UI before it feels dependable.~~ → Resolved in Phase 6 (filter bar + clickable citations).
+8. ~~Participant hydration and editing exist, but need a tighter header/popover/speaker assignment flow.~~ → Resolved in Phase 7 (participant popover).
+9. ~~PDF/Markdown exports exist as endpoints but need user-facing polish and smoke tests.~~ → Resolved in Phase 2 + Phase 6 (multi-page PDF + metadata).
+10. ~~RealizeOS export exists, but needs payload preview, status history, and retry visibility.~~ → Mostly resolved (history + retry exist; preview deferred to v0.2.0).
 
 ### Important But Not First
 
