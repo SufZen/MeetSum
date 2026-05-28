@@ -83,14 +83,51 @@ export function MeetingHeader({
               <ClockIcon aria-hidden="true" className="size-4" />
               {durationLabel(meeting)}
             </span>
-            <button
-              className="flex items-center gap-2 rounded text-left hover:text-foreground"
-              onClick={onShowParticipants}
-              type="button"
-            >
-              <UsersIcon aria-hidden="true" className="size-4" />
-              {participantCount || 0} participants
-            </button>
+            <div className="group relative">
+              <button
+                className="flex items-center gap-2 rounded text-left hover:text-foreground"
+                onClick={onShowParticipants}
+                type="button"
+              >
+                <UsersIcon aria-hidden="true" className="size-4" />
+                {participantCount || 0} participants
+              </button>
+              {meeting.participantDetails?.length ? (
+                <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden min-w-[240px] max-w-sm rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Participants
+                  </div>
+                  <div className="grid gap-1.5">
+                    {meeting.participantDetails.slice(0, 12).map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="font-medium text-foreground">{p.name}</span>
+                          {p.email ? (
+                            <span className="ml-1 text-muted-foreground">{p.email}</span>
+                          ) : null}
+                        </div>
+                        <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] ${
+                          p.role === "organizer"
+                            ? "bg-[var(--primary)]/10 text-[var(--primary)]"
+                            : p.attendanceStatus === "accepted"
+                              ? "bg-[var(--status-success)]/10 text-[var(--status-success)]"
+                              : p.attendanceStatus === "declined"
+                                ? "bg-destructive/10 text-destructive"
+                                : "bg-[var(--muted)]/50 text-muted-foreground"
+                        }`}>
+                          {p.role === "organizer" ? "organizer" : p.attendanceStatus}
+                        </span>
+                      </div>
+                    ))}
+                    {meeting.participantDetails.length > 12 ? (
+                      <div className="text-xs text-muted-foreground">
+                        +{meeting.participantDetails.length - 12} more
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
