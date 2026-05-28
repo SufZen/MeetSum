@@ -143,3 +143,106 @@ export function buildRoomDetail(
     artifacts,
   }
 }
+
+export type RoomSuggestion = {
+  name: string
+  reason: string
+  meetingCount: number
+  meetingIds: string[]
+}
+
+/**
+ * Suggest room names from meeting titles, recurring patterns, and tags.
+ * Extracts common prefixes/patterns from titles and recurring participant groups.
+ */
+export function suggestRooms(
+  meetings: MeetingRecord[],
+  existingRoomNames: string[]
+): RoomSuggestion[] {
+  const existingSet = new Set(existingRoomNames.map((name) => name.toLowerCase()))
+  const suggestions = new Map<string, RoomSuggestion>()
+
+  // Strategy 1: Extract common title prefixes
+  // E.g., "Weekly standup - Week 1", "Weekly standup - Week 2" → "Weekly standup"
+  const titleCounts = new Map<string, string[]>()
+
+  for (const meeting of meetings) {
+    const title = meeting.title.trim()
+
+    // Try splitting on common delimiters
+    for (const separator of [" - ", " — ", " | ", " · ", ": ", " #"]) {
+      const index = title.indexOf(separator)
+
+      if (index > 3) {
+        const prefix = title.slice(0, index).trim()
+        const existing = titleCounts.get(prefix) ?? []
+
+        existing.push(meeting.id)
+        titleCounts.set(prefix, existing)
+      }
+    }
+
+    // Also try matching "Title (date/number)" pattern
+    const parenMatch = title.match(/^(.{4,}?)\s*\(/)
+
+    if (parenMatch) {
+      const prefix = parenMatch[1].trim()
+      const existing = titleCounts.get(prefix) ?? []
+
+      existing.push(meeting.id)
+      titleCounts.set(prefix, existing)
+    }
+  }
+
+  for (const [prefix, meetingIds] of titleCounts) {
+    if (meetingIds.length >= 2 && !existingSet.has(prefix.toLowerCase())) {
+      suggestions.set(prefix.toLowerCase(), {
+        name: prefix,
+        reason: `${meetingIds.length} meetings share this title pattern`,
+        meetingCount: meetingIds.length,
+        meetingIds: [...new Set(meetingIds)],
+      })
+    }
+  }
+
+  // Strategy 2: Common tags across multiple meetings
+  const tagMeetings = new Map<string, string[]>()
+
+  for (const meeting of meetings) {
+    for (const tag of meeting.tags ?? []) {
+      const tagKey = String(tag)
+
+      // Skip generic language/AI tags
+      if (
+        ["hebrew", "english", "portuguese", "spanish", "italian", "mixed-language", "technical"].includes(
+          tagKey
+        )
+      )
+        continue
+
+      const existing = tagMeetings.get(tagKey) ?? []
+
+      existing.push(meeting.id)
+      tagMeetings.set(tagKey, existing)
+    }
+  }
+
+  for (const [tag, meetingIds] of tagMeetings) {
+    if (meetingIds.length >= 3 && !existingSet.has(tag)) {
+      const uniqueIds = [...new Set(meetingIds)]
+
+      if (!suggestions.has(tag)) {
+        suggestions.set(tag, {
+          name: tag.charAt(0).toUpperCase() + tag.slice(1).replace(/-/g, " "),
+          reason: `${uniqueIds.length} meetings tagged "${tag}"`,
+          meetingCount: uniqueIds.length,
+          meetingIds: uniqueIds,
+        })
+      }
+    }
+  }
+
+  return [...suggestions.values()]
+    .sort((a, b) => b.meetingCount - a.meetingCount)
+    .slice(0, 5)
+}
