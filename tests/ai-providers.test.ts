@@ -131,13 +131,14 @@ describe("AI transcription provider selection", () => {
     )
 
     await expect(auto.transcribe(meeting)).resolves.toEqual(fallbackSegments)
-    expect(auto.getLastRun()).toEqual({
-      provider: "gemini",
-      model: "gemini-model",
-      fallbackUsed: true,
-      attemptedProvider: "local-whisper",
-      fallbackReason: "local-whisper unavailable",
-    })
+    const lastRun = auto.getLastRun()
+    expect(lastRun.provider).toBe("gemini")
+    expect(lastRun.model).toBe("gemini-model")
+    expect(lastRun.fallbackUsed).toBe(true)
+    expect(lastRun.attemptedProvider).toBe("local-whisper")
+    expect(lastRun.fallbackReason).toBe("local-whisper unavailable")
+    expect(lastRun.fallbackCategory).toBe("unknown")
+    expect(typeof lastRun.fallbackElapsedMs).toBe("number")
   })
 
   it("auto provider uses local Whisper first for Hebrew meetings", async () => {
