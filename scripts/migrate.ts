@@ -10,15 +10,18 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required")
 }
 
-const client = new pg.Client({ connectionString: databaseUrl })
 const migrationsDir = resolve(process.cwd(), process.argv[2] ?? "db/migrations")
 
 const maxRetries = 10
 const retryDelayMs = 2000
 
+let client: pg.Client | undefined
+
 for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  const candidate = new pg.Client({ connectionString: databaseUrl })
   try {
-    await client.connect()
+    await candidate.connect()
+    client = candidate
     break
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
@@ -29,6 +32,10 @@ for (let attempt = 1; attempt <= maxRetries; attempt++) {
       throw error
     }
   }
+}
+
+if (!client) {
+  throw new Error("Unable to connect to database after retries")
 }
 
 try {
