@@ -634,17 +634,20 @@ export function CommandCenterShell({
   async function addToDefaultRoom() {
     if (!selectedMeeting) return
 
+    const roomName = window.prompt("Room name:", selectedMeeting.contexts?.[0]?.name ?? "")
+    if (!roomName?.trim()) return
+
     const contextsResponse = await fetch("/api/contexts")
     const contextsBody = await contextsResponse.json()
     let contextId = contextsBody.contexts?.find(
-      (context: { name: string }) => context.name === "Real Estate Acquisitions"
+      (context: { name: string }) => context.name === roomName.trim()
     )?.id
 
     if (!contextId) {
       const response = await fetch("/api/contexts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Real Estate Acquisitions" }),
+        body: JSON.stringify({ name: roomName.trim() }),
       })
       const body = await response.json()
 
@@ -671,7 +674,7 @@ export function CommandCenterShell({
     }
 
     await refreshMeeting(selectedMeeting.id)
-    toast.success("Meeting added to room")
+    toast.success(`Meeting added to "${roomName.trim()}"`)
   }
 
   async function downloadExport(format: "pdf" | "markdown") {

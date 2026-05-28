@@ -113,7 +113,7 @@ function escapePdfText(value: string) {
 }
 
 export function renderMeetingPdf(meeting: MeetingRecord): Buffer {
-  const text = renderMeetingMarkdown(meeting)
+  const allLines = renderMeetingMarkdown(meeting)
     .replace(/^#+\s*/gm, "")
     .split(/\r?\n/)
     .flatMap((line) => {
@@ -125,23 +125,53 @@ export function renderMeetingPdf(meeting: MeetingRecord): Buffer {
       }
       return chunks
     })
-    .slice(0, 58)
 
-  const content = [
-    "BT",
-    "/F1 10 Tf",
-    "50 790 Td",
-    "14 TL",
-    ...text.map((line) => `(${escapePdfText(line || " ")}) Tj T*`),
-    "ET",
-  ].join("\n")
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
-  ]
+  const linesPerPage = 52
+  const pages: string[][] = []
+  for (let i = 0; i < allLines.length; i += linesPerPage) {
+    pages.push(allLines.slice(i, i + linesPerPage))
+  }
+  if (!pages.length) pages.push([" "])
+
+  // Build PDF objects: catalog, pages, font, then per-page (page + stream)
+  const objects: string[] = []
+
+  // 1: Catalog → references Pages (object 2)
+  objects.push("<< /Type /Catalog /Pages 2 0 R >>")
+
+  // 2: Pages → will be filled after we know page refs
+  const pageRefs = pages.map((_, i) => `${3 + i * 2} 0 R`).join(" ")
+  objects.push(
+    `<< /Type /Pages /Kids [${pageRefs}] /Count ${pages.length} >>`
+  )
+
+  // Per page: page object + content stream
+  for (const [pageIndex, pageLines] of pages.entries()) {
+    const fontObjIndex = 3 + pages.length * 2
+    const streamObjIndex = 3 + pageIndex * 2 + 1
+
+    const content = [
+      "BT",
+      `/F1 10 Tf`,
+      "50 790 Td",
+      "14 TL",
+      ...pageLines.map((line) => `(${escapePdfText(line || " ")}) Tj T*`),
+      "ET",
+    ].join("\n")
+
+    // Page object
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 ${fontObjIndex} 0 R >> >> /Contents ${streamObjIndex} 0 R >>`
+    )
+    // Content stream
+    objects.push(
+      `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`
+    )
+  }
+
+  // Font object (last)
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
   const parts = ["%PDF-1.4\n"]
   const offsets = [0]
 
@@ -162,3 +192,4 @@ export function renderMeetingPdf(meeting: MeetingRecord): Buffer {
 
   return Buffer.from(parts.join(""), "utf8")
 }
+

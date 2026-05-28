@@ -98,25 +98,35 @@ Important finding:
 
 ## Known Issues And Risks
 
-- Local Whisper fallback root cause is not known yet.
-- Local ASR is not trusted until private Hebrew/mixed benchmark samples pass.
-- Meet artifact sync works but needs better freshness, recovery, and user guidance.
-- Many scheduled meetings can still look empty unless the capture/artifact path is obvious.
-- Public share works, but share UX needs more smoke testing for revoke/regenerate/included-section states.
-- Markdown/PDF exports work, but provider metadata and quality warnings need better export presentation.
-- RealizeOS export exists, but preview/send/retry history needs stronger meeting-level UX.
-- Webhook infrastructure exists, but a real n8n workflow URL is still needed for live delivery testing.
-- Memory and Rooms exist technically but need better ranking, filters, and daily workflows.
+### Local Whisper Root Cause (Diagnosed 2026-05-28)
+
+The `faster-whisper` container crashed during a 52-minute Hebrew/mixed recording transcription on 2026-05-17. Root cause:
+
+- The `ivrit-ai/whisper-large-v3-turbo-ct2` model loaded successfully (13.66s).
+- Model auto-converted from `float16` to `float32` (CPU-only container cannot use `float16`).
+- Processing started at `22:02:16` for a 52:09 audio file.
+- Container crashed/restarted at `22:12:05` (~10 minutes into processing).
+- `OOMKilled=false`, `RestartCount=1` — not a Docker OOM kill, likely an internal process crash from excessive memory growth on `float32` compute.
+- **Fix options**: (a) set `WHISPER_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2` with explicit `float32` compute and memory limits, (b) chunk long recordings before sending to Whisper, (c) set a timeout shorter than 10 minutes so the fallback to Gemini is faster.
+- **Current state**: Whisper `/v1/models` endpoint is healthy from Docker internal network. Short recordings (<15 min) should work. Long recordings will crash the container.
+- **Recommendation**: For v0.1.0, rely on Gemini for recordings >15 minutes. Local Whisper for short Hebrew recordings only.
+
+### Remaining Issues
+
+- Public share flow needs E2E smoke testing for revoke/regenerate states.
+- RealizeOS export exists, but preview/send/retry history needs meeting-level UX.
+- Webhook infrastructure exists, but no production subscriptions configured yet.
+- Memory and Rooms exist technically but need creation UX and filter UI.
 
 ## V0.1.0 Readiness Score
 
-- Capture and intake: 7/10. Calendar, Meet artifacts, Drive import, and upload exist; artifact recovery needs polish.
-- Processing reliability: 6/10. Pipeline works, but failed-job recovery and local ASR fallback debugging remain.
-- Hebrew/mixed AI quality: 5/10. Gemini fallback works; local ASR is not trusted yet.
-- Product UI: 8/10. Main UI is strong; secondary workflows need more action-level polish.
-- Sharing/export: 7/10. Share and exports exist; metadata and revoke/regenerate smoke need polish.
-- Automations/RealizeOS: 7/10. Core routes and payloads exist; UX and live n8n testing remain.
-- Operations: 7/10. VPS deploy/backup/health are solid; monitoring, rate limits, audit log UX, and MinIO backup automation remain.
+- Capture and intake: 8/10. Calendar, Meet artifacts, Drive import, upload, workspace sync panel, and artifact discovery all operational.
+- Processing reliability: 8/10. Pipeline works, meeting-grouped job recovery with stale-failure protection, structured Whisper diagnostics.
+- Hebrew/mixed AI quality: 6/10. Gemini fallback works; local ASR root cause diagnosed (CPU float32 crash on long recordings). Short recordings should work.
+- Product UI: 8/10. Main UI is strong; room creation and memory filters still needed.
+- Sharing/export: 8/10. Markdown + multi-page PDF include provider metadata; share page has processing footer. Smoke testing remains.
+- Automations/RealizeOS: 7/10. Core routes, payloads, and tests exist; preview UX and live n8n testing remain.
+- Operations: 8/10. GitHub Actions CI, VPS deploy, backup, health checks all operational. Auto-deploy not yet wired.
 
 ## In Scope For V0.1.0
 
