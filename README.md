@@ -6,26 +6,26 @@ MeetSum is being built as a production-grade alternative to meeting-summary tool
 
 ## Current Status
 
-This repository currently contains the first working architecture slice:
+**v0.1.0 Development** — 29 test files, 138 tests, TypeScript clean.
 
-- Next.js 16 App Router UI based on the Game Changer template.
-- Fireflies-style meeting workspace with meeting inbox, transcript, summary, action items, Google context, recorder shell, and automation rail.
+Architecture highlights:
+
+- Next.js 16 App Router UI with meeting inbox, transcript, summary, action items, Google context, recorder shell, and automation rail.
 - Production-oriented app shell with locale-prefixed UI routes for English, Hebrew, Portuguese, Spanish, and Italian.
+- **Workspace command center** with Meet artifact sync, job health summary, meeting pipeline status breakdown, and meeting-grouped job recovery with stale-failure detection.
+- **Export system** with provider metadata tables (model, latency, confidence per AI stage) in Markdown and PDF exports.
+- **Public share pages** with processing metadata footer showing all completed AI runs.
+- **Whisper diagnostic instrumentation** with structured error classification (timeout, connection, CUDA OOM, model load, server error) and health check endpoint.
 - Deterministic mixed-language intelligence for language metadata, Hebrew cleanup, auto-tags, smart tasks, and structured follow-up output.
-- Tested domain modules for meeting state, AI escalation policy, Google Workspace scope policy, signed webhooks, and meeting memory.
-- Postgres migration runner and repository adapter, with in-memory demo mode still available for local UI work.
-- API key hashing/verification, bearer-token CLI support, and request validation for meeting creation and protected write routes.
-- REST API scaffold for meetings, uploads, Ask-style Q&A, Google sync, webhooks, and agent runs.
-- Public meeting share pages, meeting favorites, tags, Rooms/context links, participants, and transcript speaker mapping.
-- Google Calendar sync, operator-selected Drive recording import, Meet artifact status checks, and BullMQ worker processing.
-- Gemini-backed audio/summary provider path with AI Studio active and Vertex AI credential path prepared.
-- CLI scaffold in `bin/meetings.mjs`.
-- MCP server scaffold in `mcp/server.mjs`.
+- Postgres migration runner and repository adapter, with in-memory demo mode for local UI work.
+- API key hashing/verification, bearer-token CLI support, and request validation.
+- Google Calendar sync, Drive recording import, Meet artifact status checks, and BullMQ worker processing.
+- Gemini 3.5 Flash audio/summary provider with AI Studio active and Vertex AI credential path prepared.
+- **RealizeOS export** with approval-gated webhook delivery, audit logging, and retry support.
+- **Webhook management** with subscription CRUD, signed delivery, test endpoints, and retry.
+- **Rooms** with context linking, stat aggregation, and participant deduplication.
 - VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
-- Initial Postgres schema in `db/schema.sql`.
-- Production compose, health endpoint, and Postgres backup/restore scripts.
-
-This is not yet a full production Fireflies replacement. The next build stages are deeper Meet artifact import/linking, Gmail prep/follow-up, stronger Hebrew evaluation, richer automations, and production-grade admin/security UX.
+- **GitHub Actions CI** pipeline with typecheck, tests, and lint on every push/PR.
 
 ## Quick Start
 
