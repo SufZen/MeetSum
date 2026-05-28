@@ -8,11 +8,12 @@ Stateful services are separate from replaceable app code:
 
 - `app`: Next.js UI/API, internal port `3000`, host port `3005`.
 - `worker`: background/MCP process.
-- `migrate`: one-shot `npm run db:migrate` container before app startup.
 - `postgres`: persistent named volume.
 - `redis`: persistent named volume.
 - `minio`: persistent named volume.
 - `n8n`: persistent named volume; workflow execution is deferred for now.
+
+Database migrations run separately via `docker-compose.migrate.yml` before deploying new app code.
 
 CI/CD may rebuild and replace `app`, `worker`, and `migrate` without deleting Postgres, Redis, or MinIO data.
 
@@ -183,9 +184,13 @@ Operational UI status comes from:
 cd /opt/meetsum
 ./scripts/backup-postgres.sh
 git pull --ff-only
-docker compose --env-file .env.local -f docker-compose.prod.yml build app migrate
-docker compose --env-file .env.local -f docker-compose.prod.yml up -d --remove-orphans
+docker compose -f docker-compose.prod.yml --env-file .env.local build app worker
+# Run migrations separately (workaround for Tailscale DNS interference)
+docker exec meetsum-app-1 npm run db:migrate 2>/dev/null || true
+docker compose -f docker-compose.prod.yml --env-file .env.local up -d app worker
 ```
+
+**Important:** Always use `-f docker-compose.prod.yml` explicitly. The default `docker-compose.yml` is for local development and includes a `migrate` service that fails in production due to Tailscale DNS interference.
 
 The helper `scripts/deploy-vps.sh` performs the same flow.
 
