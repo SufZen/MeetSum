@@ -1,4 +1,11 @@
-import { CalendarSyncIcon, CloudIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CalendarSyncIcon,
+  CheckCircle2Icon,
+  CloudIcon,
+  Loader2Icon,
+  RadioTowerIcon,
+} from "lucide-react"
 import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
@@ -36,10 +43,12 @@ export function WorkspaceSyncPanel({
   status,
   syncing,
   onSyncAll,
+  onSyncMeetArtifacts,
 }: {
   status?: WorkspaceStatusView
   syncing?: boolean
   onSyncAll: () => void
+  onSyncMeetArtifacts: () => void
 }) {
   return (
     <section className="ms-card grid gap-4 p-4">
@@ -87,15 +96,50 @@ export function WorkspaceSyncPanel({
           Reconnect Google
         </Link>
       )}
-      <Button
-        variant="outline"
-        className="h-9 w-full"
-        disabled={syncing}
-        onClick={onSyncAll}
-      >
-        <CalendarSyncIcon data-icon="inline-start" />
-        {syncing ? "Sync queued..." : "Sync Calendar"}
-      </Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          variant="outline"
+          className="h-9 w-full"
+          disabled={syncing}
+          onClick={onSyncAll}
+        >
+          <CalendarSyncIcon data-icon="inline-start" />
+          {syncing ? "Queued..." : "Sync Calendar"}
+        </Button>
+        <Button
+          variant="outline"
+          className="h-9 w-full"
+          disabled={syncing}
+          onClick={onSyncMeetArtifacts}
+        >
+          <RadioTowerIcon data-icon="inline-start" />
+          {syncing ? "Queued..." : "Sync Meet"}
+        </Button>
+      </div>
+
+      {/* Job health summary */}
+      {status?.jobs && (status.jobs.queued > 0 || status.jobs.active > 0 || status.jobs.failed > 0) && (
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-xs">
+          {status.jobs.active > 0 && (
+            <span className="flex items-center gap-1 text-[var(--primary)]">
+              <Loader2Icon aria-hidden="true" className="size-3 animate-spin" />
+              {status.jobs.active} active
+            </span>
+          )}
+          {status.jobs.queued > 0 && (
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <CheckCircle2Icon aria-hidden="true" className="size-3" />
+              {status.jobs.queued} queued
+            </span>
+          )}
+          {status.jobs.failed > 0 && (
+            <span className="flex items-center gap-1 text-destructive">
+              <AlertTriangleIcon aria-hidden="true" className="size-3" />
+              {status.jobs.failed} failed
+            </span>
+          )}
+        </div>
+      )}
       <div className="grid gap-2">
         {(status?.sync.length ? status.sync : []).map((item) => (
             <div key={item.source} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">

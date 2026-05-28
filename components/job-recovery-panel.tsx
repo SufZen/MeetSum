@@ -1,8 +1,11 @@
 import {
   AlertTriangleIcon,
+  ArchiveIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  LayoutListIcon,
   RefreshCwIcon,
+  UsersIcon,
 } from "lucide-react"
 import { useState } from "react"
 
@@ -18,6 +21,18 @@ type StageGroup = {
     meetingTitle: string
   }>
 }
+
+type MeetingGroup = {
+  meetingId: string
+  meetingTitle: string
+  meetingStatus?: MeetingRecord["status"]
+  jobs: JobRecord[]
+  latestStage: string
+  latestError: string
+  latestAt: string
+}
+
+type GroupMode = "stage" | "meeting"
 
 function formatJobTime(value?: string) {
   if (!value) return "unknown"
@@ -101,6 +116,58 @@ export function groupFailedJobsByStageAndError(
 
     return bTime - aTime
   })
+
+  return groups
+}
+
+export function groupFailedJobsByMeeting(
+  jobs: JobRecord[],
+  meetings: MeetingRecord[]
+): MeetingGroup[] {
+  const failedJobs = jobs.filter(
+    (job) => job.status === "failed" && job.meetingId
+  )
+  const meetingMap = new Map(meetings.map((meeting) => [meeting.id, meeting]))
+  const groupMap = new Map<string, MeetingGroup>()
+
+  for (const job of failedJobs) {
+    const meetingId = job.meetingId!
+    const meeting = meetingMap.get(meetingId)
+
+    if (!groupMap.has(meetingId)) {
+      groupMap.set(meetingId, {
+        meetingId,
+        meetingTitle: meeting?.title ?? "Unknown meeting",
+        meetingStatus: meeting?.status,
+        jobs: [],
+        latestStage: "",
+        latestError: "",
+        latestAt: "",
+      })
+    }
+
+    groupMap.get(meetingId)!.jobs.push(job)
+  }
+
+  // For each meeting group, find the latest failed job and set summary fields
+  const groups = [...groupMap.values()]
+  for (const group of groups) {
+    group.jobs.sort(
+      (a, b) =>
+        new Date(b.updatedAt ?? b.createdAt).getTime() -
+        new Date(a.updatedAt ?? a.createdAt).getTime()
+    )
+    const latest = group.jobs[0]
+    group.latestStage = jobStage(latest)
+    group.latestError = normalizeError(latest.error)
+    group.latestAt = latest.updatedAt ?? latest.createdAt
+  }
+
+  // Filter out meetings that already completed (stale failures)
+  // but still show them with a dimmed indicator
+  groups.sort(
+    (a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime()
+  )
 
   return groups
 }
@@ -215,22 +282,185 @@ function StageGroupCard({
   )
 }
 
+function MeetingGroupCard({
+  group,
+  onRetry,
+  onArchive,
+  onOpenMeeting,
+}: {
+  group: MeetingGroup
+  onRetry: (job: JobRecord) => void
+  onArchive?: (meetingId: string) => void
+  onOpenMeeting?: (meetingId: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isStale = group.meetingStatus === "completed"
+  const retryableJobs = group.jobs.filter((job) => job.retryable !== false)
+
+  return (
+    <div
+      className={`rounded-lg border p-4 ${
+        isStale
+          ? "border-[var(--divider)] bg-[var(--surface-subtle)] opacity-60"
+          : "border-[var(--divider)] bg-[var(--surface-subtle)]"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <AlertTriangleIcon
+              aria-hidden="true"
+              className="size-4 shrink-0 text-destructive"
+            />
+            <span className="truncate text-sm font-semibold text-foreground">
+              {group.meetingTitle}
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Last failed stage: <span className="font-medium text-destructive">{group.latestStage}</span>
+            {" · "}
+            {group.latestError}
+          </p>
+          {isStale ? (
+            <p className="mt-1 text-xs leading-5 text-[var(--status-success)]">
+              Meeting already completed — these are stale failures.
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge
+            variant="outline"
+            className="rounded-md border-destructive/50 text-destructive"
+          >
+            {group.jobs.length} failed
+          </Badge>
+          {isStale ? (
+            <Badge variant="outline" className="rounded-md border-[var(--status-success)] text-[var(--status-success)]">
+              completed
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {onOpenMeeting ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            onClick={() => onOpenMeeting(group.meetingId)}
+          >
+            Open meeting
+          </Button>
+        ) : null}
+        {retryableJobs.length > 0 && !isStale ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            onClick={() => {
+              // Retry the most recent failed job for this meeting
+              onRetry(retryableJobs[0])
+            }}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            Retry latest
+          </Button>
+        ) : null}
+        {onArchive && isStale ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-muted-foreground"
+            onClick={() => onArchive(group.meetingId)}
+          >
+            <ArchiveIcon data-icon="inline-start" />
+            Dismiss
+          </Button>
+        ) : null}
+      </div>
+
+      {expanded ? (
+        <div className="mt-3 grid gap-2">
+          {group.jobs.map((job) => (
+            <div
+              key={job.id}
+              className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{jobStage(job)}</span>
+                <span className="text-muted-foreground">
+                  {formatJobTime(job.updatedAt)}
+                </span>
+              </div>
+              {job.error ? (
+                <p className="mt-1 line-clamp-2 text-destructive">{job.error}</p>
+              ) : null}
+              {job.retryable !== false && !isStale ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-1 h-6 text-xs"
+                  onClick={() => onRetry(job)}
+                >
+                  <RefreshCwIcon data-icon="inline-start" />
+                  Retry
+                </Button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {group.jobs.length > 1 ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-7 w-full text-xs"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? (
+            <>
+              <ChevronUpIcon data-icon="inline-start" />
+              Hide individual jobs
+            </>
+          ) : (
+            <>
+              <ChevronDownIcon data-icon="inline-start" />
+              Show {group.jobs.length} individual jobs
+            </>
+          )}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 export function JobRecoveryPanel({
   jobs,
   meetings = [],
   onRetry,
+  onRetryAll,
+  onArchive,
   onOpenMeeting,
 }: {
   jobs: JobRecord[]
   meetings?: MeetingRecord[]
   onRetry: (job: JobRecord) => void
+  onRetryAll?: () => void
+  onArchive?: (meetingId: string) => void
   onOpenMeeting?: (meetingId: string) => void
 }) {
+  const [groupMode, setGroupMode] = useState<GroupMode>("meeting")
   const stageGroups = groupFailedJobsByStageAndError(jobs, meetings)
+  const meetingGroups = groupFailedJobsByMeeting(jobs, meetings)
   const totalFailed = stageGroups.reduce(
     (total, group) => total + group.jobs.length,
     0
   )
+  const activeFailedMeetings = meetingGroups.filter(
+    (g) => g.meetingStatus !== "completed"
+  ).length
 
   return (
     <section className="ms-card grid gap-3 p-4">
@@ -238,24 +468,71 @@ export function JobRecoveryPanel({
         <div>
           <h3 className="text-sm font-semibold">Job recovery</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Failed jobs grouped by processing stage and error type for fast triage.
+            {groupMode === "meeting"
+              ? `${activeFailedMeetings} meetings need attention · ${totalFailed} total failed jobs`
+              : `Failed jobs grouped by processing stage and error type for fast triage.`}
           </p>
         </div>
-        <Badge
-          variant={totalFailed > 0 ? "destructive" : "secondary"}
-          className="rounded-md"
-        >
-          {totalFailed} failed
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            title={groupMode === "meeting" ? "Group by stage" : "Group by meeting"}
+            onClick={() => setGroupMode(groupMode === "meeting" ? "stage" : "meeting")}
+          >
+            {groupMode === "meeting" ? (
+              <LayoutListIcon data-icon="inline-start" />
+            ) : (
+              <UsersIcon data-icon="inline-start" />
+            )}
+            {groupMode === "meeting" ? "By stage" : "By meeting"}
+          </Button>
+          {onRetryAll && totalFailed > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={onRetryAll}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              Retry all
+            </Button>
+          ) : null}
+          <Badge
+            variant={totalFailed > 0 ? "destructive" : "secondary"}
+            className="rounded-md"
+          >
+            {totalFailed} failed
+          </Badge>
+        </div>
       </div>
 
-      {stageGroups.length ? (
+      {groupMode === "stage" ? (
+        stageGroups.length ? (
+          <div className="grid gap-2">
+            {stageGroups.map((group) => (
+              <StageGroupCard
+                key={`${group.stage}::${group.errorPattern}`}
+                group={group}
+                onRetry={onRetry}
+                onOpenMeeting={onOpenMeeting}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+            No failed jobs need recovery. All processing pipelines are healthy.
+          </div>
+        )
+      ) : meetingGroups.length ? (
         <div className="grid gap-2">
-          {stageGroups.map((group) => (
-            <StageGroupCard
-              key={`${group.stage}::${group.errorPattern}`}
+          {meetingGroups.map((group) => (
+            <MeetingGroupCard
+              key={group.meetingId}
               group={group}
               onRetry={onRetry}
+              onArchive={onArchive}
               onOpenMeeting={onOpenMeeting}
             />
           ))}

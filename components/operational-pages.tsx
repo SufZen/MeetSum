@@ -420,6 +420,7 @@ export function OperationalPage({
   onRetryJob,
   onOpenMeeting,
   onProcessMeeting,
+  onSyncMeetArtifacts,
 }: {
   panel: MainPanelKey
   meetings: MeetingRecord[]
@@ -434,6 +435,7 @@ export function OperationalPage({
   onRetryJob: (job: JobRecord) => void
   onOpenMeeting: (meetingId: string) => void
   onProcessMeeting: (meetingId: string) => void
+  onSyncMeetArtifacts: () => void
 }) {
   const [memoryAnswer, setMemoryAnswer] = useState("")
   const [memoryQuestion, setMemoryQuestion] = useState("")
@@ -919,6 +921,7 @@ export function OperationalPage({
             status={workspaceStatus}
             syncing={syncing}
             onSyncAll={onSyncCalendar}
+            onSyncMeetArtifacts={onSyncMeetArtifacts}
           />
           <div className="grid gap-4">
             <OpsCard
@@ -1057,6 +1060,29 @@ export function OperationalPage({
               </div>
             </OpsCard>
             <ProviderHealthPanel providers={providers} />
+          </div>
+          <div className="xl:col-span-2">
+            <section className="ms-card grid gap-3 p-4">
+              <h3 className="text-sm font-semibold">Meeting pipeline</h3>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(
+                  [
+                    ["Completed", meetings.filter((m) => m.status === "completed").length, "bg-[var(--status-success)]/10 text-[var(--status-success)]"],
+                    ["Processing", meetings.filter((m) => ["media_found", "media_uploaded", "audio_extracted", "transcribing", "diarizing", "summarizing", "indexing"].includes(m.status)).length, "bg-[var(--primary)]/10 text-[var(--primary)]"],
+                    ["Failed", meetings.filter((m) => m.status === "failed").length, "bg-destructive/10 text-destructive"],
+                    ["Scheduled", meetings.filter((m) => m.status === "scheduled").length, "bg-[var(--muted)]/50 text-muted-foreground"],
+                  ] as const
+                ).map(([label, count, classes]) => (
+                  <div
+                    key={label}
+                    className={`rounded-lg border border-[var(--divider)] p-3 ${classes}`}
+                  >
+                    <div className="text-xl font-semibold">{count}</div>
+                    <div className="text-xs">{label}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
           <div className="xl:col-span-2">
             <JobActivityCenter

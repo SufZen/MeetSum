@@ -1183,6 +1183,7 @@ export function CommandCenterShell({
                   onFindDriveRecordings={() => setDrivePickerOpen(true)}
                   onRetryJob={retryJob}
                   onOpenMeeting={selectMeeting}
+                  onSyncMeetArtifacts={syncMeetArtifacts}
                   onProcessMeeting={(meetingId) => {
                     const meetingToProcess = meetingRecords.find(
                       (meeting) => meeting.id === meetingId
