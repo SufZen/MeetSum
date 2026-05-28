@@ -79,7 +79,7 @@ describe("meeting quality warnings", () => {
           provider: "gemini",
           task: "audio.transcribe",
           status: "completed",
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash",
           metadata: {
             fallbackUsed: true,
             attemptedProvider: "local-whisper",

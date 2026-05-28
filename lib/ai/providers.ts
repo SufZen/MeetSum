@@ -600,7 +600,7 @@ export class GeminiSummaryProvider implements SummaryProvider {
       )
       .join("\n")
     const response = await ai.models.generateContent({
-      model: process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-2.5-flash",
+      model: process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-3.5-flash",
       contents: [
         {
           role: "user",
@@ -714,7 +714,7 @@ export class GeminiSummaryProvider implements SummaryProvider {
 
 export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   readonly id = "gemini"
-  readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-2.5-flash"
+  readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash"
   private readonly fallback = new HeuristicFallbackProvider()
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
@@ -817,7 +817,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
       }
 
       const response = await ai.models.generateContent({
-        model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-2.5-flash",
+        model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash",
         contents: [
           {
             role: "user",
