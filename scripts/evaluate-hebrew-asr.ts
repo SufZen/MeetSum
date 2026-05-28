@@ -149,7 +149,7 @@ async function runGemini(sample: EvalSample, audioPath: string) {
     throw new Error("Gemini is not configured for ASR eval")
   }
 
-  const model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-2.5-flash"
+  const model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash"
   const startedAt = Date.now()
   const bytes = await readFile(audioPath)
   const ai = createGeminiClient()
