@@ -39,6 +39,8 @@ services:
 
   migrate:
     build: .
+    profiles:
+      - tools
     command: ["npm", "run", "db:migrate"]
     env_file:
       - .env.local
