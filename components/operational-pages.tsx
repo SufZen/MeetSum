@@ -1121,6 +1121,27 @@ export function OperationalPage({
                   </div>
                 ))}
               </div>
+              {(() => {
+                const failedJobs = jobs.filter((j) => j.status === "failed" && j.retryable !== false)
+                return failedJobs.length > 0 ? (
+                  <button
+                    className="mt-2 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive transition hover:bg-destructive/20"
+                    onClick={() => {
+                      // Retry the most recent failed job per meeting
+                      const seen = new Set<string>()
+                      for (const job of failedJobs) {
+                        const key = job.meetingId ?? job.id
+                        if (seen.has(key)) continue
+                        seen.add(key)
+                        onRetryJob(job)
+                      }
+                    }}
+                    type="button"
+                  >
+                    Retry all failed ({failedJobs.length})
+                  </button>
+                ) : null
+              })()}
             </section>
           </div>
           <div className="xl:col-span-2">
