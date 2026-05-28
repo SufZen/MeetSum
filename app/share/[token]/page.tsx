@@ -114,7 +114,15 @@ export default async function PublicMeetingSharePage({
             <h2 className="mb-3 text-xl font-semibold">Transcript</h2>
             {transcribeRun ? (
               <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-sm">
-                <div className="font-medium">Transcription provided by {transcribeRun.provider}</div>
+                <div className="font-medium">
+                  Transcription provided by {transcribeRun.provider}
+                  {transcribeRun.model ? ` (${transcribeRun.model})` : ""}
+                </div>
+                {transcribeRun.latencyMs ? (
+                  <div className="mt-1 text-xs text-[var(--text-muted)]">
+                    Completed in {(transcribeRun.latencyMs / 1000).toFixed(1)}s
+                  </div>
+                ) : null}
                 {transcribeRun.metadata?.fallbackUsed ? (
                   <div className="mt-1 text-xs text-[var(--status-warning)]">
                     Fallback used after {transcribeRun.metadata.attemptedProvider as string}. Reason: {(transcribeRun.metadata.fallbackReason as string) || "Unknown error"}
@@ -143,6 +151,34 @@ export default async function PublicMeetingSharePage({
               ) : null}
             </div>
           </section>
+        ) : null}
+
+        {/* Processing metadata footer */}
+        {meeting.aiRuns?.length ? (
+          <footer className="mt-10 border-t border-[var(--border)] pt-6">
+            <h3 className="mb-3 text-sm font-semibold text-[var(--text-muted)]">
+              Processing metadata
+            </h3>
+            <div className="grid gap-2 text-xs text-[var(--text-muted)] sm:grid-cols-2 lg:grid-cols-3">
+              {meeting.aiRuns
+                .filter((run) => run.status === "completed")
+                .map((run) => (
+                  <div
+                    key={run.id}
+                    className="rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-2"
+                  >
+                    <div className="font-medium text-[var(--text-secondary)]">
+                      {run.task.replace(/\./g, " · ")}
+                    </div>
+                    <div className="mt-1">
+                      {run.provider}
+                      {run.model ? ` · ${run.model}` : ""}
+                      {run.latencyMs ? ` · ${(run.latencyMs / 1000).toFixed(1)}s` : ""}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </footer>
         ) : null}
       </article>
     </main>
