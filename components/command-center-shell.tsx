@@ -96,6 +96,8 @@ export function CommandCenterShell({
   const [participants, setParticipants] = useState<MeetingParticipant[]>([])
   const [tagsOpen, setTagsOpen] = useState(false)
   const [tagDraft, setTagDraft] = useState("")
+  const [payloadPreviewOpen, setPayloadPreviewOpen] = useState(false)
+  const [payloadPreview, setPayloadPreview] = useState<string>("")
   const [darkMode, setDarkMode] = useState(false)
   const [isPending, startTransition] = useTransition()
 
@@ -359,9 +361,30 @@ export function CommandCenterShell({
     await refreshMeeting()
   }
 
+  async function previewRealizeOSPayload() {
+    if (!selectedMeeting) return
+
+    setPayloadPreview("Loading…")
+    setPayloadPreviewOpen(true)
+    try {
+      const response = await fetch(`/api/integrations/realizeos/preview/${selectedMeeting.id}`)
+      const body = await response.json()
+
+      if (!response.ok) {
+        setPayloadPreview(JSON.stringify({ error: body.error ?? "Unable to build preview" }, null, 2))
+        return
+      }
+
+      setPayloadPreview(JSON.stringify(body, null, 2))
+    } catch {
+      setPayloadPreview(JSON.stringify({ error: "Failed to fetch preview" }, null, 2))
+    }
+  }
+
   async function exportRealizeOS() {
     if (!selectedMeeting) return
 
+    setPayloadPreviewOpen(false)
     setExporting(true)
     try {
       const response = await fetch("/api/integrations/realizeos/export", {
@@ -945,7 +968,7 @@ export function CommandCenterShell({
         onEditTags={openTagsDialog}
         onExportMarkdown={() => downloadExport("markdown")}
         onExportPdf={() => downloadExport("pdf")}
-        onExportRealizeOS={exportRealizeOS}
+        onExportRealizeOS={previewRealizeOSPayload}
         onProcessMeeting={processMeeting}
         onSuggestAgents={suggestAgents}
         onApproveAgentRun={approveAgentRun}
@@ -1052,6 +1075,42 @@ export function CommandCenterShell({
                     }
                   >
                     Revoke
+                  </Button>
+                </div>
+              </section>
+            </div>
+          ) : null}
+          {payloadPreviewOpen ? (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
+              <section className="flex w-full max-w-3xl flex-col rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl" style={{ maxHeight: "80vh" }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">RealizeOS payload preview</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Review the payload before sending to RealizeOS.
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setPayloadPreviewOpen(false)}>
+                    Close
+                  </Button>
+                </div>
+                <div className="ms-scrollbar mt-4 min-h-0 flex-1 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                  <pre className="whitespace-pre-wrap text-xs leading-5 text-[var(--text-secondary)]">
+                    {payloadPreview}
+                  </pre>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => copyText(payloadPreview, "Payload JSON")}
+                    variant="outline"
+                  >
+                    Copy JSON
+                  </Button>
+                  <Button
+                    onClick={exportRealizeOS}
+                    disabled={exporting || payloadPreview === "Loading\u2026"}
+                  >
+                    Send export
                   </Button>
                 </div>
               </section>
