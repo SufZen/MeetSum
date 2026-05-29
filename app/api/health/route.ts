@@ -12,7 +12,7 @@ function configured(value: string | undefined): HealthState {
 
 export async function GET() {
   const report = await createHealthReport({
-    version: process.env.npm_package_version ?? "0.0.1",
+    version: process.env.npm_package_version ?? "0.3.0",
     startedAt,
     database: async () => {
       if (!process.env.DATABASE_URL) return "not_configured"
