@@ -1,0 +1,60 @@
+{
+  "name": "MeetSum → Slack: Meeting Completed",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meetsum-meeting-completed",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#meetings",
+        "text": "=📋 *Meeting Completed*\n\n*{{$json.payload.title}}*\n\n_{{$json.payload.overview}}_\n\n👥 Participants: {{$json.payload.participantCount}}\n✅ Action Items: {{$json.payload.actionItemCount}}\n📅 {{$json.payload.startedAt}}",
+        "otherOptions": {}
+      },
+      "name": "Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true
+  },
+  "_meta": {
+    "description": "Receives MeetSum 'meeting.completed' webhook event and posts a formatted summary to a Slack channel.",
+    "setup": [
+      "1. Import this workflow into n8n",
+      "2. Configure your Slack API credential",
+      "3. Set the #channel to your target Slack channel",
+      "4. Copy the webhook URL from the Webhook node",
+      "5. Register the webhook URL in MeetSum: POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'] }",
+      "6. Activate the workflow"
+    ]
+  }
+}
