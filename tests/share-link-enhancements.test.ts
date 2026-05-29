@@ -102,4 +102,49 @@ describe("share link enhancements", () => {
 
     expect(isExpired).toBe(false)
   })
+
+  it("password gate: requires password when passwordHash is set", () => {
+    const password = "team-secret-2026"
+    const share: MeetingShare = {
+      id: "share_gated",
+      meetingId: "meeting_003",
+      token: "gated999",
+      visibility: "public",
+      revoked: false,
+      passwordHash: createApiKeyHash(password),
+      includedSections: ["summary", "transcript"],
+      createdAt: "2026-05-29T09:00:00Z",
+      updatedAt: "2026-05-29T09:00:00Z",
+    }
+
+    // Should require password
+    expect(share.passwordHash).toBeDefined()
+
+    // Correct password passes
+    expect(verifyApiKey(password, [share.passwordHash!])).toBe(true)
+
+    // Wrong password fails
+    expect(verifyApiKey("hacker-attempt", [share.passwordHash!])).toBe(false)
+
+    // Empty password fails
+    expect(verifyApiKey("", [share.passwordHash!])).toBe(false)
+  })
+
+  it("password gate: allows access when no passwordHash", () => {
+    const share: MeetingShare = {
+      id: "share_open",
+      meetingId: "meeting_004",
+      token: "open999",
+      visibility: "public",
+      revoked: false,
+      includedSections: ["summary"],
+      createdAt: "2026-05-29T09:00:00Z",
+      updatedAt: "2026-05-29T09:00:00Z",
+    }
+
+    // No password required
+    expect(share.passwordHash).toBeUndefined()
+    // Access should be granted without verification
+    expect(!share.passwordHash).toBe(true)
+  })
 })

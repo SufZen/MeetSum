@@ -24,17 +24,22 @@ export async function POST(
 
   await meetingRepository.createExportRecord({ meetingId: id, format: "docx" })
 
-  const docx = await renderMeetingDocx(meeting)
+  try {
+    const docx = await renderMeetingDocx(meeting)
+    const safeTitle = meeting.title.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "meetsum-export"
 
-  return new NextResponse(new Uint8Array(docx), {
-    headers: {
-      "content-type":
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "content-disposition": `attachment; filename="${meeting.title.replace(
-        /[^a-z0-9_-]+/gi,
-        "-"
-      )}.docx"`,
-      ...rateLimit.headers,
-    },
-  })
+    return new NextResponse(new Uint8Array(docx), {
+      headers: {
+        "content-type":
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "content-disposition": `attachment; filename="${safeTitle}.docx"`,
+        ...rateLimit.headers,
+      },
+    })
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to generate DOCX export",
+      500
+    )
+  }
 }

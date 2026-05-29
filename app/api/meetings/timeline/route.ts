@@ -34,6 +34,11 @@ export async function GET(request: Request) {
   const from = fromParam ? new Date(fromParam) : thirtyDaysAgo
   const to = toParam ? new Date(toParam) : now
 
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    const { jsonError } = await import("@/lib/api/responses")
+    return jsonError("Invalid date format for 'from' or 'to' parameter", 400)
+  }
+
   // Fetch all meetings (filtered by room if provided)
   const allMeetings = roomId
     ? await meetingRepository.listMeetingsByContext(roomId)

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation"
 
+import { verifyApiKey } from "@/lib/auth/api-keys"
 import { meetingRepository } from "@/lib/meetings/store"
 
 function formatMs(ms: number) {
@@ -14,15 +15,62 @@ function formatMs(ms: number) {
 
 export default async function PublicMeetingSharePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const { token } = await params
+  const sp = await searchParams
   const result = await meetingRepository.getShareByToken(token)
 
   if (!result) notFound()
 
   const { meeting, share } = result
+
+  // Password gate: if share has a password, verify before showing content
+  if (share.passwordHash) {
+    const password = typeof sp.p === "string" ? sp.p : ""
+    const isValid = password && verifyApiKey(password, [share.passwordHash])
+
+    if (!isValid) {
+      return (
+        <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-5 py-8 text-[var(--text-primary)]">
+          <div className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+              MeetSum shared meeting
+            </div>
+            <h1 className="mb-2 text-xl font-semibold">Password Required</h1>
+            <p className="mb-6 text-sm text-[var(--text-muted)]">
+              This shared meeting is password-protected. Please enter the password to continue.
+            </p>
+            <form method="GET">
+              <input
+                type="password"
+                name="p"
+                autoFocus
+                required
+                placeholder="Enter password"
+                className="mb-4 w-full rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-sm"
+              />
+              <button
+                type="submit"
+                className="w-full rounded-md bg-[var(--primary)] px-4 py-3 text-sm font-medium text-white"
+              >
+                Access Meeting
+              </button>
+              {password && (
+                <p className="mt-3 text-center text-sm text-[var(--status-error)]">
+                  Incorrect password. Please try again.
+                </p>
+              )}
+            </form>
+          </div>
+        </main>
+      )
+    }
+  }
+
   const includes = new Set(share.includedSections)
   const participants =
     meeting.participantDetails?.map((participant) => participant.name) ??

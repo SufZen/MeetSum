@@ -28,7 +28,8 @@ export async function GET(request: Request) {
   const tag = url.searchParams.get("tag")?.toLowerCase().trim()
   const status = url.searchParams.get("status")?.trim()
   const source = url.searchParams.get("source")?.trim()
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 20), 1), 100)
+  const rawLimit = Number(url.searchParams.get("limit") ?? 20)
+  const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 20 : rawLimit, 1), 100)
 
   if (!q && !tag && !status && !source) {
     return jsonError("At least one search parameter (q, tag, status, source) is required", 400)
@@ -42,9 +43,9 @@ export async function GET(request: Request) {
         if (q) {
           const titleMatch = m.title.toLowerCase().includes(q)
           const participantMatch =
-            m.participantDetails?.some(
+            (m.participantDetails?.some(
               (p) => p.name.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q)
-            ) ??
+            ) ?? false) ||
             m.participants.some((p) => p.toLowerCase().includes(q))
           const overviewMatch = m.summary?.overview?.toLowerCase().includes(q) ?? false
 
