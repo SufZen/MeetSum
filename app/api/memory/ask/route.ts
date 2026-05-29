@@ -3,8 +3,13 @@ import { NextResponse } from "next/server"
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { buildMeetingMemoryAnswer } from "@/lib/memory"
 import { meetingRepository } from "@/lib/meetings/store"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export async function POST(request: Request) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.share)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
@@ -16,5 +21,8 @@ export async function POST(request: Request) {
 
   const meetings = await meetingRepository.searchMeetings(question, { limit: 12 })
 
-  return NextResponse.json(buildMeetingMemoryAnswer(question, meetings))
+  return NextResponse.json(buildMeetingMemoryAnswer(question, meetings), {
+    headers: rateLimit.headers,
+  })
 }
+

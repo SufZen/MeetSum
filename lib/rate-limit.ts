@@ -126,3 +126,57 @@ export const RATE_LIMIT_PRESETS = {
   /** Admin operations: 30 per minute */
   admin: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
 } as const
+
+/**
+ * Extract a rate limit key from a Request.
+ * Uses X-Forwarded-For (reverse proxy) or falls back to a static key.
+ */
+export function extractRateLimitKey(request: Request, suffix?: string): string {
+  const forwarded = request.headers.get("x-forwarded-for")
+  const ip = forwarded?.split(",")[0]?.trim() ?? "unknown"
+  return suffix ? `${ip}:${suffix}` : ip
+}
+
+/**
+ * Check rate limit for a request. Returns a 429 Response if blocked, or undefined if allowed.
+ * Also applies X-RateLimit-* headers to the provided headers object.
+ */
+export function rateLimitRequest(
+  request: Request,
+  config: RateLimitConfig,
+  keyOverride?: string
+): { blocked?: Response; headers: Record<string, string> } {
+  if (process.env.MEETSUM_RATE_LIMIT === "false") {
+    return { headers: {} }
+  }
+
+  const key = keyOverride ?? extractRateLimitKey(request)
+  const result = checkRateLimit(key, config)
+
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(result.limit),
+    "X-RateLimit-Remaining": String(result.remaining),
+    "X-RateLimit-Reset": String(Math.ceil(result.resetMs / 1000)),
+  }
+
+  if (!result.allowed) {
+    const retryAfter = Math.ceil((result.resetMs - Date.now()) / 1000)
+
+    return {
+      blocked: new Response(
+        JSON.stringify({ error: "Too many requests" }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(Math.max(1, retryAfter)),
+            ...headers,
+          },
+        }
+      ),
+      headers,
+    }
+  }
+
+  return { headers }
+}
