@@ -24,6 +24,8 @@ export type AuditAction =
   | "auth.session.created"
   | "auth.session.refreshed"
   | "admin.settings.updated"
+  | "api_key.created"
+  | "api_key.revoked"
 
 export async function recordAuditLog(input: {
   action: AuditAction
