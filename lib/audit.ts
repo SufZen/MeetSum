@@ -12,6 +12,7 @@ export type AuditAction =
   | "meeting.export.markdown"
   | "meeting.export.pdf"
   | "meeting.export.docx"
+  | "meeting.export.notion"
   | "room.created"
   | "room.meeting.added"
   | "webhook.subscription.created"

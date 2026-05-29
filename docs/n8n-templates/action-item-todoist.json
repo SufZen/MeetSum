@@ -1,0 +1,62 @@
+{
+  "name": "MeetSum → Todoist: Action Item Created",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meetsum-action-item",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "task",
+        "content": "={{$json.payload.title}}",
+        "additionalFields": {
+          "description": "From meeting: {{$json.payload.meetingTitle}}\nOwner: {{$json.payload.owner}}\nDue: {{$json.payload.dueDate}}",
+          "priority": 2
+        }
+      },
+      "name": "Todoist",
+      "type": "n8n-nodes-base.todoist",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "credentials": {
+        "todoistApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Todoist API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Todoist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true
+  },
+  "_meta": {
+    "description": "Receives MeetSum action item webhook and creates a Todoist task with meeting context.",
+    "setup": [
+      "1. Import this workflow into n8n",
+      "2. Configure your Todoist API credential",
+      "3. Copy the webhook URL from the Webhook node",
+      "4. Register the webhook URL in MeetSum: POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'] }",
+      "5. Activate the workflow"
+    ]
+  }
+}

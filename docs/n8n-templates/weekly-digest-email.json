@@ -1,0 +1,95 @@
+{
+  "name": "MeetSum → Email: Weekly Room Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MEETSUM_URL}}/api/meetings/timeline?groupBy=week&from={{$now.minus(7, 'days').toISO()}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Fetch Timeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "MeetSum API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "meetsum@example.com",
+        "toEmail": "={{$env.DIGEST_EMAIL}}",
+        "subject": "Weekly Meeting Digest — {{$now.format('MMM d, yyyy')}}",
+        "html": "=<h2>Weekly Meeting Digest</h2>\n<p>Here's your summary for the past week:</p>\n<ul>\n<li><strong>Total Meetings:</strong> {{$json.stats.totalMeetings}}</li>\n<li><strong>Completed:</strong> {{$json.stats.completedMeetings}}</li>\n<li><strong>Open Action Items:</strong> {{$json.stats.openActionItems}}</li>\n<li><strong>Unique Participants:</strong> {{$json.stats.uniqueParticipants}}</li>\n</ul>\n<p><a href=\"{{$env.MEETSUM_URL}}\">View in MeetSum →</a></p>",
+        "options": {}
+      },
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Fetch Timeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Timeline": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true
+  },
+  "_meta": {
+    "description": "Runs every Monday at 9 AM, fetches last week's meeting timeline from MeetSum, and sends a digest email.",
+    "setup": [
+      "1. Import this workflow into n8n",
+      "2. Set environment variables: MEETSUM_URL (e.g., https://meetsum.example.com), DIGEST_EMAIL",
+      "3. Configure HTTP Header Auth credential with header 'Authorization: Bearer <your-api-key>'",
+      "4. Configure SMTP credentials for email sending",
+      "5. Activate the workflow"
+    ]
+  }
+}
