@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
   createWebhookSubscription,
   createWebhookTestSignature,
@@ -9,16 +10,24 @@ import {
 } from "@/lib/webhooks/management"
 
 export async function GET(request: Request) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
 
   const subscriptions = await listWebhookSubscriptions()
 
-  return NextResponse.json({ subscriptions })
+  return NextResponse.json({ subscriptions }, { headers: rateLimit.headers })
 }
 
 export async function POST(request: Request) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
