@@ -27,6 +27,9 @@ export type AuditAction =
   | "admin.settings.updated"
   | "api_key.created"
   | "api_key.revoked"
+  | "media.retention.deleted"
+  | "backup.created"
+  | "backup.restored"
 
 export async function recordAuditLog(input: {
   action: AuditAction
