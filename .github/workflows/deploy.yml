@@ -1,0 +1,74 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    name: Deploy to VPS
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            cd /opt/meetsum
+
+            echo "=== Pre-deploy backup ==="
+            ./scripts/backup-postgres.sh || echo "Backup skipped"
+
+            echo "=== Pulling latest ==="
+            git pull --ff-only origin main
+
+            echo "=== Building & deploying ==="
+            docker compose -f docker-compose.prod.yml --env-file .env.local \
+              up -d --build app worker
+
+            echo "=== Health check ==="
+            sleep 10
+            HEALTH=$(docker exec meetsum-app-1 wget -qO- http://localhost:3000/api/health 2>/dev/null || echo '{"status":"error"}')
+            echo "$HEALTH"
+
+            VERSION=$(echo "$HEALTH" | grep -o '"version":"[^"]*"' | head -1 || echo 'unknown')
+            echo "Deployed version: $VERSION"
+
+      - name: Post deploy status
+        if: always()
+        run: |
+          echo "Deployment ${{ job.status }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"

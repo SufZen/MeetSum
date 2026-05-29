@@ -1,6 +1,6 @@
 {
   "name": "meetsum",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "private": true,
   "bin": {
@@ -18,6 +18,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "calendar:cleanup": "tsx scripts/calendar-noise-cleanup.ts",
     "media:retention": "tsx scripts/media-retention.ts",
+    "backup:full": "sh scripts/backup-full.sh",
+    "backup:restore": "sh scripts/restore-full.sh",
     "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
