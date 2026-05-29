@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   applyRateLimitHeaders,
   checkRateLimit,
+  extractRateLimitKey,
   RATE_LIMIT_PRESETS,
   type RateLimitConfig,
+  rateLimitRequest,
 } from "@/lib/rate-limit"
 
 describe("rate limiter", () => {
@@ -116,5 +118,81 @@ describe("rate limit presets", () => {
     for (const preset of Object.values(RATE_LIMIT_PRESETS)) {
       expect(preset.windowMs).toBeGreaterThanOrEqual(1000)
     }
+  })
+})
+
+describe("rateLimitRequest", () => {
+  it("returns headers and no blocked response for allowed requests", () => {
+    const request = new Request("http://localhost/api/test", {
+      headers: { "x-forwarded-for": "1.2.3.4" },
+    })
+
+    const result = rateLimitRequest(request, { maxRequests: 100, windowMs: 60_000 })
+
+    expect(result.blocked).toBeUndefined()
+    expect(result.headers["X-RateLimit-Limit"]).toBe("100")
+    expect(result.headers["X-RateLimit-Remaining"]).toBeTruthy()
+  })
+
+  it("returns a 429 response when rate limit is exceeded", () => {
+    const config = { maxRequests: 2, windowMs: 60_000 }
+    const key = "test-429-response"
+
+    for (let i = 0; i < 2; i++) {
+      rateLimitRequest(new Request("http://localhost"), config, key)
+    }
+
+    const result = rateLimitRequest(new Request("http://localhost"), config, key)
+
+    expect(result.blocked).toBeTruthy()
+    expect(result.blocked!.status).toBe(429)
+    expect(result.blocked!.headers.get("Retry-After")).toBeTruthy()
+    expect(result.blocked!.headers.get("Content-Type")).toBe("application/json")
+  })
+
+  it("skips rate limiting when MEETSUM_RATE_LIMIT=false", () => {
+    const original = process.env.MEETSUM_RATE_LIMIT
+    process.env.MEETSUM_RATE_LIMIT = "false"
+
+    const result = rateLimitRequest(
+      new Request("http://localhost"),
+      { maxRequests: 1, windowMs: 60_000 },
+      "test-disabled"
+    )
+
+    expect(result.blocked).toBeUndefined()
+    expect(Object.keys(result.headers)).toHaveLength(0)
+
+    process.env.MEETSUM_RATE_LIMIT = original
+  })
+})
+
+describe("extractRateLimitKey", () => {
+  it("extracts IP from x-forwarded-for header", () => {
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "192.168.1.1, 10.0.0.1" },
+    })
+
+    const key = extractRateLimitKey(request)
+
+    expect(key).toBe("192.168.1.1")
+  })
+
+  it("appends suffix when provided", () => {
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "10.0.0.5" },
+    })
+
+    const key = extractRateLimitKey(request, "ask")
+
+    expect(key).toBe("10.0.0.5:ask")
+  })
+
+  it("falls back to 'unknown' when no forwarded header", () => {
+    const request = new Request("http://localhost")
+
+    const key = extractRateLimitKey(request)
+
+    expect(key).toBe("unknown")
   })
 })

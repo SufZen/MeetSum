@@ -3,11 +3,16 @@ import { NextResponse } from "next/server"
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { renderMeetingPdf } from "@/lib/meetings/export"
 import { meetingRepository } from "@/lib/meetings/store"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
@@ -28,6 +33,7 @@ export async function POST(
         /[^a-z0-9_-]+/gi,
         "-"
       )}.pdf"`,
+      ...rateLimit.headers,
     },
   })
 }

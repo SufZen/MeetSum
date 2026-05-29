@@ -18,6 +18,8 @@ import {
   downloadMeetingObjectToFile,
   getMeetingObjectBytes,
 } from "@/lib/storage/object-storage"
+import { getAppSettings } from "@/lib/settings/app-settings"
+import { getSummaryTemplatePrompt, type SummaryTemplate } from "@/lib/ai/summary-templates"
 
 const execFileAsync = promisify(execFile)
 
@@ -745,6 +747,18 @@ export class AutoTranscriptionProvider implements TranscriptionProvider {
 export class GeminiSummaryProvider implements SummaryProvider {
   private readonly fallback = new HeuristicFallbackProvider()
 
+  private async getTemplateAddendum(): Promise<string[]> {
+    try {
+      const settings = await getAppSettings()
+      const template = (settings.summaryTemplate ?? "general") as SummaryTemplate
+      const addendum = getSummaryTemplatePrompt(template)
+
+      return addendum ? [addendum] : []
+    } catch {
+      return []
+    }
+  }
+
   async summarize(meeting: MeetingRecord) {
     if (!isGeminiConfigured() || !meeting.transcript?.length) {
       return this.fallback.summarize(meeting)
@@ -771,6 +785,7 @@ export class GeminiSummaryProvider implements SummaryProvider {
                 "Action items must be real tasks only: commitments, assignments, next steps, decisions requiring follow-up, or explicit requests. Do not copy ordinary transcript fragments as tasks.",
                 "For every action item, include title, owner if known, dueDate if stated or strongly implied, priority, confidence, sourceQuote, sourceStartMs, and kind explicit/inferred.",
                 "Decisions should be concise business decisions and should not include generic discussion.",
+                ...(await this.getTemplateAddendum()),
                 `Meeting: ${meeting.title}`,
                 transcript,
               ].join("\n\n"),
