@@ -193,3 +193,174 @@ export function renderMeetingPdf(meeting: MeetingRecord): Buffer {
   return Buffer.from(parts.join(""), "utf8")
 }
 
+export async function renderMeetingDocx(meeting: MeetingRecord): Promise<Buffer> {
+  const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    HeadingLevel,
+    AlignmentType,
+  } = await import("docx")
+
+  const children: InstanceType<typeof Paragraph>[] = []
+
+  // Title
+  children.push(
+    new Paragraph({
+      text: meeting.title,
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.LEFT,
+    })
+  )
+
+  // Metadata
+  const meta = [
+    `Date: ${new Date(meeting.startedAt).toLocaleString()}`,
+    `Source: ${meeting.source}`,
+    `Language: ${meeting.language}`,
+    `Status: ${meeting.status}`,
+    `Participants: ${
+      meeting.participantDetails?.map((p) => p.name).join(", ") ||
+      meeting.participants.join(", ") ||
+      "None recorded"
+    }`,
+  ]
+
+  for (const line of meta) {
+    children.push(new Paragraph({ text: line, spacing: { after: 80 } }))
+  }
+
+  children.push(new Paragraph({ text: "" }))
+
+  // Overview
+  children.push(
+    new Paragraph({ text: "Overview", heading: HeadingLevel.HEADING_2 })
+  )
+  children.push(
+    new Paragraph({
+      text: meeting.summary?.overview || "No summary is available yet.",
+      spacing: { after: 200 },
+    })
+  )
+
+  // Decisions
+  children.push(
+    new Paragraph({ text: "Decisions", heading: HeadingLevel.HEADING_2 })
+  )
+
+  if (meeting.summary?.decisions.length) {
+    for (const decision of meeting.summary.decisions) {
+      children.push(
+        new Paragraph({
+          text: decision,
+          bullet: { level: 0 },
+          spacing: { after: 80 },
+        })
+      )
+    }
+  } else {
+    children.push(
+      new Paragraph({
+        text: "No decisions extracted yet.",
+        spacing: { after: 200 },
+      })
+    )
+  }
+
+  // Action Items
+  children.push(
+    new Paragraph({ text: "Action Items", heading: HeadingLevel.HEADING_2 })
+  )
+
+  if (meeting.summary?.actionItems.length) {
+    for (const item of meeting.summary.actionItems) {
+      const label = item.status === "done" ? "☑" : "☐"
+      const ownerPart = item.owner ? ` (${item.owner})` : ""
+      const duePart = item.dueDate ? ` — due ${item.dueDate}` : ""
+
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: `${label} ` }),
+            new TextRun({
+              text: item.title,
+              bold: item.status !== "done",
+              strike: item.status === "done",
+            }),
+            new TextRun({ text: `${ownerPart}${duePart}`, italics: true }),
+          ],
+          spacing: { after: 80 },
+        })
+      )
+    }
+  } else {
+    children.push(
+      new Paragraph({
+        text: "No action items extracted yet.",
+        spacing: { after: 200 },
+      })
+    )
+  }
+
+  // Transcript
+  children.push(
+    new Paragraph({ text: "Transcript", heading: HeadingLevel.HEADING_2 })
+  )
+
+  if (meeting.transcript?.length) {
+    for (const segment of meeting.transcript) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `${formatMs(segment.startMs)} `,
+              color: "999999",
+              size: 18,
+            }),
+            new TextRun({
+              text: `${segment.speaker}: `,
+              bold: true,
+              size: 20,
+            }),
+            new TextRun({ text: segment.text, size: 20 }),
+          ],
+          spacing: { after: 60 },
+        })
+      )
+    }
+  } else {
+    children.push(
+      new Paragraph({
+        text: "No transcript is available yet.",
+        spacing: { after: 200 },
+      })
+    )
+  }
+
+  // Metadata footer
+  children.push(new Paragraph({ text: "" }))
+  children.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Processed by MeetSum on ${new Date().toISOString().split("T")[0]}`,
+          italics: true,
+          color: "999999",
+          size: 16,
+        }),
+      ],
+    })
+  )
+
+  const doc = new Document({
+    creator: "MeetSum",
+    title: meeting.title,
+    sections: [{ children }],
+  })
+
+  const buffer = await Packer.toBuffer(doc)
+
+  return Buffer.from(buffer)
+}
+

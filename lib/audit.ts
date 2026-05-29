@@ -11,6 +11,7 @@ export type AuditAction =
   | "meeting.share.accessed"
   | "meeting.export.markdown"
   | "meeting.export.pdf"
+  | "meeting.export.docx"
   | "room.created"
   | "room.meeting.added"
   | "webhook.subscription.created"

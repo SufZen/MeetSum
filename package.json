@@ -33,6 +33,7 @@
     "cmdk": "^1.1.1",
     "commander": "^14.0.3",
     "date-fns": "^4.1.0",
+    "docx": "^9.7.1",
     "embla-carousel-react": "^8.6.0",
     "googleapis": "^171.4.0",
     "input-otp": "^1.4.2",

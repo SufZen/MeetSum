@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { renderMeetingMarkdown, renderMeetingPdf } from "@/lib/meetings/export"
+import { renderMeetingMarkdown, renderMeetingPdf, renderMeetingDocx } from "@/lib/meetings/export"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
 const completedMeeting = {
@@ -108,5 +108,40 @@ describe("pdf export", () => {
     const text = pdf.toString("latin1")
 
     expect(text).toContain("gemini")
+  })
+})
+
+describe("docx export", () => {
+  it("produces a valid DOCX buffer (PK zip signature)", async () => {
+    const docx = await renderMeetingDocx(completedMeeting)
+
+    expect(docx).toBeInstanceOf(Buffer)
+    expect(docx.length).toBeGreaterThan(100)
+    // DOCX files are ZIP archives — PK signature
+    expect(docx[0]).toBe(0x50) // P
+    expect(docx[1]).toBe(0x4b) // K
+  })
+
+  it("produces a buffer larger than trivial size", async () => {
+    const docx = await renderMeetingDocx(completedMeeting)
+
+    // A real DOCX should be at least a few KB
+    expect(docx.length).toBeGreaterThan(1000)
+  })
+
+  it("handles empty meeting gracefully", async () => {
+    const emptyMeeting = {
+      ...completedMeeting,
+      id: "empty-docx-test",
+      summary: undefined,
+      transcript: [],
+      participants: [],
+      participantDetails: undefined,
+    } satisfies MeetingRecord
+
+    const docx = await renderMeetingDocx(emptyMeeting)
+
+    expect(docx).toBeInstanceOf(Buffer)
+    expect(docx.length).toBeGreaterThan(100)
   })
 })
