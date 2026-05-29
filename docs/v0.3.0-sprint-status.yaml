@@ -1,0 +1,129 @@
+sprint: 1
+started: 2026-05-29
+status: active
+
+epics:
+  - name: "Epic 1: Admin Self-Service"
+    stories:
+      - id: MS-301
+        title: "API Key Management UI"
+        status: todo
+        priority: P0
+        notes: "Settings page for create/revoke/list API keys. Keys stored as bcrypt hashes."
+
+      - id: MS-302
+        title: "Rate Limit Middleware Integration"
+        status: todo
+        priority: P0
+        notes: "Wire lib/rate-limit.ts into Next.js middleware. Pattern-match public + AI + export routes."
+
+      - id: MS-303
+        title: "Operational Dashboard"
+        status: todo
+        priority: P0
+        notes: "Admin page showing queue depth, sync freshness, storage, audit log, AI stats."
+
+  - name: "Epic 2: Intelligence Pipeline Completion"
+    stories:
+      - id: MS-304
+        title: "Summary Template → AI Pipeline Wiring"
+        status: todo
+        priority: P0
+        notes: "Connect getSummaryTemplatePrompt() to provider.summarize(). Per-meeting override dropdown."
+
+      - id: MS-305
+        title: "Speaker-to-Person Assignment UI"
+        status: todo
+        priority: P0
+        notes: "Modal in Transcript tab. Dropdown assignment. Persist via speakers/assign endpoint."
+
+      - id: MS-306
+        title: "Hebrew ASR Evaluation Script"
+        status: todo
+        priority: P0
+        notes: "Wire npm run asr:evaluate to manifest-based WER evaluation. JSON output report."
+
+  - name: "Epic 3: Room & Memory UX"
+    stories:
+      - id: MS-307
+        title: "Room Detail Page"
+        status: todo
+        priority: P1
+        notes: "Page at /rooms/:id. Meetings, tasks, participants, artifacts, ask-this-room."
+
+      - id: MS-308
+        title: "Room Suggestions UI"
+        status: todo
+        priority: P1
+        notes: "Suggestion banner on meeting detail. One-click create or add-to-existing."
+
+  - name: "Epic 4: Export & Share Polish"
+    stories:
+      - id: MS-309
+        title: "DOCX Export"
+        status: todo
+        priority: P1
+        notes: "renderMeetingDocx() + API endpoint. Uses 'docx' npm package."
+
+      - id: MS-310
+        title: "Public Share Page Polish"
+        status: todo
+        priority: P1
+        notes: "Branded header, section toggles, quality warnings, mobile layout, metadata footer."
+
+      - id: MS-311
+        title: "Notion Export"
+        status: todo
+        priority: P1
+        notes: "Push meeting to Notion database. Requires @notionhq/client."
+
+  - name: "Epic 5: Operational Hardening"
+    stories:
+      - id: MS-312
+        title: "Unified Backup/Restore"
+        status: todo
+        priority: P1
+        notes: "npm run backup:full (pg_dump + mc mirror). npm run backup:restore --from <path>."
+
+      - id: MS-313
+        title: "Media Retention Enforcement"
+        status: todo
+        priority: P1
+        notes: "Scheduled worker job. Audio 180d, video opt-in only. Dry-run mode."
+
+      - id: MS-314
+        title: "GitHub Actions Auto-Deploy"
+        status: todo
+        priority: P1
+        notes: "SSH deploy on main push. Gated by DEPLOY_ENABLED secret."
+
+  - name: "Epic 6: Future Platform"
+    stories:
+      - id: MS-315
+        title: "n8n Starter Workflows"
+        status: todo
+        priority: P2
+        notes: "3 workflow templates: Slack notify, Todoist tasks, weekly digest."
+
+      - id: MS-316
+        title: "Vertex AI Provider"
+        status: todo
+        priority: P2
+        notes: "VertexAIProvider adapter. Cost comparison docs."
+
+      - id: MS-317
+        title: "Zoom/Teams Capture Adapters"
+        status: todo
+        priority: P2
+        notes: "Webhook-based ingestion for Zoom. Graph API for Teams."
+
+      - id: MS-318
+        title: "Desktop Recorder / Meeting Bot"
+        status: todo
+        priority: P2
+        notes: "Electron desktop recorder. Meeting bot integration."
+
+retrospective:
+  went_well: []
+  improve: []
+  action_items: []
