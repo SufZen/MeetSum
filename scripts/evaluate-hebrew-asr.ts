@@ -27,12 +27,22 @@ const DEFAULT_MANIFEST_PATH = ".secrets/asr-eval/manifest.json"
 
 function parseArgs() {
   const manifestIndex = process.argv.indexOf("--manifest")
+  const sampleIndex = process.argv.indexOf("--sample")
+  const outputIndex = process.argv.indexOf("--output")
 
   return {
     manifestPath:
       manifestIndex >= 0
         ? process.argv[manifestIndex + 1]
         : process.env.MEETSUM_ASR_EVAL_MANIFEST ?? DEFAULT_MANIFEST_PATH,
+    sampleFilter:
+      sampleIndex >= 0
+        ? process.argv[sampleIndex + 1]
+        : undefined,
+    outputPath:
+      outputIndex >= 0
+        ? process.argv[outputIndex + 1]
+        : undefined,
   }
 }
 
@@ -193,7 +203,7 @@ async function runProvider(sample: EvalSample, audioPath: string, provider: stri
 }
 
 async function main() {
-  const { manifestPath } = parseArgs()
+  const { manifestPath, sampleFilter, outputPath } = parseArgs()
   const { manifest, baseDir } = await loadManifest(manifestPath)
   const providers = getEnabledProviders()
 
@@ -203,9 +213,17 @@ async function main() {
     )
   }
 
+  const samples = sampleFilter
+    ? manifest.samples.filter((s) => s.id === sampleFilter)
+    : manifest.samples
+
+  if (samples.length === 0) {
+    throw new Error(sampleFilter ? `Sample '${sampleFilter}' not found in manifest` : "No samples in manifest")
+  }
+
   const rows: Array<Record<string, string | number>> = []
 
-  for (const sample of manifest.samples) {
+  for (const sample of samples) {
     const audioPath = resolveSamplePath(baseDir, sample.audioPath)
     const referencePath = resolveSamplePath(baseDir, sample.referencePath)
     const reference = await readFile(referencePath, "utf8")
@@ -229,9 +247,24 @@ async function main() {
   }
 
   console.table(rows)
+
+  const report = {
+    timestamp: new Date().toISOString(),
+    manifestPath,
+    results: rows,
+  }
+
+  if (outputPath) {
+    const { writeFile } = await import("node:fs/promises")
+    await writeFile(outputPath, JSON.stringify(report, null, 2))
+    console.log(`\nReport written to ${outputPath}`)
+  } else {
+    console.log(`\n${JSON.stringify(report, null, 2)}`)
+  }
 }
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : error)
   process.exitCode = 1
 })
+
