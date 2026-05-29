@@ -72,6 +72,7 @@ export type MeetingShare = {
   visibility: "public"
   revoked: boolean
   expiresAt?: string
+  passwordHash?: string
   includedSections: string[]
   createdBy?: string
   createdAt: string
@@ -332,6 +333,8 @@ export type MeetingRepository = {
     meetingId: string
     createdBy?: string
     includedSections?: string[]
+    expiresAt?: string
+    password?: string
   }) => Promise<MeetingShare>
   updateMeetingShare: (
     meetingId: string,
@@ -942,12 +945,17 @@ export function createInMemoryMeetingRepository(
       if (existing) return existing
 
       const now = new Date().toISOString()
+      const passwordHash = input.password
+        ? (await import("@/lib/auth/api-keys")).createApiKeyHash(input.password)
+        : undefined
       const share: MeetingShare = {
         id: createId("share"),
         meetingId: input.meetingId,
         token: crypto.randomUUID().replaceAll("-", ""),
         visibility: "public",
         revoked: false,
+        expiresAt: input.expiresAt,
+        passwordHash,
         includedSections: input.includedSections ?? [
           "summary",
           "decisions",
