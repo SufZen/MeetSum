@@ -12,6 +12,8 @@ export type MeetingSource =
   | "google_meet"
   | "desktop_recorder"
   | "meeting_bot"
+  | "zoom"
+  | "teams"
 
 export type ActionItem = {
   id: string

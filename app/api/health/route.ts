@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { getProviderHealthStatus } from "@/lib/ai/provider-health"
 import { getDatabasePool } from "@/lib/db/client"
 import { createHealthReport, type HealthState } from "@/lib/health/status"
 import { validateRuntimeEnvironment } from "@/lib/ops/environment"
@@ -12,7 +13,7 @@ function configured(value: string | undefined): HealthState {
 
 export async function GET() {
   const report = await createHealthReport({
-    version: process.env.npm_package_version ?? "0.4.0",
+    version: process.env.npm_package_version ?? "0.5.0",
     startedAt,
     database: async () => {
       if (!process.env.DATABASE_URL) return "not_configured"
@@ -27,6 +28,15 @@ export async function GET() {
           process.env.MINIO_ENDPOINT ??
           process.env.AWS_ENDPOINT_URL_S3
       ),
+    ai: async () => {
+      const status = getProviderHealthStatus()
+      return {
+        provider: status.ai.provider,
+        configured: status.ai.configured,
+        model: status.ai.model,
+        transcriptionMode: status.ai.transcriptionMode,
+      }
+    },
     warnings: () => validateRuntimeEnvironment().warnings,
   })
 

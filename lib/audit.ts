@@ -31,6 +31,8 @@ export type AuditAction =
   | "media.retention.deleted"
   | "backup.created"
   | "backup.restored"
+  | "capture.zoom.recording"
+  | "capture.teams.recording"
 
 export async function recordAuditLog(input: {
   action: AuditAction

@@ -1,5 +1,12 @@
 export type HealthState = "ok" | "degraded" | "configured" | "not_configured"
 
+export type AiProviderHealth = {
+  provider: string
+  configured: boolean
+  model: string
+  transcriptionMode: string
+}
+
 export type HealthReport = {
   app: "meetsum"
   version: string
@@ -10,6 +17,7 @@ export type HealthReport = {
     database: HealthState
     redis: HealthState
     storage: HealthState
+    ai?: AiProviderHealth
   }
 }
 
@@ -19,12 +27,14 @@ export async function createHealthReport(options: {
   database: () => Promise<HealthState>
   redis: () => Promise<HealthState>
   storage: () => Promise<HealthState>
+  ai?: () => Promise<AiProviderHealth>
   warnings?: () => string[]
 }): Promise<HealthReport> {
-  const [database, redis, storage] = await Promise.all([
+  const [database, redis, storage, ai] = await Promise.all([
     options.database().catch(() => "degraded" as const),
     options.redis().catch(() => "degraded" as const),
     options.storage().catch(() => "degraded" as const),
+    options.ai?.().catch(() => undefined),
   ])
 
   return {
@@ -37,6 +47,7 @@ export async function createHealthReport(options: {
       database,
       redis,
       storage,
+      ...(ai ? { ai } : {}),
     },
   }
 }
