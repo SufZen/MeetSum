@@ -143,10 +143,19 @@ export function verifySessionCookie(
 }
 
 export function getSessionSecret(env: NodeJS.ProcessEnv = process.env): string {
-  const secret = env.MEETSUM_SESSION_SECRET ?? env.WEBHOOK_SIGNING_SECRET
+  const secret = env.MEETSUM_SESSION_SECRET
 
   if (!secret) {
     throw new Error("MEETSUM_SESSION_SECRET is required")
+  }
+
+  // The session-cookie HMAC key must never equal the webhook signing secret:
+  // that secret is shared with external webhook consumers, so reuse would let
+  // anyone who learns it forge session cookies.
+  if (env.WEBHOOK_SIGNING_SECRET && secret === env.WEBHOOK_SIGNING_SECRET) {
+    throw new Error(
+      "MEETSUM_SESSION_SECRET must be different from WEBHOOK_SIGNING_SECRET"
+    )
   }
 
   return secret

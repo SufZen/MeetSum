@@ -3,8 +3,40 @@ import { describe, expect, it } from "vitest"
 import {
   createGoogleAuthorizationUrl,
   createSessionCookie,
+  getSessionSecret,
   verifySessionCookie,
 } from "@/lib/auth/session"
+
+describe("getSessionSecret", () => {
+  it("requires MEETSUM_SESSION_SECRET with no webhook-secret fallback", () => {
+    expect(() =>
+      getSessionSecret({
+        NODE_ENV: "test",
+        WEBHOOK_SIGNING_SECRET: "webhook-secret",
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/MEETSUM_SESSION_SECRET is required/)
+  })
+
+  it("rejects a session secret equal to the webhook secret", () => {
+    expect(() =>
+      getSessionSecret({
+        NODE_ENV: "test",
+        MEETSUM_SESSION_SECRET: "shared",
+        WEBHOOK_SIGNING_SECRET: "shared",
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/must be different/)
+  })
+
+  it("returns a distinct session secret", () => {
+    expect(
+      getSessionSecret({
+        NODE_ENV: "test",
+        MEETSUM_SESSION_SECRET: "session-secret",
+        WEBHOOK_SIGNING_SECRET: "webhook-secret",
+      } as NodeJS.ProcessEnv)
+    ).toBe("session-secret")
+  })
+})
 
 describe("Google OAuth session", () => {
   it("creates and verifies signed session cookies for allowed users", () => {

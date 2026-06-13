@@ -19,7 +19,32 @@ export type StoredObject = {
 let client: S3Client | undefined
 const ensuredBuckets = new Set<string>()
 
+/**
+ * Validates object-storage configuration up front so a misconfigured S3/MinIO
+ * setup fails with a clear message at startup rather than as a cryptic error
+ * mid-processing (after a meeting + job record already exist).
+ */
+export function assertObjectStorageConfigured(
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (!env.S3_ENDPOINT) {
+    throw new Error(
+      "Object storage is not configured: S3_ENDPOINT is required for meeting media."
+    )
+  }
+
+  if (!env.S3_ACCESS_KEY || !env.S3_SECRET_KEY) {
+    throw new Error(
+      "Object storage credentials are incomplete: set both S3_ACCESS_KEY and S3_SECRET_KEY."
+    )
+  }
+}
+
 function getS3Client() {
+  if (!client) {
+    assertObjectStorageConfigured()
+  }
+
   client ??= new S3Client({
     region: process.env.S3_REGION ?? "us-east-1",
     endpoint: process.env.S3_ENDPOINT,

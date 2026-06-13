@@ -4,6 +4,10 @@ import {
   signWebhookPayload,
   type PlatformEventName,
 } from "@/lib/platform/events"
+import {
+  getWebhookFetchTimeoutMs,
+  getWebhookSigningSecret,
+} from "@/lib/webhooks/secret"
 
 type WebhookSubscriptionRow = {
   id: string
@@ -61,10 +65,11 @@ export async function deliverWebhookEvent(options: {
           "content-type": "application/json",
           "x-meetsum-signature": signWebhookPayload(
             event,
-            process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
+            getWebhookSigningSecret()
           ),
         },
         body: JSON.stringify(event),
+        signal: AbortSignal.timeout(getWebhookFetchTimeoutMs()),
       })
 
       await pool.query(

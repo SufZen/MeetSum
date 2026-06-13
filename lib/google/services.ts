@@ -1246,12 +1246,22 @@ export async function pollCalendar(subject: string): Promise<SyncStats> {
       }
     }
 
-    await setSyncState(subject, "calendar", {
-      status: "completed",
-      cursorValue: JSON.stringify(nextCursor),
-      stats,
-      nextPollAt: new Date(Date.now() + 15 * 60 * 1000),
-    })
+    try {
+      await setSyncState(subject, "calendar", {
+        status: "completed",
+        cursorValue: JSON.stringify(nextCursor),
+        stats,
+        nextPollAt: new Date(Date.now() + 15 * 60 * 1000),
+      })
+    } catch (persistError) {
+      // Losing the sync cursor forces a full re-sync next run (events dedupe on
+      // calendar_event_id, so no duplicate meetings — but log it loudly).
+      console.error(
+        "[pollCalendar] failed to persist sync cursor; next run will full-resync",
+        persistError
+      )
+      throw persistError
+    }
     return stats
   } catch (error) {
     const message = error instanceof Error ? error.message : "Calendar sync failed"

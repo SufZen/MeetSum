@@ -89,11 +89,18 @@ export const teamsCaptureAdapter: CaptureAdapter = {
       return { valid: false, reason: "TEAMS_WEBHOOK_CLIENT_STATE not configured" }
     }
 
-    // Validate clientState matches the subscription's clientState
+    // Validate clientState on EVERY notification in the batch, not just the
+    // first — otherwise an attacker could prepend one valid entry and smuggle
+    // unvalidated notifications behind it.
     try {
       const parsed = JSON.parse(body) as GraphNotification
+      const notifications = parsed.value ?? []
 
-      if (parsed.value?.[0]?.clientState !== clientState) {
+      if (notifications.length === 0) {
+        return { valid: false, reason: "Teams notification batch is empty" }
+      }
+
+      if (notifications.some((entry) => entry.clientState !== clientState)) {
         return { valid: false, reason: "Invalid clientState in Teams notification" }
       }
     } catch {

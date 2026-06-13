@@ -37,7 +37,14 @@ export async function GET() {
         transcriptionMode: status.ai.transcriptionMode,
       }
     },
-    warnings: () => validateRuntimeEnvironment().warnings,
+    warnings: () => {
+      const report = validateRuntimeEnvironment()
+
+      return [
+        ...report.fatal.map((issue) => `FATAL: ${issue}`),
+        ...report.warnings,
+      ]
+    },
   })
 
   return NextResponse.json(report)

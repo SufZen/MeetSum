@@ -168,14 +168,24 @@ describe("rateLimitRequest", () => {
 })
 
 describe("extractRateLimitKey", () => {
-  it("extracts IP from x-forwarded-for header", () => {
+  it("uses the rightmost (trusted-proxy) IP from x-forwarded-for", () => {
+    // The proxy appends the real peer IP on the right; leftmost entries are
+    // client-supplied and spoofable, so the rightmost is the trustworthy key.
     const request = new Request("http://localhost", {
       headers: { "x-forwarded-for": "192.168.1.1, 10.0.0.1" },
     })
 
     const key = extractRateLimitKey(request)
 
-    expect(key).toBe("192.168.1.1")
+    expect(key).toBe("10.0.0.1")
+  })
+
+  it("falls back to x-real-ip when no forwarded-for is present", () => {
+    const request = new Request("http://localhost", {
+      headers: { "x-real-ip": "203.0.113.9" },
+    })
+
+    expect(extractRateLimitKey(request)).toBe("203.0.113.9")
   })
 
   it("appends suffix when provided", () => {

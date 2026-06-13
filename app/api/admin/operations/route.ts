@@ -111,8 +111,8 @@ async function gatherOperationalMetrics(): Promise<OperationalMetrics> {
 
     pool.query(`
       SELECT
-        (SELECT updated_at FROM google_sync_state WHERE sync_type = 'calendar' LIMIT 1) AS calendar_last_sync,
-        (SELECT updated_at FROM google_sync_state WHERE sync_type = 'meet_artifacts' LIMIT 1) AS meet_artifact_last_sync
+        (SELECT max(updated_at) FROM google_sync_states WHERE source = 'calendar') AS calendar_last_sync,
+        (SELECT max(updated_at) FROM google_sync_states WHERE source = 'meet') AS meet_artifact_last_sync
     `).catch(() => ({ rows: [{ calendar_last_sync: null, meet_artifact_last_sync: null }] })),
 
     pool.query(`

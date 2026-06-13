@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 
-import { isAuthorizedApiRequest } from "@/lib/auth/api-keys"
+import {
+  extractBearerToken,
+  isAuthorizedApiRequest,
+  verifyDatabaseApiKey,
+} from "@/lib/auth/api-keys"
 import { getCurrentSession } from "@/lib/auth/server"
 
 export function jsonError(message: string, status: number) {
@@ -24,16 +28,22 @@ export async function requireAppAccess(request: Request) {
     return undefined
   }
 
+  // Admin-created (database-backed) API keys, so keys minted in the UI work.
+  const bearer = extractBearerToken(request.headers)
+
+  if (bearer && (await verifyDatabaseApiKey(bearer))) {
+    return undefined
+  }
+
   try {
     const session = await getCurrentSession()
 
     if (session) {
       return undefined
     }
-  } catch {
-    if (process.env.MEETSUM_REQUIRE_API_KEY !== "true") {
-      return undefined
-    }
+  } catch (error) {
+    // Fail closed: a broken/throwing session must never grant access.
+    console.error("[auth] session validation failed", error)
   }
 
   return jsonError("Unauthorized", 401)

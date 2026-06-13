@@ -2,6 +2,9 @@ import { createMeetSumWorker } from "@/lib/jobs/processor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { getGoogleSyncScheduleConfig } from "@/lib/jobs/scheduler-config"
 import { getWorkspaceSubject } from "@/lib/google/auth"
+import { assertRuntimeEnvironment } from "@/lib/ops/environment"
+
+assertRuntimeEnvironment()
 
 const worker = createMeetSumWorker()
 const scheduledTimers: NodeJS.Timeout[] = []

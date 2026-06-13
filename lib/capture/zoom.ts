@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto"
+import { createHmac, timingSafeEqual } from "node:crypto"
 
 import type {
   CaptureAdapter,
@@ -78,7 +78,13 @@ export function verifyZoomSignature(
   const message = `v0:${timestamp}:${body}`
   const expected = `v0=${createHmac("sha256", secret).update(message).digest("hex")}`
 
-  return signature === expected
+  const expectedBuf = Buffer.from(expected)
+  const signatureBuf = Buffer.from(signature)
+
+  return (
+    expectedBuf.length === signatureBuf.length &&
+    timingSafeEqual(expectedBuf, signatureBuf)
+  )
 }
 
 /**

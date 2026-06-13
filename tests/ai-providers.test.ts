@@ -4,11 +4,54 @@ import {
   AutoTranscriptionProvider,
   getLocalWhisperProviderConfig,
   getTranscriptionProviderMode,
+  HeuristicFallbackProvider,
   isLocalWhisperConfigured,
   normalizeLocalWhisperResponse,
+  TranscriptionUnavailableError,
   type TranscriptionProvider,
 } from "@/lib/ai/providers"
 import type { MeetingRecord, TranscriptSegment } from "@/lib/meetings/repository"
+
+describe("HeuristicFallbackProvider honesty", () => {
+  const base: MeetingRecord = {
+    id: "meet_x",
+    title: "No ASR configured",
+    source: "upload",
+    language: "he",
+    status: "media_uploaded",
+    retention: "audio",
+    startedAt: "2026-06-10T09:00:00.000Z",
+    participants: ["Ran"],
+  }
+
+  it("throws instead of fabricating a placeholder transcript", async () => {
+    const provider = new HeuristicFallbackProvider()
+
+    await expect(provider.transcribe(base)).rejects.toBeInstanceOf(
+      TranscriptionUnavailableError
+    )
+  })
+
+  it("passes through an already-imported transcript", async () => {
+    const provider = new HeuristicFallbackProvider()
+    const withTranscript: MeetingRecord = {
+      ...base,
+      transcript: [
+        {
+          id: "seg_1",
+          speaker: "Ran",
+          startMs: 0,
+          endMs: 4000,
+          text: "נדבר על התקציב",
+          confidence: 0.9,
+          language: "he",
+        },
+      ],
+    }
+
+    await expect(provider.transcribe(withTranscript)).resolves.toHaveLength(1)
+  })
+})
 
 const meeting: MeetingRecord = {
   id: "meet_hebrew",

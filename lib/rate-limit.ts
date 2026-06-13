@@ -132,8 +132,16 @@ export const RATE_LIMIT_PRESETS = {
  * Uses X-Forwarded-For (reverse proxy) or falls back to a static key.
  */
 export function extractRateLimitKey(request: Request, suffix?: string): string {
+  // Use the RIGHTMOST X-Forwarded-For entry — the one appended by our trusted
+  // reverse proxy (Traefik/Coolify). Leftmost entries are client-supplied and
+  // can be spoofed to mint a fresh rate-limit bucket on every request.
   const forwarded = request.headers.get("x-forwarded-for")
-  const ip = forwarded?.split(",")[0]?.trim() ?? "unknown"
+  const parts =
+    forwarded?.split(",").map((part) => part.trim()).filter(Boolean) ?? []
+  const ip =
+    parts.length > 0
+      ? parts[parts.length - 1]!
+      : request.headers.get("x-real-ip")?.trim() || "unknown"
   return suffix ? `${ip}:${suffix}` : ip
 }
 

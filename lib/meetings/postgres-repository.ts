@@ -490,6 +490,41 @@ function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord
   return [...records.values()]
 }
 
+type PoolLike = Queryable & {
+  connect?: () => Promise<Queryable & { release: () => void }>
+}
+
+/**
+ * Runs `fn` inside a BEGIN/COMMIT block on a dedicated connection when the
+ * queryable is a real pg Pool. Test fakes (no `connect`) run without a
+ * transaction. Guarantees delete+reinsert is atomic — a mid-write failure
+ * never leaves a meeting with an empty/partial transcript.
+ */
+async function withTransaction(
+  client: Queryable,
+  fn: (tx: Queryable) => Promise<void>
+): Promise<void> {
+  const pool = client as PoolLike
+
+  if (typeof pool.connect !== "function") {
+    await fn(client)
+    return
+  }
+
+  const connection = await pool.connect()
+
+  try {
+    await connection.query("begin")
+    await fn(connection)
+    await connection.query("commit")
+  } catch (error) {
+    await connection.query("rollback").catch(() => undefined)
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
 export function createPostgresMeetingRepository(
   client: Queryable
 ): MeetingRepository {
@@ -930,69 +965,71 @@ export function createPostgresMeetingRepository(
     },
 
     async replaceTranscriptSegments(meetingId, segments) {
-      await client.query(`delete from transcript_segments where meeting_id = $1`, [
-        meetingId,
-      ])
-      await client.query(`delete from speakers where meeting_id = $1`, [meetingId])
+      await withTransaction(client, async (tx) => {
+        await tx.query(`delete from transcript_segments where meeting_id = $1`, [
+          meetingId,
+        ])
+        await tx.query(`delete from speakers where meeting_id = $1`, [meetingId])
 
-      const speakerIds = new Map<string, string>()
+        const speakerIds = new Map<string, string>()
 
-      for (const segment of segments) {
-        let speakerId = speakerIds.get(segment.speaker)
+        for (const segment of segments) {
+          let speakerId = speakerIds.get(segment.speaker)
 
-        if (!speakerId) {
-          speakerId = createId("speaker")
-          speakerIds.set(segment.speaker, speakerId)
-          await client.query(
+          if (!speakerId) {
+            speakerId = createId("speaker")
+            speakerIds.set(segment.speaker, speakerId)
+            await tx.query(
+              `
+                insert into speakers (id, meeting_id, label, display_name)
+                values ($1, $2, $3, $3)
+              `,
+              [speakerId, meetingId, segment.speaker]
+            )
+          }
+
+          await tx.query(
             `
-              insert into speakers (id, meeting_id, label, display_name)
-              values ($1, $2, $3, $3)
+              insert into transcript_segments (
+                id, meeting_id, speaker_id, start_ms, end_ms, text, confidence, language
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8)
             `,
-            [speakerId, meetingId, segment.speaker]
+            [
+              segment.id || createId("seg"),
+              meetingId,
+              speakerId,
+              segment.startMs,
+              segment.endMs,
+              segment.text,
+              segment.confidence ?? null,
+              segment.language ?? null,
+            ]
           )
         }
 
-        await client.query(
-          `
-            insert into transcript_segments (
-              id, meeting_id, speaker_id, start_ms, end_ms, text, confidence, language
-            )
-            values ($1, $2, $3, $4, $5, $6, $7, $8)
-          `,
-          [
-            segment.id || createId("seg"),
-            meetingId,
-            speakerId,
-            segment.startMs,
-            segment.endMs,
-            segment.text,
-            segment.confidence ?? null,
-            segment.language ?? null,
-          ]
-        )
-      }
-
-      for (const speakerLabel of speakerIds.keys()) {
-        await client.query(
-          `
-            insert into meeting_participants (
-              id, meeting_id, name, role, source, attendance_status,
-              speaker_label, confidence
-            )
-            values ($1, $2, $3, 'speaker', 'transcript', 'unknown', $3, 0.65)
-            on conflict (id) do update set
-              speaker_label = excluded.speaker_label,
-              updated_at = now()
-          `,
-          [
-            `participant_${Buffer.from(`${meetingId}:${speakerLabel}`)
-              .toString("base64url")
-              .slice(0, 40)}`,
-            meetingId,
-            speakerLabel,
-          ]
-        )
-      }
+        for (const speakerLabel of speakerIds.keys()) {
+          await tx.query(
+            `
+              insert into meeting_participants (
+                id, meeting_id, name, role, source, attendance_status,
+                speaker_label, confidence
+              )
+              values ($1, $2, $3, 'speaker', 'transcript', 'unknown', $3, 0.65)
+              on conflict (id) do update set
+                speaker_label = excluded.speaker_label,
+                updated_at = now()
+            `,
+            [
+              `participant_${Buffer.from(`${meetingId}:${speakerLabel}`)
+                .toString("base64url")
+                .slice(0, 40)}`,
+              meetingId,
+              speakerLabel,
+            ]
+          )
+        }
+      })
 
       return segments
     },
@@ -1521,12 +1558,18 @@ export function createPostgresMeetingRepository(
     },
 
     async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
+      // Operate on the latest ACTIVE share so an edit never silently mutates a
+      // revoked link. The one exception is an explicit un-revoke
+      // (patch.revoked === false), which must be able to reactivate the latest
+      // (revoked) share.
+      const wantsUnrevoke = patch.revoked === false
       const existing = await client.query(
         `
           select id, meeting_id, token, visibility, revoked, expires_at,
                  included_sections, created_by, created_at, updated_at
           from meeting_shares
           where meeting_id = $1
+          ${wantsUnrevoke ? "" : "and revoked = false"}
           order by created_at desc
           limit 1
         `,

@@ -5,6 +5,10 @@ import {
   signWebhookPayload,
   type PlatformEventName,
 } from "@/lib/platform/events"
+import {
+  getWebhookFetchTimeoutMs,
+  getWebhookSigningSecret,
+} from "@/lib/webhooks/secret"
 
 export const WEBHOOK_EVENT_NAMES = [
   "meeting.completed",
@@ -135,10 +139,7 @@ function mapDelivery(row: DeliveryRow): WebhookDeliveryView {
 
 export function createWebhookTestSignature(url: string) {
   const event = createPlatformEvent("summary.created", { url })
-  const signature = signWebhookPayload(
-    event,
-    process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
-  )
+  const signature = signWebhookPayload(event, getWebhookSigningSecret())
 
   return { event, signature }
 }
@@ -371,10 +372,11 @@ export async function retryWebhookDelivery(id: string) {
         "content-type": "application/json",
         "x-meetsum-signature": signWebhookPayload(
           event,
-          process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
+          getWebhookSigningSecret()
         ),
       },
       body: JSON.stringify(event),
+      signal: AbortSignal.timeout(getWebhookFetchTimeoutMs()),
     })
 
     const updateResult = await pool.query(
@@ -448,10 +450,11 @@ export async function sendWebhookTest(input: {
       "content-type": "application/json",
       "x-meetsum-signature": signWebhookPayload(
         event,
-        process.env.WEBHOOK_SIGNING_SECRET ?? "dev-secret"
+        getWebhookSigningSecret()
       ),
     },
     body: JSON.stringify(event),
+    signal: AbortSignal.timeout(getWebhookFetchTimeoutMs()),
   })
 
   return {

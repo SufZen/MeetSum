@@ -506,6 +506,17 @@ async function waitForGeminiFile(
   throw new Error(`Timed out waiting for Gemini file processing: ${name}`)
 }
 
+/**
+ * Thrown when no transcription provider can produce a real transcript, so the
+ * job fails honestly instead of persisting fabricated placeholder text.
+ */
+export class TranscriptionUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "TranscriptionUnavailableError"
+  }
+}
+
 export class HeuristicFallbackProvider
   implements TranscriptionProvider, SummaryProvider
 {
@@ -513,21 +524,20 @@ export class HeuristicFallbackProvider
   readonly model = "heuristic-v1"
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
+    // Legitimate passthrough: a transcript already imported from another
+    // source (e.g. Google Meet smart notes / Docs) just needs cleanup.
     if (meeting.transcript?.length) {
       return cleanupTranscriptSegments(meeting.transcript)
     }
 
-    return [
-      {
-        id: `seg_${crypto.randomUUID()}`,
-        speaker: inferSpeaker(meeting.participants[0], 0),
-        startMs: 0,
-        endMs: 5000,
-        text: `Uploaded media for ${meeting.title}. Add Gemini credentials or a transcript source to generate a full transcript.`,
-        confidence: 0.25,
-        language: meeting.language,
-      },
-    ]
+    // No real transcript and no configured ASR provider produced one. Fail
+    // loudly rather than fabricating a placeholder that would be persisted and
+    // surfaced (in exports, shares, RealizeOS) as if it were a real transcript.
+    throw new TranscriptionUnavailableError(
+      `No transcription provider is available for "${meeting.title}". ` +
+        "Configure GOOGLE_GEMINI_API_KEY (or Vertex AI), set LOCAL_TRANSCRIPTION_URL, " +
+        "or import a transcript source before processing."
+    )
   }
 
   async summarize(meeting: MeetingRecord) {
