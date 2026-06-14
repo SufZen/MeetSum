@@ -127,6 +127,13 @@ services:
     profiles:
       - local-asr
     restart: unless-stopped
+    environment:
+      # CPU inference must use int8. The implicit default upcasts float16 ->
+      # float32, which grew memory until the process crashed on long (>15 min)
+      # recordings. int8 uses ~4x less RAM. NOTE: this VPS is memory-constrained
+      # (~7.6 GB shared); for reliable long-Hebrew ASR, offload to the Ryzen
+      # laptop's Lemonade Whisper and let Gemini handle the VPS fallback.
+      WHISPER__COMPUTE_TYPE: int8
     volumes:
       - huggingface-cache:/root/.cache/huggingface
 
