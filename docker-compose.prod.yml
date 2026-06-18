@@ -13,7 +13,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
+      # 127.0.0.11 (Docker embedded) first for service discovery; public IPv4
+      # resolvers after it because the host's upstream is IPv6/Tailscale-only and
+      # unreachable from containers (external DNS otherwise fails with EAI_AGAIN).
       - 127.0.0.11
+      - 185.12.64.2
+      - 1.1.1.1
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,7 +51,12 @@ services:
     volumes:
       - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     dns:
+      # 127.0.0.11 (Docker embedded) first for service discovery; public IPv4
+      # resolvers after it because the host's upstream is IPv6/Tailscale-only and
+      # unreachable from containers (external DNS otherwise fails with EAI_AGAIN).
       - 127.0.0.11
+      - 185.12.64.2
+      - 1.1.1.1
     depends_on:
       postgres:
         condition: service_healthy
