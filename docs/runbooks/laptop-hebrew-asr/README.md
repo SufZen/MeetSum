@@ -40,10 +40,95 @@ Meeting → VPS worker → POST audio → http://100.119.125.14:8771/v1/audio/tr
 
 ---
 
-## Part A — Laptop (Windows + WSL2)
+## ✅ VALIDATED SETUP (native Windows) — use this, not the Docker path below
 
-Run faster-whisper-server in Docker inside WSL2 (or Docker Desktop), then expose
-its port on the laptop's Tailscale IP.
+> The Docker/WSL2 approach in "Part A" below was **abandoned**: Docker Desktop
+> won't run headless on the laptop, WSL Python was too new for `ctranslate2`,
+> and `netsh portproxy` silently **drops the long idle connections** a multi-
+> minute transcription needs. The setup below is what actually runs in
+> production and was validated end-to-end on a real 26 MB / ~1 h Hebrew meeting
+> (`provider=local-whisper`, `fallbackUsed=false`, coherent transcript +
+> accurate summary/action-items).
+
+### Laptop (one-time)
+
+```powershell
+# Native Python 3.12 venv (NOT WSL — ctranslate2 needs <=3.12), via uv:
+uv venv --python 3.12 C:\meetsum-asr\.venv
+C:\meetsum-asr\.venv\Scripts\python.exe -m pip install faster-whisper fastapi "uvicorn[standard]" python-multipart
+# Model cache on D: — C: was full; the ivrit CT2 model is ~1.6 GB:
+$env:HF_HOME = "D:\meetsum-asr\hf-cache"
+# Pre-download the model AS THE LOGGED-IN USER (SYSTEM can't resolve HF):
+C:\meetsum-asr\.venv\Scripts\python.exe -c "import os; os.environ['HF_HOME']=r'D:\meetsum-asr\hf-cache'; from faster_whisper import WhisperModel; WhisperModel('ivrit-ai/whisper-large-v3-turbo-ct2', device='cpu', compute_type='int8'); print('READY')"
+```
+
+Copy `app.py` (in this folder) to `C:\meetsum-asr\app.py`.
+
+### Auto-start as a SYSTEM service (survives logoff/reboot, binds the tailnet)
+
+```powershell
+# Run as SYSTEM at startup so it's up without a login session, model cache on D:
+$action = 'cmd /c "set HF_HOME=D:\meetsum-asr\hf-cache&&C:\meetsum-asr\.venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 8771 >> D:\meetsum-asr\server.log 2>&1"'
+schtasks /Create /TN MeetSumASR-native /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $action /F
+# working dir is set by `cmd /c` cd or the task's Start-in; ensure it's C:\meetsum-asr
+schtasks /Run /TN MeetSumASR-native
+```
+
+### CRITICAL: keep the laptop reachable (these caused real fallbacks)
+
+```powershell
+# The laptop went to sleep mid-run and dropped off Tailscale -> Gemini fallback.
+# Disable sleep/hibernate/lid-sleep on AC AND battery:
+powercfg /change standby-timeout-ac 0 ; powercfg /change standby-timeout-dc 0
+powercfg /change hibernate-timeout-ac 0 ; powercfg /change hibernate-timeout-dc 0
+powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+powercfg /setactive SCHEME_CURRENT
+```
+
+### VPS-side env required for long CPU transcriptions
+
+Set in `/opt/meetsum/.env.local` (then `docker compose ... up -d worker`):
+
+```
+LOCAL_TRANSCRIPTION_URL=http://100.119.125.14:8771
+LOCAL_TRANSCRIPTION_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
+MEETSUM_TRANSCRIPTION_PROVIDER=auto
+LOCAL_TRANSCRIPTION_TIMEOUT_MS=3600000   # 15-min default aborts long CPU runs
+```
+
+### Four code/infra fixes that were required (all live on `main`)
+
+These are documented here because the laptop host's behaviour drove them; the
+code fixes themselves are in `lib/ai/providers.ts` on `main`:
+
+1. **HTTP 422 "file required"** — the installed `undici` doesn't recognize a
+   global `FormData`, so the multipart body serialized empty. Build the request
+   with undici's own `FormData` + a `Blob` via `form.set("file", blob, name)`.
+2. **`fetch failed` at ~5 min (`ECONNRESET`)** — a stateful firewall/NAT resets
+   the **idle** TCP connection while the model transcribes silently. Enable TCP
+   keepalive on the undici dispatcher
+   (`connect: { keepAlive: true, keepAliveInitialDelay: 30_000 }`).
+3. **15-minute abort** — raise `LOCAL_TRANSCRIPTION_TIMEOUT_MS` (CPU `int8` does
+   ~26 MB in 16–21 min); the `AbortController` is the real cap once undici's own
+   300 s `headersTimeout`/`bodyTimeout` are disabled.
+4. **`invalid input syntax for timestamp` ("Friday")** — the summary model
+   emits non-date due strings; `coerceDueDate()` in `postgres-repository.ts`
+   drops them to `null` instead of crashing the intelligence write.
+
+### Validated transcribe config
+
+See `app.py` in this folder — `condition_on_previous_text=False` + `vad_filter`
++ confidence thresholds eliminated the intro hallucination (the model was
+inventing ~15 nonsense Hebrew segments over the first 40 s of music/silence).
+
+---
+
+## Part A — Laptop (Windows + WSL2) — ABANDONED (kept for reference)
+
+> Superseded by the native setup above. Run faster-whisper-server in Docker
+> inside WSL2 (or Docker Desktop), then expose its port on the laptop's
+> Tailscale IP. Did not survive headless operation or long connections.
 
 ### A1. Start the ASR container (in WSL2)
 
