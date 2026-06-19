@@ -6,10 +6,24 @@ import path from "node:path"
 import { promisify } from "node:util"
 
 import {
+  fetch as undiciFetch,
+  Agent as UndiciAgent,
+  type FormData as UndiciFormData,
+} from "undici"
+
+import {
   buildMeetingIntelligence,
   cleanupTranscriptSegments,
   type SmartTask,
 } from "@/lib/intelligence"
+
+// Long-running local ASR can hold a connection open for many minutes while the
+// model transcribes. Node's built-in fetch (undici) defaults headersTimeout and
+// bodyTimeout to 300s, which aborts real meeting transcriptions with a generic
+// "fetch failed" long before our own AbortController fires. Use a dispatcher
+// with those timeouts disabled; the AbortController (LOCAL_TRANSCRIPTION_TIMEOUT_MS)
+// remains the real cap.
+const longAsrDispatcher = new UndiciAgent({ headersTimeout: 0, bodyTimeout: 0 })
 import type {
   MeetingRecord,
   TranscriptSegment,
@@ -621,14 +635,19 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
       const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
 
       try {
-        const response = await (this.options.fetch ?? fetch)(
-          `${this.config.baseUrl}/v1/audio/transcriptions`,
-          {
-            method: "POST",
-            body: formData,
-            signal: controller.signal,
-          }
-        )
+        const transcribeUrl = `${this.config.baseUrl}/v1/audio/transcriptions`
+        const response = this.options.fetch
+          ? await this.options.fetch(transcribeUrl, {
+              method: "POST",
+              body: formData,
+              signal: controller.signal,
+            })
+          : ((await undiciFetch(transcribeUrl, {
+              method: "POST",
+              body: formData as unknown as UndiciFormData,
+              signal: controller.signal,
+              dispatcher: longAsrDispatcher,
+            })) as unknown as Response)
 
         const elapsedMs = Date.now() - startTime
 
