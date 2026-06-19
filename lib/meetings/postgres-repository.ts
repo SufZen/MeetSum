@@ -202,6 +202,20 @@ function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`
 }
 
+/**
+ * Coerce an action-item due date to a value the timestamptz column accepts.
+ * The summary model sometimes emits non-date phrases ("Friday", Hebrew relative
+ * dates like "לפני שבוע"); those are dropped to null rather than crashing the
+ * whole intelligence write with an invalid-timestamp error.
+ */
+function coerceDueDate(value?: string | null): string | null {
+  if (!value) return null
+  const trimmed = String(value).trim()
+  if (!trimmed) return null
+  const parsed = new Date(trimmed)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
 function normalizeLimit(value?: number) {
   if (!value || !Number.isFinite(value)) return 50
 
@@ -1103,7 +1117,7 @@ export function createPostgresMeetingRepository(
             item.title,
             item.owner ?? null,
             item.status,
-            item.dueDate ?? null,
+            coerceDueDate(item.dueDate),
             item.priority,
             item.confidence,
             item.sourceQuote,
@@ -1161,7 +1175,7 @@ export function createPostgresMeetingRepository(
           patch.title ?? null,
           patch.owner ?? null,
           patch.status ?? null,
-          patch.dueDate ?? null,
+          coerceDueDate(patch.dueDate),
           patch.priority ?? null,
         ]
       )

@@ -8,7 +8,7 @@ import { promisify } from "node:util"
 import {
   fetch as undiciFetch,
   Agent as UndiciAgent,
-  type FormData as UndiciFormData,
+  FormData as UndiciFormData,
 } from "undici"
 
 import {
@@ -625,29 +625,49 @@ export class LocalWhisperTranscriptionProvider implements TranscriptionProvider 
         `timeout=${this.config.timeoutMs}ms`
       )
 
-      const formData = new FormData()
-      formData.set("file", new Blob([bytes], { type: asset.contentType }), asset.filename)
-      formData.set("model", this.config.model)
-      formData.set("language", this.config.language || meeting.language)
-      formData.set("response_format", "verbose_json")
-
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
 
       try {
         const transcribeUrl = `${this.config.baseUrl}/v1/audio/transcriptions`
-        const response = this.options.fetch
-          ? await this.options.fetch(transcribeUrl, {
-              method: "POST",
-              body: formData,
-              signal: controller.signal,
-            })
-          : ((await undiciFetch(transcribeUrl, {
-              method: "POST",
-              body: formData as unknown as UndiciFormData,
-              signal: controller.signal,
-              dispatcher: longAsrDispatcher,
-            })) as unknown as Response)
+        let response: Response
+
+        if (this.options.fetch) {
+          // Test-injected fetch: use the global FormData/Blob.
+          const formData = new FormData()
+          formData.set(
+            "file",
+            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
+            asset.filename
+          )
+          formData.set("model", this.config.model)
+          formData.set("language", this.config.language || meeting.language)
+          formData.set("response_format", "verbose_json")
+          response = await this.options.fetch(transcribeUrl, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          })
+        } else {
+          // Real path: build the multipart with undici's OWN FormData/File so
+          // undici's fetch serializes it. A global FormData is not recognized by
+          // the installed undici and serializes to an empty body (HTTP 422).
+          const form = new UndiciFormData()
+          form.set(
+            "file",
+            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
+            asset.filename ?? `${meeting.id}.media`
+          )
+          form.set("model", this.config.model)
+          form.set("language", this.config.language || meeting.language)
+          form.set("response_format", "verbose_json")
+          response = (await undiciFetch(transcribeUrl, {
+            method: "POST",
+            body: form,
+            signal: controller.signal,
+            dispatcher: longAsrDispatcher,
+          })) as unknown as Response
+        }
 
         const elapsedMs = Date.now() - startTime
 
