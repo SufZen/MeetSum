@@ -18,12 +18,20 @@ import {
 } from "@/lib/intelligence"
 
 // Long-running local ASR can hold a connection open for many minutes while the
-// model transcribes. Node's built-in fetch (undici) defaults headersTimeout and
-// bodyTimeout to 300s, which aborts real meeting transcriptions with a generic
-// "fetch failed" long before our own AbortController fires. Use a dispatcher
-// with those timeouts disabled; the AbortController (LOCAL_TRANSCRIPTION_TIMEOUT_MS)
-// remains the real cap.
-const longAsrDispatcher = new UndiciAgent({ headersTimeout: 0, bodyTimeout: 0 })
+// model transcribes, sending zero bytes until the final JSON. Two things break
+// that otherwise:
+//   1. Node's built-in fetch (undici) defaults headersTimeout/bodyTimeout to
+//      300s, aborting real transcriptions with a generic "fetch failed" long
+//      before our own AbortController fires. We disable both here; the
+//      AbortController (LOCAL_TRANSCRIPTION_TIMEOUT_MS) remains the real cap.
+//   2. A silent, idle TCP connection is reset by stateful firewalls/NAT after
+//      ~5 minutes (observed: ECONNRESET at ~300s). TCP keepalive probes keep
+//      the socket non-idle so the connection survives a long transcription.
+const longAsrDispatcher = new UndiciAgent({
+  headersTimeout: 0,
+  bodyTimeout: 0,
+  connect: { keepAlive: true, keepAliveInitialDelay: 30_000 },
+})
 import type {
   MeetingRecord,
   TranscriptSegment,
