@@ -72,6 +72,22 @@ node bin/meetings.mjs export --target markdown
 
 When `MEETSUM_REQUIRE_API_KEY=true`, set `MEETSUM_API_KEY` for local CLI calls or pass `--api-key`.
 
+## Desktop Capture Companion
+
+MeetSum includes a local Electron companion for mic plus system-audio capture:
+
+```bash
+npm run desktop:dev
+```
+
+The companion records locally, keeps an offline spool, and uploads through `/api/desktop-capture/ingest`. See [docs/desktop-recorder.md](docs/desktop-recorder.md).
+
+Build a Windows installer and portable app with:
+
+```bash
+npm run desktop:dist:win
+```
+
 ## Self-Hosted Stack
 
 Copy `.env.example` to `.env.local`, fill real values, then run:
@@ -96,6 +112,7 @@ Production VPS deploy uses `docker-compose.prod.yml`, exposes MeetSum on host po
 
 - `docs/architecture.md`: current architecture and integration surfaces.
 - `docs/user-manual.md`: basic logic, daily workflow, capture model, integrations, and operating rules.
+- `docs/desktop-recorder.md`: local companion setup, capture flow, spool, and retry behavior.
 - `docs/design-system.md`: UI palette, typography, layout, and component layer.
 - `docs/internationalization.md`: locale routing, language cookie, and RTL policy.
 - `docs/language-intelligence.md`: mixed-language detection, Hebrew cleanup, tags, and smart tasks.

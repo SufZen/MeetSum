@@ -2048,7 +2048,7 @@ export function OperationalPage({
               "Gmail context is connected conceptually but should remain secondary until Calendar and Drive are fully reliable.",
               "Notion and DOCX exports are prepared but not active; PDF and Markdown are first-class.",
               "Vertex AI is prepared as the stable credential path, but production still uses the AI Studio Gemini key until smoke-tested.",
-              "Visible meeting bot/desktop recorder is deferred until consent and Meet Media API requirements are proven.",
+              "Visible meeting bot and packaged desktop-recorder release polish remain deferred until consent, code-signing, installer, and Meet Media API requirements are proven; the local desktop companion and desktop imports are available through the repo, UI, and API.",
             ]}
           />
         </div>

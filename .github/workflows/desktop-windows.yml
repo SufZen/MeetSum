@@ -1,0 +1,54 @@
+name: Desktop Windows Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "desktop-recorder/**"
+      - "electron-builder.yml"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop-windows.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "desktop-recorder/**"
+      - "electron-builder.yml"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop-windows.yml"
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run desktop companion tests
+        run: npm test -- tests/desktop-recorder-companion.test.ts tests/desktop-recorder-packaging.test.ts tests/desktop-capture-route.test.ts
+
+      - name: Build Windows artifacts
+        run: npm run desktop:dist:win
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetsum-capture-windows
+          path: |
+            desktop-recorder/release/*.exe
+            desktop-recorder/release/*.blockmap
+            desktop-recorder/release/latest.yml
+          if-no-files-found: error

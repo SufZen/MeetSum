@@ -279,7 +279,8 @@ alter table meetings
 alter table media_assets
   add column if not exists source text,
   add column if not exists source_file_id text,
-  add column if not exists checksum_sha256 text;
+  add column if not exists checksum_sha256 text,
+  add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 alter table ai_runs
   add column if not exists model text,

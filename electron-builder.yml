@@ -1,0 +1,43 @@
+appId: com.meetsum.capture
+productName: MeetSum Capture
+copyright: Copyright © 2026 MeetSum
+
+directories:
+  app: desktop-recorder
+  output: desktop-recorder/release
+
+files:
+  - package.json
+  - dist/**/*
+  - src/main/preload.cjs
+  - src/renderer/**/*
+  - "!node_modules/**"
+
+extraMetadata:
+  main: dist/main/main.js
+
+asar: true
+compression: maximum
+
+win:
+  artifactName: MeetSum-Capture-${version}-${arch}.${ext}
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  artifactName: MeetSum-Capture-Setup-${version}-${arch}.${ext}
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: MeetSum Capture
+  uninstallDisplayName: MeetSum Capture
+
+publish: null

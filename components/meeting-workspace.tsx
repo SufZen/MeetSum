@@ -83,7 +83,7 @@ export function MeetingWorkspace({
           </Button>
           <Button variant="outline" onClick={onOpenUpload}>
             <UploadIcon data-icon="inline-start" />
-            Upload recording
+            Upload or import recording
           </Button>
           <Button variant="ghost" onClick={onCheckSetup}>
             <SettingsIcon data-icon="inline-start" />

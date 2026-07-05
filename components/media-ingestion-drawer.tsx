@@ -1,7 +1,7 @@
 "use client"
 
 import type { ChangeEvent } from "react"
-import { MicIcon, UploadIcon } from "lucide-react"
+import { LaptopIcon, MicIcon, UploadIcon } from "lucide-react"
 
 import { MeetingRecorder } from "@/components/meeting-recorder"
 import { Button } from "@/components/ui/button"
@@ -26,18 +26,31 @@ export function MediaIngestionDrawer({
 }: {
   dictionary: Dictionary
   pending?: boolean
-  mode?: "upload" | "record"
+  mode?: "upload" | "record" | "desktop"
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
 }) {
-  const triggerLabel = mode === "record" ? dictionary.record : dictionary.upload
-  const TriggerIcon = mode === "record" ? MicIcon : UploadIcon
-  const title = mode === "record" ? "Record in-person meeting" : "Upload meeting media"
+  const triggerLabel =
+    mode === "record"
+      ? "Record on this computer"
+      : mode === "desktop"
+        ? "Import desktop recorder"
+        : dictionary.upload
+  const TriggerIcon =
+    mode === "record" ? MicIcon : mode === "desktop" ? LaptopIcon : UploadIcon
+  const title =
+    mode === "record"
+      ? "Record on this computer"
+      : mode === "desktop"
+        ? "Import from desktop recorder"
+        : "Upload meeting media"
   const description =
     mode === "record"
       ? "Capture audio in the browser and queue it into the same transcription and summary pipeline."
+      : mode === "desktop"
+        ? "Import audio from a local desktop recorder companion. MeetSum keeps the meeting record, processing, sharing, and automations."
       : "Upload audio/video directly into the processing pipeline. Files are stored privately first."
 
   return (
@@ -57,13 +70,19 @@ export function MediaIngestionDrawer({
               Upload is queued. Keep this page open while MeetSum stores the media and starts processing.
             </div>
           )}
-          {mode === "upload" && (
+          {(mode === "upload" || mode === "desktop") && (
             <label className="grid min-h-36 cursor-pointer place-items-center rounded-md border border-dashed bg-muted/40 p-6 text-center text-sm text-muted-foreground">
-              <UploadIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
+              <TriggerIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
               <span className="font-medium text-foreground">
-                Choose audio or video
+                {mode === "desktop"
+                  ? "Choose desktop recorder audio"
+                  : "Choose audio or video"}
               </span>
-              <span>Gemini-ready files are stored privately in MinIO first.</span>
+              <span>
+                {mode === "desktop"
+                  ? "MeetSum will create a desktop recorder meeting and process it normally."
+                  : "Gemini-ready files are stored privately in MinIO first."}
+              </span>
               <input
                 type="file"
                 className="hidden"
@@ -72,17 +91,19 @@ export function MediaIngestionDrawer({
               />
             </label>
           )}
-          <MeetingRecorder
-            onRecordingReady={onRecordingReady}
-            labels={{
-              ready: dictionary.recorderReady,
-              record: dictionary.record,
-              stop: dictionary.stop,
-              recording: dictionary.recording,
-              blocked: dictionary.recorderBlocked,
-              unsupported: dictionary.recorderUnsupported,
-            }}
-          />
+          {mode === "record" ? (
+            <MeetingRecorder
+              onRecordingReady={onRecordingReady}
+              labels={{
+                ready: dictionary.recorderReady,
+                record: dictionary.record,
+                stop: dictionary.stop,
+                recording: dictionary.recording,
+                blocked: dictionary.recorderBlocked,
+                unsupported: dictionary.recorderUnsupported,
+              }}
+            />
+          ) : null}
         </div>
       </SheetContent>
     </Sheet>

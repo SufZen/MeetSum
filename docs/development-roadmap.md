@@ -132,7 +132,7 @@ The most important remaining work is daily usability: every real meeting should 
 - MinIO backup automation.
 - Analytics and model-cost dashboards.
 - Zoom/Teams native capture.
-- Visible meeting bot or desktop recorder.
+- Visible meeting bot and packaged desktop-recorder release polish.
 
 ## V0.1.0 Priority Order
 

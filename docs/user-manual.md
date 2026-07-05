@@ -6,7 +6,7 @@ MeetSum is a self-hosted, Google-first meeting intelligence system. It is design
 
 1. Google Calendar creates the schedule layer: meeting title, time, attendees, organizer, Meet links, and recurrence context.
 2. Google Drive and Google Meet artifacts provide the content layer: selected recordings, transcripts, and smart notes.
-3. Manual upload and the browser recorder provide the fallback capture path for Zoom, Teams, in-person meetings, or external audio.
+3. Manual upload, the browser recorder, and desktop recorder imports provide the fallback capture path for Zoom, Teams, in-person meetings, or external audio.
 4. Worker jobs process media through transcription, cleanup, summary generation, task extraction, indexing, and quality review.
 5. The UI exposes the result as summary, transcript, decisions, action items, tags, participants, rooms, exports, share links, and memory search.
 
@@ -24,7 +24,7 @@ Use filters:
 - Failed: meetings that need a retry or manual action.
 - Upcoming: scheduled meetings waiting for capture.
 
-Upcoming and empty meetings show a capture-readiness checklist instead of blank summary content. The checklist tells you whether MeetSum sees Calendar context, a Meet conference record, a recording, transcript, smart notes, or imported media, and it recommends the next action: sync artifacts, upload/record, or process now.
+Upcoming and empty meetings show a capture-readiness checklist instead of blank summary content. The checklist tells you whether MeetSum sees Calendar context, a Meet conference record, a recording, transcript, smart notes, or imported media, and it recommends the next action: sync artifacts, upload/import/record, or process now.
 
 ### 2. Sync Calendar
 
@@ -41,6 +41,18 @@ Import behavior:
 - Video is converted into an audio-first asset by default.
 - The drawer shows Drive download/audio extraction and worker processing status.
 - After import, MeetSum selects the imported meeting directly.
+
+Use Import desktop recorder when audio was captured by a local companion app.
+MeetSum creates a `desktop_recorder` meeting, stores the media privately, records
+desktop metadata such as device/sample/model details when provided, and sends the
+meeting into the same worker pipeline as uploads and Drive imports. Companion
+apps may also send transcript segments; in that case MeetSum stores the local
+transcript and queues summarization instead of retranscribing the audio.
+When a companion retries a spooled upload with the same capture ID, MeetSum
+reuses the existing desktop media asset and queues processing again.
+Run the bundled local companion with `npm run desktop:dev`. It records mic plus
+computer audio locally, writes an offline spool, and uploads recordings through
+the authenticated desktop ingestion API.
 
 ### 4. Process Intelligence
 
@@ -169,7 +181,7 @@ Vertex service-account credential path is configured and smoke-tested.
 - Gmail-aware prep and follow-up are not first-priority until Calendar and Drive paths are reliable.
 - DOCX and Notion exports are prepared but not active.
 - Vertex AI is not the active production provider yet.
-- A visible meeting bot and desktop recorder are deferred until consent and API requirements are proven.
+- A visible meeting bot and packaged desktop-recorder release polish are deferred until consent, code-signing, and installer requirements are proven. The local desktop companion and desktop imports are available through the repo, UI, and API.
 
 ## V0.1.0 Acceptance Target
 

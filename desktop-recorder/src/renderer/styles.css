@@ -1,0 +1,140 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #f6f5f2;
+  color: #171717;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #191919;
+  border-radius: 6px;
+  background: #171717;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0.7rem 0.9rem;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+input,
+select {
+  border: 1px solid #c9c4ba;
+  border-radius: 6px;
+  padding: 0.7rem;
+}
+
+.app {
+  display: grid;
+  gap: 1rem;
+  margin: 0 auto;
+  max-width: 980px;
+  padding: 1.25rem;
+}
+
+.toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.toolbar h1,
+.panel h2 {
+  margin: 0;
+}
+
+.toolbar p {
+  color: #5f5b53;
+  margin: 0.25rem 0 0;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #ded8cf;
+  border-radius: 8px;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.meter,
+.actions,
+.spool-row {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.meter {
+  border-block: 1px solid #ebe6dd;
+  padding-block: 0.8rem;
+}
+
+#timer {
+  font-variant-numeric: tabular-nums;
+}
+
+.spool {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.spool-row {
+  border: 1px solid #e5ded3;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #171717;
+    color: #f5f5f5;
+  }
+
+  .panel {
+    background: #222222;
+    border-color: #3d3d3d;
+  }
+
+  .toolbar p {
+    color: #b8b8b8;
+  }
+
+  input,
+  select {
+    background: #171717;
+    border-color: #4a4a4a;
+    color: #f5f5f5;
+  }
+
+  button {
+    background: #f5f5f5;
+    color: #171717;
+  }
+}

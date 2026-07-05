@@ -143,6 +143,10 @@ type MediaAssetRow = {
   content_type: string
   size_bytes: string | number
   retention: MediaAsset["retention"]
+  source: string | null
+  source_file_id: string | null
+  checksum_sha256: string | null
+  metadata: Record<string, unknown> | null
   created_at: string | Date
 }
 
@@ -418,6 +422,10 @@ function mapMediaAsset(row: MediaAssetRow): MediaAsset {
     contentType: row.content_type,
     sizeBytes: Number(row.size_bytes),
     retention: row.retention,
+    source: row.source ?? undefined,
+    sourceFileId: row.source_file_id ?? undefined,
+    checksumSha256: row.checksum_sha256 ?? undefined,
+    metadata: row.metadata ?? undefined,
     createdAt: toIso(row.created_at),
   }
 }
@@ -635,7 +643,8 @@ export function createPostgresMeetingRepository(
       client.query(
         `
           select id, meeting_id, storage_key, filename, content_type,
-                 size_bytes, retention, created_at
+                 size_bytes, retention, source, source_file_id,
+                 checksum_sha256, metadata, created_at
           from media_assets
           where meeting_id = $1
           order by created_at desc
@@ -954,11 +963,13 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           insert into media_assets (
-            id, meeting_id, storage_key, filename, content_type, size_bytes, retention
+            id, meeting_id, storage_key, filename, content_type, size_bytes,
+            retention, source, source_file_id, checksum_sha256, metadata
           )
-          values ($1, $2, $3, $4, $5, $6, $7)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
           returning id, meeting_id, storage_key, filename, content_type,
-                    size_bytes, retention, created_at
+                    size_bytes, retention, source, source_file_id,
+                    checksum_sha256, metadata, created_at
         `,
         [
           createId("asset"),
@@ -968,6 +979,10 @@ export function createPostgresMeetingRepository(
           input.contentType,
           input.sizeBytes,
           input.retention ?? "audio",
+          input.source ?? null,
+          input.sourceFileId ?? null,
+          input.checksumSha256 ?? null,
+          JSON.stringify(input.metadata ?? {}),
         ]
       )
 
@@ -976,6 +991,24 @@ export function createPostgresMeetingRepository(
       ])
 
       return mapMediaAsset(result.rows[0] as MediaAssetRow)
+    },
+
+    async findMediaAssetBySourceFile(source, sourceFileId) {
+      const result = await client.query(
+        `
+          select id, meeting_id, storage_key, filename, content_type,
+                 size_bytes, retention, source, source_file_id,
+                 checksum_sha256, metadata, created_at
+          from media_assets
+          where source = $1 and source_file_id = $2
+          order by created_at desc
+          limit 1
+        `,
+        [source, sourceFileId]
+      )
+
+      const row = result.rows[0] as MediaAssetRow | undefined
+      return row ? mapMediaAsset(row) : undefined
     },
 
     async replaceTranscriptSegments(meetingId, segments) {

@@ -29,6 +29,24 @@ Get a single meeting with full detail.
 ### `POST /api/meetings`
 Create a meeting. Body: `{ title, source, language?, participants? }`.
 
+### `POST /api/meetings/:id/upload`
+Upload media for an existing meeting. Use multipart form data:
+- `file` — audio/video file.
+- `transcript` — optional JSON array of `{ text, speaker?, startMs, endMs, confidence?, language? }`.
+- `captureMetadata` — optional JSON object for desktop companion details such as `captureId`, app version, platform, device names, sample rate, duration, local transcription provider/model, and upload status.
+
+When transcript segments are supplied, MeetSum stores them and queues summary generation without retranscribing the media.
+
+### `POST /api/desktop-capture/ingest`
+Create a `desktop_recorder` meeting from a desktop companion upload. Use multipart form data:
+- `meeting` — JSON `{ title, startedAt, endedAt?, participants?, language? }`.
+- `file` — optional audio/video file.
+- `transcript` — optional JSON transcript segment array.
+- `captureMetadata` — optional desktop capture metadata.
+
+At least one of `file` or `transcript` is required. Media-only uploads queue `media.ingest`; transcript-bearing uploads queue `meeting.summarize`.
+Use a stable `captureMetadata.captureId` when retrying spooled uploads so MeetSum can reuse an existing desktop media asset instead of storing a duplicate.
+
 ### `DELETE /api/meetings/:id`
 Delete a meeting.
 

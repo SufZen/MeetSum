@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MeetSum Capture</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="toolbar">
+        <div>
+          <h1>MeetSum Capture</h1>
+          <p>Record mic and computer audio locally, then upload to MeetSum.</p>
+        </div>
+        <button id="openSpool" type="button">Open data folder</button>
+      </section>
+
+      <section class="panel">
+        <h2>Connection</h2>
+        <div class="grid">
+          <label>
+            MeetSum URL
+            <input id="meetSumUrl" placeholder="https://meetsum.example.com" />
+          </label>
+          <label>
+            API key
+            <input id="apiKey" type="password" placeholder="ms_..." />
+          </label>
+          <label>
+            Language
+            <select id="language">
+              <option value="mixed">Mixed</option>
+              <option value="he">Hebrew</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <button id="saveConfig" type="button">Save</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Capture</h2>
+        <div class="grid">
+          <label>
+            Title
+            <input id="title" placeholder="Desktop recording" />
+          </label>
+          <label>
+            Microphone
+            <select id="microphone"></select>
+          </label>
+          <label>
+            System audio source
+            <select id="systemSource"></select>
+          </label>
+        </div>
+        <div class="meter">
+          <span id="status">Ready</span>
+          <strong id="timer">00:00</strong>
+        </div>
+        <div class="actions">
+          <button id="start" type="button">Start recording</button>
+          <button id="stop" type="button" disabled>Stop and spool</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Offline spool</h2>
+        <div id="spool" class="spool"></div>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
