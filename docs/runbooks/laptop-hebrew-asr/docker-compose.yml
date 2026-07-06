@@ -1,0 +1,29 @@
+# Hebrew ASR host — run on the Ryzen AI MAX laptop (WSL2 / Docker Desktop).
+# DEV/OPS artifact: copy to the laptop and `docker compose up -d`. Not used by
+# the MeetSum app or the VPS deployment.
+#
+# Serves an OpenAI-compatible /v1/audio/transcriptions endpoint with the
+# ivrit-ai Hebrew fine-tune at int8 (CPU). Exposed on host port 8771; see the
+# runbook (Part A2) for putting 8771 on the Tailscale IP.
+
+services:
+  meetsum-asr:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: meetsum-asr
+    restart: unless-stopped
+    ports:
+      - "8771:8000"
+    environment:
+      # Preload the Hebrew fine-tune so the first request is not a cold load.
+      WHISPER__MODEL: ivrit-ai/whisper-large-v3-turbo-ct2
+      WHISPER__INFERENCE_DEVICE: cpu
+      # int8 keeps memory ~4x below float32; the real win vs the VPS is the
+      # laptop's far stronger CPU + abundant RAM (no crash on long recordings).
+      WHISPER__COMPUTE_TYPE: int8
+      # Keep the model resident; raise if you have spare RAM and want >1 model.
+      WHISPER__MAX_MODELS: "1"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+
+volumes:
+  hf-cache:
