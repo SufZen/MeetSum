@@ -23,6 +23,9 @@ jobs:
   build-windows:
     name: Build Windows installer
     runs-on: windows-latest
+    env:
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -42,6 +45,11 @@ jobs:
 
       - name: Build Windows artifacts
         run: npm run desktop:dist:win
+
+      - name: Verify Windows signatures
+        if: ${{ env.WIN_CSC_LINK != '' }}
+        shell: pwsh
+        run: ./scripts/verify-windows-signature.ps1 -Path desktop-recorder/release
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4

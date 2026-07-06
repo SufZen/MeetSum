@@ -23,7 +23,23 @@ This creates:
 
 The repository also includes a **Desktop Windows Installer** GitHub Actions workflow. Run it manually or open a PR that changes desktop files, then download the `meetsum-capture-windows` artifact from the workflow run.
 
-The installer is not code-signed yet. Windows SmartScreen may warn on first install until a signing certificate and reputation are in place.
+## Code Signing
+
+Windows installers are signed automatically in GitHub Actions when these repository secrets are configured:
+
+- `WIN_CSC_LINK` — Windows code-signing certificate path or base64-encoded certificate, as supported by electron-builder.
+- `WIN_CSC_KEY_PASSWORD` — password for the certificate.
+
+Electron Builder also falls back to `CSC_LINK` and `CSC_KEY_PASSWORD`, but the workflow uses the Windows-specific names so future macOS signing can use separate credentials.
+
+After `npm run desktop:dist:win`, verify local signed artifacts with:
+
+```powershell
+Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-Setup-0.5.0-x64.exe
+Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-0.5.0-x64.exe
+```
+
+The workflow runs `scripts/verify-windows-signature.ps1` automatically when `WIN_CSC_LINK` is present. If signing secrets are not configured, GitHub Actions still builds unsigned artifacts for PR smoke testing. Unsigned builds may trigger Windows SmartScreen until a trusted certificate and reputation are in place.
 
 ## Connection
 
@@ -65,4 +81,4 @@ Each capture keeps a stable `captureId`. If an upload fails, the spool marks the
 
 - MeetSum remains the system of record for meetings, transcripts, summaries, search, exports, webhooks, RealizeOS, and Google Workspace sync.
 - Local transcription is represented in the API contract and metadata, but this companion does not bundle Whisper or Parakeet yet.
-- Auto-update, code signing, and macOS permission polishing are still release tasks.
+- Auto-update and macOS permission polishing are still release tasks.

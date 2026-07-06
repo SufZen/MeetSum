@@ -31,4 +31,25 @@ describe("desktop recorder Windows packaging", () => {
     expect(workflow).toContain("npm run desktop:dist:win")
     expect(workflow).toContain("desktop-recorder/release/*.exe")
   })
+
+  it("wires Windows code-signing secrets and verification into the installer workflow", async () => {
+    const workflow = await readFile(
+      ".github/workflows/desktop-windows.yml",
+      "utf8"
+    )
+
+    expect(workflow).toContain("WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}")
+    expect(workflow).toContain(
+      "WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}"
+    )
+    expect(workflow).toContain("scripts/verify-windows-signature.ps1")
+  })
+
+  it("documents the certificate secrets needed for signed Windows installers", async () => {
+    const docs = await readFile("docs/desktop-recorder.md", "utf8")
+
+    expect(docs).toContain("WIN_CSC_LINK")
+    expect(docs).toContain("WIN_CSC_KEY_PASSWORD")
+    expect(docs).toContain("Get-AuthenticodeSignature")
+  })
 })
