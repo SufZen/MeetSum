@@ -299,6 +299,48 @@ export function CommandCenterShell({
     await refreshOperationalState()
   }
 
+  async function importDesktopFile(file: File) {
+    const formData = new FormData()
+
+    formData.set("file", file)
+    formData.set(
+      "meeting",
+      JSON.stringify({
+        title: file.name.replace(/\.[^.]+$/, "") || "Desktop recording",
+        startedAt: new Date().toISOString(),
+        language: "mixed",
+        participants: [],
+      })
+    )
+    formData.set(
+      "captureMetadata",
+      JSON.stringify({
+        appVersion: "manual-import",
+        platform: "unknown",
+        uploadStatus: "uploaded",
+      })
+    )
+
+    const response = await fetch("/api/desktop-capture/ingest", {
+      method: "POST",
+      body: formData,
+    })
+    const body = await response.json()
+
+    if (!response.ok) {
+      throw new Error(body.error ?? "Unable to import desktop recording")
+    }
+
+    if (body.meeting) {
+      setMeetingRecords((current) => [body.meeting, ...current].slice(0, pageSize))
+      setSelectedMeetingId(body.meeting.id)
+      setActivePanel("meetings")
+    }
+    setJobs((current) => (body.job ? [body.job, ...current] : current))
+    toast.success("Desktop recording queued for meeting intelligence")
+    await refreshOperationalState()
+  }
+
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
 
@@ -306,6 +348,20 @@ export function CommandCenterShell({
     toast.info(`Uploading ${file.name}`)
     startTransition(() =>
       void uploadFile(file).catch((error) => {
+        setAskAnswer(error.message)
+        toast.error(error.message)
+      })
+    )
+    event.target.value = ""
+  }
+
+  function handleDesktopFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+
+    if (!file) return
+    toast.info(`Importing desktop recording ${file.name}`)
+    startTransition(() =>
+      void importDesktopFile(file).catch((error) => {
         setAskAnswer(error.message)
         toast.error(error.message)
       })
@@ -998,6 +1054,7 @@ export function CommandCenterShell({
             }}
             onUploadOpenChange={setUploadOpen}
             onFileChange={handleFileChange}
+            onDesktopFileChange={handleDesktopFileChange}
             onRecordingReady={handleRecordingReady}
             onSync={syncGoogle}
             onFindDriveRecordings={() => setDrivePickerOpen(true)}

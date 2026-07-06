@@ -28,6 +28,47 @@ describe("meeting repository", () => {
     expect(await repository.searchMeetings("strategy")).toHaveLength(1)
   })
 
+  it("stores desktop capture metadata on uploaded media assets", async () => {
+    const repository = createInMemoryMeetingRepository()
+    const meeting = await repository.createMeeting({
+      title: "Desktop recording",
+      source: "desktop_recorder",
+      language: "he",
+      startedAt: "2026-07-05T09:00:00.000Z",
+      participants: [],
+    })
+
+    const asset = await repository.createMediaAsset({
+      meetingId: meeting.id,
+      storageKey: "meetings/desktop/audio.wav",
+      filename: "audio.wav",
+      contentType: "audio/wav",
+      sizeBytes: 12000,
+      retention: "audio",
+      source: "desktop_capture",
+      metadata: {
+        sampleRate: 48000,
+        durationMs: 90000,
+        localTranscription: {
+          provider: "parakeet",
+          model: "parakeet-tdt-0.6b-v3-int8",
+        },
+      },
+    })
+
+    const updated = await repository.getMeeting(meeting.id)
+
+    expect(asset).toMatchObject({
+      source: "desktop_capture",
+      metadata: {
+        sampleRate: 48000,
+        durationMs: 90000,
+      },
+    })
+    expect(updated?.mediaAssets?.[0]).toMatchObject(asset)
+    expect(updated?.status).toBe("media_uploaded")
+  })
+
   it("answers questions from transcript and summary context", async () => {
     const repository = createInMemoryMeetingRepository([
       {

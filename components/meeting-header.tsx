@@ -15,6 +15,7 @@ import type { MeetingRecord } from "@/lib/meetings/repository"
 function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "google_meet") return "Google Meet"
   if (source === "pwa_recorder") return "Recorder"
+  if (source === "desktop_recorder") return "Desktop recorder"
   if (source === "upload") return "Upload"
   return source.replaceAll("_", " ")
 }

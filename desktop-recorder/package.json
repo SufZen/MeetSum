@@ -1,0 +1,10 @@
+{
+  "name": "meetsum-capture",
+  "productName": "MeetSum Capture",
+  "version": "0.5.0",
+  "description": "Desktop capture companion for MeetSum.",
+  "author": "MeetSum",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "private": true
+}

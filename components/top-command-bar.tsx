@@ -38,6 +38,7 @@ export function TopCommandBar({
   onQueryChange,
   onUploadOpenChange,
   onFileChange,
+  onDesktopFileChange,
   onRecordingReady,
   onSync,
   onFindDriveRecordings,
@@ -53,6 +54,7 @@ export function TopCommandBar({
   onQueryChange: (value: string) => void
   onUploadOpenChange?: (open: boolean) => void
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onDesktopFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
   onSync: (target: SyncTarget) => void
   onFindDriveRecordings: () => void
@@ -97,6 +99,13 @@ export function TopCommandBar({
           pending={pending}
           mode="record"
           onFileChange={onFileChange}
+          onRecordingReady={onRecordingReady}
+        />
+        <MediaIngestionDrawer
+          dictionary={dictionary}
+          pending={pending}
+          mode="desktop"
+          onFileChange={onDesktopFileChange}
           onRecordingReady={onRecordingReady}
         />
         <DropdownMenu>

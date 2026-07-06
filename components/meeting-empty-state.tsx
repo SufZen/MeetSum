@@ -66,7 +66,7 @@ const actionLabels: Record<CaptureReadinessAction, string> = {
   none: "Processed",
   process: "Process meeting",
   sync_artifacts: "Sync Meet artifacts",
-  upload: "Upload recording",
+  upload: "Upload or import recording",
 }
 
 const actionIcons: Record<CaptureReadinessAction, typeof FileAudioIcon> = {

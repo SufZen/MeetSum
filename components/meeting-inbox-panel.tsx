@@ -41,6 +41,7 @@ function sourceMeta(source: MeetingRecord["source"]) {
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "G" }
   if (source === "upload") return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
   if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-violet-500", icon: "R" }
+  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-indigo-500", icon: "D" }
   return { label: source.replaceAll("_", " "), dot: "bg-amber-500", icon: "A" }
 }
 

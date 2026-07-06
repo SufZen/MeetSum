@@ -133,7 +133,9 @@ export function getMeetingCaptureReadiness(meeting: MeetingRecord): CaptureReadi
     status: "manual_capture",
     title: "Manual capture needed",
     description:
-      "Upload a recording or use the browser recorder to generate meeting intelligence.",
+      meeting.source === "desktop_recorder"
+        ? "Import audio or transcript output from the desktop recorder companion, then process it through MeetSum."
+        : "Upload a recording, import desktop recorder audio, or use the browser recorder to generate meeting intelligence.",
     primaryAction: "upload",
     checks,
   }

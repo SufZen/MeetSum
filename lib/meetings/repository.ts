@@ -114,6 +114,10 @@ export type MediaAsset = {
   contentType: string
   sizeBytes: number
   retention: "audio" | "video"
+  source?: string
+  sourceFileId?: string
+  checksumSha256?: string
+  metadata?: Record<string, unknown>
   createdAt: string
 }
 
@@ -275,7 +279,15 @@ export type MeetingRepository = {
     contentType: string
     sizeBytes: number
     retention?: "audio" | "video"
+    source?: string
+    sourceFileId?: string
+    checksumSha256?: string
+    metadata?: Record<string, unknown>
   }) => Promise<MediaAsset>
+  findMediaAssetBySourceFile?: (
+    source: string,
+    sourceFileId: string
+  ) => Promise<MediaAsset | undefined>
   replaceTranscriptSegments: (
     meetingId: string,
     segments: TranscriptSegment[]
@@ -623,6 +635,10 @@ export function createInMemoryMeetingRepository(
         contentType: input.contentType,
         sizeBytes: input.sizeBytes,
         retention: input.retention ?? "audio",
+        source: input.source,
+        sourceFileId: input.sourceFileId,
+        checksumSha256: input.checksumSha256,
+        metadata: input.metadata,
         createdAt: new Date().toISOString(),
       }
       const updated = {
@@ -633,6 +649,20 @@ export function createInMemoryMeetingRepository(
 
       meetings.set(meeting.id, updated)
       return asset
+    },
+
+    async findMediaAssetBySourceFile(source, sourceFileId) {
+      for (const meeting of meetings.values()) {
+        const asset = meeting.mediaAssets?.find(
+          (candidate) =>
+            candidate.source === source &&
+            candidate.sourceFileId === sourceFileId
+        )
+
+        if (asset) return asset
+      }
+
+      return undefined
     },
 
     async replaceTranscriptSegments(
