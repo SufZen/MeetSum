@@ -180,6 +180,11 @@ Operational UI status comes from:
 
 ## Deploy Flow
 
+For release `v0.6.0`, deployment must include database migration
+`014_desktop_capture_metadata.sql` before restarting the app and worker. This
+adds desktop capture metadata to `media_assets` and is required by the desktop
+recorder ingestion path.
+
 ```bash
 cd /opt/meetsum
 ./scripts/backup-postgres.sh
@@ -193,6 +198,14 @@ docker compose -f docker-compose.prod.yml --env-file .env.local up -d app worker
 **Important:** Always use `-f docker-compose.prod.yml` explicitly. The default `docker-compose.yml` is for local development and includes a `migrate` service that fails in production due to Tailscale DNS interference.
 
 The helper `scripts/deploy-vps.sh` performs the same flow.
+
+After deploying v0.6.0, verify:
+
+- `curl -fsS https://meetsum.realization.co.il/api/health`
+- `/api/desktop-capture/ingest` appears in the built Next route output.
+- The worker is running and can process `media.ingest` and `meeting.summarize`.
+- A desktop recorder API key is available through `MEETSUM_API_KEYS`,
+  `MEETSUM_API_KEY_HASHES`, or admin API-key management.
 
 The `worker` runs by default because uploads, Gemini transcription, Google polling, RealizeOS export, and retryable jobs all depend on it. The bundled `n8n` service remains profile-gated until a live workflow is created:
 

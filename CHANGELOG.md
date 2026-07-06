@@ -2,6 +2,30 @@
 
 All notable changes to MeetSum are documented in this file.
 
+## [0.6.0] — 2026-07-06
+
+### Added
+- **MeetSum Capture desktop companion** — Electron app for personal Windows desktop capture with mic plus system-audio recording, local spool, retry upload, and authenticated upload into MeetSum.
+- **Desktop recorder ingestion API** — `POST /api/desktop-capture/ingest` creates `desktop_recorder` meetings from companion uploads and accepts optional local transcript segments.
+- **Desktop metadata persistence** — Media assets now store capture metadata, stable `captureId`, checksum, local ASR/provider details, device names, sample rate, duration, and upload status.
+- **Windows installer packaging** — Electron Builder creates NSIS installer and portable EXE artifacts; GitHub Actions uploads `meetsum-capture-windows` artifacts.
+- **Optional Windows code signing** — Workflow supports `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` and verifies Authenticode signatures when signing secrets are configured.
+- **Laptop Hebrew ASR runbook** — Ops/dev runbook for validated native Ryzen laptop Hebrew ASR setup with VPS fallback guidance.
+- **VPS handoff prompt** — `docs/vps-v0.6.0-handoff-prompt.md` captures the production deployment steps for `https://meetsum.realization.co.il/`.
+
+### Changed
+- Manual upload remains on the standard `media.ingest` path unless desktop metadata or transcript segments are present.
+- Desktop recorder retry uploads reuse an existing desktop media asset when `captureMetadata.captureId` repeats.
+- UI now exposes desktop-recorder import affordances alongside upload and browser recording.
+- Production deployment docs now call out migration `014_desktop_capture_metadata.sql` and desktop-recorder API-key readiness.
+
+### Validation
+- 54 test files / 332 tests passing after clean rerun.
+- TypeScript typecheck clean.
+- Next production build clean.
+- Windows desktop installer build clean.
+- Production dependency audit reports 0 vulnerabilities.
+
 ## [0.3.0] — 2026-05-29
 
 ### Added

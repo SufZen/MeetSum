@@ -18,8 +18,8 @@ npm run desktop:dist:win
 
 This creates:
 
-- `desktop-recorder/release/MeetSum-Capture-Setup-<version>-x64.exe` — normal Windows installer with Start menu and desktop shortcuts.
-- `desktop-recorder/release/MeetSum-Capture-<version>-x64.exe` — portable app for quick testing without installation.
+- `desktop-recorder/release/MeetSum-Capture-Setup-0.6.0-x64.exe` — normal Windows installer with Start menu and desktop shortcuts.
+- `desktop-recorder/release/MeetSum-Capture-0.6.0-x64.exe` — portable app for quick testing without installation.
 
 The repository also includes a **Desktop Windows Installer** GitHub Actions workflow. Run it manually or open a PR that changes desktop files, then download the `meetsum-capture-windows` artifact from the workflow run.
 
@@ -35,8 +35,8 @@ Electron Builder also falls back to `CSC_LINK` and `CSC_KEY_PASSWORD`, but the w
 After `npm run desktop:dist:win`, verify local signed artifacts with:
 
 ```powershell
-Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-Setup-0.5.0-x64.exe
-Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-0.5.0-x64.exe
+Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-Setup-0.6.0-x64.exe
+Get-AuthenticodeSignature desktop-recorder\release\MeetSum-Capture-0.6.0-x64.exe
 ```
 
 The workflow runs `scripts/verify-windows-signature.ps1` automatically when `WIN_CSC_LINK` is present. If signing secrets are not configured, GitHub Actions still builds unsigned artifacts for PR smoke testing. Unsigned builds may trigger Windows SmartScreen until a trusted certificate and reputation are in place.

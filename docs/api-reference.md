@@ -1,4 +1,4 @@
-# MeetSum API Reference — v0.3.0
+# MeetSum API Reference — v0.6.0
 
 All endpoints require authentication via Bearer token (API key or session cookie).
 
@@ -10,7 +10,7 @@ Returns system health status. **No auth required.**
 ```json
 {
   "app": "meetsum",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "uptimeSeconds": 1234,
   "services": { "database": "ok", "redis": "configured", "storage": "configured" }
 }

@@ -2,6 +2,15 @@
 
 Date: May 18, 2026.
 
+## v0.6.0 Addendum — July 6, 2026
+
+MeetSum has moved beyond the early v0.1 spine described below. The current
+release adds the MeetSum Capture desktop companion, desktop recorder ingestion,
+retry-safe media metadata, Windows installer artifacts, optional code-signing
+wiring, and the laptop Hebrew ASR runbook. The active production update target
+is `https://meetsum.realization.co.il/`; use
+`docs/vps-v0.6.0-handoff-prompt.md` for the next deployment session.
+
 ## Executive Summary
 
 MeetSum is deployed and usable as an early v0.1.0 spine, but it is not yet a full Fireflies/Timeless replacement. The product has a real end-to-end path for selected Google Meet/Drive content: discover or select an artifact, import it, process it through the worker, review transcript/summary/tasks/tags, share it publicly without media exposure, export it, and prepare RealizeOS/webhook automation.

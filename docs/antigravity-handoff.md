@@ -2,6 +2,14 @@
 
 Date: May 18, 2026.
 
+## v0.6.0 Addendum — July 6, 2026
+
+The latest release target is v0.6.0. It includes the desktop capture companion,
+desktop recorder ingestion API, Windows installer/portable artifact workflow,
+optional code-signing wiring, and the laptop Hebrew ASR runbook. For production
+deployment to `https://meetsum.realization.co.il/`, start from
+`docs/vps-v0.6.0-handoff-prompt.md` rather than the older May 18 task list.
+
 ## Briefing
 
 MeetSum is a self-hosted, Google-first meeting intelligence app. It is deployed at `https://meetsum.realization.co.il` and is currently an early v0.1.0 product spine: usable, but still in active hardening. The next work should focus on reliability and trust, not broad new feature sprawl.

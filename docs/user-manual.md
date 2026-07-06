@@ -183,11 +183,12 @@ Vertex service-account credential path is configured and smoke-tested.
 - Vertex AI is not the active production provider yet.
 - A visible meeting bot and packaged desktop-recorder release polish are deferred until consent, code-signing, and installer requirements are proven. The local desktop companion and desktop imports are available through the repo, UI, and API.
 
-## V0.1.0 Acceptance Target
+## V0.6.0 Release Readiness
 
-MeetSum is v0.1.0-ready when:
+MeetSum v0.6.0 is ready for the active VPS update when:
 
 - A real Google/Drive/imported meeting becomes transcript, summary, decisions, action items, tags, and quotes.
+- A desktop recorder upload can create a `desktop_recorder` meeting and enter the normal worker pipeline.
 - Public read-only meeting sharing works.
 - Participants and speakers can be viewed and corrected.
 - Drive import progress is clear.

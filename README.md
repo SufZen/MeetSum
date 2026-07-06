@@ -6,7 +6,7 @@ MeetSum is being built as a production-grade alternative to meeting-summary tool
 
 ## Current Status
 
-**v0.1.0 Development** — 29 test files, 138 tests, TypeScript clean.
+**v0.6.0** — Desktop capture companion, Google Workspace ingestion, RealizeOS/webhook automation, exports, rooms, memory/search, and VPS deployment hardening are in place. The app is ready for a production VPS update with migrations and worker restart.
 
 Architecture highlights:
 
@@ -87,6 +87,8 @@ Build a Windows installer and portable app with:
 ```bash
 npm run desktop:dist:win
 ```
+
+For personal/internal use, the unsigned installer is acceptable. Code signing is wired through `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` for later public distribution.
 
 ## Self-Hosted Stack
 
