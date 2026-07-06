@@ -7,6 +7,9 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# next build's TypeScript pass exceeds V8's default ~2 GB old-space cap on this
+# release, OOM-ing on the memory-constrained VPS. Give the build more heap.
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
 FROM node:24-alpine AS runner

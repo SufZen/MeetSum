@@ -12,8 +12,12 @@ cd "$APP_DIR"
 git pull --ff-only
 
 # Build the app/worker images (the `migrate` service lives in its own compose
-# file and is not part of docker-compose.prod.yml).
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build app worker
+# file and is not part of docker-compose.prod.yml). Build sequentially: app and
+# worker share the same build stage, so building app first warms the layer cache
+# and worker reuses it — this avoids two concurrent `next build` processes
+# doubling memory on the swap-constrained VPS.
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build app
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build worker
 
 # Run pending database migrations as a one-off (merges both files so the
 # migrate service can see the postgres service it depends on). Fails the deploy
