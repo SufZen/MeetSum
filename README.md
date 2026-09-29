@@ -139,3 +139,10 @@ MeetSum should become:
 - AI-first: summaries, action items, decisions, prep, follow-up drafts, semantic search, meeting memory, and agent workflows.
 - Integration-first: REST, signed webhooks, CLI, MCP, n8n, RealizeOS, and future SDKs.
 - VPS-first: deployable and maintainable without depending on Vercel or Supabase Cloud.
+
+## Built by Realization
+
+MeetSum is designed, built and operated by [Realization](https://realization.world).
+
+- Case study, including how Hebrew speech recognition is routed safely: [realization.world/work/meetsum](https://realization.world/work/meetsum)
+- Want meetings that feed your own systems? [realization.world/advisory](https://realization.world/advisory)
