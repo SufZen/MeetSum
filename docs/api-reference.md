@@ -202,17 +202,24 @@ List webhook subscriptions. **Rate limit:** 30 req/min.
 Create webhook subscription. **Rate limit:** 30 req/min.
 
 ```json
-{ "url": "https://example.com/webhook", "events": ["meeting.completed"], "secret": "..." }
+{ "url": "https://example.com/webhook", "events": ["meeting.completed"], "secret": "optional, >= 16 chars" }
 ```
 
+The URL must be `https` (plain `http` only outside production or for allowlisted hosts) and must not resolve to a private, loopback, link-local or otherwise reserved address; `MEETSUM_WEBHOOK_ALLOWED_HOSTS` (hosts, `*.suffix`, CIDRs) allowlists internal receivers. Without `secret`, a `whsec_…` secret is generated. The response contains `secret` **once**; it is stored encrypted and never returned again.
+
+Deliveries are signed with that secret (`x-meetsum-signature`, HMAC-SHA256 hex of the JSON body) and carry `x-meetsum-event` and `x-meetsum-delivery`. Redirects are not followed.
+
 ### `PATCH /api/webhooks/subscriptions/:id`
-Update subscription. Body: `{ enabled?, events? }`.
+Update subscription. Body: `{ url?, enabled?, events?, rotateSecret? }`. With `rotateSecret: true` the response includes the new `secret` once.
+
+### `DELETE /api/webhooks/subscriptions/:id`
+Delete a subscription and its delivery history.
 
 ### `GET /api/webhooks/deliveries`
-List webhook deliveries. Query: `subscriptionId`, `limit`.
+List webhook deliveries. Query: `subscriptionId`, `limit`. Statuses: `queued`, `active`, `retrying`, `sent`, `failed`, `cancelled`.
 
 ### `POST /api/webhooks/deliveries/:id/retry`
-Retry a failed delivery.
+Re-queue a failed or cancelled delivery. **Rate limit:** 30 req/min, plus 3 req/min per delivery. A delivery has a lifetime cap of `MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS` (20) attempts.
 
 ### `POST /api/webhooks/test`
 Send a test webhook event.
@@ -232,6 +239,8 @@ Send a test webhook event.
 - `X-RateLimit-Limit` — Window max
 - `X-RateLimit-Remaining` — Remaining in window
 - `X-RateLimit-Reset` — Window reset timestamp
+
+**Client identification:** limits are keyed by client IP. With `MEETSUM_TRUSTED_PROXY_HOPS=N` (default `1`), the client is the Nth `X-Forwarded-For` entry from the right (left entries are client-supplied and ignored); `X-Real-IP` is the fallback. Set `MEETSUM_CLIENT_IP_HEADER` (e.g. `cf-connecting-ip`) only if your edge proxy overwrites that header. Values that are not valid IPs are ignored. The app port must not be reachable except through the trusted proxy (production binds it to `127.0.0.1`).
 
 **Bypass:** Set `MEETSUM_RATE_LIMIT=false` in environment.
 
