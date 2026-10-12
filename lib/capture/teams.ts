@@ -23,21 +23,6 @@ type GraphNotification = {
   }>
 }
 
-/**
- * Graph subscription validation request.
- */
-type GraphValidation = {
-  validationToken: string
-}
-
-function isGraphValidation(body: unknown): body is GraphValidation {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    typeof (body as { validationToken?: unknown }).validationToken === "string"
-  )
-}
-
 function isGraphNotification(body: unknown): body is GraphNotification {
   return (
     typeof body === "object" &&
