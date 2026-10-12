@@ -7,7 +7,8 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 |---|---|---|---|---|
 | M0 | Baseline & honesty | `parity/m0-baseline` | PR open | #16 |
 | M1 | Pipeline correctness & security | `parity/m1-pipeline` | PR open (stacked on #16) | #17 |
-| M2 | Multi-user workspaces | `parity/m2-workspaces` | in progress (spec: m2.md) | — |
+| M2 | Multi-user workspaces | `parity/m2-workspaces` | PR open (stacked on #17) | #18 |
+| M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | next (stacked on M2; source `design/system-v2`) | — |
 | M3 | Hebrew ASR + diarization | `parity/m3-asr` | todo (needs RunPod/HF/Soniox keys) | — |
 | M4 | Player & transcript UX | `parity/m4-player` | todo | — |
 | M5 | Intelligence parity | `parity/m5-intelligence` | todo (Claude key) | — |
@@ -29,7 +30,7 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 | Soundbites/clips, comments | ✓ | ✗ | M5 |
 | Chat over meetings with citations | ✓ | weak | M6 |
 | Global semantic search | ✓ | ILIKE | M6 |
-| Teams/workspaces/roles/sharing | ✓ | single-user | M2 |
+| Teams/workspaces/roles/sharing | ✓ | workspaces, roles, invites, scoped API keys, visibility | M2 ✅ |
 | Analytics | ✓ | ✗ | M5/M9 |
 | Integrations (Slack, CRM, Notion, Zapier, Outlook) | ✓ | webhooks/RealizeOS | M8 |
 | Live transcript | ✓ | ✗ | M7 (stretch) |
@@ -45,3 +46,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 ## Log
 - 2026-10-12: review complete, plan approved, `main` fast-forwarded to `5124c83`, M0 started.
 - 2026-10-12: M0 PR #16 (378 tests). M1 PR #17 (718 tests, 2 security reviews, Zoom signing-oracle fix). Known: db/schema.sql stale (M10); no live Postgres/Redis/MinIO run yet.
+- 2026-10-13: M2 PR #18 (1417 tests; 3 security reviews; live-verified on real Postgres 18: migrations, bootstrap, invites, scoped keys, cross-workspace 404s). User approved inserting M3.5 design system (Cadence v2.0) before M4; order M2 → M3.5 → M3 → M4. Design rules: paragraph dir from segment language, fallback meeting language; dir=auto only for unknown-language text.
