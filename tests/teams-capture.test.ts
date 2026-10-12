@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { teamsCaptureAdapter } from "@/lib/capture/teams"
+import {
+  isValidTeamsRecordingResource,
+  resetGraphTokenCache,
+  teamsCaptureAdapter,
+} from "@/lib/capture/teams"
+import { CaptureConfigError } from "@/lib/capture/types"
 
 const CLIENT_STATE = "test-teams-client-state"
 
@@ -100,5 +105,119 @@ describe("teams capture adapter", () => {
     }
 
     if (origState) process.env.TEAMS_WEBHOOK_CLIENT_STATE = origState
+  })
+})
+
+describe("teams batched notifications", () => {
+  it("parses every created recording notification in a batch", () => {
+    const events = teamsCaptureAdapter.parseEvents!({
+      value: [
+        sampleNotification.value[0],
+        {
+          ...sampleNotification.value[0],
+          resource: "communications/onlineMeetings('m1')/recordings('r2')",
+          resourceData: { ...sampleNotification.value[0].resourceData, id: "r2" },
+        },
+        { ...sampleNotification.value[0], changeType: "updated", resourceData: { id: "r3" } },
+        // duplicate of the first one within the same batch
+        sampleNotification.value[0],
+      ],
+    })
+
+    expect(events.map((event) => event.externalId)).toEqual(["rec-456", "r2"])
+    expect(events[1].recordingUrl).toBe(
+      "communications/onlineMeetings('m1')/recordings('r2')"
+    )
+  })
+
+  it("drops notifications whose resource is not a Graph-relative path", () => {
+    const events = teamsCaptureAdapter.parseEvents!({
+      value: [
+        { ...sampleNotification.value[0], resource: "https://evil.example/x" },
+        { ...sampleNotification.value[0], resource: "users/../../admin" },
+        { ...sampleNotification.value[0], resource: "sites/root/drive" },
+        { ...sampleNotification.value[0], resource: "users/u1/recordings?x=1" },
+      ],
+    })
+
+    expect(events).toEqual([])
+    expect(isValidTeamsRecordingResource("users/u1/onlineMeetings/m1/recordings/r1")).toBe(true)
+    expect(isValidTeamsRecordingResource("me/onlineMeetings/m1/recordings/r1")).toBe(true)
+  })
+
+  it("rejects a batch with one forged clientState", () => {
+    const origState = process.env.TEAMS_WEBHOOK_CLIENT_STATE
+    process.env.TEAMS_WEBHOOK_CLIENT_STATE = CLIENT_STATE
+
+    const result = teamsCaptureAdapter.validateWebhook(
+      {},
+      JSON.stringify({
+        value: [
+          sampleNotification.value[0],
+          { ...sampleNotification.value[0], clientState: "forged" },
+        ],
+      })
+    )
+
+    expect(result.valid).toBe(false)
+    process.env.TEAMS_WEBHOOK_CLIENT_STATE = origState
+  })
+})
+
+describe("teams recording download", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    resetGraphTokenCache()
+  })
+
+  function stubAzureEnv() {
+    vi.stubEnv("AZURE_TENANT_ID", "tenant")
+    vi.stubEnv("AZURE_CLIENT_ID", "client")
+    vi.stubEnv("AZURE_CLIENT_SECRET", "secret")
+  }
+
+  it("streams the Graph /content endpoint with a cached Bearer token", async () => {
+    stubAzureEnv()
+    const fetchMock = vi.fn(async (input: string | URL) =>
+      String(input).includes("login.microsoftonline.com")
+        ? Response.json({ access_token: "graph-token", expires_in: 3600 })
+        : new Response("mp4-bytes", {
+            headers: { "content-type": "video/mp4", "content-length": "9" },
+          })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const event = teamsCaptureAdapter.parseEvent(sampleNotification)!
+    const download = await teamsCaptureAdapter.downloadRecording(event)
+    await teamsCaptureAdapter.downloadRecording(event)
+
+    const graphCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith("https://graph.microsoft.com/")
+    )
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("login.")).length
+    ).toBe(1)
+    expect(String(graphCalls[0][0])).toBe(
+      "https://graph.microsoft.com/v1.0/communications/callRecords/rec-456/content"
+    )
+    expect(
+      ((graphCalls[0] as unknown as [string, RequestInit])[1].headers as Record<string, string>)
+        .Authorization
+    ).toBe("Bearer graph-token")
+    expect(download).toMatchObject({ contentType: "video/mp4", sizeBytes: 9 })
+    expect(await new Response(download.body as ReadableStream).text()).toBe("mp4-bytes")
+  })
+
+  it("throws a config error without Azure credentials", async () => {
+    vi.stubEnv("AZURE_TENANT_ID", "")
+    vi.stubGlobal("fetch", vi.fn())
+
+    await expect(
+      teamsCaptureAdapter.downloadRecording(
+        teamsCaptureAdapter.parseEvent(sampleNotification)!
+      )
+    ).rejects.toBeInstanceOf(CaptureConfigError)
   })
 })
