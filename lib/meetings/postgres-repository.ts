@@ -813,6 +813,15 @@ export function createPostgresMeetingRepository(
   }
 
   return {
+    async findMeetingByExternalId(): Promise<MeetingRecord | undefined> {
+      throw new Error("not implemented (M1-A)")
+    },
+    async createMeetingIfAbsent(): Promise<{ meeting: MeetingRecord; created: boolean }> {
+      throw new Error("not implemented (M1-A)")
+    },
+    async discardMeeting(): Promise<boolean> {
+      throw new Error("not implemented (M1-A)")
+    },
     async listMeetings(options: MeetingListOptions = {}) {
       return (await this.listMeetingsPage(options)).meetings
     },

@@ -14,6 +14,7 @@ export type MeetSumJobName =
   | "google.meet.poll"
   | "webhook.deliver"
   | "realizeos.export"
+  | "teams.subscription.renew"
 
 export type MeetSumJobPayload = {
   meetingId?: string

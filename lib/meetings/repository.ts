@@ -26,6 +26,10 @@ export type ActionItem = {
   sourceQuote?: string
   sourceStartMs?: number
   kind?: "explicit" | "inferred"
+  editedByUser?: boolean
+  origin?: "ai" | "user"
+  originalTitle?: string
+  completedAt?: string
 }
 
 export type TranscriptSegment = {
@@ -252,6 +256,8 @@ export type CreateMeetingInput = {
   language: string
   startedAt: string
   participants?: string[]
+  externalSource?: string
+  externalId?: string
 }
 
 export type MeetingAnswer = {
@@ -286,8 +292,18 @@ export type MeetingRepository = {
   }) => Promise<MediaAsset>
   findMediaAssetBySourceFile?: (
     source: string,
-    sourceFileId: string
+    sourceFileId: string,
+    options?: { meetingId?: string }
   ) => Promise<MediaAsset | undefined>
+  findMeetingByExternalId: (
+    source: string,
+    externalId: string
+  ) => Promise<MeetingRecord | undefined>
+  createMeetingIfAbsent: (
+    input: CreateMeetingInput & { externalSource: string; externalId: string }
+  ) => Promise<{ meeting: MeetingRecord; created: boolean }>
+  /** Hard-deletes a meeting only when it has no transcript and no summary. */
+  discardMeeting: (id: string) => Promise<boolean>
   replaceTranscriptSegments: (
     meetingId: string,
     segments: TranscriptSegment[]
@@ -556,6 +572,15 @@ export function createInMemoryMeetingRepository(
   }
 
   return {
+    async findMeetingByExternalId(): Promise<MeetingRecord | undefined> {
+      throw new Error("not implemented (M1-A)")
+    },
+    async createMeetingIfAbsent(): Promise<{ meeting: MeetingRecord; created: boolean }> {
+      throw new Error("not implemented (M1-A)")
+    },
+    async discardMeeting(): Promise<boolean> {
+      throw new Error("not implemented (M1-A)")
+    },
     async listMeetings(options?: MeetingListOptions): Promise<MeetingRecord[]> {
       return (await this.listMeetingsPage(options)).meetings
     },

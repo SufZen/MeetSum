@@ -105,3 +105,13 @@ export async function deliverWebhookEvent(options: {
 
   return { delivered, failed, eventId: event.id }
 }
+
+/** Delivers one queued webhook_deliveries row. Implemented in M1-C. */
+export async function processWebhookDeliveryJob(input: {
+  deliveryId: string
+  attempt: number
+  maxAttempts: number
+}): Promise<{ deliveryId: string; status: string; responseStatus?: number }> {
+  void input
+  throw new Error("not implemented (M1-C)")
+}
