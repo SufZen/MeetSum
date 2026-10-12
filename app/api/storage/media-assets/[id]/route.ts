@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { withAuthz } from "@/lib/auth/authz"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import {
   MediaAssetNotFoundError,
   deleteMediaAsset,
@@ -13,7 +13,7 @@ export const DELETE = withAuthz<{ id: string }>(
     const { id } = await params
 
     try {
-      const asset = await deleteMediaAsset(ctx.workspace.id, id)
+      const asset = await deleteMediaAsset(toRepoScope(ctx), id)
 
       return NextResponse.json({ asset })
     } catch (error) {

@@ -1,4 +1,6 @@
 import { getDatabasePool } from "@/lib/db/client"
+import type { RepoScope } from "@/lib/meetings/repository"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { deleteMeetingObject } from "@/lib/storage/object-storage"
 
 export type MediaAssetView = {
@@ -46,7 +48,7 @@ function mapMediaAsset(row: MediaAssetRow): MediaAssetView {
   }
 }
 
-/** Raised for asset ids that do not exist in the caller's workspace. */
+/** Raised for asset ids that do not exist (or are not visible) for the caller. */
 export class MediaAssetNotFoundError extends Error {
   constructor() {
     super("Media asset not found")
@@ -54,47 +56,56 @@ export class MediaAssetNotFoundError extends Error {
   }
 }
 
-/** Media of one workspace (storage admin view). */
+/**
+ * Media of the caller's workspace (storage admin view), limited to meetings
+ * the caller can see: admins do NOT bypass private meetings.
+ */
 export async function listMediaAssets(
-  workspaceId: string,
+  scope: RepoScope,
   options: { limit?: number } = {}
 ) {
-  if (!workspaceId) throw new Error("workspaceId is required")
+  if (!scope.workspaceId) throw new Error("workspaceId is required")
   if (process.env.MEETSUM_STORAGE !== "postgres") return []
 
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100)
+  const values: unknown[] = [scope.workspaceId]
+  const visible = meetingScopeSql(scope, "m", values)
+  values.push(limit)
   const result = await getDatabasePool().query(
     `
       select a.id, a.meeting_id, m.title as meeting_title, a.storage_key,
              a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
-      where a.workspace_id = $1 and m.workspace_id = $1
+      where a.workspace_id = $1 and ${visible}
       order by a.created_at desc
-      limit $2
+      limit $${values.length}
     `,
-    [workspaceId, limit]
+    values
   )
 
   return (result.rows as MediaAssetRow[]).map(mapMediaAsset)
 }
 
-export async function deleteMediaAsset(workspaceId: string, id: string) {
-  if (!workspaceId) throw new Error("workspaceId is required")
+/** Deletes an asset of a meeting the caller can see (else not found). */
+export async function deleteMediaAsset(scope: RepoScope, id: string) {
+  if (!scope.workspaceId) throw new Error("workspaceId is required")
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     throw new Error("Media asset deletion requires Postgres storage")
   }
 
   const pool = getDatabasePool()
+  const values: unknown[] = [id, scope.workspaceId]
+  const visible = meetingScopeSql(scope, "m", values)
   const result = await pool.query(
     `
       select a.id, a.meeting_id, m.title as meeting_title, a.storage_key,
              a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
-      where a.id = $1 and a.workspace_id = $2 and m.workspace_id = $2
+      where a.id = $1 and a.workspace_id = $2 and ${visible}
     `,
-    [id, workspaceId]
+    values
   )
   const row = result.rows[0] as MediaAssetRow | undefined
 
@@ -103,7 +114,7 @@ export async function deleteMediaAsset(workspaceId: string, id: string) {
   await deleteMeetingObject(row.storage_key)
   await pool.query("delete from media_assets where id = $1 and workspace_id = $2", [
     id,
-    workspaceId,
+    scope.workspaceId,
   ])
 
   return mapMediaAsset(row)
