@@ -32,10 +32,10 @@ export async function POST(request: Request) {
 
   if (unauthorized) return unauthorized
 
-  const { url, events, secret } = (await request.json()) as {
+  const { url, events, secret } = (await request.json().catch(() => ({}))) as {
     url?: string
     events?: unknown
-    secret?: string
+    secret?: unknown
   }
 
   if (!url) {
@@ -43,22 +43,32 @@ export async function POST(request: Request) {
   }
 
   try {
-    const subscription = await createWebhookSubscription({ url, events, secret })
-    const { event, signature } = createWebhookTestSignature(subscription.url)
+    const created = await createWebhookSubscription({ url, events, secret })
+    const { subscription } = created
+    const { event, signature } = createWebhookTestSignature(
+      subscription.url,
+      created.secret
+    )
     await recordAuditLog({
       action: "webhook.subscription.created",
       targetType: "webhook_subscription",
       targetId: subscription.id,
-      metadata: { url: subscription.url, events: subscription.events },
+      metadata: {
+        url: subscription.url,
+        events: subscription.events,
+        secretRef: subscription.secretRef,
+      },
     })
 
     return NextResponse.json(
       {
         subscription,
+        // Shown once: the plaintext secret is never returned again.
+        secret: created.secret,
         testEvent: event,
         signature,
       },
-      { status: 201 }
+      { status: 201, headers: { "cache-control": "no-store" } }
     )
   } catch (error) {
     return jsonError(

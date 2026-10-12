@@ -5,6 +5,7 @@ import { recordAuditLog } from "@/lib/audit"
 import {
   sendWebhookTest,
   WEBHOOK_EVENT_NAMES,
+  WebhookNotFoundError,
   type WebhookEventName,
 } from "@/lib/webhooks/management"
 
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to send webhook test",
-      400
+      error instanceof WebhookNotFoundError ? 404 : 400
     )
   }
 }

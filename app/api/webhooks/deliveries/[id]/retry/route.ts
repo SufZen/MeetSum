@@ -2,7 +2,10 @@ import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { retryWebhookDelivery } from "@/lib/webhooks/management"
+import {
+  retryWebhookDelivery,
+  WebhookNotFoundError,
+} from "@/lib/webhooks/management"
 
 export async function POST(
   request: Request,
@@ -31,7 +34,7 @@ export async function POST(
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to retry webhook delivery",
-      400
+      error instanceof WebhookNotFoundError ? 404 : 400
     )
   }
 }
