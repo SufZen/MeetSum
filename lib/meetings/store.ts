@@ -26,4 +26,29 @@ export function createMeetingRepositoryFromEnv(
   return createInMemoryMeetingRepository(DEMO_MEETINGS)
 }
 
-export const meetingRepository = createMeetingRepositoryFromEnv()
+let cachedRepository: MeetingRepository | undefined
+
+export function getMeetingRepository(): MeetingRepository {
+  cachedRepository ??= createMeetingRepositoryFromEnv()
+
+  return cachedRepository
+}
+
+/**
+ * Lazily resolved repository. Resolving at first use (instead of at module
+ * load) keeps `next build` — which imports every route module while
+ * collecting page data — from requiring runtime-only configuration such as
+ * MEETSUM_STORAGE / DATABASE_URL. Production misconfiguration is still caught
+ * at boot by instrumentation.ts (lib/ops/environment) and on first use here.
+ */
+export const meetingRepository: MeetingRepository = new Proxy(
+  {} as MeetingRepository,
+  {
+    get(_target, property) {
+      const repository = getMeetingRepository()
+      const value = Reflect.get(repository, property, repository)
+
+      return typeof value === "function" ? value.bind(repository) : value
+    },
+  }
+)
