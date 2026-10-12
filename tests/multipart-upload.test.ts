@@ -10,7 +10,10 @@ vi.mock("@/lib/storage/object-storage", () => ({
   deleteMeetingObject: mocks.deleteMeetingObject,
 }))
 
-import { parseMediaUploadRequest } from "@/lib/capture/multipart-upload"
+import {
+  parseMediaUploadRequest,
+  uploadErrorResponse,
+} from "@/lib/capture/multipart-upload"
 import { UploadError } from "@/lib/capture/media-validation"
 import { streamedMultipartRequest, wavBytes } from "./helpers/multipart"
 
@@ -99,6 +102,27 @@ describe("parseMediaUploadRequest", () => {
     expect(mocks.storeMeetingObjectStream).toHaveBeenCalledWith(
       expect.objectContaining({ keyPrefix: "meetings/meet_1", maxBytes: 1024 })
     )
+  })
+
+  it("surfaces storage outages as server errors, not 4xx, without leaking details", async () => {
+    mocks.storeMeetingObjectStream.mockImplementation(async (input: { body: AsyncIterable<Buffer> }) => {
+      for await (const chunk of input.body) void chunk
+      throw new Error("connect ECONNREFUSED 10.0.0.5:9000")
+    })
+
+    const error = await parseMediaUploadRequest(
+      await multipartRequest([
+        { name: "file", filename: "meeting.wav", type: "audio/wav", bytes: wavBytes() },
+      ]),
+      { ...limits, resolveKeyPrefix: () => "meetings/meet_1" }
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(UploadError)
+
+    const response = uploadErrorResponse(error, "Upload failed")
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({ error: "Upload failed" })
   })
 
   it("rejects non-multipart bodies with 415", async () => {

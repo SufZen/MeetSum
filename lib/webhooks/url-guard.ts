@@ -24,6 +24,18 @@ export class UnsafeWebhookUrlError extends Error {
   }
 }
 
+/**
+ * The host could not be resolved right now (EAI_AGAIN, timeout, SERVFAIL…).
+ * Not a policy violation: deliveries retry with backoff instead of failing
+ * permanently.
+ */
+export class WebhookResolutionError extends Error {
+  constructor(host: string, cause?: unknown) {
+    super(`Webhook host ${host} could not be resolved`, { cause })
+    this.name = "WebhookResolutionError"
+  }
+}
+
 export type ResolvedAddress = { address: string; family: 4 | 6 }
 export type WebhookHostResolver = (hostname: string) => Promise<ResolvedAddress[]>
 
@@ -348,12 +360,12 @@ export async function assertSafeWebhookUrl(
   let addresses: ResolvedAddress[]
   try {
     addresses = await resolve(host)
-  } catch {
-    throw new UnsafeWebhookUrlError(`Webhook host ${host} could not be resolved`)
+  } catch (error) {
+    throw new WebhookResolutionError(host, error)
   }
 
   if (!addresses.length) {
-    throw new UnsafeWebhookUrlError(`Webhook host ${host} could not be resolved`)
+    throw new WebhookResolutionError(host)
   }
 
   if (addresses.some((entry) => !isAddressPermitted(entry.address, policy))) {
@@ -407,7 +419,7 @@ function createGuardedLookup(env: NodeJS.ProcessEnv, resolve: WebhookHostResolve
           : resolved
 
         if (!addresses.length) {
-          throw new UnsafeWebhookUrlError(`Webhook host ${host} could not be resolved`)
+          throw new WebhookResolutionError(host)
         }
 
         if (wantsAll) callback(null, addresses)

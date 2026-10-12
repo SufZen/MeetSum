@@ -147,23 +147,30 @@ export async function parseMediaUploadRequest(
   await new Promise<void>((resolve, reject) => {
     let settled = false
 
+    // Storage/database failures keep their original error so callers answer
+    // 500 (retryable) instead of a permanent-looking 4xx.
     const fail = (error: unknown) => {
       if (settled) return
       settled = true
-      const uploadError =
-        error instanceof UploadError
-          ? error
-          : new UploadError(
-              error instanceof Error ? error.message : "Upload failed",
-              400
-            )
+      const failure =
+        error instanceof Error ? error : new Error("Upload failed")
       source.unpipe(parser)
       source.destroy()
       parser.removeAllListeners("file")
-      activeFile?.destroy(uploadError)
+      activeFile?.destroy(failure)
       parser.destroy()
-      reject(uploadError)
+      reject(failure)
     }
+    // Errors from parsing the request body itself are the client's fault.
+    const failRequest = (error: unknown) =>
+      fail(
+        error instanceof UploadError
+          ? error
+          : new UploadError(
+              `Malformed upload: ${error instanceof Error ? error.message : "unreadable body"}`,
+              400
+            )
+      )
 
     parser.on("field", (name, value, info) => {
       if (info.valueTruncated) {
@@ -243,8 +250,8 @@ export async function parseMediaUploadRequest(
     parser.on("partsLimit", () =>
       fail(new UploadError("Too many multipart parts", 413))
     )
-    parser.on("error", fail)
-    source.on("error", fail)
+    parser.on("error", failRequest)
+    source.on("error", failRequest)
 
     parser.on("close", () => {
       if (settled) return
@@ -297,5 +304,6 @@ export function uploadErrorResponse(error: unknown, fallback: string) {
 
   console.error("[upload] ingestion failed", error)
 
-  return jsonError(error instanceof Error ? error.message : fallback, 500)
+  // Never echo internal error text (hosts, endpoints, SQL) to the client.
+  return jsonError(fallback, 500)
 }

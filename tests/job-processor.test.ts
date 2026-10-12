@@ -263,6 +263,22 @@ describe("processJob media pipeline", () => {
     expect(failures[0].data).toMatchObject({ attempts: 3, permanent: false })
   })
 
+  it("does not fail a processed meeting when a non-processing job (export) fails", async () => {
+    const meeting = await seedMeeting()
+    await mocks.repository.updateMeetingStatus(meeting.id, "completed")
+    const realizeos = await import("@/lib/integrations/realizeos")
+    vi.mocked(realizeos.exportMeetingToRealizeOS).mockRejectedValue(
+      new Error("RealizeOS unavailable")
+    )
+    const job = await makeJob("realizeos.export", { meetingId: meeting.id }, { attemptsMade: 2 })
+
+    await expect(processJob(job)).rejects.toThrow()
+
+    expect((await mocks.repository.getJob(String(job.data.jobRecordId)))?.status).toBe("failed")
+    expect((await mocks.repository.getMeeting(meeting.id))?.status).toBe("completed")
+    expect(eventsNamed("meeting.process_failed")).toHaveLength(0)
+  })
+
   it("treats TranscriptionUnavailableError as permanent and records a failed ai_run", async () => {
     const meeting = await seedMeeting()
     await addAsset(meeting.id, "meetings/a/first.m4a")

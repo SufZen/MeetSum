@@ -29,7 +29,7 @@ import {
   processWebhookDeliveryJob,
   QUEUE_UNAVAILABLE_ERROR,
 } from "@/lib/webhooks/delivery"
-import { UnsafeWebhookUrlError } from "@/lib/webhooks/url-guard"
+import { UnsafeWebhookUrlError, WebhookResolutionError } from "@/lib/webhooks/url-guard"
 
 const event: PlatformEvent<Record<string, unknown>> = {
   id: "evt_1",
@@ -343,6 +343,19 @@ describe("processWebhookDeliveryJob", () => {
 
     const error = await processWebhookDeliveryJob(job).catch((e: unknown) => e)
 
+    expect(error).not.toBeInstanceOf(UnrecoverableError)
+    expect(lastStatusUpdate()[1]).toBe("retrying")
+  })
+
+  it("retries a transient DNS resolution failure instead of failing permanently", async () => {
+    useDatabase({ delivery: deliveryRow() })
+    guardedFetch.mockRejectedValue(
+      new WebhookResolutionError("hooks.example.com", Object.assign(new Error("EAI_AGAIN"), { code: "EAI_AGAIN" }))
+    )
+
+    const error = await processWebhookDeliveryJob(job).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(Error)
     expect(error).not.toBeInstanceOf(UnrecoverableError)
     expect(lastStatusUpdate()[1]).toBe("retrying")
   })

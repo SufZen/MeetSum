@@ -721,7 +721,9 @@ export async function processJob(job: MeetSumJob) {
     }
 
     await failJob(jobRecordId, error, attempts).catch(() => {})
-    if (job.data.meetingId) {
+    // Only processing jobs own the meeting's status. A failed export or
+    // index run must not flip an already processed meeting to "failed".
+    if (job.data.meetingId && MEETING_PROCESSING_JOBS.has(job.name)) {
       await meetingRepository
         .updateMeetingStatus(job.data.meetingId, "failed")
         .catch(() => {})
@@ -737,6 +739,13 @@ export async function processJob(job: MeetSumJob) {
     throw error
   }
 }
+
+const MEETING_PROCESSING_JOBS: ReadonlySet<MeetSumJobName> = new Set([
+  "media.ingest",
+  "artifact.import",
+  "meeting.transcribe",
+  "meeting.summarize",
+])
 
 export function createMeetSumWorker() {
   return new Worker<MeetSumJobPayload, unknown, MeetSumJobName>(
