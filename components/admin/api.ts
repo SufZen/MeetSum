@@ -368,7 +368,10 @@ export async function acceptInvitation(token: string) {
     { method: "POST" }
   )
 
-  return { workspaceId: asString(body.workspaceId) ?? null }
+  return {
+    workspaceId:
+      asString(asRecord(body.workspace).id) ?? asString(body.workspaceId) ?? null,
+  }
 }
 
 // --- API keys --------------------------------------------------------------
@@ -451,7 +454,8 @@ export async function listAuditLogs(
     if (typeof value === "string" && value.trim()) params.set(key, value.trim())
   }
 
-  if (cursor) params.set("cursor", cursor)
+  // The server pages with `before` (an opaque cursor from `nextCursor`).
+  if (cursor) params.set("before", cursor)
 
   const body = await request(`/api/admin/audit-logs?${params}`)
 

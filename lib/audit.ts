@@ -1,5 +1,4 @@
 import { getDatabasePool } from "@/lib/db/client"
-import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 export type AuditAction =
   | "meeting.created"
@@ -101,11 +100,8 @@ export type AuditLogEntry = {
 }
 
 export type ListAuditLogsOptions = {
-  /**
-   * Workspace whose log is read. COMPAT: defaults to the default workspace
-   * until M2 Integration makes it required.
-   */
-  workspaceId?: string
+  /** Workspace whose log is read (mandatory: logs are never cross-tenant). */
+  workspaceId: string
   action?: AuditAction
   /** Matches the actor label, the actor user id or the actor API key id. */
   actor?: string
@@ -156,9 +152,16 @@ export function decodeAuditCursor(
   return Number.isNaN(Date.parse(cursor)) ? undefined : { createdAt: cursor }
 }
 
+export class InvalidAuditCursorError extends Error {
+  constructor() {
+    super("Invalid audit log cursor")
+    this.name = "InvalidAuditCursorError"
+  }
+}
+
 /** Newest-first page of one workspace's audit log (keyset pagination). */
 export async function listAuditLogsPage(
-  options: ListAuditLogsOptions = {}
+  options: ListAuditLogsOptions
 ): Promise<AuditLogPage> {
   if (process.env.MEETSUM_STORAGE !== "postgres") return { logs: [] }
 
@@ -169,7 +172,7 @@ export async function listAuditLogsPage(
     return `$${values.length}`
   }
   const conditions = [
-    `workspace_id = ${param(options.workspaceId ?? DEFAULT_WORKSPACE_ID)}`,
+    `workspace_id = ${param(options.workspaceId)}`,
   ]
 
   if (options.action) conditions.push(`action = ${param(options.action)}`)
@@ -187,7 +190,7 @@ export async function listAuditLogsPage(
 
   const cursor = options.before ? decodeAuditCursor(options.before) : undefined
 
-  if (options.before && !cursor) throw new Error("Invalid audit log cursor")
+  if (options.before && !cursor) throw new InvalidAuditCursorError()
   if (cursor?.id) {
     conditions.push(
       `(created_at, id) < (${param(cursor.createdAt)}::timestamptz, ${param(cursor.id)})`
@@ -230,7 +233,7 @@ export async function listAuditLogsPage(
 
 /** Newest-first entries of one workspace's audit log. */
 export async function listAuditLogs(
-  options: ListAuditLogsOptions = {}
+  options: ListAuditLogsOptions
 ): Promise<AuditLogEntry[]> {
   return (await listAuditLogsPage(options)).logs
 }

@@ -54,32 +54,16 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
   })
 })
 
-/**
- * Applies the workspace default meeting language when the payload does not
- * name one (`meetingLanguageMode`, M2 settings wiring).
- */
-function withDefaultLanguage(payload: unknown, defaultLanguage: string) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return payload
-  }
-
-  const body = payload as Record<string, unknown>
-  const language = typeof body.language === "string" ? body.language.trim() : ""
-
-  return language ? body : { ...body, language: defaultLanguage }
-}
-
 export const POST = withAuthz("meeting:create", async (request, ctx) => {
   const settings = await getAppSettings(ctx.workspace.id)
   let input
 
   try {
-    input = parseCreateMeetingInput(
-      withDefaultLanguage(
-        await request.json(),
-        resolveDefaultMeetingLanguage(settings)
-      )
-    )
+    // Workspace default language (`meetingLanguageMode`) when the body
+    // omits one.
+    input = parseCreateMeetingInput(await request.json(), {
+      defaultLanguage: resolveDefaultMeetingLanguage(settings),
+    })
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Invalid meeting payload",

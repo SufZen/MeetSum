@@ -95,10 +95,7 @@ describe("workspace audit store (postgres)", () => {
     expect(next.values).toEqual(["ws_a", "2026-05-02T00:00:00.000Z", "audit_2", 3])
   })
 
-  it("defaults to the default workspace until integration and rejects bad cursors", async () => {
-    await listAuditLogs()
-
-    expect(db.queries[0].values[0]).toBe("ws_default")
+  it("rejects bad cursors", async () => {
     await expect(
       listAuditLogsPage({ workspaceId: "ws_a", before: "garbage" })
     ).rejects.toThrow("Invalid audit log cursor")

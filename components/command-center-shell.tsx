@@ -38,6 +38,7 @@ import {
   type SyncTarget,
 } from "@/components/top-command-bar"
 import type { WorkspaceStatusView } from "@/components/workspace-sync-panel"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { selectRecentRooms } from "@/lib/rooms"
@@ -936,7 +937,7 @@ export function CommandCenterShell({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(body.error ?? "Unable to process meeting")
+          toast.error(apiErrorMessage(body, dictionary, "Unable to process meeting"))
           return
         }
 
@@ -968,7 +969,7 @@ export function CommandCenterShell({
           const body = await response.json()
 
           if (!response.ok) {
-            toast.error(body.error ?? "Unable to sync Meet artifacts")
+            toast.error(apiErrorMessage(body, dictionary, "Unable to sync Meet artifacts"))
             return
           }
 
@@ -998,8 +999,14 @@ export function CommandCenterShell({
           const body = await response.json()
 
           if (!response.ok) {
-            setAskAnswer(body.error ?? "Unable to sync Google Workspace")
-            toast.error(body.error ?? "Unable to sync Google Workspace")
+            const message = apiErrorMessage(
+              body,
+              dictionary,
+              "Unable to sync Google Workspace"
+            )
+
+            setAskAnswer(message)
+            toast.error(message)
             return
           }
 
@@ -1181,6 +1188,7 @@ export function CommandCenterShell({
             onInvite={() => setActivePanel("admin")}
           />
           <DriveRecordingPickerDrawer
+            dictionary={dictionary}
             open={drivePickerOpen}
             onOpenChange={setDrivePickerOpen}
             onImported={handleDriveImported}

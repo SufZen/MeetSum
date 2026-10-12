@@ -21,6 +21,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
+import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { JobRecord } from "@/lib/meetings/repository"
 
 type DriveRecording = {
@@ -68,10 +70,12 @@ function formatBytes(value?: number) {
 }
 
 export function DriveRecordingPickerDrawer({
+  dictionary = dictionaries.en,
   open,
   onOpenChange,
   onImported,
 }: {
+  dictionary?: Dictionary
   open: boolean
   onOpenChange: (open: boolean) => void
   onImported: (result: DriveImportResult) => void
@@ -112,7 +116,9 @@ export function DriveRecordingPickerDrawer({
         const body = await response.json()
 
         if (!response.ok) {
-          setError(body.error ?? "Unable to find Drive recordings")
+          setError(
+            apiErrorMessage(body, dictionary, "Unable to find Drive recordings")
+          )
           return
         }
 
@@ -203,7 +209,9 @@ export function DriveRecordingPickerDrawer({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(body.error ?? "Unable to import selected recordings")
+          toast.error(
+            apiErrorMessage(body, dictionary, "Unable to import selected recordings")
+          )
           return
         }
 

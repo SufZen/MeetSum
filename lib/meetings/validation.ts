@@ -13,7 +13,11 @@ const meetingSourceSchema = z.enum([
 const createMeetingSchema = z.object({
   title: z.string().trim().min(1),
   source: meetingSourceSchema,
-  language: z.string().trim().min(2).optional(),
+  // A blank language counts as omitted (falls back to the default).
+  language: z.preprocess(
+    (value) => (typeof value === "string" && !value.trim() ? undefined : value),
+    z.string().trim().min(2).optional()
+  ),
   startedAt: z.string().datetime({ offset: true }),
   participants: z.array(z.string().trim().min(1)).default([]),
 })

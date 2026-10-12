@@ -8,6 +8,7 @@ export const GET = withAuthz("workspace:read", async (_request, ctx) =>
     workspace: await getWorkspaceStatus({
       sessionEmail: ctx.user?.email,
       workspaceId: ctx.workspace.id,
+      googleSubject: ctx.workspace.googleSubject,
     }),
   })
 )

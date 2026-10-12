@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const listAuditLogs = vi.hoisted(() => vi.fn())
+const listAuditLogsPage = vi.hoisted(() => vi.fn())
 
-vi.mock("@/lib/audit", () => ({ listAuditLogs, recordAuditLog: vi.fn(async () => {}) }))
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>()
+
+  return {
+    InvalidAuditCursorError: actual.InvalidAuditCursorError,
+    listAuditLogsPage,
+    recordAuditLog: vi.fn(async () => {}),
+  }
+})
 
 import { GET } from "@/app/api/admin/audit-logs/route"
 import { setWorkspaceStoreForTesting, type WorkspaceStore } from "@/lib/workspaces/store"
@@ -32,7 +40,7 @@ describe("GET /api/admin/audit-logs", () => {
     setWorkspaceStoreForTesting(store)
     vi.stubEnv("MEETSUM_SESSION_SECRET", TEST_SESSION_SECRET)
     vi.stubEnv("MEETSUM_RATE_LIMIT", "false")
-    listAuditLogs.mockReset()
+    listAuditLogsPage.mockReset()
   })
 
   afterEach(() => {
@@ -49,13 +57,13 @@ describe("GET /api/admin/audit-logs", () => {
     )
 
     expect(response.status).toBe(403)
-    expect(listAuditLogs).not.toHaveBeenCalled()
+    expect(listAuditLogsPage).not.toHaveBeenCalled()
   })
 
   it("always filters by the caller's workspace and forwards filters + cursor", async () => {
     const { owner, workspace } = await seedWorkspace(store, "W1", "owner@example.com")
 
-    listAuditLogs.mockResolvedValue({ logs: [entry("a1", "2026-10-01T00:00:00Z")], nextCursor: "cur_2" })
+    listAuditLogsPage.mockResolvedValue({ logs: [entry("a1", "2026-10-01T00:00:00Z")], nextCursor: "cur_2" })
 
     const response = await GET(
       makeRequest(
@@ -65,7 +73,7 @@ describe("GET /api/admin/audit-logs", () => {
       routeParams({})
     )
 
-    expect(listAuditLogs).toHaveBeenCalledWith({
+    expect(listAuditLogsPage).toHaveBeenCalledWith({
       workspaceId: workspace.id,
       action: "member.removed",
       actor: "x@example.com",
@@ -80,25 +88,27 @@ describe("GET /api/admin/audit-logs", () => {
     })
   })
 
-  it("derives a cursor when the store returns a plain page", async () => {
+  it("returns a null cursor on the last page and 400 on a bad cursor", async () => {
     const { owner } = await seedWorkspace(store, "W1", "owner@example.com")
 
-    listAuditLogs.mockResolvedValue([entry("a1", "2026-10-02T00:00:00Z"), entry("a2", "2026-10-01T00:00:00Z")])
+    listAuditLogsPage.mockResolvedValue({ logs: [entry("a1", "2026-10-02T00:00:00Z")] })
 
-    const full = await GET(
+    const last = await GET(
       makeRequest("http://localhost/api/admin/audit-logs?limit=2", { cookie: sessionCookieFor(owner) }),
       routeParams({})
     )
 
-    expect((await full.json()).nextCursor).toBe("2026-10-01T00:00:00Z")
+    expect((await last.json()).nextCursor).toBeNull()
 
-    listAuditLogs.mockResolvedValue([entry("a1", "2026-10-02T00:00:00Z")])
+    const { InvalidAuditCursorError } = await import("@/lib/audit")
 
-    const partial = await GET(
-      makeRequest("http://localhost/api/admin/audit-logs?limit=2", { cookie: sessionCookieFor(owner) }),
+    listAuditLogsPage.mockRejectedValue(new InvalidAuditCursorError())
+
+    const bad = await GET(
+      makeRequest("http://localhost/api/admin/audit-logs?before=garbage", { cookie: sessionCookieFor(owner) }),
       routeParams({})
     )
 
-    expect((await partial.json()).nextCursor).toBeNull()
+    expect(bad.status).toBe(400)
   })
 })

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server"
 
+import { jsonError } from "@/lib/api/responses"
+import {
+  InvalidAuditCursorError,
+  listAuditLogsPage,
+  type AuditAction,
+} from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
-import { listAuditLogs, type AuditAction, type AuditLogEntry } from "@/lib/audit"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 function param(url: URL, name: string, max = 200): string | undefined {
@@ -33,16 +38,18 @@ export const GET = withAuthz("audit:read", async (request, ctx) => {
     before: param(url, "before", 500),
     limit,
   }
-  const result = (await listAuditLogs(query)) as unknown as
-    | AuditLogEntry[]
-    | { logs: AuditLogEntry[]; nextCursor?: string | null }
+  try {
+    const { logs, nextCursor } = await listAuditLogsPage(query)
 
-  const logs = Array.isArray(result) ? result : result.logs
-  const nextCursor = Array.isArray(result)
-    ? logs.length === limit
-      ? (logs[logs.length - 1]?.createdAt ?? null)
-      : null
-    : (result.nextCursor ?? null)
+    return NextResponse.json(
+      { logs, nextCursor: nextCursor ?? null },
+      { headers: rateLimit.headers }
+    )
+  } catch (error) {
+    if (error instanceof InvalidAuditCursorError) {
+      return jsonError("Invalid cursor", 400)
+    }
 
-  return NextResponse.json({ logs, nextCursor }, { headers: rateLimit.headers })
+    throw error
+  }
 })

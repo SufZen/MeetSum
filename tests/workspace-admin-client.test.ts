@@ -106,7 +106,8 @@ describe("admin API client", () => {
 
     expect(url.searchParams.get("action")).toBe("member.removed")
     expect(url.searchParams.has("actor")).toBe(false)
-    expect(url.searchParams.get("cursor")).toBe("c1")
+    expect(url.searchParams.get("before")).toBe("c1")
+    expect(url.searchParams.has("cursor")).toBe(false)
     expect(page.nextCursor).toBe("c2")
   })
 

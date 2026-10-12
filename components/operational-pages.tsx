@@ -31,6 +31,7 @@ import { Switch } from "@/components/ui/switch"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
 import { useWorkspace } from "@/components/workspace-context"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
@@ -598,6 +599,8 @@ export function OperationalPage({
     if (panel !== "workspace") return
 
     void refreshMeetArtifacts()
+    // Reload only when the panel opens (the dictionary is read at call time).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel])
 
   async function askMemory() {
@@ -1020,7 +1023,9 @@ export function OperationalPage({
       const body = await response.json()
 
       if (!response.ok) {
-        throw new Error(body.error ?? "Unable to load Meet artifact status")
+        throw new Error(
+          apiErrorMessage(body, t, "Unable to load Meet artifact status")
+        )
       }
 
       setMeetArtifactsError("")
@@ -1057,7 +1062,7 @@ export function OperationalPage({
       const body = await response.json()
 
       if (!response.ok) {
-        throw new Error(body.error ?? "Unable to sync Meet artifacts")
+        throw new Error(apiErrorMessage(body, t, "Unable to sync Meet artifacts"))
       }
 
       toast.success(body.message ?? "Meet artifacts synced")

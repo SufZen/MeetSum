@@ -36,6 +36,10 @@ export const workspaceMessagesEn = {
   workspaceLoading: "Loading workspace…",
   workspaceLoadFailed: "Could not load your workspaces",
 
+  // Google Workspace not configured for this workspace (API 409)
+  googleNotConfigured:
+    "Google Workspace is not connected for this workspace. An owner must set the workspace Google account first.",
+
   // No workspace
   noWorkspaceTitle: "No workspace yet",
   noWorkspaceDescription:
@@ -224,6 +228,9 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   workspaceSwitchFailed: "לא ניתן להחליף סביבת עבודה",
   workspaceLoading: "טוען סביבת עבודה…",
   workspaceLoadFailed: "לא ניתן לטעון את סביבות העבודה שלכם",
+
+  googleNotConfigured:
+    "Google Workspace אינו מחובר לסביבת העבודה הזו. בעלים צריך להגדיר קודם את חשבון Google של סביבת העבודה.",
 
   noWorkspaceTitle: "עדיין אין סביבת עבודה",
   noWorkspaceDescription:
