@@ -612,7 +612,10 @@ async function getSubscriptionForTest(workspaceId: string, id: string) {
 
 /**
  * Sends a signed test event through the SSRF guard. A subscription test uses
- * that subscription's own secret; an ad-hoc URL test uses the global secret.
+ * that subscription's own secret. An ad-hoc URL test is signed with a fresh
+ * throwaway secret (returned once as `secret`) and never with the global
+ * WEBHOOK_SIGNING_SECRET: signing attacker-chosen payloads with the global
+ * secret would hand out valid signatures for legacy subscriptions.
  */
 export async function sendWebhookTest(
   workspaceId: string,
@@ -628,9 +631,12 @@ export async function sendWebhookTest(
   )[0]
   let url: string | undefined
   let secret: string | undefined
+  let adHocSecret: string | undefined
 
   if (input.url) {
     url = await assertSafeWebhookUrl(input.url)
+    adHocSecret = generateWebhookSecret()
+    secret = adHocSecret
   } else if (input.subscriptionId) {
     const subscription = await getSubscriptionForTest(workspaceId, input.subscriptionId)
 
@@ -639,7 +645,7 @@ export async function sendWebhookTest(
     secret = subscription.secret
   }
 
-  if (!url) throw new Error("Webhook URL or subscriptionId is required")
+  if (!url || !secret) throw new Error("Webhook URL or subscriptionId is required")
 
   const event = createPlatformEvent(
     eventName,
@@ -655,10 +661,7 @@ export async function sendWebhookTest(
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-meetsum-signature": signWebhookPayload(
-        event,
-        secret ?? getWebhookSigningSecret()
-      ),
+      "x-meetsum-signature": signWebhookPayload(event, secret),
       "x-meetsum-event": event.name,
       "x-meetsum-delivery": deliveryId,
     },
@@ -671,5 +674,6 @@ export async function sendWebhookTest(
     url,
     status: response.ok ? "sent" : "failed",
     responseStatus: response.status,
+    ...(adHocSecret ? { secret: adHocSecret } : {}),
   }
 }

@@ -346,6 +346,42 @@ describe("webhook subscription management (postgres)", () => {
     expect(guardedFetch).not.toHaveBeenCalled()
   })
 
+  it("signs ad-hoc URL test sends with a fresh throwaway secret, never the global one", async () => {
+    guardedFetch.mockResolvedValue({ ok: true, status: 200, durationMs: 4 })
+
+    const first = await sendWebhookTest("ws_1", { url: PUBLIC_URL })
+    const second = await sendWebhookTest("ws_1", { url: PUBLIC_URL })
+
+    expect(first.secret).toMatch(/^whsec_/)
+    expect(second.secret).toMatch(/^whsec_/)
+    expect(first.secret).not.toBe(second.secret)
+    const [, init] = guardedFetch.mock.calls[0]
+    expect(init.headers["x-meetsum-signature"]).toBe(
+      signWebhookPayload(first.event, first.secret!)
+    )
+    expect(init.headers["x-meetsum-signature"]).not.toBe(
+      signWebhookPayload(first.event, "global-legacy-secret")
+    )
+    expect(query).not.toHaveBeenCalled()
+  })
+
+  it("does not return a secret for subscription test sends", async () => {
+    query.mockResolvedValue({
+      rows: [
+        {
+          url: PUBLIC_URL,
+          enabled: true,
+          secret_ciphertext: encryptSecret("whsec_subscription_specific_secret"),
+        },
+      ],
+    })
+    guardedFetch.mockResolvedValue({ ok: true, status: 200, durationMs: 4 })
+
+    const result = await sendWebhookTest("ws_1", { subscriptionId: "wh_1" })
+
+    expect(result).not.toHaveProperty("secret")
+  })
+
   it("rejects test sends to private URLs", async () => {
     await expect(
       sendWebhookTest("ws_1", { url: "https://169.254.169.254/latest" })

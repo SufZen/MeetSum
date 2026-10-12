@@ -233,7 +233,7 @@ List webhook deliveries. Query: `subscriptionId`, `limit`. Statuses: `queued`, `
 Re-queue a failed or cancelled delivery. **Rate limit:** 30 req/min, plus 3 req/min per delivery. A delivery has a lifetime cap of `MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS` (20) attempts.
 
 ### `POST /api/webhooks/test`
-Send a test webhook event.
+Send a test webhook event. Body: `{ subscriptionId }` (signed with that subscription's secret) or `{ url }` (ad-hoc URL, signed with a fresh throwaway secret returned once as `secret` in the response; the global `WEBHOOK_SIGNING_SECRET` is never used for ad-hoc URLs).
 
 ---
 
