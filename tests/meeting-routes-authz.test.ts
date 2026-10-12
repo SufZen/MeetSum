@@ -444,4 +444,69 @@ describe("PATCH /api/meetings/:id/participants/:participantId", () => {
 
     expect(response.status).toBe(403)
   })
+
+  async function patchWorkspaceMeetingEmail(options: {
+    role: "member" | "admin"
+    ownerUserId?: string
+    body: Record<string, unknown>
+  }) {
+    const meetings = [
+      testMeeting({
+        id: "m_ws",
+        visibility: "workspace",
+        ownerUserId: options.ownerUserId ?? "user_owner",
+        participants: ["Dana"],
+      }),
+    ]
+    const ctx = await createTestCtx({ meetings, role: options.role })
+    const [dana] = await ctx.meetings.listMeetingParticipants("m_ws")
+    const update = vi.spyOn(ctx.meetings, "updateMeetingParticipant")
+    setRouteCtx(ctx)
+
+    const response = await patchParticipant(
+      jsonRequest(
+        `${BASE}/api/meetings/m_ws/participants/${dana.id}`,
+        "PATCH",
+        options.body
+      ),
+      routeParams({ id: "m_ws", participantId: dana.id })
+    )
+
+    return { response, update }
+  }
+
+  it("forbids a member planting their own email on a workspace meeting", async () => {
+    const { response, update } = await patchWorkspaceMeetingEmail({
+      role: "member",
+      body: { email: "me@example.com" },
+    })
+
+    expect(response.status).toBe(403)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it("still lets a member edit non-email fields of a workspace meeting participant", async () => {
+    const { response, update } = await patchWorkspaceMeetingEmail({
+      role: "member",
+      body: { name: "Dana Cohen" },
+    })
+
+    expect(response.status).toBe(200)
+    expect(update).toHaveBeenCalled()
+  })
+
+  it("lets the meeting owner or an admin change a participant email", async () => {
+    const owner = await patchWorkspaceMeetingEmail({
+      role: "member",
+      ownerUserId: "user_me",
+      body: { email: "dana@example.com" },
+    })
+    const admin = await patchWorkspaceMeetingEmail({
+      role: "admin",
+      body: { email: "dana@example.com" },
+    })
+
+    expect(owner.response.status).toBe(200)
+    expect(admin.response.status).toBe(200)
+  })
 })

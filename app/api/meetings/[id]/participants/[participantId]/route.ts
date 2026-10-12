@@ -57,11 +57,12 @@ export const PATCH = withAuthz<{ id: string; participantId: string }>(
     }
 
     // Participant emails grant access to private meetings, so changing one
-    // on a private meeting needs owner-or-admin rights.
+    // needs owner-or-admin rights regardless of the current visibility: a
+    // member could otherwise plant their own email on a workspace meeting
+    // and keep access after it is made private.
     if (
       patch.email !== undefined &&
       normalizeEmail(patch.email) !== normalizeEmail(existing.email) &&
-      meeting.visibility === "private" &&
       !canManageMeeting(ctx, meeting)
     ) {
       return meetingManageForbidden()
