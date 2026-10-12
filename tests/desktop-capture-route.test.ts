@@ -550,6 +550,29 @@ describe("desktop capture upload routes", () => {
     expect(mocks.discardMeeting).not.toHaveBeenCalled()
   })
 
+  it("answers a captureId held by an invisible meeting with a generic 409 and no meeting info", async () => {
+    const { MeetingExternalIdConflictError } = await import("@/lib/meetings/repository")
+    mocks.createMeetingIfAbsent.mockRejectedValue(new MeetingExternalIdConflictError())
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const response = await ingestRoute.POST(
+      await ingestRequest(
+        formWith({
+          meeting: { title: "Desktop capture", startedAt: "2026-07-05T09:00:00.000Z" },
+          captureMetadata: { captureId: "cap_private" },
+          file: wavFile(),
+        })
+      ),
+      { params: Promise.resolve({}) }
+    )
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "capture_conflict" })
+    // The streamed object is discarded; nothing is attached or enqueued.
+    expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(1)
+    expect(mocks.createMediaAsset).not.toHaveBeenCalled()
+    expect(mocks.enqueueMeetSumJob).not.toHaveBeenCalled()
+  })
+
   it("skips streaming entirely when the capture's media is already stored", async () => {
     mocks.findMeetingByExternalId.mockResolvedValue(desktopMeeting)
     mocks.createMeetingIfAbsent.mockResolvedValue({

@@ -201,3 +201,38 @@ describe("in-memory favorites and shares", () => {
     )
   })
 })
+
+describe("createMeetingIfAbsent with an invisible external-id holder", () => {
+  it("throws a generic conflict for an admin when the holder is private, and dedups when visible", async () => {
+    const database = createInMemoryMeetingDatabase()
+    const ownerRepo = createInMemoryMeetingRepository(database, owner)
+    const adminRepo = createInMemoryMeetingRepository(database, admin)
+    const input = {
+      title: "Desktop capture",
+      source: "desktop_recorder" as const,
+      language: "he",
+      startedAt: "2026-07-05T09:00:00.000Z",
+      externalSource: "desktop_capture",
+      externalId: "cap_1",
+    }
+    const { MeetingExternalIdConflictError } = await import("@/lib/meetings/repository")
+
+    const first = await ownerRepo.createMeetingIfAbsent({
+      ...input,
+      ownerUserId: "user_owner",
+      visibility: "private",
+    })
+
+    expect(first.created).toBe(true)
+    await expect(adminRepo.createMeetingIfAbsent(input)).rejects.toBeInstanceOf(
+      MeetingExternalIdConflictError
+    )
+    await expect(adminRepo.createMeetingIfAbsent(input)).rejects.not.toThrow(
+      /cap_1|desktop_capture/
+    )
+    await expect(ownerRepo.createMeetingIfAbsent(input)).resolves.toMatchObject({
+      created: false,
+      meeting: { id: first.meeting.id },
+    })
+  })
+})

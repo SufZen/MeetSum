@@ -22,7 +22,10 @@ import type {
   RepoScope,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
-import { MeetingScopeError } from "@/lib/meetings/repository"
+import {
+  MeetingExternalIdConflictError,
+  MeetingScopeError,
+} from "@/lib/meetings/repository"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
@@ -1225,11 +1228,7 @@ export function createPostgresMeetingRepository(
         input.externalId
       )
 
-      if (!existing) {
-        throw new Error(
-          `Meeting ${input.externalSource}:${input.externalId} conflicted but could not be loaded`
-        )
-      }
+      if (!existing) throw new MeetingExternalIdConflictError()
 
       return { meeting: existing, created: false }
     },

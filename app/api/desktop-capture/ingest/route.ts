@@ -18,7 +18,10 @@ import {
   uploadErrorResponse,
   type ParsedMediaUpload,
 } from "@/lib/capture/multipart-upload"
-import type { MeetingRecord } from "@/lib/meetings/repository"
+import {
+  MeetingExternalIdConflictError,
+  type MeetingRecord,
+} from "@/lib/meetings/repository"
 import { createPlatformEvent } from "@/lib/platform/events"
 import {
   getAppSettings,
@@ -132,6 +135,13 @@ export const POST = withAuthz("meeting:create", async (request, ctx) => {
     }
   } catch (error) {
     await upload.cleanup()
+
+    // The captureId belongs to a meeting this caller cannot see: answer with
+    // a generic conflict that carries no meeting information.
+    if (error instanceof MeetingExternalIdConflictError) {
+      return NextResponse.json({ error: "capture_conflict" }, { status: 409 })
+    }
+
     return uploadErrorResponse(error, "Unable to create desktop capture meeting")
   }
 

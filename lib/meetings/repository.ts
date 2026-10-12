@@ -201,6 +201,18 @@ export type MeetingQualityWarning = {
   detail: string
 }
 
+/**
+ * `createMeetingIfAbsent` hit an existing meeting with the same external id
+ * that the caller cannot see. Callers must answer with a generic conflict
+ * that reveals nothing about that meeting.
+ */
+export class MeetingExternalIdConflictError extends Error {
+  constructor() {
+    super("External id is already used by another meeting")
+    this.name = "MeetingExternalIdConflictError"
+  }
+}
+
 /** Who can see a meeting (M2). */
 export type MeetingVisibility = "private" | "workspace" | "link"
 
@@ -780,11 +792,7 @@ export function createInMemoryMeetingRepository(
           input.externalId
         )
 
-        if (!existing) {
-          throw new Error(
-            `Meeting ${input.externalSource}:${input.externalId} conflicted but could not be loaded`
-          )
-        }
+        if (!existing) throw new MeetingExternalIdConflictError()
 
         return { meeting: existing, created: false }
       }
