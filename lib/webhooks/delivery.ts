@@ -39,6 +39,7 @@ type DeliveryJobRow = {
   url: string | null
   enabled: boolean | null
   secret_ciphertext: string | null
+  subscription_workspace_id?: string | null
 }
 
 export type WebhookDeliveryJobResult = {
@@ -141,15 +142,30 @@ export const QUEUE_UNAVAILABLE_ERROR =
 export async function deliverWebhookEvent(options: {
   eventName: PlatformEventName
   data: Record<string, unknown>
-  /** M2 contract: accepted but not yet used for fan-out scoping (Package C). */
+  /**
+   * Owning workspace. Only that workspace's subscriptions are considered
+   * (`workspace_id = $1`), so a W1 event never reaches a W2 subscription; an
+   * event without a workspace is dropped (fail closed).
+   */
   workspaceId?: string
 }) {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     return { queued: 0, delivered: 0, failed: 0, skipped: true }
   }
 
+  const workspaceId = options.workspaceId?.trim()
+
+  if (!workspaceId) {
+    console.warn(
+      `[webhooks] ${options.eventName}: dropped, the event carries no workspace`
+    )
+    return { queued: 0, delivered: 0, failed: 0, skipped: true }
+  }
+
   const pool = getDatabasePool()
-  const event = createPlatformEvent(options.eventName, options.data)
+  const event = createPlatformEvent(options.eventName, options.data, {
+    workspaceId,
+  })
   const maxAttempts = getWebhookMaxAttempts()
   const fanOutLimit = getWebhookMaxSubscriptionsPerEvent()
   const subscriptions = await pool.query(
@@ -157,11 +173,12 @@ export async function deliverWebhookEvent(options: {
       select id, url, events
       from webhook_subscriptions
       where enabled = true
-        and events ? $1
+        and workspace_id = $1
+        and events ? $2
       order by created_at asc
-      limit $2
+      limit $3
     `,
-    [options.eventName, fanOutLimit + 1]
+    [workspaceId, options.eventName, fanOutLimit + 1]
   )
   const matching = (subscriptions.rows as WebhookSubscriptionRow[]).filter(
     (subscription) => parseEvents(subscription.events).includes(options.eventName)
@@ -359,7 +376,8 @@ export async function processWebhookDeliveryJob(input: {
   const result = await pool.query(
     `
       select d.id, d.event_name, d.event_payload, d.status, d.attempts,
-             s.id as subscription_id, s.url, s.enabled, s.secret_ciphertext
+             s.id as subscription_id, s.url, s.enabled, s.secret_ciphertext,
+             s.workspace_id as subscription_workspace_id
       from webhook_deliveries d
       left join webhook_subscriptions s on s.id = d.webhook_subscription_id
       where d.id = $1
@@ -384,6 +402,25 @@ export async function processWebhookDeliveryJob(input: {
     return { deliveryId, status: "cancelled" }
   }
 
+  const event =
+    typeof row.event_payload === "string"
+      ? (JSON.parse(row.event_payload) as PlatformEvent<Record<string, unknown>>)
+      : row.event_payload
+
+  // Defence in depth: never send an event to another workspace's subscription,
+  // even if a delivery row somehow points at one.
+  if (
+    event.workspace_id &&
+    row.subscription_workspace_id &&
+    event.workspace_id !== row.subscription_workspace_id
+  ) {
+    await markDelivery(deliveryId, {
+      status: "cancelled",
+      lastError: "Webhook subscription belongs to another workspace",
+    })
+    return { deliveryId, status: "cancelled" }
+  }
+
   // Lifetime ceiling, independent of how many manual retries were requested.
   if ((row.attempts ?? 0) >= getWebhookMaxTotalAttempts()) {
     const message = "Webhook delivery exhausted its total attempt budget"
@@ -401,11 +438,6 @@ export async function processWebhookDeliveryJob(input: {
     `,
     [deliveryId]
   )
-
-  const event =
-    typeof row.event_payload === "string"
-      ? (JSON.parse(row.event_payload) as PlatformEvent<Record<string, unknown>>)
-      : row.event_payload
 
   let signature: string
   try {

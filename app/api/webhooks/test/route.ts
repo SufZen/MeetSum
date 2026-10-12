@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
+import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
   sendWebhookTest,
@@ -10,14 +11,10 @@ import {
   type WebhookEventName,
 } from "@/lib/webhooks/management"
 
-export async function POST(request: Request) {
+export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
-
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
 
   const body = (await request.json().catch(() => ({}))) as {
     url?: string
@@ -29,12 +26,13 @@ export async function POST(request: Request) {
     : undefined
 
   try {
-    const result = await sendWebhookTest({
+    const result = await sendWebhookTest(ctx.workspace.id, {
       url: body.url,
       subscriptionId: body.subscriptionId,
       eventName,
     })
     await recordAuditLog({
+      ...ctx.audit,
       action: "webhook.test.sent",
       targetType: body.subscriptionId ? "webhook_subscription" : "webhook_url",
       targetId: body.subscriptionId,
@@ -53,4 +51,4 @@ export async function POST(request: Request) {
       error instanceof WebhookNotFoundError ? 404 : 400
     )
   }
-}
+})
