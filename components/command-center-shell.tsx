@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react"
@@ -15,7 +16,12 @@ import {
   DriveRecordingPickerDrawer,
   type DriveImportResult,
 } from "@/components/drive-recording-picker-drawer"
-import { MainSidebar, type MainPanelKey } from "@/components/main-sidebar"
+import {
+  MainSidebar,
+  type MainPanelKey,
+  type SidebarRoom,
+  type SidebarUser,
+} from "@/components/main-sidebar"
 import {
   MeetingInboxPanel,
   type MeetingSortMode,
@@ -25,10 +31,15 @@ import { MeetingWorkspace } from "@/components/meeting-workspace"
 import { OperationalPage } from "@/components/operational-pages"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
-import { TopCommandBar, type SyncTarget } from "@/components/top-command-bar"
+import {
+  TopCommandBar,
+  type AiProviderStatus,
+  type SyncTarget,
+} from "@/components/top-command-bar"
 import type { WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { selectRecentRooms } from "@/lib/rooms"
 import type {
   ActionItem,
   JobRecord,
@@ -58,12 +69,17 @@ export function CommandCenterShell({
   dictionary,
   locale,
   meetings,
+  rooms,
+  user,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
   meetings: MeetingRecord[]
+  rooms: SidebarRoom[]
+  user?: SidebarUser
 }) {
   const router = useRouter()
+  const [sidebarRooms, setSidebarRooms] = useState(rooms)
   const initialMeetings = useMemo(() => meetings, [meetings])
   const [meetingRecords, setMeetingRecords] = useState(initialMeetings)
   const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetings[0]?.id ?? "")
@@ -101,12 +117,39 @@ export function CommandCenterShell({
   const [darkMode, setDarkMode] = useState(false)
   const [isPending, startTransition] = useTransition()
 
+  // A ?meeting= deep link (e.g. from a room page) may point outside the
+  // current page of meetings; fetch it once and keep it pinned in the list
+  // until the user selects a different meeting.
+  const deepLinkedMeetingRef = useRef<MeetingRecord | null>(null)
+  const deepLinkAttemptRef = useRef<string | null>(null)
+
   useEffect(() => {
     const meetingId = new URLSearchParams(window.location.search).get("meeting")
 
-    if (meetingId && meetingRecords.some((meeting) => meeting.id === meetingId)) {
+    if (!meetingId) return
+    if (meetingRecords.some((meeting) => meeting.id === meetingId)) {
       queueMicrotask(() => setSelectedMeetingId(meetingId))
+      return
     }
+    if (deepLinkAttemptRef.current === meetingId) return
+
+    deepLinkAttemptRef.current = meetingId
+    void fetch(`/api/meetings/${encodeURIComponent(meetingId)}`)
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((body: { meeting?: MeetingRecord } | undefined) => {
+        const linked = body?.meeting
+
+        if (!linked) return
+
+        deepLinkedMeetingRef.current = linked
+        setMeetingRecords((current) =>
+          current.some((meeting) => meeting.id === linked.id)
+            ? current
+            : [linked, ...current]
+        )
+        setSelectedMeetingId(linked.id)
+      })
+      .catch(() => undefined)
   }, [meetingRecords])
 
   async function refreshOperationalState() {
@@ -164,12 +207,24 @@ export function CommandCenterShell({
     })
   }
 
+  const geminiProvider = providers.find((provider) => provider.id === "gemini")
+  const aiStatus: AiProviderStatus | undefined = geminiProvider
+    ? {
+        configured: geminiProvider.configured,
+        label: geminiProvider.label,
+        detail: geminiProvider.detail,
+      }
+    : undefined
+
   const selectedMeeting =
     meetingRecords.find((meeting) => meeting.id === selectedMeetingId) ??
     meetingRecords[0] ??
     null
 
   const selectMeeting = useCallback((meetingId: string) => {
+    if (deepLinkedMeetingRef.current?.id !== meetingId) {
+      deepLinkedMeetingRef.current = null
+    }
     setSelectedMeetingId(meetingId)
     setActivePanel("meetings")
     const params = new URLSearchParams(window.location.search)
@@ -214,9 +269,17 @@ export function CommandCenterShell({
     }
 
     const meetingsBody = await meetingsResponse.json()
-    const nextMeetings = meetingsBody.meetings ?? []
+    const nextMeetings: MeetingRecord[] = meetingsBody.meetings ?? []
+    const pinned = deepLinkedMeetingRef.current
+    const keepPinned = Boolean(
+      pinned && !nextMeetings.some((meeting) => meeting.id === pinned.id)
+    )
 
-    setMeetingRecords(nextMeetings)
+    setMeetingRecords((current) =>
+      keepPinned && pinned
+        ? [current.find((meeting) => meeting.id === pinned.id) ?? pinned, ...nextMeetings]
+        : nextMeetings
+    )
     setMeetingPage(
       meetingsBody.page ?? {
         limit: pageSize,
@@ -230,6 +293,7 @@ export function CommandCenterShell({
       selectMeeting(nextSelectedMeetingId)
     } else if (
       nextMeetings.length &&
+      !(keepPinned && pinned?.id === selectedMeetingId) &&
       !nextMeetings.some((meeting: MeetingRecord) => meeting.id === selectedMeetingId)
     ) {
       setSelectedMeetingId(nextMeetings[0].id)
@@ -753,7 +817,17 @@ export function CommandCenterShell({
     }
 
     await refreshMeeting(selectedMeeting.id)
+    void refreshSidebarRooms()
     toast.success(`Meeting added to "${roomName.trim()}"`)
+  }
+
+  async function refreshSidebarRooms() {
+    const response = await fetch("/api/rooms").catch(() => undefined)
+
+    if (!response?.ok) return
+
+    const body = await response.json()
+    setSidebarRooms(selectRecentRooms(body.rooms ?? []))
   }
 
   async function downloadExport(format: "pdf" | "markdown") {
@@ -1037,8 +1111,11 @@ export function CommandCenterShell({
       <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
           dictionary={dictionary}
+          locale={locale}
           activePanel={activePanel}
           onPanelChange={setActivePanel}
+          rooms={sidebarRooms}
+          user={user}
         />
         <section className="min-w-0 lg:h-svh lg:overflow-hidden">
           <TopCommandBar
@@ -1060,6 +1137,7 @@ export function CommandCenterShell({
             onFindDriveRecordings={() => setDrivePickerOpen(true)}
             darkMode={darkMode}
             onToggleDarkMode={toggleDarkMode}
+            aiStatus={aiStatus}
           />
           <DriveRecordingPickerDrawer
             open={drivePickerOpen}

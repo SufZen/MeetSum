@@ -406,6 +406,40 @@ function SettingRow({
   )
 }
 
+type MeetingStatusTotals = {
+  completed: number
+  processing: number
+  failed: number
+  scheduled: number
+}
+
+async function fetchMeetingStatusTotals(): Promise<MeetingStatusTotals | undefined> {
+  const statuses = ["completed", "processing", "failed", "scheduled"] as const
+
+  try {
+    const totals = await Promise.all(
+      statuses.map(async (status) => {
+        const response = await fetch(`/api/meetings?limit=5&status=${status}`)
+
+        if (!response.ok) throw new Error(`Unable to count ${status} meetings`)
+
+        const body = (await response.json()) as { page?: { total?: number } }
+
+        return typeof body.page?.total === "number" ? body.page.total : 0
+      })
+    )
+
+    return {
+      completed: totals[0],
+      processing: totals[1],
+      failed: totals[2],
+      scheduled: totals[3],
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export function OperationalPage({
   panel,
   meetings,
@@ -471,6 +505,7 @@ export function OperationalPage({
   const [meetArtifacts, setMeetArtifacts] = useState<MeetArtifactStatusView>()
   const [meetArtifactsLoading, setMeetArtifactsLoading] = useState(false)
   const [meetArtifactsError, setMeetArtifactsError] = useState("")
+  const [meetingTotals, setMeetingTotals] = useState<MeetingStatusTotals>()
 
   useEffect(() => {
     if (panel !== "memory") return
@@ -508,6 +543,21 @@ export function OperationalPage({
     if (panel !== "storage") return
 
     void refreshStorage()
+    void refreshSettings()
+  }, [panel])
+
+  useEffect(() => {
+    if (panel !== "workspace" && panel !== "memory") return
+
+    let cancelled = false
+
+    void fetchMeetingStatusTotals().then((totals) => {
+      if (!cancelled && totals) setMeetingTotals(totals)
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [panel])
 
   useEffect(() => {
@@ -1106,17 +1156,17 @@ export function OperationalPage({
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(
                   [
-                    ["Completed", meetings.filter((m) => m.status === "completed").length, "bg-[var(--status-success)]/10 text-[var(--status-success)]"],
-                    ["Processing", meetings.filter((m) => ["media_found", "media_uploaded", "audio_extracted", "transcribing", "diarizing", "summarizing", "indexing"].includes(m.status)).length, "bg-[var(--primary)]/10 text-[var(--primary)]"],
-                    ["Failed", meetings.filter((m) => m.status === "failed").length, "bg-destructive/10 text-destructive"],
-                    ["Scheduled", meetings.filter((m) => m.status === "scheduled").length, "bg-[var(--muted)]/50 text-muted-foreground"],
+                    ["Completed", meetingTotals?.completed, "bg-[var(--status-success)]/10 text-[var(--status-success)]"],
+                    ["Processing", meetingTotals?.processing, "bg-[var(--primary)]/10 text-[var(--primary)]"],
+                    ["Failed", meetingTotals?.failed, "bg-destructive/10 text-destructive"],
+                    ["Scheduled", meetingTotals?.scheduled, "bg-[var(--muted)]/50 text-muted-foreground"],
                   ] as const
                 ).map(([label, count, classes]) => (
                   <div
                     key={label}
                     className={`rounded-lg border border-[var(--divider)] p-3 ${classes}`}
                   >
-                    <div className="text-xl font-semibold">{count}</div>
+                    <div className="text-xl font-semibold">{count ?? "—"}</div>
                     <div className="text-xs">{label}</div>
                   </div>
                 ))}
@@ -1158,7 +1208,6 @@ export function OperationalPage({
   }
 
   if (panel === "memory") {
-    const completedCount = meetings.filter((meeting) => meeting.summary?.overview).length
 
     return (
       <PageFrame
@@ -1280,7 +1329,9 @@ export function OperationalPage({
             icon={SparklesIcon}
             title="Ask all meetings"
             description="Ask across indexed summaries and transcripts. Answers include server-side citations when available."
-            status={`${completedCount} indexed`}
+            status={
+              meetingTotals ? `${meetingTotals.completed} completed meetings` : undefined
+            }
           >
             <div className="grid gap-2">
               <Input
@@ -1855,7 +1906,7 @@ export function OperationalPage({
       <PageFrame
         eyebrow="Retention and backups"
         title="Storage operations"
-        description="Audio is retained for 180 days by default, transcripts and summaries are retained indefinitely, and raw video is not kept unless explicitly enabled."
+        description="Audio retention follows your settings, transcripts and summaries are retained indefinitely, and raw video is not kept unless explicitly enabled."
       >
         <div className="grid gap-4 lg:grid-cols-3">
           <OpsCard
@@ -1875,9 +1926,21 @@ export function OperationalPage({
             status="active"
           >
             <div className="grid gap-2 text-sm text-muted-foreground">
-              <p>Audio: 180 days by default.</p>
+              <p>
+                Audio:{" "}
+                {settingsLoading
+                  ? "loading…"
+                  : `${settings.audioRetentionDays} days (from Settings).`}
+              </p>
+              <p>
+                Video:{" "}
+                {settingsLoading
+                  ? "loading…"
+                  : settings.retainVideoByDefault
+                    ? "retained by default."
+                    : "not retained by default."}
+              </p>
               <p>Transcripts and summaries: retained indefinitely.</p>
-              <p>Raw video: delete or avoid retaining unless explicitly needed.</p>
             </div>
           </OpsCard>
           <OpsCard
@@ -1886,13 +1949,10 @@ export function OperationalPage({
             description="Postgres backup runs before VPS deploys; restore remains operator-confirmed."
             status="configured"
           >
-            <Button
-              variant="outline"
-              className="h-9 w-full justify-start"
-              onClick={() => toast.info("Backups are created by the VPS deploy script before container replacement.")}
-            >
-              View backup policy
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              Backups are created by the VPS deploy script before container
+              replacement. Restores are run by an operator.
+            </p>
           </OpsCard>
           <div className="lg:col-span-3">
             <OpsCard

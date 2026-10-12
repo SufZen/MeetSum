@@ -1,8 +1,7 @@
 "use client"
 
-import type { ChangeEvent } from "react"
+import { type ChangeEvent, useEffect, useRef } from "react"
 import {
-  BellIcon,
   ChevronDownIcon,
   FolderSearchIcon,
   MoonIcon,
@@ -28,6 +27,12 @@ import type { SupportedLocale } from "@/lib/i18n/locales"
 
 export type SyncTarget = "calendar" | "gmail"
 
+export type AiProviderStatus = {
+  configured: boolean
+  label: string
+  detail: string
+}
+
 export function TopCommandBar({
   dictionary,
   locale,
@@ -44,6 +49,7 @@ export function TopCommandBar({
   onFindDriveRecordings,
   darkMode,
   onToggleDarkMode,
+  aiStatus,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
@@ -60,12 +66,31 @@ export function TopCommandBar({
   onFindDriveRecordings: () => void
   darkMode: boolean
   onToggleDarkMode: () => void
+  /** Primary AI provider health from /api/ai/providers/status; undefined until loaded. */
+  aiStatus?: AiProviderStatus
 }) {
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
+
   return (
     <header className="sticky top-0 z-30 flex min-h-14 flex-col gap-2 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-2 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
       <div className="flex h-8 w-full items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] lg:max-w-[390px]">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
+          ref={searchInputRef}
+          aria-keyshortcuts="Control+K Meta+K"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={dictionary.commandPlaceholder}
@@ -161,20 +186,19 @@ export function TopCommandBar({
           )}
           <span className="sr-only">Toggle dark mode</span>
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative rounded-full"
-          disabled
-          title="Notifications are coming in the next release slice"
-        >
-          <BellIcon aria-hidden="true" className="size-5" />
-          <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-orange-500 text-[10px] font-semibold text-white">
-            3
+        {aiStatus ? (
+          <span
+            role="status"
+            title={`${aiStatus.label}: ${aiStatus.detail}`}
+            className={`size-2.5 rounded-full ${
+              aiStatus.configured ? "bg-emerald-500" : "bg-amber-500"
+            }`}
+          >
+            <span className="sr-only">
+              {aiStatus.label} {aiStatus.configured ? "configured" : "not configured"}
+            </span>
           </span>
-          <span className="sr-only">Notifications</span>
-        </Button>
-        <span className="size-2.5 rounded-full bg-emerald-500" />
+        ) : null}
       </div>
     </header>
   )

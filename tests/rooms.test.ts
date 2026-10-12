@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { buildRoomDetail } from "@/lib/rooms"
+import { buildRoomDetail, selectRecentRooms } from "@/lib/rooms"
 import type { MeetingContext, MeetingRecord } from "@/lib/meetings/repository"
 
 const room: MeetingContext & { meetingCount: number } = {
@@ -107,5 +107,21 @@ describe("room detail", () => {
     expect(detail.participants).toEqual([
       expect.objectContaining({ name: "Ran", meetingCount: 2 }),
     ])
+  })
+})
+
+describe("selectRecentRooms", () => {
+  it("returns newest rooms first, limited and stripped to sidebar fields", () => {
+    const rooms = [
+      { id: "a", name: "Old", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "b", name: "New", color: "#123456", createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "c", name: "Mid", createdAt: "2026-02-01T00:00:00.000Z" },
+    ]
+
+    expect(selectRecentRooms(rooms, 2)).toEqual([
+      { id: "b", name: "New", color: "#123456" },
+      { id: "c", name: "Mid" },
+    ])
+    expect(selectRecentRooms([])).toEqual([])
   })
 })

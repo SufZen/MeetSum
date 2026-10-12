@@ -51,7 +51,7 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
 
   return (
     <Link
-      href={`/${locale}`}
+      href={`/${locale}?meeting=${encodeURIComponent(meeting.id)}`}
       className="block rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 transition-colors hover:border-[var(--primary)]/30 hover:bg-[var(--surface-hover)]"
     >
       <div className="mb-2 flex items-start justify-between gap-2">
