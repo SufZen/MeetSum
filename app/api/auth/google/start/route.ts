@@ -1,24 +1,28 @@
 import { NextResponse } from "next/server"
 
+import { withPublicRoute } from "@/lib/auth/authz"
 import { getGoogleOAuthConfig } from "@/lib/auth/google"
+import { safeReturnTo } from "@/lib/auth/return-to"
 import {
   OAUTH_STATE_COOKIE,
   createGoogleAuthorizationUrl,
   createOAuthState,
 } from "@/lib/auth/session"
 import { flattenGoogleWorkspaceScopes } from "@/lib/google/workspace"
+import { isValidEmail, normalizeEmail } from "@/lib/workspaces/tokens"
 
-export async function GET(request: Request) {
+export const GET = withPublicRoute("Starts Google sign-in", async (request) => {
   const config = getGoogleOAuthConfig()
   const requestUrl = new URL(request.url)
-  const returnTo = requestUrl.searchParams.get("returnTo") ?? "/en"
+  const returnTo = safeReturnTo(requestUrl.searchParams.get("returnTo"))
+  const hint = normalizeEmail(requestUrl.searchParams.get("loginHint") ?? "")
   const state = createOAuthState()
   const response = NextResponse.redirect(
     createGoogleAuthorizationUrl({
       clientId: config.clientId,
       redirectUri: config.redirectUri,
       state,
-      loginHint: process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL,
+      ...(hint && isValidEmail(hint) ? { loginHint: hint } : {}),
       scopes: [
         "openid",
         "email",
@@ -38,4 +42,4 @@ export async function GET(request: Request) {
   })
 
   return response
-}
+})
