@@ -46,13 +46,12 @@ The workflow runs `scripts/verify-windows-signature.ps1` automatically when `WIN
 Configure:
 
 - MeetSum URL, for example `https://meetsum.example.com`
-- API key with access to MeetSum
+- A MeetSum API key with the `write` scope (Admin → API keys); recordings land in that key's workspace
 - Default language: `mixed`, `he`, or `en`
 
 For the VPS, make sure:
 
-- `MEETSUM_REQUIRE_API_KEY=true` is enabled.
-- The API key entered in the desktop app is present in `MEETSUM_API_KEYS`, `MEETSUM_API_KEY_HASHES`, or the API-key management table.
+- The API key entered in the desktop app was created in Admin → API keys (or is an env key in `MEETSUM_API_KEYS` / `MEETSUM_API_KEY_HASHES`, bound to `MEETSUM_ENV_API_KEY_WORKSPACE_ID` with `MEETSUM_ENV_API_KEY_SCOPES`).
 - Object storage is configured because desktop uploads store media privately before worker processing.
 - The worker is running so uploaded media can enter the normal transcription, summary, tasks, index, webhook, export, and RealizeOS flow.
 
