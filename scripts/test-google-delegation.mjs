@@ -8,8 +8,14 @@ const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? "meetsum-494211"
 const serviceAccount =
   process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT ??
   "meetsum-workspace-sync@meetsum-494211.iam.gserviceaccount.com"
-const subject =
-  process.env.GOOGLE_WORKSPACE_SUBJECT ?? "info@realization.co.il"
+const subject = process.argv[2] ?? process.env.GOOGLE_WORKSPACE_SUBJECT
+
+if (!subject) {
+  console.error(
+    "Usage: node scripts/test-google-delegation.mjs <subject-email> (or set GOOGLE_WORKSPACE_SUBJECT)"
+  )
+  process.exit(1)
+}
 const gcloud =
   process.env.GCLOUD_BIN ??
   (process.platform === "win32"

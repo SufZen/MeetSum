@@ -44,10 +44,20 @@ function normalizeEmail(email: string): string {
 }
 
 export function parseAllowedEmails(value?: string): string[] {
-  return (value ?? "info@realization.co.il")
-    .split(",")
-    .map(normalizeEmail)
-    .filter(Boolean)
+  return (value ?? "").split(",").map(normalizeEmail).filter(Boolean)
+}
+
+/**
+ * Emails allowed to sign in. `MEETSUM_ALLOWED_EMAILS` wins; otherwise the
+ * configured Workspace subject is the bootstrap admin. With neither set,
+ * nobody can sign in (no baked-in identity).
+ */
+export function getAllowedEmails(env: NodeJS.ProcessEnv = process.env): string[] {
+  return parseAllowedEmails(
+    env.MEETSUM_ALLOWED_EMAILS ??
+      env.GOOGLE_WORKSPACE_SUBJECT ??
+      env.GOOGLE_WORKSPACE_ADMIN_EMAIL
+  )
 }
 
 export function createOAuthState(): string {

@@ -1,7 +1,7 @@
 import { createMeetSumWorker } from "@/lib/jobs/processor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { getGoogleSyncScheduleConfig } from "@/lib/jobs/scheduler-config"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
 import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 
 assertRuntimeEnvironment()
@@ -34,7 +34,14 @@ function scheduleGoogleSync() {
 
   if (!config.enabled) return
 
-  const subject = getWorkspaceSubject()
+  const subject = getConfiguredWorkspaceSubject()
+
+  if (!subject) {
+    console.warn(
+      "Scheduled Google sync is enabled but GOOGLE_WORKSPACE_SUBJECT is not set; skipping scheduled sync."
+    )
+    return
+  }
 
   if (config.calendar.enabled) {
     scheduledTimers.push(

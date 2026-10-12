@@ -38,19 +38,26 @@ program
 program
   .command("sync")
   .argument("<source>", "google")
-  .option("--subject <email>", "Workspace subject email", "info@realization.co.il")
+  .option(
+    "--subject <email>",
+    "Workspace subject email (defaults to GOOGLE_WORKSPACE_SUBJECT, else the server resolves it)",
+    process.env.GOOGLE_WORKSPACE_SUBJECT
+  )
   .action(async (source, options) => {
     if (source !== "google") {
       throw new Error("Only google sync is implemented in this scaffold")
     }
 
     const results = []
-    for (const googleSource of ["calendar", "gmail", "drive"]) {
+    // Drive auto-import is disabled server-side (manual review/import only).
+    for (const googleSource of ["calendar", "gmail"]) {
       results.push(
         await request(`/api/google/sync/${googleSource}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject: options.subject }),
+          body: JSON.stringify(
+            options.subject ? { subject: options.subject } : {}
+          ),
         })
       )
     }
@@ -100,7 +107,7 @@ program
 program
   .command("ask")
   .argument("<question>", "Question for meeting memory")
-  .option("--meeting <id>", "Meeting id", "meet_google_workspace")
+  .requiredOption("--meeting <id>", "Meeting id")
   .action(async (question, options) => {
     console.log(
       JSON.stringify(

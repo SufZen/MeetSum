@@ -852,7 +852,7 @@ export function CommandCenterShell({
           const response = await fetch("/api/google/meet/sync", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ subject: "info@realization.co.il" }),
+            body: JSON.stringify({}),
           })
           const body = await response.json()
 
@@ -882,7 +882,7 @@ export function CommandCenterShell({
           const response = await fetch(endpoint, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ subject: "info@realization.co.il" }),
+            body: JSON.stringify({}),
           })
           const body = await response.json()
 

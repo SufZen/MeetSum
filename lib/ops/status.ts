@@ -8,6 +8,7 @@ import {
 } from "@/lib/ai/providers"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
+import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
 
 export type ProviderStatus = {
   id: string
@@ -19,7 +20,8 @@ export type ProviderStatus = {
 
 export type WorkspaceStatus = {
   google: {
-    subject: string
+    /** Resolved Workspace subject, or null when none is configured. */
+    subject: string | null
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
     keyFileConfigured: boolean
@@ -105,7 +107,9 @@ export function getProviderStatus(): ProviderStatus[] {
   ]
 }
 
-export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
+export async function getWorkspaceStatus(
+  options: { sessionEmail?: string | null } = {}
+): Promise<WorkspaceStatus> {
   const sync: WorkspaceStatus["sync"] = []
   const jobs = { queued: 0, active: 0, failed: 0 }
 
@@ -167,10 +171,13 @@ export async function getWorkspaceStatus(): Promise<WorkspaceStatus> {
     }
   }
 
-  const authStatus = getWorkspaceAuthStatus()
-  const userOAuth = await getGoogleWorkspaceOAuthConnectionStatus(
-    authStatus.subject
+  const authStatus = getWorkspaceAuthStatus(
+    getConfiguredWorkspaceSubject() ??
+      (options.sessionEmail?.trim().toLowerCase() || null)
   )
+  const userOAuth = authStatus.subject
+    ? await getGoogleWorkspaceOAuthConnectionStatus(authStatus.subject)
+    : { connected: false }
   const keyFileConfigured = authStatus.strategy === "key-file"
   const serviceAccountKeyConfigured = authStatus.strategy === "json-key"
 
