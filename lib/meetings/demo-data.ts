@@ -3,6 +3,8 @@ import type { MeetingRecord } from "@/lib/meetings/repository"
 export const DEMO_MEETINGS: MeetingRecord[] = [
   {
     id: "meet_google_workspace",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Q2 Acquisition Review",
     source: "google_meet",
     language: "en",
@@ -79,6 +81,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_realizeos",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Project Horizon Standup",
     source: "desktop_recorder",
     language: "he",
@@ -112,6 +116,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_hebrew_quality",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Client Follow-up - Leo Co.",
     source: "pwa_recorder",
     language: "he",
@@ -145,6 +151,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_strategy_recording",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Strategy Session Recording",
     source: "upload",
     language: "en",
@@ -178,6 +186,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_product_roadmap",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Product Roadmap Sync",
     source: "google_meet",
     language: "en",
@@ -195,6 +205,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_weekly_ops",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Weekly Ops Review",
     source: "google_meet",
     language: "en",
@@ -220,6 +232,8 @@ export const DEMO_MEETINGS: MeetingRecord[] = [
   },
   {
     id: "meet_investor_update",
+    workspaceId: "ws_default",
+    visibility: "workspace",
     title: "Investor Update Call",
     source: "pwa_recorder",
     language: "en",

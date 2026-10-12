@@ -1,5 +1,7 @@
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import type { MeetingStatus } from "@/lib/meetings/state"
+import { canViewMeeting } from "@/lib/meetings/visibility"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 import {
   buildMeetingIntelligence,
   type MeetingIntelligence,
@@ -400,7 +402,10 @@ export type MeetingRepository = {
   getShareByToken: (
     token: string
   ) => Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined>
-  /** M2 contract (Package B implements; leaving `link` revokes shares). */
+  /**
+   * Sets who can see a meeting. Leaving `link` revokes every active share in
+   * the same transaction; creating a share sets `link`.
+   */
   updateMeetingVisibility: (
     meetingId: string,
     visibility: MeetingVisibility
@@ -535,21 +540,103 @@ function sortMeetings(meetings: MeetingRecord[], mode: MeetingListSortMode = "sm
   })
 }
 
-export function createInMemoryMeetingRepository(
+/**
+ * Raised when an operation is not available to the repository's scope (for
+ * example favorites without a signed-in member). `status` is the HTTP status
+ * a route should answer with.
+ */
+export class MeetingScopeError extends Error {
+  readonly status: 400 | 403
+
+  constructor(message: string, status: 400 | 403 = 400) {
+    super(message)
+    this.name = "MeetingScopeError"
+    this.status = status
+  }
+}
+
+/** System scope of the legacy default workspace (pre-M2 behaviour). */
+export const DEFAULT_SYSTEM_SCOPE: RepoScope = {
+  kind: "system",
+  workspaceId: DEFAULT_WORKSPACE_ID,
+}
+
+/**
+ * Shared state behind in-memory repositories. Several scoped repositories
+ * (one per request scope) read and write the same database, mirroring how
+ * scoped Postgres repositories share one pool.
+ */
+export type InMemoryMeetingDatabase = {
+  meetings: Map<string, MeetingRecord>
+  contexts: Map<string, MeetingContext>
+  contextWorkspaces: Map<string, string>
+  jobs: Map<string, JobRecord>
+  jobWorkspaces: Map<string, string>
+  shares: Map<string, MeetingShare>
+  participants: Map<string, MeetingParticipant>
+  exportRecords: Map<string, ExportRecord>
+  suggestedRuns: Map<string, SuggestedAgentRun>
+  /** `${userId}\u0000${meetingId}` */
+  favorites: Set<string>
+}
+
+export function createInMemoryMeetingDatabase(
   initialMeetings: MeetingRecord[] = []
+): InMemoryMeetingDatabase {
+  return {
+    meetings: new Map(
+      initialMeetings.map((meeting) => [meeting.id, { isFavorite: false, ...meeting }])
+    ),
+    contexts: new Map(),
+    contextWorkspaces: new Map(),
+    jobs: new Map(),
+    jobWorkspaces: new Map(),
+    shares: new Map(),
+    participants: new Map(),
+    exportRecords: new Map(),
+    suggestedRuns: new Map(),
+    favorites: new Set(),
+  }
+}
+
+function favoriteKey(userId: string, meetingId: string) {
+  return `${userId}\u0000${meetingId}`
+}
+
+function meetingWorkspaceId(meeting: MeetingRecord) {
+  return meeting.workspaceId ?? DEFAULT_WORKSPACE_ID
+}
+
+/**
+ * In-memory repository restricted to `scope` (defaults to the system scope
+ * of the default workspace). Mirrors the Postgres repository's M2 semantics:
+ * invisible or foreign meetings behave exactly like missing ones.
+ */
+export function createInMemoryMeetingRepository(
+  source: MeetingRecord[] | InMemoryMeetingDatabase = [],
+  scope: RepoScope = DEFAULT_SYSTEM_SCOPE
 ): MeetingRepository {
-  const meetings = new Map<string, MeetingRecord>(
-    initialMeetings.map((meeting) => [
-      meeting.id,
-      { isFavorite: false, ...meeting },
-    ])
-  )
-  const contexts = new Map<string, MeetingContext>()
-  const jobs = new Map<string, JobRecord>()
-  const shares = new Map<string, MeetingShare>()
-  const participants = new Map<string, MeetingParticipant>()
-  const exportRecords = new Map<string, ExportRecord>()
-  const suggestedRuns = new Map<string, SuggestedAgentRun>()
+  const db = Array.isArray(source) ? createInMemoryMeetingDatabase(source) : source
+  const {
+    meetings,
+    contexts,
+    contextWorkspaces,
+    jobs,
+    jobWorkspaces,
+    shares,
+    participants,
+    exportRecords,
+    suggestedRuns,
+    favorites,
+  } = db
+  const workspaceId = scope.workspaceId
+  const favoriteUserId = scope.kind === "member" ? scope.userId : undefined
+  const defaultOwnerUserId =
+    scope.kind === "member"
+      ? scope.userId
+      : scope.kind === "api_key"
+        ? scope.ownerUserId
+        : undefined
 
   function ensureParticipants(meeting: MeetingRecord): MeetingParticipant[] {
     const existing = [...participants.values()].filter(
@@ -596,16 +683,80 @@ export function createInMemoryMeetingRepository(
     })
   }
 
+  function isVisible(meeting: MeetingRecord): boolean {
+    if (meetingWorkspaceId(meeting) !== workspaceId) return false
+    if (scope.kind !== "member" || (meeting.visibility ?? "workspace") !== "private") {
+      return canViewMeeting(scope, meeting)
+    }
+
+    return canViewMeeting(
+      scope,
+      meeting,
+      ensureParticipants(meeting).map((participant) => participant.email)
+    )
+  }
+
+  /** The stored meeting when this scope can see it. */
+  function visibleMeeting(id: string): MeetingRecord | undefined {
+    const meeting = meetings.get(id)
+
+    return meeting && isVisible(meeting) ? meeting : undefined
+  }
+
+  function requireVisibleMeeting(id: string): MeetingRecord {
+    const meeting = visibleMeeting(id)
+
+    if (!meeting) throw new Error(`Meeting not found: ${id}`)
+    return meeting
+  }
+
+  function visibleMeetings(): MeetingRecord[] {
+    return [...meetings.values()].filter(isVisible)
+  }
+
   function hydrate(meeting: MeetingRecord): MeetingRecord {
     return {
       ...meeting,
+      isFavorite: favoriteUserId
+        ? favorites.has(favoriteKey(favoriteUserId, meeting.id))
+        : false,
       participantDetails: ensureParticipants(meeting),
     }
   }
 
+  /** Workspace jobs; one linked to a meeting only while that meeting is visible. */
+  function isScopedJob(job: JobRecord): boolean {
+    return (
+      jobWorkspaces.get(job.id) === workspaceId &&
+      (!job.meetingId || Boolean(visibleMeeting(job.meetingId)))
+    )
+  }
+
+  function scopedJob(id: string): JobRecord | undefined {
+    const job = jobs.get(id)
+
+    return job && isScopedJob(job) ? job : undefined
+  }
+
+  function scopedContext(id: string): MeetingContext | undefined {
+    return contextWorkspaces.get(id) === workspaceId ? contexts.get(id) : undefined
+  }
+
+  function latestShare(meetingId: string, activeOnly: boolean) {
+    return [...shares.values()]
+      .filter(
+        (share) => share.meetingId === meetingId && (!activeOnly || !share.revoked)
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  }
+
+  function setLinkVisibility(meeting: MeetingRecord) {
+    meetings.set(meeting.id, { ...meeting, visibility: "link" })
+  }
+
   return {
     async findMeetingByExternalId(source, externalId) {
-      for (const meeting of meetings.values()) {
+      for (const meeting of visibleMeetings()) {
         if (meeting.externalSource === source && meeting.externalId === externalId) {
           return hydrate(meeting)
         }
@@ -615,18 +766,34 @@ export function createInMemoryMeetingRepository(
     },
 
     async createMeetingIfAbsent(input) {
-      const existing = await this.findMeetingByExternalId(
-        input.externalSource,
-        input.externalId
+      // Uniqueness is per workspace (workspace_id, external_source, external_id).
+      const conflicting = [...meetings.values()].find(
+        (meeting) =>
+          meetingWorkspaceId(meeting) === workspaceId &&
+          meeting.externalSource === input.externalSource &&
+          meeting.externalId === input.externalId
       )
 
-      if (existing) return { meeting: existing, created: false }
+      if (conflicting) {
+        const existing = await this.findMeetingByExternalId(
+          input.externalSource,
+          input.externalId
+        )
+
+        if (!existing) {
+          throw new Error(
+            `Meeting ${input.externalSource}:${input.externalId} conflicted but could not be loaded`
+          )
+        }
+
+        return { meeting: existing, created: false }
+      }
 
       return { meeting: await this.createMeeting(input), created: true }
     },
 
     async discardMeeting(id) {
-      const meeting = meetings.get(id)
+      const meeting = visibleMeeting(id)
 
       if (!meeting || meeting.transcript?.length || meeting.summary) return false
 
@@ -636,6 +803,9 @@ export function createInMemoryMeetingRepository(
       }
       for (const [jobId, job] of jobs) {
         if (job.meetingId === id) jobs.set(jobId, { ...job, meetingId: undefined })
+      }
+      for (const key of favorites) {
+        if (key.endsWith(`\u0000${id}`)) favorites.delete(key)
       }
 
       return true
@@ -648,11 +818,12 @@ export function createInMemoryMeetingRepository(
     async listMeetingsPage(options: MeetingListOptions = {}): Promise<MeetingListPage> {
       const limit = normalizeListLimit(options.limit)
       const offset = normalizeListOffset(options.offset)
-      const filtered = [...meetings.values()]
+      const filtered = visibleMeetings()
+        .map(hydrate)
         .filter((meeting) => meetingMatchesStatus(meeting, options.status))
         .filter((meeting) => meetingMatchesQuery(meeting, options.query))
       const sorted = sortMeetings(filtered, options.sort)
-      const pageMeetings = sorted.slice(offset, offset + limit).map(hydrate)
+      const pageMeetings = sorted.slice(offset, offset + limit)
 
       return {
         meetings: pageMeetings,
@@ -666,7 +837,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async getMeeting(id: string): Promise<MeetingRecord | undefined> {
-      const meeting = meetings.get(id)
+      const meeting = visibleMeeting(id)
 
       return meeting ? hydrate(meeting) : undefined
     },
@@ -684,6 +855,9 @@ export function createInMemoryMeetingRepository(
         isFavorite: false,
         externalSource: input.externalSource,
         externalId: input.externalId,
+        workspaceId,
+        ownerUserId: input.ownerUserId ?? defaultOwnerUserId,
+        visibility: input.visibility ?? "workspace",
       }
 
       meetings.set(meeting.id, meeting)
@@ -695,12 +869,7 @@ export function createInMemoryMeetingRepository(
       id: string,
       status: MeetingStatus
     ): Promise<MeetingRecord> {
-      const meeting = meetings.get(id)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${id}`)
-      }
-
+      const meeting = requireVisibleMeeting(id)
       const updated = { ...meeting, status }
 
       meetings.set(id, updated)
@@ -708,12 +877,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async createMediaAsset(input): Promise<MediaAsset> {
-      const meeting = meetings.get(input.meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${input.meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(input.meetingId)
       const asset: MediaAsset = {
         id: createId("asset"),
         meetingId: input.meetingId,
@@ -739,7 +903,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
-      for (const meeting of meetings.values()) {
+      for (const meeting of visibleMeetings()) {
         if (options.meetingId && meeting.id !== options.meetingId) continue
 
         const asset = meeting.mediaAssets?.find(
@@ -758,11 +922,7 @@ export function createInMemoryMeetingRepository(
       meetingId: string,
       segments: TranscriptSegment[]
     ): Promise<TranscriptSegment[]> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
+      const meeting = requireVisibleMeeting(meetingId)
 
       meetings.set(meetingId, { ...meeting, transcript: segments })
       return segments
@@ -772,12 +932,7 @@ export function createInMemoryMeetingRepository(
       meetingId: string,
       intelligence: MeetingIntelligence
     ): Promise<MeetingIntelligence> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(meetingId)
       const existing = meeting.summary?.actionItems ?? []
       const plan = mergeActionItems(existing, intelligence.actionItems, () =>
         createId("act")
@@ -812,7 +967,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async updateActionItem(id, patch): Promise<ActionItem> {
-      for (const meeting of meetings.values()) {
+      for (const meeting of visibleMeetings()) {
         const actionItems = meeting.summary?.actionItems ?? []
         const index = actionItems.findIndex((item) => item.id === id)
 
@@ -859,12 +1014,23 @@ export function createInMemoryMeetingRepository(
     },
 
     async createJob(input): Promise<JobRecord> {
+      const id = input.id ?? createId("job")
+      const owner = jobWorkspaces.get(id)
+
+      if (owner && owner !== workspaceId) {
+        throw new Error(`Job id already in use: ${id}`)
+      }
+
       const now = new Date().toISOString()
       const job: JobRecord = {
-        id: input.id ?? createId("job"),
+        id,
         name: input.name,
         status: input.status ?? "queued",
-        meetingId: input.meetingId,
+        // Linked only when visible (mirrors the Postgres repository).
+        meetingId:
+          input.meetingId && visibleMeeting(input.meetingId)
+            ? input.meetingId
+            : undefined,
         payload: input.payload ?? {},
         result: {},
         attempts: 0,
@@ -876,11 +1042,12 @@ export function createInMemoryMeetingRepository(
       }
 
       jobs.set(job.id, job)
+      jobWorkspaces.set(job.id, workspaceId)
       return job
     },
 
     async updateJob(id, patch): Promise<JobRecord> {
-      const job = jobs.get(id)
+      const job = scopedJob(id)
 
       if (!job) {
         throw new Error(`Job not found: ${id}`)
@@ -909,11 +1076,12 @@ export function createInMemoryMeetingRepository(
     },
 
     async getJob(id): Promise<JobRecord | undefined> {
-      return jobs.get(id)
+      return scopedJob(id)
     },
 
     async listJobs(filters = {}): Promise<JobRecord[]> {
       return [...jobs.values()]
+        .filter(isScopedJob)
         .filter((job) =>
           filters.meetingId ? job.meetingId === filters.meetingId : true
         )
@@ -938,12 +1106,7 @@ export function createInMemoryMeetingRepository(
       meetingId: string,
       question: string
     ): Promise<MeetingAnswer> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(meetingId)
       const normalizedQuestion = normalize(question)
       const transcriptMatch = meeting.transcript?.find((segment) =>
         normalize(segment.text).includes(
@@ -973,27 +1136,22 @@ export function createInMemoryMeetingRepository(
     async getMeetingIntelligence(
       meetingId: string
     ): Promise<MeetingIntelligence | undefined> {
-      return meetings.get(meetingId)?.intelligence
+      return visibleMeeting(meetingId)?.intelligence
     },
 
     async runMeetingIntelligence(
       meetingId: string
     ): Promise<MeetingIntelligence> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(meetingId)
       const intelligence = buildMeetingIntelligence(meeting)
 
       return this.upsertMeetingIntelligence(meetingId, intelligence)
     },
 
     async listContexts(): Promise<MeetingContext[]> {
-      return [...contexts.values()].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      )
+      return [...contexts.values()]
+        .filter((context) => contextWorkspaces.get(context.id) === workspaceId)
+        .sort((a, b) => a.name.localeCompare(b.name))
     },
 
     async createContext(input: CreateContextInput): Promise<MeetingContext> {
@@ -1005,6 +1163,7 @@ export function createInMemoryMeetingRepository(
       }
 
       contexts.set(context.id, context)
+      contextWorkspaces.set(context.id, workspaceId)
       return context
     },
 
@@ -1012,12 +1171,9 @@ export function createInMemoryMeetingRepository(
       meetingId: string,
       contextId: string
     ): Promise<MeetingRecord> {
-      const meeting = meetings.get(meetingId)
-      const context = contexts.get(contextId)
+      const meeting = requireVisibleMeeting(meetingId)
+      const context = scopedContext(contextId)
 
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
       if (!context) {
         throw new Error(`Context not found: ${contextId}`)
       }
@@ -1033,18 +1189,18 @@ export function createInMemoryMeetingRepository(
     },
 
     async listRooms(): Promise<Array<MeetingContext & { meetingCount: number }>> {
-      return [...contexts.values()]
-        .map((context) => ({
-          ...context,
-          meetingCount: [...meetings.values()].filter((meeting) =>
-            meeting.contexts?.some((item) => item.id === context.id)
-          ).length,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name))
+      const visible = visibleMeetings()
+
+      return (await this.listContexts()).map((context) => ({
+        ...context,
+        meetingCount: visible.filter((meeting) =>
+          meeting.contexts?.some((item) => item.id === context.id)
+        ).length,
+      }))
     },
 
     async listMeetingsByContext(contextId: string): Promise<MeetingRecord[]> {
-      return [...meetings.values()]
+      return visibleMeetings()
         .filter((meeting) =>
           meeting.contexts?.some((context) => context.id === contextId)
         )
@@ -1056,12 +1212,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async updateMeetingTags(meetingId, tags): Promise<MeetingRecord> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(meetingId)
       const normalizedTags = [...new Set(tags.map((tag) => tag.trim()))].filter(
         Boolean
       ) as MeetingTag[]
@@ -1072,28 +1223,29 @@ export function createInMemoryMeetingRepository(
     },
 
     async updateMeetingFavorite(meetingId, favorite): Promise<MeetingRecord> {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
+      if (!favoriteUserId) {
+        throw new MeetingScopeError(
+          "Favorites are per user and need a signed-in member",
+          400
+        )
       }
 
-      const updatedMeeting = { ...meeting, isFavorite: favorite }
+      const meeting = requireVisibleMeeting(meetingId)
+      const key = favoriteKey(favoriteUserId, meetingId)
 
-      meetings.set(meetingId, updatedMeeting)
-      return hydrate(updatedMeeting)
+      if (favorite) favorites.add(key)
+      else favorites.delete(key)
+
+      return hydrate(meeting)
     },
 
     async createMeetingShare(input): Promise<MeetingShare> {
-      const meeting = meetings.get(input.meetingId)
+      const meeting = requireVisibleMeeting(input.meetingId)
 
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${input.meetingId}`)
-      }
+      // A share link only works while the meeting is `link`-visible.
+      setLinkVisibility(meeting)
 
-      const existing = [...shares.values()].find(
-        (share) => share.meetingId === input.meetingId && !share.revoked
-      )
+      const existing = latestShare(input.meetingId, true)
 
       if (existing) return existing
 
@@ -1125,14 +1277,29 @@ export function createInMemoryMeetingRepository(
       return share
     },
 
-    async updateMeetingVisibility(): Promise<MeetingRecord> {
-      throw new Error("updateMeetingVisibility is not implemented yet (M2)")
+    async updateMeetingVisibility(meetingId, visibility): Promise<MeetingRecord> {
+      const meeting = requireVisibleMeeting(meetingId)
+      const updated: MeetingRecord = { ...meeting, visibility }
+
+      meetings.set(meetingId, updated)
+
+      // Leaving `link` revokes every active share.
+      if (visibility !== "link") {
+        const now = new Date().toISOString()
+
+        for (const share of shares.values()) {
+          if (share.meetingId === meetingId && !share.revoked) {
+            shares.set(share.id, { ...share, revoked: true, updatedAt: now })
+          }
+        }
+      }
+
+      return hydrate(updated)
     },
 
     async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
-      const existing = [...shares.values()]
-        .filter((share) => share.meetingId === meetingId)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+      const meeting = requireVisibleMeeting(meetingId)
+      const existing = latestShare(meetingId, false)
 
       if (patch.regenerate) {
         if (existing) {
@@ -1156,6 +1323,8 @@ export function createInMemoryMeetingRepository(
         })
       }
 
+      if (patch.revoked === false) setLinkVisibility(meeting)
+
       const updated: MeetingShare = {
         ...existing,
         revoked: patch.revoked ?? existing.revoked,
@@ -1176,22 +1345,20 @@ export function createInMemoryMeetingRepository(
 
       if (!share || expired) return undefined
 
-      const meeting = meetings.get(share.meetingId)
+      const meeting = visibleMeeting(share.meetingId)
 
-      return meeting ? { share, meeting: hydrate(meeting) } : undefined
+      if (!meeting || meeting.visibility !== "link") return undefined
+      return { share, meeting: hydrate(meeting) }
     },
 
     async listMeetingParticipants(meetingId) {
-      const meeting = meetings.get(meetingId)
-
-      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
-      return ensureParticipants(meeting)
+      return ensureParticipants(requireVisibleMeeting(meetingId))
     },
 
     async updateMeetingParticipant(participantId, patch) {
       const participant = participants.get(participantId)
 
-      if (!participant) {
+      if (!participant || !visibleMeeting(participant.meetingId)) {
         throw new Error(`Participant not found: ${participantId}`)
       }
 
@@ -1207,7 +1374,7 @@ export function createInMemoryMeetingRepository(
 
     async assignSpeakerToParticipant(meetingId, speakerLabel, participantId) {
       const participant = participants.get(participantId)
-      const meeting = meetings.get(meetingId)
+      const meeting = visibleMeeting(meetingId)
 
       if (!participant || participant.meetingId !== meetingId || !meeting) {
         throw new Error(`Participant not found: ${participantId}`)
@@ -1227,11 +1394,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async createExportRecord(input): Promise<ExportRecord> {
-      const meeting = meetings.get(input.meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${input.meetingId}`)
-      }
+      requireVisibleMeeting(input.meetingId)
 
       const record: ExportRecord = {
         id: createId("export"),
@@ -1249,7 +1412,7 @@ export function createInMemoryMeetingRepository(
     async approveAgentRun(id): Promise<SuggestedAgentRun> {
       const run = suggestedRuns.get(id)
 
-      if (!run) {
+      if (!run || !visibleMeeting(run.meetingId)) {
         throw new Error(`Agent run not found: ${id}`)
       }
 
@@ -1260,12 +1423,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async createSuggestedAgentRun(input): Promise<SuggestedAgentRun> {
-      const meeting = meetings.get(input.meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${input.meetingId}`)
-      }
-
+      const meeting = requireVisibleMeeting(input.meetingId)
       const suggestion: SuggestedAgentRun = {
         id: createId("agent_suggestion"),
         meetingId: input.meetingId,
@@ -1286,6 +1444,30 @@ export function createInMemoryMeetingRepository(
       meetings.set(input.meetingId, updatedMeeting)
       suggestedRuns.set(suggestion.id, suggestion)
       return suggestion
+    },
+  }
+}
+
+/**
+ * Cross-workspace share-token lookup over an in-memory database (mirrors
+ * createPostgresShareLookup): active, unexpired share AND `link` visibility.
+ */
+export function createInMemoryShareLookup(db: InMemoryMeetingDatabase): {
+  getShareByToken: MeetingRepository["getShareByToken"]
+} {
+  return {
+    async getShareByToken(token) {
+      const share = [...db.shares.values()].find(
+        (item) => item.token === token && !item.revoked
+      )
+      const meeting = share ? db.meetings.get(share.meetingId) : undefined
+
+      if (!share || !meeting) return undefined
+
+      return createInMemoryMeetingRepository(db, {
+        kind: "system",
+        workspaceId: meetingWorkspaceId(meeting),
+      }).getShareByToken(token)
     },
   }
 }
