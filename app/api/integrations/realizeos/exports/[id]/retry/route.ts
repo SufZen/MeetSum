@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { withAuthz } from "@/lib/auth/authz"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import {
   RealizeOSExportNotFoundError,
   retryRealizeOSExport,
@@ -14,7 +14,7 @@ export const POST = withAuthz<{ id: string }>(
     const { id } = await params
 
     try {
-      const result = await retryRealizeOSExport(ctx.workspace.id, id)
+      const result = await retryRealizeOSExport(toRepoScope(ctx), id)
       await recordAuditLog({
         ...ctx.audit,
         action: "realizeos.export.retried",

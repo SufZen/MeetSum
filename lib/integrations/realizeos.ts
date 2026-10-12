@@ -1,7 +1,8 @@
 import { getDatabasePool } from "@/lib/db/client"
 import { recordAuditLog } from "@/lib/audit"
-import type { MeetingRecord } from "@/lib/meetings/repository"
+import type { MeetingRecord, RepoScope } from "@/lib/meetings/repository"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
 
 export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
@@ -275,17 +276,19 @@ export async function getRealizeOSStatus() {
 }
 
 /**
- * Exports of one workspace (suggested_agent_runs has no workspace column; the
- * meeting it belongs to decides).
+ * Exports the caller may see (suggested_agent_runs has no workspace column;
+ * the meeting it belongs to decides, under the caller's visibility scope —
+ * the payload carries the meeting's full intelligence, so a private meeting's
+ * exports are visible only to those who can see the meeting).
  */
 export async function listRealizeOSExports(
-  workspaceId: string,
+  scope: RepoScope,
   options: { meetingId?: string; limit?: number } = {}
 ) {
   if (process.env.MEETSUM_STORAGE !== "postgres") return []
 
-  const values: unknown[] = ["realizeos", workspaceId]
-  const clauses = ["s.target = $1", "m.workspace_id = $2"]
+  const values: unknown[] = ["realizeos"]
+  const clauses = ["s.target = $1", meetingScopeSql(scope, "m", values)]
 
   if (options.meetingId) {
     values.push(options.meetingId)
@@ -321,20 +324,23 @@ export async function listRealizeOSExports(
   }))
 }
 
-export async function retryRealizeOSExport(workspaceId: string, id: string) {
+/** Re-sends an export; one whose meeting the caller cannot see is "not found". */
+export async function retryRealizeOSExport(scope: RepoScope, id: string) {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     throw new Error("RealizeOS export retry requires Postgres storage")
   }
 
+  const values: unknown[] = [id]
+  const visible = meetingScopeSql(scope, "m", values)
   const result = await getDatabasePool().query(
     `
       select s.id, s.meeting_id
       from suggested_agent_runs s
       join meetings m on m.id = s.meeting_id
-      where s.id = $1 and s.target = 'realizeos' and m.workspace_id = $2
+      where s.id = $1 and s.target = 'realizeos' and ${visible}
       limit 1
     `,
-    [id, workspaceId]
+    values
   )
   const row = result.rows[0] as { id?: string; meeting_id?: string } | undefined
 
@@ -342,7 +348,7 @@ export async function retryRealizeOSExport(workspaceId: string, id: string) {
 
   return exportMeetingToRealizeOS({
     meetingId: row.meeting_id,
-    workspaceId,
+    workspaceId: scope.workspaceId,
     suggestionId: row.id,
   })
 }

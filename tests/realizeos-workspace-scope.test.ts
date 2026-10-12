@@ -32,6 +32,14 @@ const {
   retryRealizeOSExport,
 } = await import("@/lib/integrations/realizeos")
 
+const adminW1 = {
+  kind: "member" as const,
+  workspaceId: "ws_1",
+  userId: "usr_admin",
+  email: "Admin@W1.test",
+  role: "admin" as const,
+}
+
 const meeting = {
   id: "meet_1",
   title: "Weekly",
@@ -62,7 +70,9 @@ afterEach(() => {
 
 describe("RealizeOS exports are workspace-scoped", () => {
   it("lists only exports whose meeting is in the workspace", async () => {
-    await listRealizeOSExports("ws_2", { meetingId: "meet_1" })
+    await listRealizeOSExports({ kind: "system", workspaceId: "ws_2" }, {
+      meetingId: "meet_1",
+    })
 
     const [sql, values] = mocks.query.mock.calls[0]
     expect(sql).toMatch(/join meetings m on m\.id = s\.meeting_id/)
@@ -70,14 +80,61 @@ describe("RealizeOS exports are workspace-scoped", () => {
     expect(values).toEqual(["realizeos", "ws_2", "meet_1", 25])
   })
 
+  it("applies the caller's private-meeting visibility to listed exports", async () => {
+    await listRealizeOSExports(adminW1)
+
+    const [sql, values] = mocks.query.mock.calls[0]
+    expect(sql).toMatch(/m\.workspace_id = \$2/)
+    expect(sql).toMatch(/m\.visibility in \('workspace', 'link'\)/)
+    expect(sql).toMatch(/m\.owner_user_id = \$3/)
+    expect(sql).toMatch(/lower\(mp_scope\.email\) = \$4/)
+    expect(values).toEqual(["realizeos", "ws_1", "usr_admin", "admin@w1.test", 25])
+  })
+
+  it("restricts an API key to shared meetings plus its creator's private ones", async () => {
+    await listRealizeOSExports({
+      kind: "api_key",
+      workspaceId: "ws_1",
+      ownerUserId: "usr_key",
+    })
+
+    const [sql, values] = mocks.query.mock.calls[0]
+    expect(sql).toMatch(/m\.visibility = 'private' and m\.owner_user_id = \$3/)
+    expect(values).toEqual(["realizeos", "ws_1", "usr_key", 25])
+  })
+
   it("treats another workspace's export as not found on retry", async () => {
-    await expect(retryRealizeOSExport("ws_2", "sar_w1")).rejects.toBeInstanceOf(
-      RealizeOSExportNotFoundError
-    )
+    await expect(
+      retryRealizeOSExport({ kind: "system", workspaceId: "ws_2" }, "sar_w1")
+    ).rejects.toBeInstanceOf(RealizeOSExportNotFoundError)
     const [sql, values] = mocks.query.mock.calls[0]
     expect(sql).toMatch(/m\.workspace_id = \$2/)
     expect(values).toEqual(["sar_w1", "ws_2"])
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("treats an export of an invisible private meeting as not found on retry", async () => {
+    // The visibility predicate filters the row out: nothing is re-sent.
+    await expect(retryRealizeOSExport(adminW1, "sar_private")).rejects.toBeInstanceOf(
+      RealizeOSExportNotFoundError
+    )
+    const [sql, values] = mocks.query.mock.calls[0]
+    expect(sql).toMatch(/m\.owner_user_id = \$3/)
+    expect(sql).toMatch(/mp_scope/)
+    expect(values).toEqual(["sar_private", "ws_1", "usr_admin", "admin@w1.test"])
+    expect(mocks.getMeeting).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("retries a visible export in the caller's workspace", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: "sar_1", meeting_id: "meet_1" }] })
+    mocks.getMeeting.mockResolvedValue(meeting)
+
+    await expect(retryRealizeOSExport(adminW1, "sar_1")).resolves.toMatchObject({
+      status: "sent",
+      meetingId: "meet_1",
+    })
+    expect(mocks.repositoryWorkspaces).toEqual(["ws_1"])
   })
 
   it("never exports a meeting outside the workspace", async () => {
