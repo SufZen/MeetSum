@@ -8,7 +8,11 @@ import {
   isSupportedLocale,
   resolveLocalePreference,
 } from "@/lib/i18n/locales"
-import { dictionaries } from "@/lib/i18n/dictionaries"
+import { dictionaries, formatMessage } from "@/lib/i18n/dictionaries"
+import {
+  workspaceMessagesEn,
+  workspaceMessagesHe,
+} from "@/lib/i18n/workspace-messages"
 
 describe("internationalization", () => {
   it("supports exactly the day-one MeetSum locales with English as default", () => {
@@ -33,6 +37,40 @@ describe("internationalization", () => {
     expect(resolveLocalePreference("es", "he-IL,he;q=0.9")).toBe("es")
     expect(resolveLocalePreference(undefined, "he-IL,he;q=0.9")).toBe("en")
     expect(resolveLocalePreference("fr", "pt-PT,pt;q=0.9")).toBe("en")
+  })
+
+  it("translates every workspace/admin string into Hebrew", () => {
+    const hebrew = /[֐-׿]/
+
+    for (const key of Object.keys(workspaceMessagesEn) as Array<
+      keyof typeof workspaceMessagesEn
+    >) {
+      expect(dictionaries.he[key], key).toMatch(hebrew)
+      expect(dictionaries.en[key], key).toBe(workspaceMessagesEn[key])
+    }
+  })
+
+  it("keeps placeholders identical between Hebrew and English", () => {
+    const placeholders = (value: string) =>
+      (value.match(/\{\w+\}/g) ?? []).sort()
+
+    for (const key of Object.keys(workspaceMessagesEn) as Array<
+      keyof typeof workspaceMessagesEn
+    >) {
+      expect(placeholders(workspaceMessagesHe[key]), key).toEqual(
+        placeholders(workspaceMessagesEn[key])
+      )
+    }
+  })
+
+  it("fills message placeholders", () => {
+    expect(
+      formatMessage("הצטרפות אל {workspace} בתפקיד {role}.", {
+        workspace: "צוות",
+        role: "מנהל",
+      })
+    ).toBe("הצטרפות אל צוות בתפקיד מנהל.")
+    expect(formatMessage("{missing} stays", {})).toBe("{missing} stays")
   })
 
   it("keeps dictionary keys complete for every locale", () => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { type ChangeEvent, useEffect, useRef } from "react"
+import { type ChangeEvent, useEffect, useRef, useState } from "react"
 import {
   ChevronDownIcon,
   FolderSearchIcon,
@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { useWorkspace } from "@/components/workspace-context"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
@@ -50,6 +51,7 @@ export function TopCommandBar({
   darkMode,
   onToggleDarkMode,
   aiStatus,
+  onInvite,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
@@ -68,8 +70,31 @@ export function TopCommandBar({
   onToggleDarkMode: () => void
   /** Primary AI provider health from /api/ai/providers/status; undefined until loaded. */
   aiStatus?: AiProviderStatus
+  /** Opens the admin panel's members area (shown to member managers). */
+  onInvite?: () => void
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const { can, activeWorkspace } = useWorkspace()
+  const [recorderEnabled, setRecorderEnabled] = useState(true)
+  const activeWorkspaceId = activeWorkspace?.id
+
+  // `pwaRecorderEnabled` (workspace setting) hides the browser recorder.
+  useEffect(() => {
+    let cancelled = false
+
+    void fetch("/api/settings")
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((body) => {
+        if (!cancelled && body?.settings) {
+          setRecorderEnabled(body.settings.pwaRecorderEnabled !== false)
+        }
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeWorkspaceId])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -102,15 +127,16 @@ export function TopCommandBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="outline"
-          className="hidden h-8 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)] md:inline-flex"
-          disabled
-          title="Team invite is prepared for a later team release"
-        >
-          <UserPlusIcon data-icon="inline-start" className="size-4" />
-          Invite
-        </Button>
+        {onInvite && can("members:manage") ? (
+          <Button
+            variant="outline"
+            className="hidden h-8 rounded-md border-[var(--divider)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--selected)] md:inline-flex"
+            onClick={onInvite}
+          >
+            <UserPlusIcon data-icon="inline-start" className="size-4" />
+            {dictionary.invitationsInvite}
+          </Button>
+        ) : null}
         <MediaIngestionDrawer
           dictionary={dictionary}
           pending={pending}
@@ -119,13 +145,15 @@ export function TopCommandBar({
           onFileChange={onFileChange}
           onRecordingReady={onRecordingReady}
         />
-        <MediaIngestionDrawer
-          dictionary={dictionary}
-          pending={pending}
-          mode="record"
-          onFileChange={onFileChange}
-          onRecordingReady={onRecordingReady}
-        />
+        {recorderEnabled ? (
+          <MediaIngestionDrawer
+            dictionary={dictionary}
+            pending={pending}
+            mode="record"
+            onFileChange={onFileChange}
+            onRecordingReady={onRecordingReady}
+          />
+        ) : null}
         <MediaIngestionDrawer
           dictionary={dictionary}
           pending={pending}

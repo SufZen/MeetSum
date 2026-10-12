@@ -12,6 +12,7 @@ import {
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+import { AdminPanel } from "@/components/admin/admin-panel"
 import {
   DriveRecordingPickerDrawer,
   type DriveImportResult,
@@ -45,6 +46,7 @@ import type {
   JobRecord,
   MeetingParticipant,
   MeetingRecord,
+  MeetingVisibility,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
 
@@ -108,6 +110,7 @@ export function CommandCenterShell({
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [shareLink, setShareLink] = useState("")
+  const [sharePrivateConfirm, setSharePrivateConfirm] = useState(false)
   const [participantsOpen, setParticipantsOpen] = useState(false)
   const [participants, setParticipants] = useState<MeetingParticipant[]>([])
   const [tagsOpen, setTagsOpen] = useState(false)
@@ -595,11 +598,20 @@ export function CommandCenterShell({
     toast.success(`${label} copied`)
   }
 
-  async function openShareDialog() {
+  function setMeetingVisibility(meetingId: string, visibility: MeetingVisibility) {
+    setMeetingRecords((current) =>
+      current.map((meeting) =>
+        meeting.id === meetingId ? { ...meeting, visibility } : meeting
+      )
+    )
+  }
+
+  async function createShareLink() {
     if (!selectedMeeting) return
 
-    setShareOpen(true)
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
+    setSharePrivateConfirm(false)
+    const meetingId = selectedMeeting.id
+    const response = await fetch(`/api/meetings/${meetingId}/share`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
@@ -607,11 +619,31 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to create share link")
+      toast.error(
+        body.reason === "meeting_manage_required"
+          ? dictionary.visibilityReadOnly
+          : (body.error ?? "Unable to create share link")
+      )
       return
     }
 
     setShareLink(body.url)
+    setMeetingVisibility(meetingId, "link")
+  }
+
+  async function openShareDialog() {
+    if (!selectedMeeting) return
+
+    setShareLink("")
+    setShareOpen(true)
+
+    // A public link widens a private meeting to the workspace: confirm first.
+    if (selectedMeeting.visibility === "private") {
+      setSharePrivateConfirm(true)
+      return
+    }
+
+    await createShareLink()
   }
 
   async function regenerateShareLink() {
@@ -1089,6 +1121,9 @@ export function CommandCenterShell({
         onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
         onShareMeeting={openShareDialog}
+        onVisibilityChanged={(visibility) =>
+          selectedMeeting && setMeetingVisibility(selectedMeeting.id, visibility)
+        }
         onToggleFavorite={toggleFavorite}
         onShowParticipants={openParticipantsDialog}
         onAssignSpeaker={assignSpeaker}
@@ -1143,6 +1178,7 @@ export function CommandCenterShell({
             darkMode={darkMode}
             onToggleDarkMode={toggleDarkMode}
             aiStatus={aiStatus}
+            onInvite={() => setActivePanel("admin")}
           />
           <DriveRecordingPickerDrawer
             open={drivePickerOpen}
@@ -1164,13 +1200,25 @@ export function CommandCenterShell({
                     Close
                   </Button>
                 </div>
-                <div className="mt-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
-                  <input
-                    className="w-full bg-transparent text-sm outline-none"
-                    readOnly
-                    value={shareLink || "Creating link..."}
-                  />
-                </div>
+                {sharePrivateConfirm ? (
+                  <div className="mt-4 grid gap-3 rounded-md border border-[var(--status-warning)]/40 bg-[var(--tag-action)] p-3 text-sm leading-5 text-[var(--tag-action-fg)]">
+                    <p>{dictionary.sharePrivateWarning}</p>
+                    <div>
+                      <Button onClick={() => void createShareLink()}>
+                        {dictionary.visibilityConfirm}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                    <input
+                      className="w-full bg-transparent text-sm outline-none"
+                      dir="ltr"
+                      readOnly
+                      value={shareLink || "Creating link..."}
+                    />
+                  </div>
+                )}
                 {selectedMeeting && !selectedMeeting.summary?.overview ? (
                   <div className="mt-3 rounded-md border border-[var(--status-warning)]/40 bg-[var(--tag-action)] px-3 py-2 text-xs leading-5 text-[var(--tag-action-fg)]">
                     This meeting has no generated summary yet. The public page
@@ -1371,8 +1419,11 @@ export function CommandCenterShell({
           ) : null}
           {activePanel === "meetings"
             ? defaultMeetingsView
-            : (
+            : activePanel === "admin"
+              ? <AdminPanel dictionary={dictionary} locale={locale} />
+              : (
                 <OperationalPage
+                  dictionary={dictionary}
                   panel={activePanel}
                   meetings={meetingRecords}
                   jobs={jobs}

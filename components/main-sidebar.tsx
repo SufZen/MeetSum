@@ -12,10 +12,12 @@ import {
   ZapIcon,
   ChevronDownIcon,
   LogOutIcon,
+  ShieldCheckIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { useRef } from "react"
 
+import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/admin-panel"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -23,6 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useWorkspace } from "@/components/workspace-context"
+import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
@@ -46,6 +50,7 @@ const panelKeys = [
   "storage",
   "manual",
   "settings",
+  "admin",
 ] as const
 
 export type MainPanelKey = (typeof panelKeys)[number]
@@ -58,6 +63,7 @@ const navIcons = [
   DatabaseIcon,
   BookOpenIcon,
   SettingsIcon,
+  ShieldCheckIcon,
 ]
 
 export function MainSidebar({
@@ -76,6 +82,8 @@ export function MainSidebar({
   user?: SidebarUser
 }) {
   const logoutFormRef = useRef<HTMLFormElement>(null)
+  const { can } = useWorkspace()
+  const showAdmin = ADMIN_PANEL_PERMISSIONS.some((permission) => can(permission))
   const displayName = user?.name?.trim() || user?.email.split("@")[0] || ""
   const initial = (displayName || "?").slice(0, 1).toUpperCase()
   const navItems = [
@@ -86,6 +94,7 @@ export function MainSidebar({
     dictionary.navStorage,
     dictionary.navManual,
     dictionary.navSettings,
+    dictionary.navAdmin,
   ]
 
   return (
@@ -96,12 +105,15 @@ export function MainSidebar({
         </div>
         <div className="text-lg font-semibold tracking-tight text-foreground">MeetSum</div>
       </div>
+      {user ? <WorkspaceSwitcher dictionary={dictionary} /> : null}
 
       <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-[var(--divider)] py-3 lg:grid lg:gap-1.5 lg:overflow-visible">
         {navItems.map((label, index) => {
           const Icon = navIcons[index]
           const panel = panelKeys[index]
           const active = activePanel === panel
+
+          if (panel === "admin" && !showAdmin) return null
 
           return (
             <Button
@@ -176,9 +188,11 @@ export function MainSidebar({
                   </div>
                 )}
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{displayName}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {user.email}
+                  <div className="truncate text-sm font-semibold">
+                    <bdi>{displayName}</bdi>
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground" dir="ltr">
+                    <bdi>{user.email}</bdi>
                   </div>
                 </div>
                 <ChevronDownIcon aria-hidden="true" className="ms-auto size-4 shrink-0 text-muted-foreground" />
@@ -189,7 +203,7 @@ export function MainSidebar({
                   onClick={() => logoutFormRef.current?.requestSubmit()}
                 >
                   <LogOutIcon aria-hidden="true" className="size-4" />
-                  Log out
+                  {dictionary.logOut}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
