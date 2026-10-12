@@ -8,7 +8,6 @@ import {
 export type AppSettings = {
   defaultLocale: SupportedLocale
   meetingLanguageMode: "auto" | SupportedLocale
-  aiProviderPreference: "gemini-developer-api" | "vertex-ai"
   summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
   googleArtifactsFirst: boolean
   pwaRecorderEnabled: boolean
@@ -18,7 +17,6 @@ export type AppSettings = {
   shareActionsByDefault: boolean
   audioRetentionDays: number
   retainVideoByDefault: boolean
-  requireApiKeyForMachines: boolean
   /** Visibility of newly created meetings (M2). */
   defaultMeetingVisibility: "workspace" | "private"
 }
@@ -31,7 +29,6 @@ type AppSettingsRow = {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultLocale: DEFAULT_LOCALE,
   meetingLanguageMode: "auto",
-  aiProviderPreference: "gemini-developer-api",
   summaryTemplate: "general",
   googleArtifactsFirst: true,
   pwaRecorderEnabled: true,
@@ -41,7 +38,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   shareActionsByDefault: true,
   audioRetentionDays: 180,
   retainVideoByDefault: false,
-  requireApiKeyForMachines: true,
   defaultMeetingVisibility: "workspace",
 }
 
@@ -81,12 +77,6 @@ function isSummaryTemplate(value: unknown): value is AppSettings["summaryTemplat
   )
 }
 
-function isAiProviderPreference(
-  value: unknown
-): value is AppSettings["aiProviderPreference"] {
-  return value === "gemini-developer-api" || value === "vertex-ai"
-}
-
 function normalizeBoolean(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback
 }
@@ -115,9 +105,6 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
   return {
     defaultLocale,
     meetingLanguageMode,
-    aiProviderPreference: isAiProviderPreference(raw.aiProviderPreference)
-      ? raw.aiProviderPreference
-      : DEFAULT_APP_SETTINGS.aiProviderPreference,
     summaryTemplate: isSummaryTemplate(raw.summaryTemplate)
       ? raw.summaryTemplate
       : DEFAULT_APP_SETTINGS.summaryTemplate,
@@ -150,32 +137,28 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
       raw.retainVideoByDefault,
       DEFAULT_APP_SETTINGS.retainVideoByDefault
     ),
-    requireApiKeyForMachines: normalizeBoolean(
-      raw.requireApiKeyForMachines,
-      DEFAULT_APP_SETTINGS.requireApiKeyForMachines
-    ),
     defaultMeetingVisibility:
       raw.defaultMeetingVisibility === "private" ? "private" : "workspace",
   }
 }
 
-/**
- * Settings of a workspace.
- * COMPAT (M2 Step 0): postgres storage still reads the instance-wide
- * `app_settings` table; Package B moves it to `workspace_settings`.
- */
+/** Keys persisted per workspace (removed settings are never written). */
+const SETTING_KEYS = Object.keys(DEFAULT_APP_SETTINGS) as Array<keyof AppSettings>
+
+/** Settings of a workspace, stored in `workspace_settings` (M2). */
 export async function getAppSettings(workspaceId: string): Promise<AppSettings> {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     return { ...getMemorySettings(workspaceId) }
   }
 
   const result = await getDatabasePool().query(
-    "select key, value from app_settings"
+    "select key, value from workspace_settings where workspace_id = $1",
+    [workspaceId]
   )
-  const raw = { ...DEFAULT_APP_SETTINGS }
+  const raw: Record<string, unknown> = { ...DEFAULT_APP_SETTINGS }
 
   for (const row of result.rows as AppSettingsRow[]) {
-    raw[row.key as keyof AppSettings] = row.value as never
+    if ((SETTING_KEYS as string[]).includes(row.key)) raw[row.key] = row.value
   }
 
   return normalizeSettings(raw)
@@ -196,18 +179,17 @@ export async function updateAppSettings(
   }
 
   const pool = getDatabasePool()
-  const entries = Object.entries(next) as Array<[keyof AppSettings, unknown]>
 
-  for (const [key, value] of entries) {
+  for (const key of SETTING_KEYS) {
     await pool.query(
       `
-        insert into app_settings (key, value, updated_at)
-        values ($1, $2::jsonb, now())
-        on conflict (key) do update
+        insert into workspace_settings (workspace_id, key, value, updated_at)
+        values ($1, $2, $3::jsonb, now())
+        on conflict (workspace_id, key) do update
           set value = excluded.value,
               updated_at = now()
       `,
-      [key, JSON.stringify(value)]
+      [workspaceId, key, JSON.stringify(next[key])]
     )
   }
 
