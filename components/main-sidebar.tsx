@@ -89,7 +89,7 @@ export function MainSidebar({
   ]
 
   return (
-    <aside className="flex min-h-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
+    <aside className="flex min-h-0 flex-col border-e border-[var(--sidebar-border)] bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
       <div className="flex h-11 items-center justify-center gap-3 px-1 lg:h-12 lg:justify-start">
         <div className="grid size-7 place-items-center rounded-md bg-[var(--primary)]/10 text-[var(--primary)]">
           <AudioWaveformIcon aria-hidden="true" className="size-4" />
@@ -121,9 +121,9 @@ export function MainSidebar({
         })}
       </nav>
 
-      <div className="mt-auto hidden px-3 pb-2 lg:block">
+      <div className="mt-auto px-3 pb-2">
         {rooms.length ? (
-          <>
+          <div className="hidden lg:block">
             <div className="mb-4 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <span>Recent rooms</span>
               <FolderPlusIcon aria-hidden="true" className="size-4 text-[var(--primary)]" />
@@ -143,7 +143,7 @@ export function MainSidebar({
                 </Link>
               ))}
             </div>
-          </>
+          </div>
         ) : null}
         {user ? (
           <>
@@ -158,7 +158,7 @@ export function MainSidebar({
                 render={
                   <button
                     type="button"
-                    className="mt-8 flex w-full items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3 text-left hover:bg-sidebar-accent rtl:text-right"
+                    className="mt-4 flex w-full items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3 text-start hover:bg-sidebar-accent lg:mt-8"
                   />
                 }
               >

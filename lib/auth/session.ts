@@ -53,11 +53,15 @@ export function parseAllowedEmails(value?: string): string[] {
  * nobody can sign in (no baked-in identity).
  */
 export function getAllowedEmails(env: NodeJS.ProcessEnv = process.env): string[] {
-  return parseAllowedEmails(
-    env.MEETSUM_ALLOWED_EMAILS ??
-      env.GOOGLE_WORKSPACE_SUBJECT ??
-      env.GOOGLE_WORKSPACE_ADMIN_EMAIL
-  )
+  // Blank values count as unset, so `MEETSUM_ALLOWED_EMAILS=` in compose does
+  // not shadow the workspace subject and lock everyone out.
+  const firstSet = [
+    env.MEETSUM_ALLOWED_EMAILS,
+    env.GOOGLE_WORKSPACE_SUBJECT,
+    env.GOOGLE_WORKSPACE_ADMIN_EMAIL,
+  ].find((value) => value?.trim())
+
+  return parseAllowedEmails(firstSet)
 }
 
 export function createOAuthState(): string {
