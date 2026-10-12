@@ -1,4 +1,10 @@
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import {
+  workspaceMessagesEn,
+  workspaceMessagesHe,
+} from "@/lib/i18n/workspace-messages"
+
+export { formatMessage } from "@/lib/i18n/workspace-messages"
 
 export const dictionaries = {
   en: {
@@ -60,7 +66,8 @@ export const dictionaries = {
     signInDescription:
       "Use your Google Workspace account to access private meeting intelligence.",
     signInWithGoogle: "Continue with Google",
-    signInRestricted: "Access is currently limited to the first admin account.",
+    signInRestricted: "Access is by invitation to a workspace.",
+    ...workspaceMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -121,7 +128,8 @@ export const dictionaries = {
     signInDescription:
       "התחבר עם חשבון Google Workspace כדי לגשת למודיעין הפגישות הפרטי.",
     signInWithGoogle: "המשך עם Google",
-    signInRestricted: "הגישה מוגבלת כרגע לחשבון האדמין הראשון.",
+    signInRestricted: "הגישה מתאפשרת בהזמנה לסביבת עבודה.",
+    ...workspaceMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -182,7 +190,8 @@ export const dictionaries = {
     signInDescription:
       "Use sua conta Google Workspace para acessar inteligencia privada de reunioes.",
     signInWithGoogle: "Continuar com Google",
-    signInRestricted: "O acesso esta limitado a primeira conta admin.",
+    signInRestricted: "O acesso e feito por convite para um workspace.",
+    ...workspaceMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -243,7 +252,8 @@ export const dictionaries = {
     signInDescription:
       "Usa tu cuenta de Google Workspace para acceder a inteligencia privada de reuniones.",
     signInWithGoogle: "Continuar con Google",
-    signInRestricted: "El acceso esta limitado a la primera cuenta admin.",
+    signInRestricted: "El acceso es por invitacion a un workspace.",
+    ...workspaceMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -304,7 +314,8 @@ export const dictionaries = {
     signInDescription:
       "Usa il tuo account Google Workspace per accedere all'intelligence privata delle riunioni.",
     signInWithGoogle: "Continua con Google",
-    signInRestricted: "L'accesso e limitato al primo account admin.",
+    signInRestricted: "L'accesso avviene su invito a un workspace.",
+    ...workspaceMessagesEn,
   },
 } as const
 

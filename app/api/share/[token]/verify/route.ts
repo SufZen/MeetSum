@@ -2,9 +2,10 @@ import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
 import { verifyApiKey } from "@/lib/auth/api-keys"
+import { withPublicRoute } from "@/lib/auth/authz"
 import { getSessionSecret } from "@/lib/auth/session"
-import { meetingRepository } from "@/lib/meetings/store"
 import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
+import { lookupPublicShare } from "@/lib/sharing/public-share"
 import {
   createShareAccessCookie,
   getShareAccessCookiePath,
@@ -55,85 +56,86 @@ function redirectToShare(token: string, error?: string) {
  * `{ valid }`). On success an httpOnly, short-lived, signed cookie scoped to
  * `/share/:token` is set, so the password never travels in the URL.
  */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ token: string }> }
-) {
-  const { token } = await params
-  const form = isFormSubmission(request)
-  const rateLimit = rateLimitRequest(
-    request,
-    SHARE_VERIFY_RATE_LIMIT,
-    extractRateLimitKey(request, `share-verify:${token}`)
-  )
-
-  if (rateLimit.blocked) {
-    return form ? redirectToShare(token, "rate_limited") : rateLimit.blocked
-  }
-
-  const result = await meetingRepository.getShareByToken(token)
-
-  if (!result) return jsonError("Share link not found or expired", 404)
-
-  const { share } = result
-
-  // No password set — always valid
-  if (!share.passwordHash) {
-    return form
-      ? redirectToShare(token)
-      : NextResponse.json({ valid: true, passwordRequired: false })
-  }
-
-  const password = await readPassword(request, form)
-  const isValid = Boolean(password) && verifyApiKey(password, [share.passwordHash])
-
-  if (!isValid) {
-    if (form) return redirectToShare(token, "invalid")
-
-    return NextResponse.json(
-      {
-        valid: false,
-        passwordRequired: true,
-        ...(password ? { error: "Incorrect password" } : {}),
-      },
-      { status: 403 }
+export const POST = withPublicRoute<{ token: string }>(
+  "Public share-link password check; the unguessable token is the credential.",
+  async (request, { params }) => {
+    const { token } = await params
+    const form = isFormSubmission(request)
+    const rateLimit = rateLimitRequest(
+      request,
+      SHARE_VERIFY_RATE_LIMIT,
+      extractRateLimitKey(request, `share-verify:${token}`)
     )
+
+    if (rateLimit.blocked) {
+      return form ? redirectToShare(token, "rate_limited") : rateLimit.blocked
+    }
+
+    const result = await lookupPublicShare(token)
+
+    if (!result) return jsonError("Share link not found or expired", 404)
+
+    const { share } = result
+
+    // No password set — always valid
+    if (!share.passwordHash) {
+      return form
+        ? redirectToShare(token)
+        : NextResponse.json({ valid: true, passwordRequired: false })
+    }
+
+    const password = await readPassword(request, form)
+    const isValid =
+      Boolean(password) && verifyApiKey(password, [share.passwordHash])
+
+    if (!isValid) {
+      if (form) return redirectToShare(token, "invalid")
+
+      return NextResponse.json(
+        {
+          valid: false,
+          passwordRequired: true,
+          ...(password ? { error: "Incorrect password" } : {}),
+        },
+        { status: 403 }
+      )
+    }
+
+    const cookie = createShareAccessCookie({
+      token,
+      passwordHash: share.passwordHash,
+      secret: getSessionSecret(),
+    })
+    const response = form
+      ? redirectToShare(token)
+      : NextResponse.json({ valid: true, passwordRequired: true })
+
+    response.cookies.set(cookie.name, cookie.value, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: cookie.path,
+      maxAge: cookie.maxAge,
+    })
+
+    return response
   }
-
-  const cookie = createShareAccessCookie({
-    token,
-    passwordHash: share.passwordHash,
-    secret: getSessionSecret(),
-  })
-  const response = form
-    ? redirectToShare(token)
-    : NextResponse.json({ valid: true, passwordRequired: true })
-
-  response.cookies.set(cookie.name, cookie.value, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: cookie.path,
-    maxAge: cookie.maxAge,
-  })
-
-  return response
-}
+)
 
 /**
  * GET /api/share/:token/verify — Check if share requires a password.
  */
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ token: string }> }
-) {
-  const { token } = await params
-  const result = await meetingRepository.getShareByToken(token)
+export const GET = withPublicRoute<{ token: string }>(
+  "Public share-link metadata (password required?); the token is the credential.",
+  async (_request, { params }) => {
+    const { token } = await params
+    const result = await lookupPublicShare(token)
 
-  if (!result) return jsonError("Share link not found or expired", 404)
+    if (!result) return jsonError("Share link not found or expired", 404)
 
-  return NextResponse.json({
-    passwordRequired: Boolean(result.share.passwordHash),
-    expiresAt: result.share.expiresAt ?? null,
-  })
-}
+    return NextResponse.json({
+      passwordRequired: Boolean(result.share.passwordHash),
+      expiresAt: result.share.expiresAt ?? null,
+    })
+  }
+)

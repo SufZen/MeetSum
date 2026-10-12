@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { withAuthz } from "@/lib/auth/authz"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
-  const rooms = await meetingRepository.listRooms()
-
-  return NextResponse.json({ rooms })
-}
+export const GET = withAuthz("workspace:read", async (_request, ctx) =>
+  NextResponse.json({ rooms: await ctx.meetings.listRooms() })
+)

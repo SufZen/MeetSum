@@ -1,37 +1,36 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import {
+  loadVisibleMeeting,
+  meetingNotFound,
+} from "@/app/api/_lib/meeting-access"
+import { withAuthz } from "@/lib/auth/authz"
 import { renderMeetingMarkdown } from "@/lib/meetings/export"
-import { meetingRepository } from "@/lib/meetings/store"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
+export const POST = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (request, ctx, { params }) => {
+    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
 
-  if (rateLimit.blocked) return rateLimit.blocked
+    if (rateLimit.blocked) return rateLimit.blocked
 
-  const unauthorized = await requireAppAccess(request)
+    const { id } = await params
+    const meeting = await loadVisibleMeeting(ctx, id)
 
-  if (unauthorized) return unauthorized
+    if (!meeting) return meetingNotFound()
 
-  const { id } = await params
-  const meeting = await meetingRepository.getMeeting(id)
+    await ctx.meetings.createExportRecord({ meetingId: id, format: "markdown" })
 
-  if (!meeting) return jsonError("Meeting not found", 404)
-
-  await meetingRepository.createExportRecord({ meetingId: id, format: "markdown" })
-
-  return new NextResponse(renderMeetingMarkdown(meeting), {
-    headers: {
-      "content-type": "text/markdown; charset=utf-8",
-      "content-disposition": `attachment; filename="${meeting.title.replace(
-        /[^a-z0-9_-]+/gi,
-        "-"
-      )}.md"`,
-      ...rateLimit.headers,
-    },
-  })
-}
+    return new NextResponse(renderMeetingMarkdown(meeting), {
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": `attachment; filename="${meeting.title.replace(
+          /[^a-z0-9_-]+/gi,
+          "-"
+        )}.md"`,
+        ...rateLimit.headers,
+      },
+    })
+  }
+)

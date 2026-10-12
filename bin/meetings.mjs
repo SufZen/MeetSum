@@ -4,6 +4,46 @@ import { stat } from "node:fs/promises"
 import { basename } from "node:path"
 import { Command } from "commander"
 
+// M2: API keys are bound to one workspace and carry a scope
+// (admin ⊃ write ⊃ read). Map the server's 401/403 to actionable messages.
+const READ_PERMISSIONS = ["workspace:read", "meeting:read", "jobs:read"]
+const WRITE_PERMISSIONS = [
+  "meeting:write",
+  "meeting:create",
+  "contexts:write",
+  "jobs:write",
+]
+
+function requiredScope(permission) {
+  if (READ_PERMISSIONS.includes(permission)) return "read"
+  if (WRITE_PERMISSIONS.includes(permission)) return "write"
+  return "admin"
+}
+
+function describeApiError(status, body) {
+  if (status === 401) {
+    return "Unauthorized: set MEETSUM_API_KEY to a key created in MeetSum (Admin → API keys)."
+  }
+
+  if (status === 403 && body?.permission) {
+    const scope = requiredScope(body.permission)
+
+    return `Forbidden: this API key cannot use "${body.permission}". It needs the "${scope}" scope; create a ${scope} key in Admin → API keys.`
+  }
+
+  if (status === 403 && body?.reason === "meeting_manage_required") {
+    return "Forbidden: sharing or changing visibility needs an admin-scope key (or the meeting owner)."
+  }
+
+  if (status === 404) {
+    return body?.error
+      ? `${body.error} (or not visible to this API key's workspace)`
+      : "Not found (or not visible to this API key's workspace)"
+  }
+
+  return body?.error ?? `Request failed with ${status}`
+}
+
 const program = new Command()
 const defaultAppUrl = process.env.MEETINGS_APP_URL ?? "http://127.0.0.1:3000"
 
@@ -20,10 +60,10 @@ async function request(path, init) {
     ...init,
     headers,
   })
-  const body = await response.json()
+  const body = await response.json().catch(() => ({}))
 
   if (!response.ok) {
-    throw new Error(body.error ?? `Request failed with ${response.status}`)
+    throw new Error(describeApiError(response.status, body))
   }
 
   return body
@@ -31,7 +71,12 @@ async function request(path, init) {
 
 program
   .name("meetings")
-  .description("CLI for the self-hosted meeting intelligence app")
+  .description(
+    "CLI for the self-hosted meeting intelligence app.\n" +
+      "Auth: --api-key / MEETSUM_API_KEY (Admin → API keys). Keys act on one\n" +
+      "workspace. Scopes: read (list/search/export), write (upload, process),\n" +
+      "admin (Google sync and other workspace administration)."
+  )
   .option("--url <url>", "App URL", defaultAppUrl)
   .option("--api-key <key>", "MeetSum API key", process.env.MEETSUM_API_KEY)
 

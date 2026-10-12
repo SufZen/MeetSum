@@ -30,6 +30,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
+import { useWorkspace } from "@/components/workspace-context"
+import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
@@ -217,7 +219,6 @@ type MeetArtifactStatusView = {
 type AppSettingsView = {
   defaultLocale: SupportedLocale
   meetingLanguageMode: "auto" | SupportedLocale
-  aiProviderPreference: "gemini-developer-api" | "vertex-ai"
   summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
   googleArtifactsFirst: boolean
   pwaRecorderEnabled: boolean
@@ -227,7 +228,7 @@ type AppSettingsView = {
   shareActionsByDefault: boolean
   audioRetentionDays: number
   retainVideoByDefault: boolean
-  requireApiKeyForMachines: boolean
+  defaultMeetingVisibility: "workspace" | "private"
 }
 
 const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
@@ -250,7 +251,6 @@ const localeLabels: Record<SupportedLocale, string> = {
 const defaultSettings: AppSettingsView = {
   defaultLocale: "en",
   meetingLanguageMode: "auto",
-  aiProviderPreference: "gemini-developer-api",
   summaryTemplate: "general",
   googleArtifactsFirst: true,
   pwaRecorderEnabled: true,
@@ -260,7 +260,7 @@ const defaultSettings: AppSettingsView = {
   shareActionsByDefault: true,
   audioRetentionDays: 180,
   retainVideoByDefault: false,
-  requireApiKeyForMachines: true,
+  defaultMeetingVisibility: "workspace",
 }
 
 function formatBytes(bytes: number) {
@@ -474,7 +474,9 @@ export function OperationalPage({
   onOpenMeeting,
   onProcessMeeting,
   onSyncMeetArtifacts,
+  dictionary = dictionaries.en,
 }: {
+  dictionary?: Dictionary
   panel: MainPanelKey
   meetings: MeetingRecord[]
   jobs: JobRecord[]
@@ -490,6 +492,8 @@ export function OperationalPage({
   onProcessMeeting: (meetingId: string) => void
   onSyncMeetArtifacts: () => void
 }) {
+  const t = dictionary
+  const { can } = useWorkspace()
   const [memoryAnswer, setMemoryAnswer] = useState("")
   const [memoryQuestion, setMemoryQuestion] = useState("")
   const [memoryCitations, setMemoryCitations] = useState<MemoryCitationView[]>([])
@@ -522,6 +526,9 @@ export function OperationalPage({
   const [storageLoading, setStorageLoading] = useState(false)
   const [settings, setSettings] = useState<AppSettingsView>(defaultSettings)
   const [settingsLoading, setSettingsLoading] = useState(false)
+  // Settings are readable by every member; only admins may change them.
+  const settingsReadOnly = !can("settings:write")
+  const settingsDisabled = settingsLoading || settingsReadOnly
   const [settingsSection, setSettingsSection] = useState("Recording & Privacy")
   const [meetArtifacts, setMeetArtifacts] = useState<MeetArtifactStatusView>()
   const [meetArtifactsLoading, setMeetArtifactsLoading] = useState(false)
@@ -2097,8 +2104,8 @@ export function OperationalPage({
                 {settingsLoading
                   ? "loading…"
                   : settings.retainVideoByDefault
-                    ? "retained by default."
-                    : "not retained by default."}
+                    ? "original video kept for Drive imports."
+                    : "Drive imports stored as audio."}
               </p>
               <p>Transcripts and summaries: retained indefinitely.</p>
             </div>
@@ -2307,6 +2314,15 @@ export function OperationalPage({
           ))}
         </nav>
         <div className="grid gap-4">
+          {settingsReadOnly ? (
+            <div
+              role="status"
+              className="flex items-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm text-muted-foreground"
+            >
+              <ShieldCheckIcon aria-hidden="true" className="size-4 shrink-0" />
+              {t.settingsReadOnly}
+            </div>
+          ) : null}
           {settingsSection === "Recording & Privacy" ? (
             <OpsCard
               icon={RadioTowerIcon}
@@ -2321,7 +2337,7 @@ export function OperationalPage({
                 >
                   <Switch
                     checked={settings.googleArtifactsFirst}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ googleArtifactsFirst: Boolean(checked) })
                     }
@@ -2333,7 +2349,7 @@ export function OperationalPage({
                 >
                   <Switch
                     checked={settings.pwaRecorderEnabled}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ pwaRecorderEnabled: Boolean(checked) })
                     }
@@ -2345,19 +2361,19 @@ export function OperationalPage({
                 >
                   <Switch
                     checked={settings.autoProcessImportedMedia}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ autoProcessImportedMedia: Boolean(checked) })
                     }
                   />
                 </SettingRow>
                 <SettingRow
-                  title="Retain video by default"
-                  description="Recommended off. MeetSum should stay audio-first unless you explicitly need video archives."
+                  title={t.settingsKeepVideoTitle}
+                  description={t.settingsKeepVideoDescription}
                 >
                   <Switch
                     checked={settings.retainVideoByDefault}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ retainVideoByDefault: Boolean(checked) })
                     }
@@ -2373,7 +2389,7 @@ export function OperationalPage({
                     min={1}
                     max={3650}
                     value={settings.audioRetentionDays}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onChange={(event) =>
                       setSettings({
                         ...settings,
@@ -2399,34 +2415,12 @@ export function OperationalPage({
             >
               <div className="grid gap-3">
                 <SettingRow
-                  title="Preferred provider path"
-                  description="AI Studio is active today. Vertex can be selected as a preference, but production switches only after credential smoke test."
-                >
-                  <NativeSelect
-                    value={settings.aiProviderPreference}
-                    disabled={settingsLoading}
-                    onChange={(event) =>
-                      saveSettingsPatch({
-                        aiProviderPreference: event.target
-                          .value as AppSettingsView["aiProviderPreference"],
-                      })
-                    }
-                  >
-                    <NativeSelectOption value="gemini-developer-api">
-                      Gemini API key
-                    </NativeSelectOption>
-                    <NativeSelectOption value="vertex-ai">
-                      Vertex AI
-                    </NativeSelectOption>
-                  </NativeSelect>
-                </SettingRow>
-                <SettingRow
                   title="Default summary template"
                   description="Used as the default intelligence style for future reprocess and summary runs."
                 >
                   <NativeSelect
                     value={settings.summaryTemplate}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onChange={(event) =>
                       saveSettingsPatch({
                         summaryTemplate: event.target
@@ -2477,7 +2471,7 @@ export function OperationalPage({
                 >
                   <NativeSelect
                     value={settings.meetingLanguageMode}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onChange={(event) =>
                       saveSettingsPatch({
                         meetingLanguageMode: event.target
@@ -2504,18 +2498,6 @@ export function OperationalPage({
               status="hardened"
             >
               <div className="grid gap-3">
-                <SettingRow
-                  title="Require API keys for machines"
-                  description="Keep enabled for CLI, MCP, webhook management scripts, and external API clients."
-                >
-                  <Switch
-                    checked={settings.requireApiKeyForMachines}
-                    disabled={settingsLoading}
-                    onCheckedChange={(checked) =>
-                      saveSettingsPatch({ requireApiKeyForMachines: Boolean(checked) })
-                    }
-                  />
-                </SettingRow>
                 <SettingRow
                   title="Webhook signing"
                   description="Outbound events use x-meetsum-signature. The signing secret is stored only in production env."
@@ -2553,7 +2535,7 @@ export function OperationalPage({
                 >
                   <NativeSelect
                     value={settings.defaultLocale}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onChange={(event) =>
                       saveSettingsPatch({
                         defaultLocale: event.target.value as SupportedLocale,
@@ -2573,7 +2555,7 @@ export function OperationalPage({
                 >
                   <NativeSelect
                     value={settings.meetingLanguageMode}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onChange={(event) =>
                       saveSettingsPatch({
                         meetingLanguageMode: event.target
@@ -2611,12 +2593,35 @@ export function OperationalPage({
                   </span>
                 </SettingRow>
                 <SettingRow
+                  title={t.settingsDefaultVisibilityTitle}
+                  description={t.settingsDefaultVisibilityDescription}
+                >
+                  <NativeSelect
+                    aria-label={t.settingsDefaultVisibilityTitle}
+                    value={settings.defaultMeetingVisibility}
+                    disabled={settingsDisabled}
+                    onChange={(event) =>
+                      saveSettingsPatch({
+                        defaultMeetingVisibility: event.target
+                          .value as AppSettingsView["defaultMeetingVisibility"],
+                      })
+                    }
+                  >
+                    <NativeSelectOption value="workspace">
+                      {t.visibilityWorkspace}
+                    </NativeSelectOption>
+                    <NativeSelectOption value="private">
+                      {t.visibilityPrivate}
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </SettingRow>
+                <SettingRow
                   title="Public sharing enabled"
                   description="Allows public read-only summary/transcript links. Audio remains private by default."
                 >
                   <Switch
                     checked={settings.publicSharingEnabled}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ publicSharingEnabled: Boolean(checked) })
                     }
@@ -2628,7 +2633,7 @@ export function OperationalPage({
                 >
                   <Switch
                     checked={settings.shareTranscriptByDefault}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ shareTranscriptByDefault: Boolean(checked) })
                     }
@@ -2640,7 +2645,7 @@ export function OperationalPage({
                 >
                   <Switch
                     checked={settings.shareActionsByDefault}
-                    disabled={settingsLoading}
+                    disabled={settingsDisabled}
                     onCheckedChange={(checked) =>
                       saveSettingsPatch({ shareActionsByDefault: Boolean(checked) })
                     }

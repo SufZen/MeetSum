@@ -7,11 +7,13 @@ import {
   UsersIcon,
 } from "lucide-react"
 
+import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { meetingDurationLabel } from "@/lib/meetings/duration"
-import type { MeetingRecord } from "@/lib/meetings/repository"
+import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
 
 function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "google_meet") return "Google Meet"
@@ -28,8 +30,12 @@ export function MeetingHeader({
   onToggleFavorite,
   onShowParticipants,
   onAddToRoom,
+  dictionary,
+  onVisibilityChanged,
 }: {
   meeting: MeetingRecord
+  dictionary?: Dictionary
+  onVisibilityChanged?: (visibility: MeetingVisibility) => void
   locale: SupportedLocale
   onShare?: () => void
   onToggleFavorite?: () => void
@@ -52,7 +58,18 @@ export function MeetingHeader({
             <Badge variant="secondary" className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
               {sourceLabel(meeting.source)}
             </Badge>
-            <h1 className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl">
+            {dictionary && onVisibilityChanged ? (
+              <MeetingVisibilityControl
+                meeting={meeting}
+                dictionary={dictionary}
+                onChanged={onVisibilityChanged}
+                onRequestShare={() => onShare?.()}
+              />
+            ) : null}
+            <h1
+              dir="auto"
+              className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl"
+            >
               {meeting.title}
             </h1>
             <button

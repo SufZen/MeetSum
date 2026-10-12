@@ -15,7 +15,12 @@ import { Button } from "@/components/ui/button"
 import { TranscriptTimeline } from "@/components/transcript-timeline"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import type { ActionItem, JobRecord, MeetingRecord } from "@/lib/meetings/repository"
+import type {
+  ActionItem,
+  JobRecord,
+  MeetingRecord,
+  MeetingVisibility,
+} from "@/lib/meetings/repository"
 
 export function MeetingWorkspace({
   dictionary,
@@ -36,6 +41,7 @@ export function MeetingWorkspace({
   onSyncGoogle,
   onCheckSetup,
   onShareMeeting,
+  onVisibilityChanged,
   onToggleFavorite,
   onShowParticipants,
   onAssignSpeaker,
@@ -62,6 +68,7 @@ export function MeetingWorkspace({
   onSyncGoogle: () => void
   onCheckSetup: () => void
   onShareMeeting: () => void
+  onVisibilityChanged?: (visibility: MeetingVisibility) => void
   onToggleFavorite: () => void
   onShowParticipants: () => void
   onAssignSpeaker: (speakerLabel: string, participantId: string) => void
@@ -103,6 +110,8 @@ export function MeetingWorkspace({
         onToggleFavorite={onToggleFavorite}
         onShowParticipants={onShowParticipants}
         onAddToRoom={onAddToRoom}
+        dictionary={dictionary}
+        onVisibilityChanged={onVisibilityChanged}
       />
 
       <Tabs defaultValue="summary" className="min-w-0">

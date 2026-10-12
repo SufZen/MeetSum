@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:3000/api/meetings/meet_google_workspace/ask \
 node bin/meetings.mjs export --target markdown
 ```
 
-When `MEETSUM_REQUIRE_API_KEY=true`, set `MEETSUM_API_KEY` for local CLI calls or pass `--api-key`.
+Every API call needs a credential: a browser session or an API key. Create keys in **Admin → API keys**; each key acts on one workspace and has a scope (`read` ⊂ `write` ⊂ `admin`). Set `MEETSUM_API_KEY` for the CLI and MCP server, or pass `--api-key`. A `read` key is enough for the MCP read tools; uploads and processing need `write`; Google sync and workspace administration need `admin`.
 
 ## Desktop Capture Companion
 
