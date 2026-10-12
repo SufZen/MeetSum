@@ -41,7 +41,10 @@ import { GET as timeline } from "@/app/api/meetings/timeline/route"
 import { GET as memorySearch } from "@/app/api/memory/search/route"
 import { GET as getRoom } from "@/app/api/rooms/[id]/route"
 import { GET as listRooms } from "@/app/api/rooms/route"
-import { createInMemoryMeetingRepository } from "@/lib/meetings/repository"
+import {
+  createInMemoryMeetingDatabase,
+  createInMemoryMeetingRepository,
+} from "@/lib/meetings/repository"
 import { updateAppSettings } from "@/lib/settings/app-settings"
 
 const BASE = "http://localhost"
@@ -416,12 +419,16 @@ describe("PATCH /api/meetings/:id/participants/:participantId", () => {
         participants: ["Me"],
       }),
     ]
-    const repository = createInMemoryMeetingRepository(meetings)
-    const [me] = await repository.listMeetingParticipants("m_priv")
-    await repository.updateMeetingParticipant(me.id, {
+    const database = createInMemoryMeetingDatabase(meetings)
+    const system = createInMemoryMeetingRepository(database, {
+      kind: "system",
+      workspaceId: "ws_a",
+    })
+    const [me] = await system.listMeetingParticipants("m_priv")
+    await system.updateMeetingParticipant(me.id, {
       email: "me@example.com",
     })
-    const ctx = await createTestCtx({ repository })
+    const ctx = await createTestCtx({ database })
     setRouteCtx(ctx)
 
     const response = await patchParticipant(

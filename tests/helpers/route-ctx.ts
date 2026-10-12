@@ -1,6 +1,7 @@
 import type { AuthContext, Permission } from "@/lib/auth/authz"
 import {
   createInMemoryMeetingRepository,
+  type InMemoryMeetingDatabase,
   type MeetingRecord,
   type MeetingRepository,
 } from "@/lib/meetings/repository"
@@ -115,6 +116,8 @@ export async function createTestCtx(options: {
   apiKeyCreatedBy?: string
   meetings?: MeetingRecord[]
   repository?: MeetingRepository
+  /** Shared in-memory database (e.g. seeded for several workspaces). */
+  database?: InMemoryMeetingDatabase
 }): Promise<AuthContext> {
   const { toRepoScope } = await import("@/lib/auth/authz")
   const role = options.role ?? "member"
@@ -142,13 +145,18 @@ export async function createTestCtx(options: {
     workspace: { id: workspaceId, name: "Workspace A", slug: "a" },
     role,
   }
-  const repository =
-    options.repository ??
-    createInMemoryMeetingRepository(options.meetings ?? [])
+  // The real in-memory repository enforces the M2 workspace/visibility scope
+  // itself; a caller-supplied repository is wrapped to get the same rules.
+  const meetings = options.repository
+    ? scopeRepository(options.repository, base, toRepoScope)
+    : createInMemoryMeetingRepository(
+        options.database ?? options.meetings ?? [],
+        toRepoScope(base)
+      )
 
   return {
     ...base,
-    meetings: scopeRepository(repository, base, toRepoScope),
+    meetings,
     audit: {
       workspaceId,
       actor: user?.email,

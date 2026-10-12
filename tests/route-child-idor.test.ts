@@ -26,7 +26,9 @@ import { PATCH as patchParticipant } from "@/app/api/meetings/[id]/participants/
 import { POST as assignSpeaker } from "@/app/api/meetings/[id]/speakers/assign/route"
 import type { AuthContext } from "@/lib/auth/authz"
 import {
+  createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
+  type InMemoryMeetingDatabase,
   type MeetingRepository,
 } from "@/lib/meetings/repository"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
@@ -34,7 +36,7 @@ import type { WorkspaceRole } from "@/lib/workspaces/types"
 const BASE = "http://localhost"
 
 type Fixture = {
-  repository: MeetingRepository
+  database: InMemoryMeetingDatabase
   w1RunId: string
   w2RunId: string
   w1ParticipantId: string
@@ -48,7 +50,7 @@ async function fixture(): Promise<Fixture> {
     decisions: [],
     actionItems: [{ id, title: `Task ${id}`, status: "open" as const }],
   })
-  const repository = createInMemoryMeetingRepository([
+  const database = createInMemoryMeetingDatabase([
     testMeeting({
       id: "m_w1",
       workspaceId: "ws_a",
@@ -62,21 +64,24 @@ async function fixture(): Promise<Fixture> {
       summary: summary("ai_w2"),
     }),
   ])
-  const w1Run = await repository.createSuggestedAgentRun({
+  // Seed each workspace through its own system-scoped repository.
+  const w1System = createInMemoryMeetingRepository(database, { kind: "system", workspaceId: "ws_a" })
+  const w2System = createInMemoryMeetingRepository(database, { kind: "system", workspaceId: "ws_b" })
+  const w1Run = await w1System.createSuggestedAgentRun({
     meetingId: "m_w1",
     target: "n8n",
     payload: {},
   })
-  const w2Run = await repository.createSuggestedAgentRun({
+  const w2Run = await w2System.createSuggestedAgentRun({
     meetingId: "m_w2",
     target: "n8n",
     payload: {},
   })
-  const [w1Participant] = await repository.listMeetingParticipants("m_w1")
-  const [w2Participant] = await repository.listMeetingParticipants("m_w2")
+  const [w1Participant] = await w1System.listMeetingParticipants("m_w1")
+  const [w2Participant] = await w2System.listMeetingParticipants("m_w2")
 
   return {
-    repository,
+    database,
     w1RunId: w1Run.id,
     w2RunId: w2Run.id,
     w1ParticipantId: w1Participant.id,
@@ -91,7 +96,7 @@ async function w1Ctx(
   const ctx = await createTestCtx({
     role,
     workspaceId: "ws_a",
-    repository: data.repository,
+    database: data.database,
   })
 
   // Scoped repository behaviour (Package B): only W1 rooms are listed.
