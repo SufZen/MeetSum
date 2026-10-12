@@ -4,7 +4,13 @@ export const SESSION_COOKIE = "meetsum_session"
 export const OAUTH_STATE_COOKIE = "meetsum_oauth_state"
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 
+/** Current session payload version. v1 (allowlist-era) cookies are rejected. */
+export const SESSION_VERSION = 2
+
 export type UserSession = {
+  v: typeof SESSION_VERSION
+  /** `users.id` of the signed-in user. */
+  userId: string
   email: string
   name?: string
   picture?: string
@@ -12,6 +18,7 @@ export type UserSession = {
 }
 
 export type SessionIdentity = {
+  userId: string
   email: string
   name?: string
   picture?: string
@@ -48,9 +55,10 @@ export function parseAllowedEmails(value?: string): string[] {
 }
 
 /**
- * Emails allowed to sign in. `MEETSUM_ALLOWED_EMAILS` wins; otherwise the
- * configured Workspace subject is the bootstrap admin. With neither set,
- * nobody can sign in (no baked-in identity).
+ * Bootstrap allowlist (M2). `MEETSUM_ALLOWED_EMAILS` wins; otherwise the
+ * configured Workspace subject. Listed emails always get a membership in
+ * `ws_default` (see lib/workspaces/bootstrap.ts); sign-in itself is decided by
+ * workspace membership or a pending invitation, not by this list.
  */
 export function getAllowedEmails(env: NodeJS.ProcessEnv = process.env): string[] {
   // Blank values count as unset, so `MEETSUM_ALLOWED_EMAILS=` in compose does
@@ -101,18 +109,18 @@ export function createSessionCookie(
   identity: SessionIdentity,
   options: {
     secret: string
-    allowedEmails: string[]
     now?: number
   }
 ): { name: typeof SESSION_COOKIE; value: string; maxAge: number } {
   const email = normalizeEmail(identity.email)
-  const allowed = options.allowedEmails.map(normalizeEmail)
 
-  if (!allowed.includes(email)) {
-    throw new Error("Email is not allowed")
+  if (!identity.userId || !email) {
+    throw new Error("Session identity requires a user id and email")
   }
 
   const payload: UserSession = {
+    v: SESSION_VERSION,
+    userId: identity.userId,
     email,
     name: identity.name,
     picture: identity.picture,
@@ -128,11 +136,15 @@ export function createSessionCookie(
   }
 }
 
+/**
+ * Verify a signed session cookie. Only v2 payloads (with a user id) are
+ * accepted: membership is checked per request against the database, so the
+ * cookie carries identity only.
+ */
 export function verifySessionCookie(
   value: string | undefined,
   options: {
     secret: string
-    allowedEmails: string[]
     now?: number
   }
 ): UserSession | undefined {
@@ -144,13 +156,19 @@ export function verifySessionCookie(
   if (!safeEqual(sign(encoded, options.secret), signature)) return undefined
 
   try {
-    const session = JSON.parse(base64UrlDecode(encoded)) as UserSession
-    const allowed = options.allowedEmails.map(normalizeEmail)
+    const session = JSON.parse(base64UrlDecode(encoded)) as Partial<UserSession>
 
-    if (!allowed.includes(normalizeEmail(session.email))) return undefined
-    if (session.expiresAt <= (options.now ?? Date.now())) return undefined
+    if (session.v !== SESSION_VERSION) return undefined
+    if (typeof session.userId !== "string" || !session.userId) return undefined
+    if (typeof session.email !== "string" || !session.email) return undefined
+    if (
+      typeof session.expiresAt !== "number" ||
+      session.expiresAt <= (options.now ?? Date.now())
+    ) {
+      return undefined
+    }
 
-    return session
+    return session as UserSession
   } catch {
     return undefined
   }
@@ -173,4 +191,31 @@ export function getSessionSecret(env: NodeJS.ProcessEnv = process.env): string {
   }
 
   return secret
+}
+
+/** Read one cookie from a raw `Cookie` request header. */
+export function readRequestCookie(
+  request: Pick<Request, "headers">,
+  name: string
+): string | undefined {
+  const header = request.headers.get("cookie")
+
+  if (!header) return undefined
+
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=")
+
+    if (index < 0) continue
+    if (part.slice(0, index).trim() !== name) continue
+
+    const raw = part.slice(index + 1).trim()
+
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
+  }
+
+  return undefined
 }

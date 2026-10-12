@@ -1,50 +1,34 @@
 import { NextResponse } from "next/server"
 
-import {
-  extractBearerToken,
-  isAuthorizedApiRequest,
-  verifyDatabaseApiKey,
-} from "@/lib/auth/api-keys"
-import { getCurrentSession } from "@/lib/auth/server"
+import { authenticateRequest } from "@/lib/auth/authz"
+import { WorkspaceStoreError } from "@/lib/workspaces/store"
 
 export function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
 }
 
-export function requireApiKey(request: Request) {
-  if (process.env.MEETSUM_REQUIRE_API_KEY !== "true") {
-    return undefined
+/** Maps a WorkspaceStoreError to its HTTP response; rethrows anything else. */
+export function workspaceErrorResponse(error: unknown): Response {
+  if (error instanceof WorkspaceStoreError) {
+    return NextResponse.json(
+      { error: error.code, message: error.message },
+      { status: error.status }
+    )
   }
 
-  if (!isAuthorizedApiRequest(request)) {
-    return jsonError("Unauthorized", 401)
-  }
-
-  return undefined
+  throw error
 }
 
+/**
+ * @deprecated M2: wrap routes with `withAuthz` / `withSession` /
+ * `withPublicRoute` (lib/auth/authz.ts). Removed at Integration.
+ *
+ * Legacy gate kept so not-yet-migrated routes still compile: it now runs the
+ * real M2 authentication (invalid bearer → 401 without cookie fallback,
+ * per-request membership, Origin check) but checks no permission.
+ */
 export async function requireAppAccess(request: Request) {
-  if (isAuthorizedApiRequest(request)) {
-    return undefined
-  }
+  const resolved = await authenticateRequest(request)
 
-  // Admin-created (database-backed) API keys, so keys minted in the UI work.
-  const bearer = extractBearerToken(request.headers)
-
-  if (bearer && (await verifyDatabaseApiKey(bearer))) {
-    return undefined
-  }
-
-  try {
-    const session = await getCurrentSession()
-
-    if (session) {
-      return undefined
-    }
-  } catch (error) {
-    // Fail closed: a broken/throwing session must never grant access.
-    console.error("[auth] session validation failed", error)
-  }
-
-  return jsonError("Unauthorized", 401)
+  return resolved.ok ? undefined : resolved.response
 }
