@@ -51,11 +51,11 @@ export function MeetingHeader({
     meeting.participantDetails?.length || meeting.participants.length || 0
 
   return (
-    <header className="border-b border-[var(--divider)] bg-[var(--surface)] px-5 py-4 md:px-7">
+    <header className="border-b border-line bg-surface px-5 py-4 md:px-7">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+            <Badge variant="secondary" className="rounded-md bg-brand-soft text-brand-text">
               {sourceLabel(meeting.source)}
             </Badge>
             {dictionary && onVisibilityChanged ? (
@@ -73,7 +73,7 @@ export function MeetingHeader({
               {meeting.title}
             </h1>
             <button
-              className="rounded p-0.5 text-amber-400 hover:bg-[var(--surface-subtle)]"
+              className="rounded p-0.5 text-amber-400 hover:bg-surface-2"
               onClick={onToggleFavorite}
               title={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
               type="button"
@@ -95,7 +95,7 @@ export function MeetingHeader({
             </span>
             <div className="group relative">
               <button
-                className="flex items-center gap-2 rounded text-left hover:text-foreground"
+                className="flex items-center gap-2 rounded text-start hover:text-foreground"
                 onClick={onShowParticipants}
                 type="button"
               >
@@ -103,7 +103,7 @@ export function MeetingHeader({
                 {participantCount || 0} participants
               </button>
               {meeting.participantDetails?.length ? (
-                <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden min-w-[240px] max-w-sm rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
+                <div className="pointer-events-none absolute start-0 top-full z-50 mt-2 hidden min-w-[240px] max-w-sm rounded-lg border border-line bg-surface p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Participants
                   </div>
@@ -113,17 +113,17 @@ export function MeetingHeader({
                         <div className="min-w-0">
                           <span className="font-medium text-foreground">{p.name}</span>
                           {p.email ? (
-                            <span className="ml-1 text-muted-foreground">{p.email}</span>
+                            <span className="ms-1 text-muted-foreground">{p.email}</span>
                           ) : null}
                         </div>
-                        <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] ${
+                        <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-2xs ${
                           p.role === "organizer"
-                            ? "bg-[var(--primary)]/10 text-[var(--primary)]"
+                            ? "bg-brand/10 text-brand-text"
                             : p.attendanceStatus === "accepted"
-                              ? "bg-[var(--status-success)]/10 text-[var(--status-success)]"
+                              ? "bg-ok/10 text-ok-text"
                               : p.attendanceStatus === "declined"
                                 ? "bg-destructive/10 text-destructive"
-                                : "bg-[var(--muted)]/50 text-muted-foreground"
+                                : "bg-surface-2/50 text-muted-foreground"
                         }`}>
                           {p.role === "organizer" ? "organizer" : p.attendanceStatus}
                         </span>
@@ -147,7 +147,7 @@ export function MeetingHeader({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 rounded-md border-[var(--divider)] bg-[var(--selected)] text-[var(--primary)]"
+              className="h-7 rounded-md border-line bg-brand-soft text-brand-text"
               onClick={onAddToRoom}
             >
               Add to room

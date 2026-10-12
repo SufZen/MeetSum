@@ -137,7 +137,7 @@ export function AuditLogSection({
     <div className="grid gap-3">
       <form
         onSubmit={apply}
-        className="grid gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end"
+        className="grid gap-3 rounded-lg border border-line bg-surface-2 p-3 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end"
       >
         <div className="grid gap-1.5">
           <Label htmlFor="audit-action">{t.auditFilterAction}</Label>
@@ -204,9 +204,9 @@ export function AuditLogSection({
         retryLabel={t.retry}
         onRetry={() => void load(appliedRef.current)}
       >
-        <div className="overflow-x-auto rounded-lg border border-[var(--divider)]">
+        <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[680px] text-sm">
-            <thead className="bg-[var(--surface-subtle)] text-xs text-muted-foreground">
+            <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
                   {t.auditColumnTime}
@@ -226,7 +226,7 @@ export function AuditLogSection({
               {logs.map((log) => (
                 <tr
                   key={log.id}
-                  className="border-t border-[var(--divider)] align-top"
+                  className="border-t border-line align-top"
                 >
                   <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                     {formatDateTime(locale, log.createdAt, {

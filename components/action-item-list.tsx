@@ -19,7 +19,7 @@ export function ActionItemList({
       {items.length ? items.map((item) => (
         <div
           key={item.id}
-          className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm"
+          className="grid gap-2 rounded-lg border border-line bg-surface p-3 text-sm"
         >
           <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-start">
             <Checkbox
@@ -69,7 +69,7 @@ export function ActionItemList({
           )}
         </div>
       )) : (
-        <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
           No smart tasks extracted yet.
         </div>
       )}

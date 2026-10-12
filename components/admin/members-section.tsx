@@ -100,9 +100,9 @@ export function MembersSection({
       retryLabel={t.retry}
       onRetry={() => void members.reload()}
     >
-      <div className="overflow-x-auto rounded-lg border border-[var(--divider)]">
+      <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full min-w-[560px] text-sm">
-          <thead className="bg-[var(--surface-subtle)] text-xs text-muted-foreground">
+          <thead className="bg-surface-2 text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-start font-medium">
                 {t.membersColumnMember}
@@ -130,7 +130,7 @@ export function MembersSection({
               return (
                 <tr
                   key={member.userId}
-                  className="border-t border-[var(--divider)] align-middle"
+                  className="border-t border-line align-middle"
                 >
                   <td className="px-3 py-2">
                     <div className="flex min-w-0 items-center gap-2">
@@ -143,7 +143,7 @@ export function MembersSection({
                           className="size-7 shrink-0 rounded-full object-cover"
                         />
                       ) : (
-                        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[var(--primary)]/10 text-xs font-semibold text-[var(--primary)]">
+                        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/10 text-xs font-semibold text-brand-text">
                           {displayName(member).slice(0, 1).toUpperCase()}
                         </span>
                       )}
@@ -209,7 +209,7 @@ export function MembersSection({
                         onClick={() => setRemoving(member)}
                       >
                         {isSelf ? (
-                          <LogOutIcon data-icon="inline-start" />
+                          <LogOutIcon data-icon="inline-start" data-directional="" />
                         ) : (
                           <UserMinusIcon data-icon="inline-start" />
                         )}

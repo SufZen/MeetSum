@@ -106,28 +106,28 @@ export function GoogleContextCard({
   ]
 
   return (
-    <section className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-4">
+    <section className="rounded-md border border-line bg-surface p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Google Context</h3>
         <Badge
           variant="outline"
           className={
             hasArtifactContext
-              ? "rounded-md border-[var(--primary)]/40 text-[var(--primary)]"
+              ? "rounded-md border-brand/40 text-brand-text"
               : "rounded-md"
           }
         >
           {hasArtifactContext ? "linked" : "pending"}
         </Badge>
       </div>
-      <div className="mb-3 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-xs leading-5 text-muted-foreground">
+      <div className="mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs leading-5 text-muted-foreground">
         <span className="font-medium text-foreground">{artifactCountLabel}</span>
         {primaryConferenceRecord?.startTime
           ? ` · Meet record ${formatDate(primaryConferenceRecord.startTime)}`
           : " · Sync Meet artifacts after the call to refresh this context."}
       </div>
       {readiness ? (
-        <div className="mb-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+        <div className="mb-4 rounded-md border border-line bg-surface-2 p-3">
           <div className="text-xs font-semibold text-foreground">
             {readiness.title}
           </div>
@@ -142,12 +142,12 @@ export function GoogleContextCard({
 
           return (
             <div key={item.label} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3">
-              <Icon aria-hidden="true" className="mt-0.5 size-5 text-[var(--primary)]" />
+              <Icon aria-hidden="true" className="mt-0.5 size-5 text-brand-text" />
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-foreground">{item.label}</div>
                 <div className="truncate text-xs text-muted-foreground">{item.value}</div>
                 {item.detail ? (
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 truncate text-2xs text-muted-foreground">
                     {item.detail}
                   </div>
                 ) : null}
@@ -156,18 +156,18 @@ export function GoogleContextCard({
           )
         })}
         {artifacts.length ? (
-          <div className="flex flex-wrap gap-1.5 border-t border-[var(--divider)] pt-3">
+          <div className="flex flex-wrap gap-1.5 border-t border-line pt-3">
             {artifacts.slice(0, 5).map((artifact) => (
               <span
                 key={artifact.id}
-                className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]"
+                className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text"
                 title={artifact.artifactName}
               >
                 {formatArtifactType(artifact.artifactType)}
               </span>
             ))}
             {artifacts.length > 5 ? (
-              <span className="rounded-sm bg-[var(--surface-subtle)] px-2 py-0.5 text-[11px] text-muted-foreground">
+              <span className="rounded-sm bg-surface-2 px-2 py-0.5 text-2xs text-muted-foreground">
                 +{artifacts.length - 5}
               </span>
             ) : null}
@@ -204,7 +204,7 @@ export function GoogleContextCard({
               : "No Google source attached"}
         </Button>
         {!meeting && (
-          <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--divider)] p-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-line p-3 text-xs text-muted-foreground">
             <FileIcon aria-hidden="true" className="size-4" />
             Select a meeting to see linked Workspace context.
           </div>

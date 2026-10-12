@@ -30,13 +30,13 @@ function formatDate(iso: string) {
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: React.ComponentType<{ className?: string }> }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="grid size-10 place-items-center rounded-md bg-[var(--primary)]/10 text-[var(--primary)]">
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-surface p-4">
+      <div className="grid size-10 place-items-center rounded-md bg-brand/10 text-brand-text">
         <Icon className="size-5" />
       </div>
       <div>
-        <div className="text-2xl font-bold text-[var(--text-primary)]">{value}</div>
-        <div className="text-xs text-[var(--text-muted)]">{label}</div>
+        <div className="text-2xl font-bold text-fg">{value}</div>
+        <div className="text-xs text-fg-3">{label}</div>
       </div>
     </div>
   )
@@ -52,18 +52,18 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
   return (
     <Link
       href={`/${locale}?meeting=${encodeURIComponent(meeting.id)}`}
-      className="block rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 transition-colors hover:border-[var(--primary)]/30 hover:bg-[var(--surface-hover)]"
+      className="block rounded-lg border border-line bg-surface p-4 transition-colors hover:border-brand/30 hover:bg-surface-3"
     >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <h3 className="font-medium text-[var(--text-primary)]">{meeting.title}</h3>
+        <h3 className="font-medium text-fg">{meeting.title}</h3>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}`}>
           {meeting.status}
         </span>
       </div>
-      <p className="mb-3 line-clamp-2 text-sm text-[var(--text-muted)]">
+      <p className="mb-3 line-clamp-2 text-sm text-fg-3">
         {meeting.overview || "No summary available yet."}
       </p>
-      <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
+      <div className="flex items-center gap-4 text-xs text-fg-3">
         <span className="flex items-center gap-1">
           <CalendarDaysIcon className="size-3" />
           {formatDate(meeting.startedAt)}
@@ -85,11 +85,11 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
 
 function TaskItem({ task }: { task: RoomTask }) {
   return (
-    <div className="flex items-start gap-3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+    <div className="flex items-start gap-3 rounded-md border border-line bg-surface px-4 py-3">
       <CircleDotIcon className="mt-0.5 size-4 shrink-0 text-amber-500" />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-[var(--text-primary)]">{task.title}</div>
-        <div className="mt-1 flex gap-3 text-xs text-[var(--text-muted)]">
+        <div className="font-medium text-fg">{task.title}</div>
+        <div className="mt-1 flex gap-3 text-xs text-fg-3">
           {task.owner && <span>→ {task.owner}</span>}
           <span>from {task.meetingTitle}</span>
           {task.dueDate && <span className="text-amber-600">due {task.dueDate}</span>}
@@ -109,16 +109,16 @@ function ParticipantRow({ participant }: { participant: RoomParticipant }) {
 
   return (
     <div className="flex items-center gap-3 py-2">
-      <div className="grid size-8 place-items-center rounded-full bg-[var(--primary)]/10 text-xs font-semibold text-[var(--primary)]">
+      <div className="grid size-8 place-items-center rounded-full bg-brand/10 text-xs font-semibold text-brand-text">
         {initials}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-[var(--text-primary)]">{participant.name}</div>
+        <div className="text-sm font-medium text-fg">{participant.name}</div>
         {participant.email && (
-          <div className="truncate text-xs text-[var(--text-muted)]">{participant.email}</div>
+          <div className="truncate text-xs text-fg-3">{participant.email}</div>
         )}
       </div>
-      <div className="text-xs text-[var(--text-muted)]">
+      <div className="text-xs text-fg-3">
         {participant.meetingCount} meeting{participant.meetingCount !== 1 ? "s" : ""}
       </div>
     </div>
@@ -135,10 +135,10 @@ function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
 
   return (
     <div className="flex items-center gap-3 py-2">
-      <Icon className="size-4 text-[var(--text-muted)]" />
+      <Icon className="size-4 text-fg-3" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-[var(--text-primary)]">{artifact.artifactName}</div>
-        <div className="text-xs text-[var(--text-muted)]">{artifact.meetingTitle}</div>
+        <div className="text-sm text-fg">{artifact.artifactName}</div>
+        <div className="text-xs text-fg-3">{artifact.meetingTitle}</div>
       </div>
     </div>
   )
@@ -170,9 +170,9 @@ function AskRoom({ roomId }: { roomId: string }) {
   }
 
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
-        <MessageSquareIcon className="size-4 text-[var(--primary)]" />
+    <div className="rounded-lg border border-line bg-surface p-4">
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-fg">
+        <MessageSquareIcon className="size-4 text-brand-text" />
         Ask this room
       </h2>
       <div className="flex gap-2">
@@ -182,18 +182,18 @@ function AskRoom({ roomId }: { roomId: string }) {
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAsk()}
           placeholder="Ask a question about this room's meetings..."
-          className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--primary)] focus:outline-none"
+          className="flex-1 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-brand focus:outline-none"
         />
         <button
           onClick={handleAsk}
           disabled={loading || !question.trim()}
-          className="grid size-9 place-items-center rounded-md bg-[var(--primary)] text-white disabled:opacity-50"
+          className="grid size-9 place-items-center rounded-md bg-brand text-white disabled:opacity-50"
         >
           {loading ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
         </button>
       </div>
       {answer && (
-        <div className="mt-3 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-sm text-[var(--text-primary)]">
+        <div className="mt-3 rounded-md border border-line bg-surface-2 p-3 text-sm text-fg">
           {answer}
         </div>
       )}
@@ -203,7 +203,7 @@ function AskRoom({ roomId }: { roomId: string }) {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="py-8 text-center text-sm text-[var(--text-muted)]">{message}</div>
+    <div className="py-8 text-center text-sm text-fg-3">{message}</div>
   )
 }
 
@@ -217,13 +217,13 @@ export function RoomDetailView({
   const { room, stats, meetings, openTasks, participants, artifacts } = detail
 
   return (
-    <main className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
+    <main className="min-h-screen bg-canvas text-fg">
       {/* Header */}
-      <header className="border-b border-[var(--border)] bg-[var(--surface)]">
+      <header className="border-b border-line bg-surface">
         <div className="mx-auto max-w-6xl px-6 py-6">
           <Link
             href={`/${locale}`}
-            className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--primary)]"
+            className="mb-4 inline-flex items-center gap-1.5 text-sm text-fg-3 hover:text-brand-text"
           >
             <ArrowLeftIcon className="size-3.5" />
             Back to MeetSum
@@ -232,12 +232,12 @@ export function RoomDetailView({
           <div className="flex items-start gap-4">
             <div
               className="mt-1 size-4 shrink-0 rounded-full"
-              style={{ backgroundColor: room.color ?? "var(--primary)" }}
+              style={{ backgroundColor: room.color ?? "var(--brand)" }}
             />
             <div>
               <h1 className="text-2xl font-bold">{room.name}</h1>
               {room.description && (
-                <p className="mt-1 text-sm text-[var(--text-muted)]">{room.description}</p>
+                <p className="mt-1 text-sm text-fg-3">{room.description}</p>
               )}
             </div>
           </div>
@@ -281,7 +281,7 @@ export function RoomDetailView({
               <div className="mt-8">
                 <h2 className="mb-4 text-lg font-semibold">
                   Open Tasks
-                  <span className="ml-2 text-sm font-normal text-[var(--text-muted)]">
+                  <span className="ms-2 text-sm font-normal text-fg-3">
                     ({openTasks.length})
                   </span>
                 </h2>
@@ -297,13 +297,13 @@ export function RoomDetailView({
           {/* Right rail */}
           <div className="space-y-6">
             {/* Participants */}
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="rounded-lg border border-line bg-surface p-4">
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                <UsersIcon className="size-4 text-[var(--primary)]" />
+                <UsersIcon className="size-4 text-brand-text" />
                 Participants
               </h2>
               {participants.length > 0 ? (
-                <div className="divide-y divide-[var(--border)]">
+                <div className="divide-y divide-line">
                   {participants.map((p) => (
                     <ParticipantRow key={p.email ?? p.name} participant={p} />
                   ))}
@@ -315,12 +315,12 @@ export function RoomDetailView({
 
             {/* Artifacts */}
             {artifacts.length > 0 && (
-              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="rounded-lg border border-line bg-surface p-4">
                 <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                  <FileAudioIcon className="size-4 text-[var(--primary)]" />
+                  <FileAudioIcon className="size-4 text-brand-text" />
                   Artifacts
                 </h2>
-                <div className="divide-y divide-[var(--border)]">
+                <div className="divide-y divide-line">
                   {artifacts.map((a) => (
                     <ArtifactRow key={a.id} artifact={a} />
                   ))}

@@ -220,7 +220,7 @@ export function InviteAcceptCard({
                     method="post"
                   >
                     <Button type="submit" variant="outline" className="w-full">
-                      <LogOutIcon data-icon="inline-start" />
+                      <LogOutIcon data-icon="inline-start" data-directional="" />
                       {t.inviteSwitchAccount}
                     </Button>
                   </form>

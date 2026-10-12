@@ -70,7 +70,7 @@ export function JobActivityCenter({
           {jobs.length}
         </span>
       </div>
-      <div className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+      <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-semibold">Processing recovery</h4>
@@ -79,7 +79,7 @@ export function JobActivityCenter({
               completed content.
             </p>
           </div>
-          <span className="rounded-md bg-[var(--tag-action)] px-2 py-1 text-xs font-medium text-[var(--tag-action-fg)]">
+          <span className="rounded-md bg-warn-soft px-2 py-1 text-xs font-medium text-warn-text">
             {failedGroups.length}
           </span>
         </div>
@@ -91,7 +91,7 @@ export function JobActivityCenter({
               return (
                 <article
                   key={group.meetingId}
-                  className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3"
+                  className="rounded-md border border-line bg-surface p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -101,12 +101,12 @@ export function JobActivityCenter({
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-destructive">
                         {latest.error ?? "Processing failed without a stored error."}
                       </p>
-                      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                      <p className="mt-1 text-2xs leading-5 text-muted-foreground">
                         {jobStage(latest)} · {latest.id} · updated{" "}
                         {formatJobTime(latest.updatedAt)}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-md border border-[var(--divider)] px-2 py-1 text-xs text-muted-foreground">
+                    <span className="shrink-0 rounded-md border border-line px-2 py-1 text-xs text-muted-foreground">
                       {group.jobs.length}
                     </span>
                   </div>
@@ -138,7 +138,7 @@ export function JobActivityCenter({
             })}
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)] p-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed border-line bg-surface p-3 text-sm text-muted-foreground">
             No failed meeting jobs need recovery.
           </div>
         )}
@@ -146,14 +146,14 @@ export function JobActivityCenter({
       <div className="ms-scrollbar grid max-h-72 gap-2 overflow-y-auto">
         {jobs.length ? (
           jobs.map((job) => (
-            <article key={job.id} className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+            <article key={job.id} className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="truncate font-medium">{job.name}</span>
                 <span className="capitalize text-muted-foreground">
                   {job.status}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
                 <span>{jobStage(job)}</span>
                 <span className="font-mono">{job.id}</span>
                 <span>updated {formatJobTime(job.updatedAt)}</span>

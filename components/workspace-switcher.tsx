@@ -51,7 +51,7 @@ export function WorkspaceSwitcher({
 
   if (status === "error" && !me) {
     return (
-      <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-[var(--divider)] px-2 py-1.5 text-xs text-muted-foreground">
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-line px-2 py-1.5 text-xs text-muted-foreground">
         <span className="truncate">{t.workspaceLoadFailed}</span>
         <Button
           variant="ghost"
@@ -69,7 +69,7 @@ export function WorkspaceSwitcher({
   if (!me) {
     return (
       <div
-        className="mt-2 flex h-9 items-center gap-2 rounded-md border border-[var(--divider)] px-2 text-xs text-muted-foreground"
+        className="mt-2 flex h-9 items-center gap-2 rounded-md border border-line px-2 text-xs text-muted-foreground"
         aria-busy="true"
       >
         <Loader2Icon aria-hidden="true" className="size-3.5 animate-spin" />
@@ -137,15 +137,15 @@ export function WorkspaceSwitcher({
             <button
               type="button"
               aria-label={t.workspaceSwitchAction}
-              className="mt-2 flex w-full min-w-0 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 py-1.5 text-start hover:bg-[var(--sidebar-accent)]"
+              className="mt-2 flex w-full min-w-0 items-center gap-2 rounded-md border border-line bg-surface px-2 py-1.5 text-start hover:bg-surface-3"
             />
           }
         >
-          <span className="grid size-6 shrink-0 place-items-center rounded bg-[var(--primary)]/10 text-xs font-semibold text-[var(--primary)]">
+          <span className="grid size-6 shrink-0 place-items-center rounded bg-brand/10 text-xs font-semibold text-brand-text">
             {(activeWorkspace?.name ?? "?").slice(0, 1).toUpperCase()}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+            <span className="block text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
               {t.workspaceSwitcherLabel}
             </span>
             <bdi className="block truncate text-sm font-medium text-foreground">

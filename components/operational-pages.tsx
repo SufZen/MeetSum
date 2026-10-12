@@ -153,10 +153,10 @@ type RevealedWebhookSecret = {
 const WEBHOOK_RETRYABLE_STATUSES = new Set(["failed", "cancelled"])
 
 function webhookDeliveryBadgeClass(status: string) {
-  if (status === "sent") return "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+  if (status === "sent") return "rounded-md bg-brand-soft text-brand-text"
   if (status === "failed") return "rounded-md bg-destructive/10 text-destructive"
   if (status === "retrying") return "rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300"
-  return "rounded-md bg-[var(--surface)] text-muted-foreground"
+  return "rounded-md bg-surface text-muted-foreground"
 }
 
 type MediaAssetView = {
@@ -325,11 +325,11 @@ function PageFrame({
   children: ReactNode
 }) {
   return (
-    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:h-[calc(100svh-3.5rem)] lg:p-5">
+    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-surface-2 p-3 lg:h-[calc(100svh-3.5rem)] lg:p-5">
       <div className="mx-auto grid max-w-7xl gap-4">
         <header className="flex flex-col gap-3 px-1 py-1 lg:flex-row lg:items-end lg:justify-between">
           <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+          <div className="text-xs font-semibold uppercase tracking-wide text-brand-text">
             {eyebrow}
           </div>
           <h1 className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
@@ -363,7 +363,7 @@ function OpsCard({
     <section className="ms-card p-3.5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="grid size-8 place-items-center rounded-md bg-[var(--selected)] text-[var(--primary)]">
+          <div className="grid size-8 place-items-center rounded-md bg-brand-soft text-brand-text">
             <Icon aria-hidden="true" className="size-4" />
           </div>
           <div>
@@ -372,7 +372,7 @@ function OpsCard({
           </div>
         </div>
         {status && (
-          <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">{status}</Badge>
+          <Badge className="rounded-md bg-brand-soft text-brand-text">{status}</Badge>
         )}
       </div>
       {children && <div className="mt-4">{children}</div>}
@@ -394,7 +394,7 @@ function ManualBlock({
         {items.map((item) => (
           <div
             key={item}
-            className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-muted-foreground"
+            className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm leading-6 text-muted-foreground"
           >
             {item}
           </div>
@@ -414,7 +414,7 @@ function SettingRow({
   children: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface-2 p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-foreground">{title}</div>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">
@@ -1134,13 +1134,13 @@ export function OperationalPage({
               }
             >
               <div className="grid gap-2 text-sm text-muted-foreground">
-                <div className="flex items-center justify-between rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                <div className="flex items-center justify-between rounded-lg border border-line bg-surface-2 p-3">
                   <span>Recording / transcript / smart notes readiness</span>
                   <Badge
                     variant="outline"
                     className={
                       meetArtifacts?.setup?.authorized
-                        ? "rounded-md border-[var(--status-success)] text-[var(--status-success)]"
+                        ? "rounded-md border-ok text-ok-text"
                         : "rounded-md"
                     }
                   >
@@ -1148,30 +1148,30 @@ export function OperationalPage({
                   </Badge>
                 </div>
                 {meetArtifacts?.setup?.message ? (
-                  <div className="rounded-md border border-[var(--status-warning)]/40 bg-[var(--surface-subtle)] px-3 py-2 text-xs leading-5 text-[var(--status-warning)]">
+                  <div className="rounded-md border border-warn/40 bg-surface-2 px-3 py-2 text-xs leading-5 text-warn-text">
                     {meetArtifacts.setup.message}
                   </div>
                 ) : null}
                 {meetArtifactsError ? (
-                  <div className="rounded-md border border-[var(--status-error)]/40 bg-[var(--tag-action)] px-3 py-2 text-xs leading-5 text-[var(--tag-action-fg)]">
+                  <div className="rounded-md border border-danger/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
                     {meetArtifactsError}
                   </div>
                 ) : null}
                 {meetArtifacts ? (
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                    <div className="rounded-md border border-line bg-surface-2 p-2">
                       <div className="text-xs text-muted-foreground">Live records</div>
                       <div className="mt-1 font-semibold text-foreground">
                         {meetArtifacts.conferenceRecords.length}
                       </div>
                     </div>
-                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                    <div className="rounded-md border border-line bg-surface-2 p-2">
                       <div className="text-xs text-muted-foreground">Persisted</div>
                       <div className="mt-1 font-semibold text-foreground">
                         {meetArtifacts.persistedRecords.length}
                       </div>
                     </div>
-                    <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2">
+                    <div className="rounded-md border border-line bg-surface-2 p-2">
                       <div className="text-xs text-muted-foreground">Artifacts</div>
                       <div className="mt-1 font-semibold text-foreground">
                         {meetArtifacts.persistedRecords.reduce(
@@ -1200,7 +1200,7 @@ export function OperationalPage({
                     {meetArtifacts.persistedRecords.slice(0, 4).map((record) => (
                       <div
                         key={record.id}
-                        className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                        className="rounded-md border border-line bg-surface-2 p-3"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -1222,7 +1222,7 @@ export function OperationalPage({
                             record.artifacts.slice(0, 5).map((artifact) => (
                               <span
                                 key={artifact.id}
-                                className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]"
+                                className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text"
                               >
                                 {formatArtifactType(artifact.artifactType)}
                               </span>
@@ -1266,15 +1266,15 @@ export function OperationalPage({
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(
                   [
-                    ["Completed", meetingTotals?.completed, "bg-[var(--status-success)]/10 text-[var(--status-success)]"],
-                    ["Processing", meetingTotals?.processing, "bg-[var(--primary)]/10 text-[var(--primary)]"],
+                    ["Completed", meetingTotals?.completed, "bg-ok/10 text-ok-text"],
+                    ["Processing", meetingTotals?.processing, "bg-brand/10 text-brand-text"],
                     ["Failed", meetingTotals?.failed, "bg-destructive/10 text-destructive"],
-                    ["Scheduled", meetingTotals?.scheduled, "bg-[var(--muted)]/50 text-muted-foreground"],
+                    ["Scheduled", meetingTotals?.scheduled, "bg-surface-2/50 text-muted-foreground"],
                   ] as const
                 ).map(([label, count, classes]) => (
                   <div
                     key={label}
-                    className={`rounded-lg border border-[var(--divider)] p-3 ${classes}`}
+                    className={`rounded-lg border border-line p-3 ${classes}`}
                   >
                     <div className="text-xl font-semibold">{count ?? "—"}</div>
                     <div className="text-xs">{label}</div>
@@ -1339,7 +1339,7 @@ export function OperationalPage({
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <select
-                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground"
+                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground"
                 value={filterRoom}
                 onChange={(e) => setFilterRoom(e.target.value)}
               >
@@ -1349,19 +1349,19 @@ export function OperationalPage({
                 ))}
               </select>
               <input
-                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
+                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
                 placeholder="Filter by tag..."
                 value={filterTag}
                 onChange={(e) => setFilterTag(e.target.value)}
               />
               <input
-                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
+                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
                 placeholder="Filter by participant..."
                 value={filterParticipant}
                 onChange={(e) => setFilterParticipant(e.target.value)}
               />
               <select
-                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 py-1.5 text-xs text-foreground"
+                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground"
                 value={filterLanguage}
                 onChange={(e) => setFilterLanguage(e.target.value)}
               >
@@ -1374,7 +1374,7 @@ export function OperationalPage({
               </select>
               {(filterRoom || filterTag || filterParticipant || filterLanguage) ? (
                 <button
-                  className="text-xs text-[var(--primary)] hover:underline"
+                  className="text-xs text-brand-text hover:underline"
                   onClick={() => { setFilterRoom(""); setFilterTag(""); setFilterParticipant(""); setFilterLanguage("") }}
                   type="button"
                 >
@@ -1384,10 +1384,10 @@ export function OperationalPage({
             </div>
             <div className="mt-3 grid gap-2">
               {memoryResults.slice(0, 8).map((meeting) => (
-                <div key={meeting.id} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                <div key={meeting.id} className="rounded-lg border border-line bg-surface-2 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 truncate text-sm font-semibold text-foreground">{meeting.title}</div>
-                    <span className="shrink-0 rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] text-[var(--primary)]">
+                    <span className="shrink-0 rounded-sm bg-brand-soft px-2 py-0.5 text-2xs text-brand-text">
                       {meeting.status}
                     </span>
                   </div>
@@ -1398,10 +1398,10 @@ export function OperationalPage({
                     <div className="mt-2 grid gap-1.5">
                       {meeting.matches.slice(0, 3).map((match, index) => (
                         <div
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 py-1.5 text-xs leading-5"
+                          className="rounded-md border border-line bg-surface px-2 py-1.5 text-xs leading-5"
                           key={`${match.source}-${match.segmentId ?? match.actionItemId ?? index}`}
                         >
-                          <div className="mb-0.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[var(--primary)]">
+                          <div className="mb-0.5 flex items-center gap-2 text-2xs font-medium uppercase tracking-wide text-brand-text">
                             <span>{formatMemorySource(match.source)}</span>
                             {formatMemoryTime(match.startMs) ? (
                               <span>{formatMemoryTime(match.startMs)}</span>
@@ -1416,12 +1416,12 @@ export function OperationalPage({
                   ) : null}
                   <div className="mt-2 flex flex-wrap gap-1">
                     {meeting.matchCount ? (
-                      <span className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] text-[var(--primary)]">
+                      <span className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs text-brand-text">
                         {meeting.matchCount} matches
                       </span>
                     ) : null}
                     {meeting.tags.slice(0, 4).map((tag) => (
-                      <span key={tag} className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                      <span key={tag} className="rounded-sm bg-surface px-2 py-0.5 text-2xs text-muted-foreground">
                         {tag}
                       </span>
                     ))}
@@ -1429,7 +1429,7 @@ export function OperationalPage({
                 </div>
               ))}
               {!memoryResults.length ? (
-                <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
                   No indexed meeting memory matched this search.
                 </div>
               ) : null}
@@ -1452,27 +1452,27 @@ export function OperationalPage({
               />
               <Button onClick={askMemory}>Ask memory</Button>
               {memoryAnswer ? (
-                <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm leading-6">
+                <div className="rounded-lg border border-line bg-surface-2 p-3 text-sm leading-6">
                   <div className="whitespace-pre-wrap">{memoryAnswer}</div>
                   {memoryCitations.length ? (
-                    <div className="mt-3 grid gap-2 border-t border-[var(--divider)] pt-3">
+                    <div className="mt-3 grid gap-2 border-t border-line pt-3">
                       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Citations
                       </div>
                       {memoryCitations.slice(0, 6).map((citation, index) => (
                         <div
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+                          className="rounded-md border border-line bg-surface p-2 text-xs"
                           key={`${citation.meetingId}-${citation.source}-${citation.segmentId ?? citation.actionItemId ?? index}`}
                         >
                           <div className="flex flex-wrap items-center gap-2 font-medium text-foreground">
                             <button
-                              className="text-left text-[var(--primary)] hover:underline"
+                              className="text-start text-brand-text hover:underline"
                               onClick={() => onOpenMeeting(citation.meetingId)}
                               type="button"
                             >
                               {citation.meetingTitle}
                             </button>
-                            <Badge variant="outline" className="rounded-sm text-[10px]">
+                            <Badge variant="outline" className="rounded-sm text-2xs">
                               {formatMemorySource(citation.source)}
                             </Badge>
                             {formatMemoryTime(citation.startMs) ? (
@@ -1502,7 +1502,7 @@ export function OperationalPage({
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {rooms.map((room) => (
                   <button
-                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-left transition hover:border-[var(--primary)]/50 hover:bg-[var(--selected)]"
+                    className="rounded-lg border border-line bg-surface-2 p-3 text-start transition hover:border-brand/50 hover:bg-brand-soft"
                     key={room.id}
                     onClick={() => openRoom(room.id)}
                     type="button"
@@ -1519,21 +1519,21 @@ export function OperationalPage({
                   </button>
                 ))}
                 {!rooms.length ? (
-                  <div className="rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-dashed border-line p-4 text-sm text-muted-foreground">
                     No rooms yet. Create one below to start grouping meetings.
                   </div>
                 ) : null}
                 <div className="col-span-full mt-1">
                   <div className="flex items-center gap-2">
                     <input
-                      className="flex-1 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-[var(--primary)] focus:outline-none"
+                      className="flex-1 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-brand focus:outline-none"
                       placeholder="New room name..."
                       value={newRoomName}
                       onChange={(e) => setNewRoomName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") void createRoom() }}
                     />
                     <button
-                      className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] transition hover:opacity-90 disabled:opacity-50"
+                      className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-on-brand transition hover:opacity-90 disabled:opacity-50"
                       disabled={!newRoomName.trim() || roomCreating}
                       onClick={() => void createRoom()}
                       type="button"
@@ -1544,12 +1544,12 @@ export function OperationalPage({
                 </div>
               </div>
               {roomLoading ? (
-                <div className="mt-4 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                <div className="mt-4 rounded-lg border border-line bg-surface-2 p-4 text-sm text-muted-foreground">
                   Loading room context...
                 </div>
               ) : roomDetail ? (
                 <div className="mt-4 grid gap-4">
-                  <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4">
+                  <div className="rounded-lg border border-line bg-surface-2 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="text-base font-semibold text-foreground">
@@ -1574,11 +1574,11 @@ export function OperationalPage({
                         ["Meetings", roomDetail.stats.meetings],
                       ].map(([label, value]) => (
                         <div
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3"
+                          className="rounded-md border border-line bg-surface p-3"
                           key={label}
                         >
                           <div className="text-lg font-semibold">{value}</div>
-                          <div className="text-[11px] text-muted-foreground">{label}</div>
+                          <div className="text-2xs text-muted-foreground">{label}</div>
                         </div>
                       ))}
                     </div>
@@ -1589,7 +1589,7 @@ export function OperationalPage({
                       <div className="grid gap-2">
                         {roomDetail.meetings.slice(0, 6).map((meeting) => (
                           <div
-                            className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                            className="rounded-lg border border-line bg-surface-2 p-3"
                             key={meeting.id}
                           >
                             <div className="flex items-center justify-between gap-2">
@@ -1603,7 +1603,7 @@ export function OperationalPage({
                             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
                               {meeting.overview || "No summary yet."}
                             </p>
-                            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                            <div className="mt-2 flex flex-wrap gap-2 text-2xs text-muted-foreground">
                               <span>{formatShortDate(meeting.startedAt)}</span>
                               <span>{meeting.openTasks} open tasks</span>
                               <span>{meeting.participants} people</span>
@@ -1619,7 +1619,7 @@ export function OperationalPage({
                         <div className="grid gap-2">
                           {roomDetail.openTasks.slice(0, 5).map((task) => (
                             <div
-                              className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs"
+                              className="rounded-lg border border-line bg-surface-2 p-3 text-xs"
                               key={task.id}
                             >
                               <div className="font-medium text-foreground">{task.title}</div>
@@ -1630,7 +1630,7 @@ export function OperationalPage({
                             </div>
                           ))}
                           {!roomDetail.openTasks.length ? (
-                            <div className="rounded-lg border border-dashed border-[var(--divider)] p-3 text-xs text-muted-foreground">
+                            <div className="rounded-lg border border-dashed border-line p-3 text-xs text-muted-foreground">
                               No open tasks in this room.
                             </div>
                           ) : null}
@@ -1641,7 +1641,7 @@ export function OperationalPage({
                         <div className="flex flex-wrap gap-1.5">
                           {roomDetail.participants.slice(0, 8).map((participant) => (
                             <span
-                              className="rounded-sm bg-[var(--selected)] px-2 py-1 text-[11px] text-[var(--primary)]"
+                              className="rounded-sm bg-brand-soft px-2 py-1 text-2xs text-brand-text"
                               key={participant.email ?? participant.name}
                             >
                               {participant.name} · {participant.meetingCount}
@@ -1692,7 +1692,7 @@ export function OperationalPage({
                   disabled={webhookLoading}
                   onClick={createWebhookSubscription}
                 >
-                  <SendIcon data-icon="inline-start" className="size-4" />
+                  <SendIcon data-icon="inline-start" data-directional="" className="size-4" />
                   Add webhook
                 </Button>
               </div>
@@ -1708,11 +1708,11 @@ export function OperationalPage({
                 {webhookEvents.map((event) => (
                   <label
                     key={event.value}
-                    className="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2.5 text-xs font-medium text-foreground"
+                    className="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 text-xs font-medium text-foreground"
                   >
                     <input
                       type="checkbox"
-                      className="size-3.5 accent-[var(--primary)]"
+                      className="size-3.5 accent-brand"
                       checked={webhookEventSelection.includes(event.value)}
                       onChange={() => toggleWebhookEvent(event.value)}
                     />
@@ -1721,9 +1721,9 @@ export function OperationalPage({
                 ))}
               </div>
               {revealedWebhookSecret ? (
-                <div className="rounded-lg border border-[var(--primary)] bg-[var(--selected)] p-3">
+                <div className="rounded-lg border border-brand bg-brand-soft p-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <KeyRoundIcon className="size-4 text-[var(--primary)]" />
+                    <KeyRoundIcon className="size-4 text-brand-text" />
                     {revealedWebhookSecret.reason === "rotated"
                       ? "New signing secret"
                       : "Signing secret"}
@@ -1734,7 +1734,7 @@ export function OperationalPage({
                     x-meetsum-signature header (HMAC-SHA256 of the body) with it.
                   </p>
                   <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <code className="min-w-0 flex-1 break-all rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 py-1.5 font-mono text-xs text-foreground">
+                    <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface px-2 py-1.5 font-mono text-xs text-foreground">
                       {revealedWebhookSecret.secret}
                     </code>
                     <div className="flex shrink-0 gap-2">
@@ -1762,7 +1762,7 @@ export function OperationalPage({
                 {webhookSubscriptions.map((subscription) => (
                   <div
                     key={subscription.id}
-                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                    className="rounded-lg border border-line bg-surface-2 p-3"
                   >
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
@@ -1773,7 +1773,7 @@ export function OperationalPage({
                           {subscription.events.map((event) => (
                             <span
                               key={event}
-                              className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]"
+                              className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text"
                             >
                               {event}
                             </span>
@@ -1784,15 +1784,15 @@ export function OperationalPage({
                         <Badge
                           className={
                             subscription.enabled
-                              ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
-                              : "rounded-md bg-[var(--surface)] text-muted-foreground"
+                              ? "rounded-md bg-brand-soft text-brand-text"
+                              : "rounded-md bg-surface text-muted-foreground"
                           }
                         >
                           {subscription.enabled ? "enabled" : "paused"}
                         </Badge>
                         {subscription.secretRef === "global" ? (
                           <Badge
-                            className="rounded-md bg-[var(--surface)] text-muted-foreground"
+                            className="rounded-md bg-surface text-muted-foreground"
                             title="Signed with the shared WEBHOOK_SIGNING_SECRET. Rotate to give this webhook its own secret."
                           >
                             shared secret
@@ -1839,7 +1839,7 @@ export function OperationalPage({
                   </div>
                 ))}
                 {!webhookSubscriptions.length ? (
-                  <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
                     No webhook subscriptions yet. Add your n8n webhook URL or
                     another API endpoint to start receiving signed MeetSum
                     events.
@@ -1857,7 +1857,7 @@ export function OperationalPage({
               status={realizeOSStatus?.configured ? "configured" : "needs setup"}
             >
               <div className="grid gap-2">
-                <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm">
+                <div className="rounded-md border border-line bg-surface-2 p-3 text-sm">
                   <div className="font-medium text-foreground">
                     {realizeOSStatus?.configured
                       ? `${realizeOSStatus.baseUrl}${realizeOSStatus.path}`
@@ -1886,7 +1886,7 @@ export function OperationalPage({
                   {realizeOSExports.map((run) => (
                     <div
                       key={run.id}
-                      className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-2.5 text-xs"
+                      className="rounded-md border border-line bg-surface-2 p-2.5 text-xs"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-muted-foreground">
@@ -1895,10 +1895,10 @@ export function OperationalPage({
                         <Badge
                           className={
                             run.status === "sent"
-                              ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+                              ? "rounded-md bg-brand-soft text-brand-text"
                               : run.status === "failed"
                                 ? "rounded-md bg-destructive/10 text-destructive"
-                                : "rounded-md bg-[var(--surface)] text-muted-foreground"
+                                : "rounded-md bg-surface text-muted-foreground"
                           }
                         >
                           {run.status}
@@ -1911,10 +1911,10 @@ export function OperationalPage({
                       ) : null}
                       {run.response && Object.keys(run.response).length > 0 ? (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-[11px] font-medium text-[var(--primary)] hover:underline">
+                          <summary className="cursor-pointer text-2xs font-medium text-brand-text hover:underline">
                             Response payload
                           </summary>
-                          <pre className="mt-1.5 max-h-40 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-4 text-muted-foreground">
+                          <pre className="mt-1.5 max-h-40 overflow-auto rounded-md border border-line bg-surface p-2 font-mono text-2xs leading-4 text-muted-foreground">
                             {JSON.stringify(run.response, null, 2)}
                           </pre>
                         </details>
@@ -1946,7 +1946,7 @@ export function OperationalPage({
                     </div>
                   ))}
                   {!realizeOSExports.length ? (
-                    <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs text-muted-foreground">
+                    <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-xs text-muted-foreground">
                       No RealizeOS exports yet. Export a processed meeting to create the first auditable run.
                     </div>
                   ) : null}
@@ -1996,7 +1996,7 @@ export function OperationalPage({
               {webhookDeliveries.map((delivery) => (
                 <div
                   key={delivery.id}
-                  className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                  className="rounded-lg border border-line bg-surface-2 p-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-sm font-semibold text-foreground">
@@ -2017,10 +2017,10 @@ export function OperationalPage({
                   ) : null}
                   {delivery.responseBody ? (
                     <details className="mt-2">
-                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--primary)] hover:underline">
+                      <summary className="cursor-pointer text-2xs font-medium text-brand-text hover:underline">
                         Response body
                       </summary>
-                      <pre className="mt-1.5 max-h-32 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 font-mono text-[11px] leading-4 text-muted-foreground">
+                      <pre className="mt-1.5 max-h-32 overflow-auto rounded-md border border-line bg-surface p-2 font-mono text-2xs leading-4 text-muted-foreground">
                         {delivery.responseBody}
                       </pre>
                     </details>
@@ -2045,7 +2045,7 @@ export function OperationalPage({
                 </div>
               ))}
               {!webhookDeliveries.length ? (
-                <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
                   Delivery attempts will appear after a subscribed event fires.
                 </div>
               ) : null}
@@ -2147,7 +2147,7 @@ export function OperationalPage({
                 {mediaAssets.map((asset) => (
                   <div
                     key={asset.id}
-                    className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                    className="rounded-lg border border-line bg-surface-2 p-3"
                   >
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                       <div className="min-w-0">
@@ -2158,13 +2158,13 @@ export function OperationalPage({
                           {asset.meetingTitle}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1">
-                          <span className="rounded-sm bg-[var(--selected)] px-2 py-0.5 text-[11px] font-medium text-[var(--primary)]">
+                          <span className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text">
                             {asset.retention}
                           </span>
-                          <span className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                          <span className="rounded-sm bg-surface px-2 py-0.5 text-2xs text-muted-foreground">
                             {asset.contentType}
                           </span>
-                          <span className="rounded-sm bg-[var(--surface)] px-2 py-0.5 text-[11px] text-muted-foreground">
+                          <span className="rounded-sm bg-surface px-2 py-0.5 text-2xs text-muted-foreground">
                             {formatBytes(asset.sizeBytes)}
                           </span>
                         </div>
@@ -2182,7 +2182,7 @@ export function OperationalPage({
                   </div>
                 ))}
                 {!mediaAssets.length ? (
-                  <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
                     No stored media assets were found. Imported recordings and
                     uploads will appear here after processing starts.
                   </div>
@@ -2310,8 +2310,8 @@ export function OperationalPage({
               onClick={() => setSettingsSection(item)}
               className={
                 settingsSection === item || (!settingsSection && index === 0)
-                  ? "rounded-lg bg-[var(--selected)] px-3 py-2 text-left font-semibold text-[var(--primary)] rtl:text-right"
-                  : "rounded-lg px-3 py-2 text-left text-muted-foreground hover:bg-[var(--surface-subtle)] hover:text-foreground rtl:text-right"
+                  ? "rounded-lg bg-brand-soft px-3 py-2 text-start font-semibold text-brand-text"
+                  : "rounded-lg px-3 py-2 text-start text-muted-foreground hover:bg-surface-2 hover:text-foreground"
               }
             >
               {item}
@@ -2322,7 +2322,7 @@ export function OperationalPage({
           {settingsReadOnly ? (
             <div
               role="status"
-              className="flex items-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm text-muted-foreground"
+              className="flex items-center gap-2 rounded-lg border border-line bg-surface p-3 text-sm text-muted-foreground"
             >
               <ShieldCheckIcon aria-hidden="true" className="size-4 shrink-0" />
               {t.settingsReadOnly}
@@ -2440,7 +2440,7 @@ export function OperationalPage({
                     ))}
                   </NativeSelect>
                 </SettingRow>
-                <div className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
                   {providers.map((provider) => (
                     <div
                       key={provider.id}
@@ -2466,7 +2466,7 @@ export function OperationalPage({
                   title="Online meeting capture"
                   description="MeetSum imports native recordings/transcripts after meetings instead of joining as a bot."
                 >
-                  <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+                  <Badge className="rounded-md bg-brand-soft text-brand-text">
                     artifacts first
                   </Badge>
                 </SettingRow>
@@ -2507,7 +2507,7 @@ export function OperationalPage({
                   title="Webhook signing"
                   description="Outbound events use x-meetsum-signature. The signing secret is stored only in production env."
                 >
-                  <Badge className="rounded-md bg-[var(--selected)] text-[var(--primary)]">
+                  <Badge className="rounded-md bg-brand-soft text-brand-text">
                     enabled
                   </Badge>
                 </SettingRow>

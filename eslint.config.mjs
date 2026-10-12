@@ -16,6 +16,9 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "desktop-recorder/dist/**",
     "desktop-recorder/release/**",
+    // Static design-system showcase (plain browser JS, not app source).
+    "design-system/showcase/**",
+    "public/ds/**",
   ]),
 ]);
 

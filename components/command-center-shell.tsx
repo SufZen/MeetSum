@@ -1074,7 +1074,7 @@ export function CommandCenterShell({
   }
 
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-[var(--surface-subtle)] lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_270px]">
+    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_270px]">
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
@@ -1195,7 +1195,7 @@ export function CommandCenterShell({
           />
           {shareOpen ? (
             <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-lg rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+              <section className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold">Share meeting</h2>
@@ -1209,7 +1209,7 @@ export function CommandCenterShell({
                   </Button>
                 </div>
                 {sharePrivateConfirm ? (
-                  <div className="mt-4 grid gap-3 rounded-md border border-[var(--status-warning)]/40 bg-[var(--tag-action)] p-3 text-sm leading-5 text-[var(--tag-action-fg)]">
+                  <div className="mt-4 grid gap-3 rounded-md border border-warn/40 bg-warn-soft p-3 text-sm leading-5 text-warn-text">
                     <p>{dictionary.sharePrivateWarning}</p>
                     <div>
                       <Button onClick={() => void createShareLink()}>
@@ -1218,7 +1218,7 @@ export function CommandCenterShell({
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+                  <div className="mt-4 rounded-md border border-line bg-surface-2 p-3">
                     <input
                       className="w-full bg-transparent text-sm outline-none"
                       dir="ltr"
@@ -1228,7 +1228,7 @@ export function CommandCenterShell({
                   </div>
                 )}
                 {selectedMeeting && !selectedMeeting.summary?.overview ? (
-                  <div className="mt-3 rounded-md border border-[var(--status-warning)]/40 bg-[var(--tag-action)] px-3 py-2 text-xs leading-5 text-[var(--tag-action-fg)]">
+                  <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
                     This meeting has no generated summary yet. The public page
                     will still open, but it may only show metadata, participants,
                     and any transcript that exists.
@@ -1278,7 +1278,7 @@ export function CommandCenterShell({
           ) : null}
           {payloadPreviewOpen ? (
             <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="flex w-full max-w-3xl flex-col rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl" style={{ maxHeight: "80vh" }}>
+              <section className="flex w-full max-w-3xl flex-col rounded-lg border border-line bg-surface p-5 shadow-xl" style={{ maxHeight: "80vh" }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold">RealizeOS payload preview</h2>
@@ -1290,8 +1290,8 @@ export function CommandCenterShell({
                     Close
                   </Button>
                 </div>
-                <div className="ms-scrollbar mt-4 min-h-0 flex-1 overflow-auto rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
-                  <pre className="whitespace-pre-wrap text-xs leading-5 text-[var(--text-secondary)]">
+                <div className="ms-scrollbar mt-4 min-h-0 flex-1 overflow-auto rounded-md border border-line bg-surface-2 p-3">
+                  <pre className="whitespace-pre-wrap text-xs leading-5 text-fg-2">
                     {payloadPreview}
                   </pre>
                 </div>
@@ -1314,7 +1314,7 @@ export function CommandCenterShell({
           ) : null}
           {participantsOpen ? (
             <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-2xl rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+              <section className="w-full max-w-2xl rounded-lg border border-line bg-surface p-5 shadow-xl">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold">Participants</h2>
@@ -1334,13 +1334,13 @@ export function CommandCenterShell({
                 <div className="mt-4 max-h-[55vh] space-y-3 overflow-y-auto">
                   {participants.length ? participants.map((participant) => (
                     <div
-                      className="grid gap-2 rounded-md border border-[var(--divider)] p-3 md:grid-cols-[1fr_1fr_110px_auto]"
+                      className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_1fr_110px_auto]"
                       key={participant.id}
                     >
                       <label className="grid gap-1 text-xs font-medium text-muted-foreground">
                         Name
                         <input
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
                           value={participant.name}
                           onChange={(event) =>
                             setParticipants((current) =>
@@ -1356,7 +1356,7 @@ export function CommandCenterShell({
                       <label className="grid gap-1 text-xs font-medium text-muted-foreground">
                         Email
                         <input
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
                           placeholder="email"
                           value={participant.email ?? ""}
                           onChange={(event) =>
@@ -1373,7 +1373,7 @@ export function CommandCenterShell({
                       <label className="grid gap-1 text-xs font-medium text-muted-foreground">
                         Speaker
                         <input
-                          className="rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm text-foreground"
+                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
                           placeholder="Speaker"
                           value={participant.speakerLabel ?? ""}
                           onChange={(event) =>
@@ -1396,7 +1396,7 @@ export function CommandCenterShell({
                       </Button>
                     </div>
                   )) : (
-                    <div className="rounded-md border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
+                    <div className="rounded-md border border-dashed border-line p-4 text-sm text-muted-foreground">
                       No participants were found for this meeting yet.
                     </div>
                   )}
@@ -1406,13 +1406,13 @@ export function CommandCenterShell({
           ) : null}
           {tagsOpen ? (
             <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-md rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-5 shadow-xl">
+              <section className="w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-xl">
                 <h2 className="text-lg font-semibold">Edit tags</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Separate tags with commas.
                 </p>
                 <textarea
-                  className="mt-4 min-h-28 w-full rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm"
+                  className="mt-4 min-h-28 w-full rounded-md border border-line bg-surface p-3 text-sm"
                   value={tagDraft}
                   onChange={(event) => setTagDraft(event.target.value)}
                 />

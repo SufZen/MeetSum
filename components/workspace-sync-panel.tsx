@@ -70,7 +70,7 @@ export function WorkspaceSyncPanel({
           {status ? (status.google.subject ?? "Not configured") : "Checking…"}
         </span>
       </div>
-      <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs leading-5 text-muted-foreground">
+      <div className="rounded-lg border border-line bg-surface-2 p-3 text-xs leading-5 text-muted-foreground">
         <div>
           Auth:{" "}
           <span className="font-medium text-foreground">
@@ -91,7 +91,7 @@ export function WorkspaceSyncPanel({
       {status && !status.google.configured && (
         <Link
           href="/api/auth/google/start?returnTo=/en"
-          className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-foreground)] hover:bg-[var(--primary)]/90"
+          className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-brand px-3 text-sm font-medium text-on-brand hover:bg-brand/90"
         >
           Reconnect Google
         </Link>
@@ -119,9 +119,9 @@ export function WorkspaceSyncPanel({
 
       {/* Job health summary */}
       {status?.jobs && (status.jobs.queued > 0 || status.jobs.active > 0 || status.jobs.failed > 0) && (
-        <div className="flex items-center gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-xs">
+        <div className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs">
           {status.jobs.active > 0 && (
-            <span className="flex items-center gap-1 text-[var(--primary)]">
+            <span className="flex items-center gap-1 text-brand-text">
               <Loader2Icon aria-hidden="true" className="size-3 animate-spin" />
               {status.jobs.active} active
             </span>
@@ -142,7 +142,7 @@ export function WorkspaceSyncPanel({
       )}
       <div className="grid gap-2">
         {(status?.sync.length ? status.sync : []).map((item) => (
-            <div key={item.source} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+            <div key={item.source} className="rounded-lg border border-line bg-surface-2 p-3">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-medium capitalize">{item.source}</span>
               <span className="text-muted-foreground">{item.status}</span>

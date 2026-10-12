@@ -71,9 +71,11 @@
   --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
 
   /* ---- 5. Type --------------------------------------------------------- */
-  --font-ui: "IBM Plex Sans", "IBM Plex Sans Hebrew", ui-sans-serif, system-ui, sans-serif;
-  --font-he: "IBM Plex Sans Hebrew", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* next/font (app layouts) sets --font-plex-*; the literal family names are
+     the fallback for the static showcase. */
+  --font-ui: var(--font-plex-sans, "IBM Plex Sans"), var(--font-plex-hebrew, "IBM Plex Sans Hebrew"), ui-sans-serif, system-ui, sans-serif;
+  --font-he: var(--font-plex-hebrew, "IBM Plex Sans Hebrew"), var(--font-plex-sans, "IBM Plex Sans"), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, "SFMono-Regular", Menlo, monospace;
   --font-label: var(--font-mono);             /* eyebrows, day headers; Hebrew swaps to --font-he */
 
   /* size / line-height pairs. Body = 14px. html stays 16px (drop the
@@ -190,26 +192,6 @@
   --sidebar-accent-foreground: var(--fg);
   --sidebar-border: var(--line);
   --sidebar-ring: var(--focus);
-
-  /* legacy names still referenced in components (remove after migration) */
-  --divider: var(--line);
-  --surface-subtle: var(--surface-2);
-  --rail: var(--surface-2);
-  --selected: var(--brand-soft);
-  --app-bg: var(--canvas);
-  --text-primary: var(--fg);
-  --text-secondary: var(--fg-2);
-  --text-muted: var(--fg-3);
-  --surface-hover: var(--surface-3);
-  --status-info: var(--info);
-  --status-warning: var(--warn);
-  --status-success: var(--ok);
-  --status-error: var(--danger);
-  --status-ai: var(--ai);
-  --tag-technical: var(--info-soft);   --tag-technical-fg: var(--info-text);
-  --tag-business: var(--brand-soft);   --tag-business-fg: var(--brand-text);
-  --tag-action: var(--warn-soft);      --tag-action-fg: var(--warn-text);
-  --tag-ai: var(--ai-soft);            --tag-ai-fg: var(--ai-text);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
