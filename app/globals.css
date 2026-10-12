@@ -72,3 +72,30 @@
     word-break: normal;
   }
 }
+
+/* ---- Σ mark (components/ui/sigma-mark.tsx) ------------------------------
+   Resting state sums the four speaker bars into Σ; data-state="lanes" lays
+   them out as speaker lanes. Identity colours survive forced-colours mode. */
+@layer components {
+  .ms-sigma {
+    flex: none;
+    overflow: visible;
+    forced-color-adjust: none;
+  }
+  .ms-sigma rect {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform var(--dur-sigma) var(--ease-emphasized);
+  }
+  .ms-sigma [data-bar="1"] { fill: var(--spk-1); }
+  .ms-sigma [data-bar="2"] { fill: var(--spk-2); transform: translate(-3.5px, -1px) rotate(41.6deg) scaleX(0.67); }
+  .ms-sigma [data-bar="3"] { fill: var(--spk-3); transform: translate(-3.5px, 1px) rotate(-41.6deg) scaleX(0.67); }
+  .ms-sigma [data-bar="4"] { fill: var(--spk-4); }
+  .ms-sigma[data-state="lanes"] [data-bar="1"] { transform: translateX(-3px) scaleX(0.62); }
+  .ms-sigma[data-state="lanes"] [data-bar="2"] { transform: translateX(3px) scaleX(0.5); }
+  .ms-sigma[data-state="lanes"] [data-bar="3"] { transform: translateX(-1px) scaleX(0.78); }
+  .ms-sigma[data-state="lanes"] [data-bar="4"] { transform: translateX(4px) scaleX(0.42); }
+  @media (prefers-reduced-motion: reduce) {
+    .ms-sigma rect { transition: none; }
+  }
+}

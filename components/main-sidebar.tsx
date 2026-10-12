@@ -8,12 +8,13 @@ import {
   FolderPlusIcon,
   SettingsIcon,
   WorkflowIcon,
-  AudioWaveformIcon,
   ZapIcon,
   ChevronDownIcon,
   LogOutIcon,
   ShieldCheckIcon,
 } from "lucide-react"
+
+import { SigmaMark } from "@/components/ui/sigma-mark"
 import Link from "next/link"
 import { useRef } from "react"
 
@@ -100,9 +101,7 @@ export function MainSidebar({
   return (
     <aside className="flex min-h-0 flex-col border-e border-line bg-canvas p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
       <div className="flex h-11 items-center justify-center gap-3 px-1 lg:h-12 lg:justify-start">
-        <div className="grid size-7 place-items-center rounded-md bg-brand/10 text-brand-text">
-          <AudioWaveformIcon aria-hidden="true" className="size-4" />
-        </div>
+        <SigmaMark className="size-6" />
         <div className="text-lg font-semibold tracking-tight text-foreground">MeetSum</div>
       </div>
       {user ? <WorkspaceSwitcher dictionary={dictionary} /> : null}

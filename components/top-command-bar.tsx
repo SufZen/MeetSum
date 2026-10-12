@@ -7,7 +7,6 @@ import {
   MoonIcon,
   RefreshCwIcon,
   SearchIcon,
-  SparklesIcon,
   SunIcon,
   UserPlusIcon,
 } from "lucide-react"
@@ -15,6 +14,7 @@ import {
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { MediaIngestionDrawer } from "@/components/media-ingestion-drawer"
 import { Button } from "@/components/ui/button"
+import { CitedMark } from "@/components/ui/meeting-atoms"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -197,7 +197,7 @@ export function TopCommandBar({
           disabled
           title="Provider details live in Google Workspace"
         >
-          <SparklesIcon aria-hidden="true" className="size-5" />
+          <CitedMark className="size-5" />
           <span className="sr-only">AI status</span>
         </Button>
         <LanguageSwitcher locale={locale} />

@@ -5,13 +5,13 @@ import {
   FileTextIcon,
   MoreHorizontalIcon,
   NotepadTextIcon,
-  SparklesIcon,
 } from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CitedMark } from "@/components/ui/meeting-atoms"
 import type {
   JobRecord,
   MeetingRecord,
@@ -306,13 +306,13 @@ export function MeetingRightRail({
             </p>
           </div>
           <Button
-            variant="outline"
+            variant="ai"
             size="sm"
-            className="h-8 gap-1.5"
+            className="gap-1.5"
             onClick={onSuggestAgents}
             disabled={!meeting || suggestingAgents}
           >
-            <SparklesIcon aria-hidden="true" className="size-3.5" />
+            <CitedMark className="size-3.5" />
             Suggest
           </Button>
         </div>

@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 
 import "../../globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { DirectionProvider } from "@/components/ui/direction"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { fontVariables } from "@/lib/fonts"
 import { cn } from "@/lib/utils"
@@ -37,7 +38,9 @@ export default async function ShareLayout({
       className={cn("antialiased", fontVariables)}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <DirectionProvider direction={dir}>
+          <ThemeProvider>{children}</ThemeProvider>
+        </DirectionProvider>
       </body>
     </html>
   )

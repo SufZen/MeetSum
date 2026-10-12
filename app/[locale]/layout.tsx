@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 
 import "../globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { DirectionProvider } from "@/components/ui/direction"
 import { Toaster } from "@/components/ui/sonner"
 import {
   getLocaleDirection,
@@ -31,19 +32,22 @@ export default async function LocaleLayout({
   }
 
   const supportedLocale = locale as SupportedLocale
+  const dir = getLocaleDirection(supportedLocale)
 
   return (
     <html
       lang={supportedLocale}
-      dir={getLocaleDirection(supportedLocale)}
+      dir={dir}
       suppressHydrationWarning
       className={cn("antialiased", fontVariables)}
     >
       <body>
-        <ThemeProvider>
-          {children}
-          <Toaster position="top-right" richColors />
-        </ThemeProvider>
+        <DirectionProvider direction={dir}>
+          <ThemeProvider>
+            {children}
+            <Toaster dir={dir} richColors />
+          </ThemeProvider>
+        </DirectionProvider>
       </body>
     </html>
   )

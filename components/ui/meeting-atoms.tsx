@@ -1,9 +1,7 @@
 /**
- * MeetSum Cadence — reference implementations of the meeting atoms.
- *
- * These are the components generic kits don't have. They depend only on the
- * Cadence tokens (design-system/tokens.css registered in @theme) and lucide.
- * When adopting, move each export into components/ui/<name>.tsx unchanged.
+ * MeetSum Cadence meeting atoms: the components generic kits don't have.
+ * They depend only on the Cadence tokens (design-system/tokens.css, registered
+ * in @theme) and lucide. Spec: design-system/README.md §6.
  *
  * Bidi rules baked in:
  *   - timecodes are always LTR-isolated, mono and tabular
@@ -135,7 +133,7 @@ export function provenanceGradient(colors: SpeakerColor[]): string {
 }
 
 const avatarVariants = cva(
-  "inline-grid shrink-0 place-items-center rounded-full font-semibold tracking-normal text-[color-mix(in_oklch,var(--c)_70%,var(--fg))] bg-[color-mix(in_oklch,var(--c)_var(--spk-soft-mix),var(--surface))] shadow-[inset_0_0_0_1.5px_color-mix(in_oklch,var(--c)_55%,transparent)]",
+  "inline-grid shrink-0 place-items-center rounded-full font-semibold tracking-normal forced-color-adjust-none text-[color-mix(in_oklch,var(--c)_70%,var(--fg))] bg-[color-mix(in_oklch,var(--c)_var(--spk-soft-mix),var(--surface))] shadow-[inset_0_0_0_1.5px_color-mix(in_oklch,var(--c)_55%,transparent)]",
   {
     variants: {
       size: {
@@ -219,7 +217,7 @@ export function LiveDot({ className }: { className?: string }) {
   return (
     <span
       aria-hidden
-      className={cn("size-2 shrink-0 rounded-full bg-live animate-ms-live motion-reduce:animate-none motion-reduce:ring-2 motion-reduce:ring-live/35", className)}
+      className={cn("size-2 shrink-0 rounded-full bg-live forced-color-adjust-none animate-ms-live motion-reduce:animate-none motion-reduce:ring-2 motion-reduce:ring-live/35", className)}
     />
   )
 }

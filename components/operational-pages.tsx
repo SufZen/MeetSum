@@ -12,11 +12,10 @@ import {
   SearchIcon,
   SendIcon,
   ShieldCheckIcon,
-  SparklesIcon,
   Trash2Icon,
   WorkflowIcon,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode, SVGProps } from "react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
@@ -25,6 +24,7 @@ import { JobRecoveryPanel } from "@/components/job-recovery-panel"
 import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provider-health-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CitedMark } from "@/components/ui/meeting-atoms"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
@@ -353,7 +353,7 @@ function OpsCard({
   status,
   children,
 }: {
-  icon: typeof SearchIcon
+  icon: ComponentType<SVGProps<SVGSVGElement>>
   title: string
   description: string
   status?: string
@@ -1436,7 +1436,7 @@ export function OperationalPage({
             </div>
           </OpsCard>
           <OpsCard
-            icon={SparklesIcon}
+            icon={CitedMark}
             title="Ask all meetings"
             description="Ask across indexed summaries and transcripts. Answers include server-side citations when available."
             status={
@@ -2413,7 +2413,7 @@ export function OperationalPage({
           ) : null}
           {settingsSection === "AI settings" ? (
             <OpsCard
-              icon={SparklesIcon}
+              icon={CitedMark}
               title="AI settings"
               description="Choose preferred intelligence behavior. Active provider still depends on production secrets and environment validation."
               status={providers.find((provider) => provider.id === "gemini")?.mode ?? "Gemini"}

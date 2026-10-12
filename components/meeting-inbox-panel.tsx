@@ -2,14 +2,12 @@ import {
   CalendarDaysIcon,
   SearchIcon,
   SlidersHorizontalIcon,
-  CheckCircle2Icon,
-  Clock3Icon,
-  CircleAlertIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { StatusPill } from "@/components/ui/meeting-atoms"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { meetingDurationLabel } from "@/lib/meetings/duration"
@@ -45,13 +43,13 @@ function sourceMeta(meeting: MeetingRecord) {
   const source = meeting.source
 
   if (source === "upload" && isDriveImport(meeting)) {
-    return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
+    return { label: "Drive import", dot: "bg-info", icon: "D" }
   }
-  if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "G" }
-  if (source === "upload") return { label: "Upload", dot: "bg-sky-500", icon: "U" }
-  if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-violet-500", icon: "R" }
-  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-indigo-500", icon: "D" }
-  return { label: source.replaceAll("_", " "), dot: "bg-amber-500", icon: "A" }
+  if (source === "google_meet") return { label: "Google Meet", dot: "bg-ok", icon: "G" }
+  if (source === "upload") return { label: "Upload", dot: "bg-info", icon: "U" }
+  if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-brand", icon: "R" }
+  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-fg-3", icon: "D" }
+  return { label: source.replaceAll("_", " "), dot: "bg-warn", icon: "A" }
 }
 
 function participantCount(meeting: MeetingRecord) {
@@ -72,34 +70,18 @@ function tagClass(tag: string) {
   return "bg-brand-soft text-brand-text"
 }
 
-function statusMeta(status: MeetingRecord["status"]) {
-  if (status === "completed") {
-    return {
-      label: "Ready",
-      Icon: CheckCircle2Icon,
-      className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
-    }
-  }
-  if (status === "failed") {
-    return {
-      label: "Failed",
-      Icon: CircleAlertIcon,
-      className: "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-200",
-    }
-  }
-  if (status === "scheduled") {
-    return {
-      label: "Upcoming",
-      Icon: Clock3Icon,
-      className: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200",
-    }
-  }
+/**
+ * Inbox pills are for exceptions only (README §7): a finished, scheduled or
+ * just-created meeting gets no pill. Processing shows the step, never an
+ * invented percentage.
+ */
+function statusPill(
+  status: MeetingRecord["status"]
+): { status: "failed" | "processing"; label: string } | null {
+  if (status === "failed") return { status: "failed", label: "Failed" }
+  if (status === "completed" || status === "scheduled" || status === "created") return null
 
-  return {
-    label: "Processing",
-    Icon: Clock3Icon,
-    className: "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
-  }
+  return { status: "processing", label: "Processing" }
 }
 
 function dateGroupLabel(date: Date) {
@@ -228,7 +210,7 @@ export function MeetingInboxPanel({
               key={filter}
               type="button"
               onClick={() => onFilterChange(filter)}
-              className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+              className="rounded-sm focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent"
             >
               <Badge
                 variant={activeFilter === filter ? "secondary" : "outline"}
@@ -256,8 +238,7 @@ export function MeetingInboxPanel({
             const source = sourceMeta(meeting)
             const selected = selectedMeetingId === meeting.id
             const started = new Date(meeting.startedAt)
-            const status = statusMeta(meeting.status)
-            const StatusIcon = status.Icon
+            const pill = statusPill(meeting.status)
 
             return (
               <div key={meeting.id} className="grid gap-2">
@@ -297,10 +278,7 @@ export function MeetingInboxPanel({
                         </span>
                       </div>
                       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
-                        <span className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-2xs font-medium ${status.className}`}>
-                          <StatusIcon aria-hidden="true" className="size-3" />
-                          {status.label}
-                        </span>
+                        {pill ? <StatusPill status={pill.status}>{pill.label}</StatusPill> : null}
                         {(meeting.tags?.slice(0, 2) ?? []).map((tag) => (
                           <Badge
                             key={tag}

@@ -7,8 +7,9 @@ The live showcase (`design-system/showcase/index.html`) includes a working proto
 | File | What it is |
 |---|---|
 | `tokens.css` | **Source of truth.** Colour, type, space, radius, elevation, layers, icon sizes and motion tokens, plus Hebrew `:lang(he)` overrides, shadcn aliases, Tailwind v4 `@theme` registration and keyframes. Drop-in for `app/globals.css`. |
-| `motion.ts` | Motion constants for JS-driven animation (WAAPI, scroll, canvas, optional `motion` library) and reduced-motion helpers. |
-| `reference/meeting-atoms.tsx` | Reference React components: `CitedMark`, `TimecodeChip`, `CitationChip`, `SpeakerAvatar`, `SpeakerLabel`, `AvatarStack`, `LiveDot`, `StatusPill`, `AiProvenance`, `provenanceGradient`. They typecheck against the repo and pass the guardrails. |
+| `lib/motion.ts` | Motion constants for JS-driven animation (WAAPI, scroll, canvas, optional `motion` library) and reduced-motion helpers. (Moved from `design-system/motion.ts` in M3.5.) |
+| `components/ui/meeting-atoms.tsx` | Meeting atoms (moved from `reference/` in M3.5): `CitedMark`, `TimecodeChip`, `CitationChip`, `SpeakerAvatar`, `SpeakerLabel`, `AvatarStack`, `LiveDot`, `StatusPill`, `AiProvenance`, `provenanceGradient`. They typecheck against the repo and pass the guardrails. |
+| `codemod.mjs` | Phase-1 codemod with explicit mapping tables (legacy `[var(--…)]` classes, `text-[11px]`, physical direction). |
 | `check.mjs` | Guardrail scanner: physical direction, raw palette, bracketed colours/`var()`, arbitrary px/rem, hex literals. Becomes the CI gate. |
 | `showcase/` | Interactive showcase. `tokens.generated.css` is built from `tokens.css`, so the showcase can't drift from production. |
 

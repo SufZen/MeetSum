@@ -5,6 +5,7 @@ import { MicIcon, SquareIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/meeting-atoms"
 
 type RecorderState = "idle" | "recording" | "blocked" | "unsupported"
 
@@ -115,17 +116,24 @@ export function MeetingRecorder({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-md border bg-background p-3">
-      <Badge variant={state === "recording" ? "default" : "secondary"}>
-        {label}
-      </Badge>
+    <div className="flex items-center gap-3 rounded-md border border-line bg-surface p-3">
       {state === "recording" ? (
-        <Button size="sm" variant="outline" onClick={stopRecording}>
+        <StatusPill status="live">{label}</StatusPill>
+      ) : (
+        <Badge variant="secondary">{label}</Badge>
+      )}
+      {state === "recording" ? (
+        <Button
+          size="sm"
+          variant="record"
+          className="border-live bg-live-soft text-live-text"
+          onClick={stopRecording}
+        >
           <SquareIcon data-icon="inline-start" />
           {labels.stop}
         </Button>
       ) : (
-        <Button size="sm" onClick={startRecording}>
+        <Button size="sm" variant="record" onClick={startRecording}>
           <MicIcon data-icon="inline-start" />
           {labels.record}
         </Button>

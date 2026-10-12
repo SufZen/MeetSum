@@ -2,7 +2,7 @@
  * MeetSum Cadence — motion tokens for TypeScript.
  *
  * CSS is the source of truth (design-system/tokens.css). Use CSS utilities
- * (`duration-[var(--dur-3)]`, `ease-out-expo`, `animate-ms-rise`) for anything
+ * (`duration-(--dur-3)`, `ease-out-expo`, `animate-ms-rise`) for anything
  * that can be expressed as a transition. Reach for these constants only when
  * JavaScript drives the animation (Web Animations API, scroll, canvas, or the
  * `motion` library if it is adopted later).
