@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
-import { getCurrentSession } from "@/lib/auth/server"
+import { withAuthz } from "@/lib/auth/authz"
 import { getWorkspaceStatus } from "@/lib/ops/status"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
-  const sessionEmail = await getCurrentSession()
-    .then((session) => session?.email)
-    .catch(() => undefined)
-
-  return NextResponse.json({
-    workspace: await getWorkspaceStatus({ sessionEmail }),
+export const GET = withAuthz("workspace:read", async (_request, ctx) =>
+  NextResponse.json({
+    workspace: await getWorkspaceStatus({
+      sessionEmail: ctx.user?.email,
+      workspaceId: ctx.workspace.id,
+    }),
   })
-}
+)

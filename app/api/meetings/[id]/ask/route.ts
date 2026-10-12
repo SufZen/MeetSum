@@ -1,29 +1,42 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import {
+  loadVisibleMeeting,
+  meetingNotFound,
+} from "@/app/api/_lib/meeting-access"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { parseRequiredString } from "@/lib/meetings/validation"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const POST = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (request, ctx, { params }) => {
+    const { id } = await params
+    let question
 
-  if (unauthorized) {
-    return unauthorized
+    try {
+      question = parseRequiredString(
+        await request.json().catch(() => ({})),
+        "question"
+      )
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "question is required",
+        400
+      )
+    }
+
+    if (!(await loadVisibleMeeting(ctx, id))) return meetingNotFound()
+
+    try {
+      return NextResponse.json({
+        answer: await ctx.meetings.askMeetingMemory(id, question),
+      })
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unknown error",
+        404
+      )
+    }
   }
-
-  const { id } = await params
-  let question
-
-  try {
-    question = parseRequiredString(await request.json(), "question")
-    return NextResponse.json({
-      answer: await meetingRepository.askMeetingMemory(id, question),
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error"
-    return jsonError(message, message.endsWith("required") ? 400 : 404)
-  }
-}
+)

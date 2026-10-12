@@ -1,35 +1,33 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+/**
+ * PATCH /api/action-items/:id — the scoped repository joins the action item
+ * to a meeting visible to the caller; anything else is reported as 404.
+ */
+export const PATCH = withAuthz<{ id: string }>(
+  "meeting:write",
+  async (request, ctx, { params }) => {
+    const { id } = await params
+    const body = (await request.json().catch(() => ({}))) as {
+      title?: string
+      owner?: string
+      status?: "open" | "done"
+      dueDate?: string
+      priority?: "low" | "normal" | "high" | "urgent"
+    }
 
-  if (unauthorized) {
-    return unauthorized
+    try {
+      const actionItem = await ctx.meetings.updateActionItem(id, body)
+
+      return NextResponse.json({ actionItem })
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unable to update action item",
+        404
+      )
+    }
   }
-
-  const { id } = await params
-  const body = (await request.json()) as {
-    title?: string
-    owner?: string
-    status?: "open" | "done"
-    dueDate?: string
-    priority?: "low" | "normal" | "high" | "urgent"
-  }
-
-  try {
-    const actionItem = await meetingRepository.updateActionItem(id, body)
-
-    return NextResponse.json({ actionItem })
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Unable to update action item",
-      404
-    )
-  }
-}
+)

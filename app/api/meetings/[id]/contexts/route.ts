@@ -1,33 +1,35 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import {
+  loadVisibleMeeting,
+  meetingNotFound,
+} from "@/app/api/_lib/meeting-access"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const POST = withAuthz<{ id: string }>(
+  "meeting:write",
+  async (request, ctx, { params }) => {
+    const { id } = await params
+    const { contextId } = (await request.json().catch(() => ({}))) as {
+      contextId?: string
+    }
 
-  if (unauthorized) {
-    return unauthorized
+    if (!contextId) {
+      return jsonError("contextId is required", 400)
+    }
+
+    if (!(await loadVisibleMeeting(ctx, id))) return meetingNotFound()
+
+    try {
+      const meeting = await ctx.meetings.linkMeetingContext(id, contextId)
+
+      return NextResponse.json({ meeting })
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unable to link context",
+        404
+      )
+    }
   }
-
-  const { id } = await params
-  const { contextId } = (await request.json()) as { contextId?: string }
-
-  if (!contextId) {
-    return jsonError("contextId is required", 400)
-  }
-
-  try {
-    const meeting = await meetingRepository.linkMeetingContext(id, contextId)
-
-    return NextResponse.json({ meeting })
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Unable to link context",
-      404
-    )
-  }
-}
+)
