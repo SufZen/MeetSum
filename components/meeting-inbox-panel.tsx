@@ -1,6 +1,5 @@
 import {
   CalendarDaysIcon,
-  FilterIcon,
   SearchIcon,
   SlidersHorizontalIcon,
   CheckCircle2Icon,
@@ -13,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { meetingDurationLabel } from "@/lib/meetings/duration"
 import type {
   MeetingListSortMode,
   MeetingRecord,
@@ -37,21 +37,25 @@ const sortLabels: Record<MeetingSortMode, string> = {
   status: "Status",
 }
 
-function sourceMeta(source: MeetingRecord["source"]) {
+function isDriveImport(meeting: MeetingRecord) {
+  return Boolean(meeting.mediaAssets?.some((asset) => asset.source === "google_drive"))
+}
+
+function sourceMeta(meeting: MeetingRecord) {
+  const source = meeting.source
+
+  if (source === "upload" && isDriveImport(meeting)) {
+    return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
+  }
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "G" }
-  if (source === "upload") return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
+  if (source === "upload") return { label: "Upload", dot: "bg-sky-500", icon: "U" }
   if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-violet-500", icon: "R" }
   if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-indigo-500", icon: "D" }
   return { label: source.replaceAll("_", " "), dot: "bg-amber-500", icon: "A" }
 }
 
-function durationLabel(meeting: MeetingRecord) {
-  const last = meeting.transcript?.at(-1)
-  const minutes = last ? Math.max(62, Math.round(last.endMs / 60000)) : 48
-
-  return minutes >= 60
-    ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
-    : `${minutes}m`
+function participantCount(meeting: MeetingRecord) {
+  return meeting.participantDetails?.length || meeting.participants.length
 }
 
 function tagClass(tag: string) {
@@ -192,10 +196,6 @@ export function MeetingInboxPanel({
           </span>
         </div>
         <div className="mb-2.5 flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-8 justify-start px-2">
-            <FilterIcon data-icon="inline-start" className="size-4 text-muted-foreground" />
-            {dictionary.filter}
-          </Button>
           <label className="ms-auto flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground">
               <SlidersHorizontalIcon data-icon="inline-start" className="size-4 text-muted-foreground" />
               <span className="sr-only">Sort meetings</span>
@@ -253,7 +253,7 @@ export function MeetingInboxPanel({
             </div>
           )}
           {meetingRows.map(({ meeting, group, showGroup }) => {
-            const source = sourceMeta(meeting.source)
+            const source = sourceMeta(meeting)
             const selected = selectedMeetingId === meeting.id
             const started = new Date(meeting.startedAt)
             const status = statusMeta(meeting.status)
@@ -290,9 +290,11 @@ export function MeetingInboxPanel({
                         <span className={`size-2 rounded-full ${source.dot}`} />
                         <span className="min-w-0 truncate">{source.label}</span>
                         <span>·</span>
-                        <span className="shrink-0">{durationLabel(meeting)}</span>
+                        <span className="shrink-0">{meetingDurationLabel(meeting)}</span>
                         <span>·</span>
-                        <span className="min-w-0 truncate">{meeting.participants.length || 1} participants</span>
+                        <span className="min-w-0 truncate">
+                          {participantCount(meeting)} {participantCount(meeting) === 1 ? "participant" : "participants"}
+                        </span>
                       </div>
                       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
                         <span className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium ${status.className}`}>

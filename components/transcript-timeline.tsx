@@ -6,18 +6,11 @@ import { SearchIcon, UsersIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { formatTimestamp } from "@/lib/meetings/duration"
 import type {
   MeetingParticipant,
   TranscriptSegment,
 } from "@/lib/meetings/repository"
-
-function formatTime(ms: number) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-
-  return `${minutes}:${String(seconds).padStart(2, "0")}`
-}
 
 export function TranscriptTimeline({
   segments,
@@ -159,7 +152,7 @@ export function TranscriptTimeline({
               )}
             </div>
             <span className="font-mono text-xs text-muted-foreground">
-              {formatTime(segment.startMs)}
+              {formatTimestamp(segment.startMs)}
             </span>
           </div>
           <p className="leading-7 text-foreground/80">{segment.text}</p>

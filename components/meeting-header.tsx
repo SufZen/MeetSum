@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { meetingDurationLabel } from "@/lib/meetings/duration"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
 function sourceLabel(source: MeetingRecord["source"]) {
@@ -18,15 +19,6 @@ function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "desktop_recorder") return "Desktop recorder"
   if (source === "upload") return "Upload"
   return source.replaceAll("_", " ")
-}
-
-function durationLabel(meeting: MeetingRecord) {
-  const last = meeting.transcript?.at(-1)
-  const minutes = last ? Math.max(62, Math.round(last.endMs / 60000)) : 62
-
-  return minutes >= 60
-    ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
-    : `${minutes}m`
 }
 
 export function MeetingHeader({
@@ -82,7 +74,7 @@ export function MeetingHeader({
             </span>
             <span className="flex items-center gap-2">
               <ClockIcon aria-hidden="true" className="size-4" />
-              {durationLabel(meeting)}
+              {meetingDurationLabel(meeting)}
             </span>
             <div className="group relative">
               <button
