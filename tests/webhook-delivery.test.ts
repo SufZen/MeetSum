@@ -324,10 +324,11 @@ describe("deliverWebhookEvent", () => {
       ],
     })
 
+    // Runtime guard for untyped callers (legacy job payloads).
     const result = await deliverWebhookEvent({
       eventName: "summary.created",
       data: {},
-    })
+    } as Parameters<typeof deliverWebhookEvent>[0])
 
     expect(result).toMatchObject({ queued: 0, delivered: 0, skipped: true })
     expect(query).not.toHaveBeenCalled()

@@ -112,14 +112,12 @@ export function getProviderStatus(): ProviderStatus[] {
  * tenant-specific is read (fail closed): sync states come from the
  * workspace's own Google identities, job counts from its jobs rows.
  */
-export async function getWorkspaceStatus(
-  options: {
-    sessionEmail?: string | null
-    workspaceId?: string
-    /** The workspace's `google_subject` (ctx.workspace.googleSubject). */
-    googleSubject?: string | null
-  } = {}
-): Promise<WorkspaceStatus> {
+export async function getWorkspaceStatus(options: {
+  sessionEmail?: string | null
+  workspaceId: string
+  /** The workspace's `google_subject` (ctx.workspace.googleSubject). */
+  googleSubject?: string | null
+}): Promise<WorkspaceStatus> {
   const sync: WorkspaceStatus["sync"] = []
   const jobs = { queued: 0, active: 0, failed: 0 }
   const workspaceId = options.workspaceId?.trim()

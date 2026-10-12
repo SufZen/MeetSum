@@ -756,6 +756,14 @@ async function processWebhookJob(job: MeetSumJob) {
     })
   }
 
+  const workspaceId = readJobWorkspaceId(job.data)
+
+  // Legacy payloads without a workspace are dropped (fail closed).
+  if (!workspaceId) {
+    console.warn("[webhooks] webhook.deliver job without a workspace dropped")
+    return { queued: 0, delivered: 0, failed: 0, skipped: true }
+  }
+
   return deliverWebhookEvent({
     eventName:
       typeof job.data.eventName === "string"
@@ -765,8 +773,7 @@ async function processWebhookJob(job: MeetSumJob) {
       job.data.data && typeof job.data.data === "object"
         ? (job.data.data as Record<string, unknown>)
         : {},
-    // Legacy payloads without a workspace are dropped by the fan-out.
-    workspaceId: readJobWorkspaceId(job.data),
+    workspaceId,
   })
 }
 

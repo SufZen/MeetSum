@@ -49,7 +49,10 @@ describe("getWorkspaceStatus", () => {
   })
 
   it("reads nothing tenant-specific without a workspace (fail closed)", async () => {
-    const status = await getWorkspaceStatus({})
+    // Runtime guard for untyped callers.
+    const status = await getWorkspaceStatus(
+      {} as Parameters<typeof getWorkspaceStatus>[0]
+    )
 
     expect(mocks.query).not.toHaveBeenCalled()
     expect(status.sync).toEqual([])

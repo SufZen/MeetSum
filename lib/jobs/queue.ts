@@ -28,6 +28,18 @@ export type MeetSumJobPayload = {
   [key: string]: unknown
 }
 
+/**
+ * Jobs that may be enqueued without an explicit workspace: Teams subscription
+ * renewal is instance-level (resolved to the capture workspace) and
+ * `webhook.deliver` carries its workspace inside the delivery row.
+ */
+export type WorkspaceOptionalJobName = "teams.subscription.renew" | "webhook.deliver"
+
+export type WorkspaceScopedJobName = Exclude<MeetSumJobName, WorkspaceOptionalJobName>
+
+/** Payload of a workspace-scoped job: `workspaceId` is mandatory. */
+export type WorkspaceScopedJobPayload = MeetSumJobPayload & { workspaceId: string }
+
 /** A job that cannot be attributed to a workspace is never enqueued. */
 export class JobWorkspaceRequiredError extends Error {
   constructor(name: MeetSumJobName) {
@@ -101,9 +113,26 @@ async function persistJobWorkspace(jobId: string, workspaceId: string) {
  * (`webhook.deliver` jobs bypass this: see lib/webhooks/delivery.ts.)
  */
 export async function enqueueMeetSumJob(
+  name: WorkspaceScopedJobName,
+  payload: WorkspaceScopedJobPayload
+): Promise<Awaited<ReturnType<typeof enqueueJob>>>
+export async function enqueueMeetSumJob(
+  name: WorkspaceOptionalJobName,
+  payload?: MeetSumJobPayload
+): Promise<Awaited<ReturnType<typeof enqueueJob>>>
+/** Dynamic job name (e.g. a retry): the workspace must be explicit. */
+export async function enqueueMeetSumJob(
+  name: MeetSumJobName,
+  payload: WorkspaceScopedJobPayload
+): Promise<Awaited<ReturnType<typeof enqueueJob>>>
+export async function enqueueMeetSumJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload = {}
 ) {
+  return enqueueJob(name, payload)
+}
+
+async function enqueueJob(name: MeetSumJobName, payload: MeetSumJobPayload) {
   const workspaceId = await resolveEnqueueWorkspaceId(name, payload)
 
   if (!workspaceId) throw new JobWorkspaceRequiredError(name)

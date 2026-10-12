@@ -58,6 +58,8 @@ export const GET = withPublicRoute("Google OAuth redirect target", async (reques
     if (user.disabledAt) {
       await recordAuditLog({
         action: "auth.login.denied",
+        // Instance-level: the user belongs to no workspace here.
+        workspaceId: null,
         actor: email,
         actorUserId: user.id,
         metadata: { reason: "disabled" },
@@ -97,6 +99,8 @@ export const GET = withPublicRoute("Google OAuth redirect target", async (reques
     if (!allowed) {
       await recordAuditLog({
         action: "auth.login.denied",
+        // Instance-level: the user belongs to no workspace here.
+        workspaceId: null,
         actor: email,
         actorUserId: user.id,
         metadata: { reason: "no_access" },

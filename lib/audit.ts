@@ -53,10 +53,11 @@ export type RecordAuditLogInput = {
   targetId?: string
   metadata?: Record<string, unknown>
   /**
-   * Workspace the event belongs to. Rows without one are invisible to every
-   * workspace's audit log. Becomes required at M2 Integration.
+   * Workspace the event belongs to. `null` only for instance-level events
+   * that belong to no workspace (e.g. a denied login); such rows are
+   * invisible to every workspace's audit log.
    */
-  workspaceId?: string
+  workspaceId: string | null
   actorUserId?: string
   actorApiKeyId?: string
 }

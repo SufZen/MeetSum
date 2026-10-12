@@ -1,5 +1,9 @@
 import { getWorkspaceGoogleSubject } from "@/lib/google/workspace-subject"
-import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
+import type {
+  MeetSumJobName,
+  WorkspaceScopedJobName,
+  WorkspaceScopedJobPayload,
+} from "@/lib/jobs/queue"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 /**
@@ -17,7 +21,10 @@ export type GoogleSyncWorkspace = { workspaceId: string; subject: string }
 type ScheduleDeps = {
   env?: NodeJS.ProcessEnv
   db?: Queryable
-  enqueue?: (name: MeetSumJobName, payload: MeetSumJobPayload) => Promise<unknown>
+  enqueue?: (
+    name: WorkspaceScopedJobName,
+    payload: WorkspaceScopedJobPayload
+  ) => Promise<unknown>
   log?: Pick<Console, "error" | "warn">
 }
 
@@ -25,7 +32,10 @@ async function defaultDb(): Promise<Queryable> {
   return (await import("@/lib/db/client")).getDatabasePool()
 }
 
-async function defaultEnqueue(name: MeetSumJobName, payload: MeetSumJobPayload) {
+async function defaultEnqueue(
+  name: WorkspaceScopedJobName,
+  payload: WorkspaceScopedJobPayload
+) {
   return (await import("@/lib/jobs/queue")).enqueueMeetSumJob(name, payload)
 }
 

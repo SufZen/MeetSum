@@ -24,6 +24,11 @@ vi.mock("@/lib/meetings/store", () => ({
 
 const { closeMeetSumQueue, enqueueMeetSumJob, getJobAttempts, JobWorkspaceRequiredError } =
   await import("@/lib/jobs/queue")
+/** Untyped call path (legacy payloads): exercises the runtime workspace guard. */
+const enqueueUntyped = enqueueMeetSumJob as unknown as (
+  name: string,
+  payload: Record<string, unknown>
+) => ReturnType<typeof enqueueMeetSumJob>
 const { getCaptureScheduleConfig, getRetentionScheduleConfig } = await import(
   "@/lib/jobs/scheduler-config"
 )
@@ -80,7 +85,7 @@ describe("enqueueMeetSumJob", () => {
   })
 
   it("resolves the workspace from the meeting when the payload has none", async () => {
-    await enqueueMeetSumJob("meeting.summarize", { meetingId: "meet_2" })
+    await enqueueUntyped("meeting.summarize", { meetingId: "meet_2" })
 
     expect(mocks.resolveMeetingWorkspaceId).toHaveBeenCalledWith("meet_2")
     expect(mocks.repositoryWorkspaces).toEqual(["ws_meeting"])
@@ -91,10 +96,10 @@ describe("enqueueMeetSumJob", () => {
     mocks.resolveMeetingWorkspaceId.mockResolvedValue(undefined)
 
     await expect(
-      enqueueMeetSumJob("google.drive.poll", { subject: "a@example.test" })
+      enqueueUntyped("google.drive.poll", { subject: "a@example.test" })
     ).rejects.toBeInstanceOf(JobWorkspaceRequiredError)
     await expect(
-      enqueueMeetSumJob("media.ingest", { meetingId: "meet_missing" })
+      enqueueUntyped("media.ingest", { meetingId: "meet_missing" })
     ).rejects.toBeInstanceOf(JobWorkspaceRequiredError)
     expect(mocks.createJob).not.toHaveBeenCalled()
     expect(mocks.add).not.toHaveBeenCalled()

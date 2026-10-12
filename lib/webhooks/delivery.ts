@@ -147,7 +147,7 @@ export async function deliverWebhookEvent(options: {
    * (`workspace_id = $1`), so a W1 event never reaches a W2 subscription; an
    * event without a workspace is dropped (fail closed).
    */
-  workspaceId?: string
+  workspaceId: string
 }) {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     return { queued: 0, delivered: 0, failed: 0, skipped: true }
