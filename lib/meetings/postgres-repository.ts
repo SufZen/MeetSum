@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type { Queryable } from "@/lib/db/client"
 import type {
   ActionItem,
@@ -583,6 +584,14 @@ const SHARE_COLUMNS = `
   included_sections, created_by, created_at, updated_at
 `
 
+/**
+ * Stable participant row id. A hash of the full key: truncating base64 of
+ * `${meetingId}:${name}` made every participant of a meeting share one id
+ * (the meeting id fills the prefix), so all but the first were dropped.
+ */
+export function participantRowId(meetingId: string, key: string): string {
+  return `participant_${createHash("sha256").update(`${meetingId}:${key}`).digest("hex").slice(0, 32)}`
+}
 async function insertCalendarParticipants(
   db: Queryable,
   meetingId: string,
@@ -604,9 +613,7 @@ async function insertCalendarParticipants(
         on conflict do nothing
       `,
       [
-        `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
-          .toString("base64url")
-          .slice(0, 40)}`,
+        participantRowId(meetingId, email ?? name),
         meetingId,
         name,
         email,
@@ -1480,9 +1487,7 @@ export function createPostgresMeetingRepository(
                 updated_at = now()
             `,
             [
-              `participant_${Buffer.from(`${meetingId}:${speakerLabel}`)
-                .toString("base64url")
-                .slice(0, 40)}`,
+              participantRowId(meetingId, speakerLabel),
               meetingId,
               speakerLabel,
             ]
@@ -2197,9 +2202,7 @@ export function createPostgresMeetingRepository(
             on conflict (id) do nothing
           `,
           [
-            `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
-              .toString("base64url")
-              .slice(0, 40)}`,
+            participantRowId(meetingId, email ?? name),
             meetingId,
             name,
             email,
