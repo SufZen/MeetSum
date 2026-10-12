@@ -6,8 +6,14 @@ import {
   DeleteObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
+import { Upload } from "@aws-sdk/lib-storage"
+import { createHash } from "node:crypto"
 import { createWriteStream } from "node:fs"
+import { Readable, Transform, type TransformCallback } from "node:stream"
 import { pipeline } from "node:stream/promises"
+import type { ReadableStream as WebReadableStream } from "node:stream/web"
+
+import { UploadTooLargeError } from "@/lib/capture/media-validation"
 
 export type StoredObject = {
   bucket: string
@@ -79,6 +85,134 @@ async function ensureBucket(bucket: string) {
   ensuredBuckets.add(bucket)
 }
 
+function safeObjectFilename(filename: string) {
+  return filename.replace(/[^\w. -]+/g, "_").slice(-180) || "upload"
+}
+
+/** Byte-counting + SHA-256 pass-through that aborts past `maxBytes`. */
+export class CountingHashTransform extends Transform {
+  readonly maxBytes: number
+  bytes = 0
+  private readonly hash = createHash("sha256")
+
+  constructor(maxBytes: number) {
+    super()
+    this.maxBytes = maxBytes
+  }
+
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ) {
+    this.bytes += chunk.length
+
+    if (this.bytes > this.maxBytes) {
+      callback(new UploadTooLargeError(this.maxBytes))
+      return
+    }
+
+    this.hash.update(chunk)
+    callback(null, chunk)
+  }
+
+  digest() {
+    return this.hash.digest("hex")
+  }
+}
+
+export type StreamBody =
+  | Readable
+  | AsyncIterable<Uint8Array>
+  | WebReadableStream<Uint8Array>
+  | ReadableStream<Uint8Array>
+
+function toNodeReadable(body: StreamBody): Readable {
+  if (body instanceof Readable) return body
+
+  if (typeof (body as ReadableStream<Uint8Array>).getReader === "function") {
+    return Readable.fromWeb(body as WebReadableStream<Uint8Array>)
+  }
+
+  return Readable.from(body as AsyncIterable<Uint8Array>)
+}
+
+export const MULTIPART_PART_SIZE = 8 * 1024 * 1024
+
+/**
+ * Streams a body into object storage with a multipart upload (8 MiB parts,
+ * two in flight) while counting bytes and computing a SHA-256 checksum. The
+ * whole file is never buffered in memory. Exceeding `maxBytes` aborts the
+ * upload and throws {@link UploadTooLargeError}.
+ */
+export async function storeMeetingObjectStream(options: {
+  keyPrefix: string
+  filename: string
+  contentType: string
+  body: StreamBody
+  maxBytes: number
+}): Promise<StoredObject & { checksumSha256: string }> {
+  const key = [
+    options.keyPrefix.replace(/\/+$/, ""),
+    `${Date.now()}-${crypto.randomUUID()}-${safeObjectFilename(options.filename)}`,
+  ].join("/")
+  const bucket = getMeetingMediaBucket()
+
+  await ensureBucket(bucket)
+
+  const source = toNodeReadable(options.body)
+  const counter = new CountingHashTransform(options.maxBytes)
+  let streamError: unknown
+
+  const onError = (error: unknown) => {
+    streamError ??= error
+    counter.destroy(error instanceof Error ? error : new Error(String(error)))
+  }
+
+  source.once("error", onError)
+  source.pipe(counter)
+
+  const upload = new Upload({
+    client: getS3Client(),
+    queueSize: 2,
+    partSize: MULTIPART_PART_SIZE,
+    leavePartsOnError: false,
+    params: {
+      Bucket: bucket,
+      Key: key,
+      Body: counter,
+      ContentType: options.contentType,
+    },
+  })
+
+  counter.once("error", (error) => {
+    streamError ??= error
+    void upload.abort().catch(() => {})
+  })
+
+  try {
+    await upload.done()
+  } catch (error) {
+    source.unpipe(counter)
+    source.destroy()
+    throw streamError ?? error
+  }
+
+  if (streamError) {
+    await deleteMeetingObject(key).catch(() => {})
+    throw streamError
+  }
+
+  return {
+    bucket,
+    key,
+    contentType: options.contentType,
+    sizeBytes: counter.bytes,
+    checksumSha256: counter.digest(),
+  }
+}
+
+/** Buffer variant kept for small imports (e.g. Google Drive artifacts). */
 export async function storeMeetingObject(options: {
   meetingId: string
   filename: string

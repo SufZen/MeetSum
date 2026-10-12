@@ -200,10 +200,11 @@ export function buildDesktopCaptureIngestionPlan(options: {
 }
 
 export function parseDesktopJsonField(
-  formData: FormData,
+  formData: FormData | Record<string, string>,
   field: string
 ): unknown {
-  const value = formData.get(field)
+  const value =
+    formData instanceof FormData ? formData.get(field) : formData[field]
 
   if (typeof value !== "string" || !value.trim()) return undefined
 
