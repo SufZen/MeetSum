@@ -9,8 +9,11 @@ import {
   verifyZoomSignature,
   zoomCaptureAdapter,
 } from "@/lib/capture/zoom"
-import { meetingRepository } from "@/lib/meetings/store"
+import { withPublicRoute } from "@/lib/auth/authz"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import { getAppSettings } from "@/lib/settings/app-settings"
 
 export const runtime = "nodejs"
 
@@ -34,8 +37,16 @@ function lowerCaseHeaders(request: Request) {
  * Idempotent per Zoom meeting UUID: redeliveries return 200 without
  * creating another meeting or job. The recording itself is downloaded by
  * the worker (`media.ingest` → importPlatformRecording), not in the request.
+ *
+ * Public (Zoom signs every request); recordings land in the capture
+ * workspace (MEETSUM_CAPTURE_WORKSPACE_ID) through its system repository.
  */
-export async function POST(request: Request) {
+export const POST = withPublicRoute(
+  "Zoom webhook: authenticated by the Zoom HMAC signature",
+  handleZoomWebhook
+)
+
+async function handleZoomWebhook(request: Request) {
   const rawBody = await request.text()
   const headers = lowerCaseHeaders(request)
   let body: unknown
@@ -80,10 +91,14 @@ export async function POST(request: Request) {
 
   let meetingId: string | undefined
   let created = false
+  const workspaceId = getCaptureWorkspaceId()
+  const repository = getSystemMeetingRepository(workspaceId)
 
   try {
-    const outcome = await meetingRepository.createMeetingIfAbsent({
+    const settings = await getAppSettings(workspaceId)
+    const outcome = await repository.createMeetingIfAbsent({
       ...zoomCaptureAdapter.toMeetingInput(event),
+      visibility: settings.defaultMeetingVisibility,
       externalSource: "zoom",
       externalId: event.externalId,
     })
@@ -97,12 +112,15 @@ export async function POST(request: Request) {
 
     await enqueueMeetSumJob("media.ingest", {
       meetingId,
+      workspaceId,
       platform: "zoom",
       externalId: event.externalId,
       captureEvent: event,
     })
 
     await recordAuditLog({
+      workspaceId,
+      actor: "zoom",
       action: "capture.zoom.recording",
       targetType: "meeting",
       targetId: meetingId,
@@ -118,7 +136,7 @@ export async function POST(request: Request) {
     // Let Zoom redeliver: drop the meeting we just created so the retry
     // isn't mistaken for a duplicate.
     if (created && meetingId) {
-      await meetingRepository.discardMeeting(meetingId).catch(() => false)
+      await repository.discardMeeting(meetingId).catch(() => false)
     }
 
     console.error("[zoom] webhook processing failed", error)

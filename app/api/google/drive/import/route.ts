@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { importDriveRecordings, validateDriveImportFileIds } from "@/lib/google/services"
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const POST = withAuthz("meeting:create", async (request, ctx) => {
   let body: { fileIds?: unknown; subject?: string }
 
   try {
@@ -28,12 +25,16 @@ export async function POST(request: Request) {
     )
   }
 
-  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+  const resolved = resolveRequestWorkspaceSubject(ctx, body.subject)
 
   if ("response" in resolved) return resolved.response
 
   try {
-    const result = await importDriveRecordings(resolved.subject, fileIds)
+    const result = await importDriveRecordings(
+      { subject: resolved.subject, workspaceId: ctx.workspace.id },
+      fileIds,
+      { ownerUserId: ctx.user?.id ?? ctx.apiKey?.createdByUserId }
+    )
 
     return NextResponse.json(result, { status: 202 })
   } catch (error) {
@@ -42,4 +43,4 @@ export async function POST(request: Request) {
       500
     )
   }
-}
+})

@@ -1,5 +1,6 @@
 import { getDatabasePool, type Queryable } from "@/lib/db/client"
 import { graphFetch } from "@/lib/capture/teams"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 
 /**
  * Microsoft Graph change-notification subscriptions for Teams recordings.
@@ -103,8 +104,13 @@ function mapRow(row: CaptureSubscriptionRow): CaptureSubscriptionRecord {
   }
 }
 
+/**
+ * The Teams Graph subscription is instance-level and feeds the capture
+ * workspace, so its rows are stamped with that workspace.
+ */
 export function createPostgresCaptureSubscriptionStore(
-  db: Queryable = getDatabasePool()
+  db: Queryable = getDatabasePool(),
+  workspaceId: string = getCaptureWorkspaceId()
 ): CaptureSubscriptionStore {
   return {
     async listActive(platform) {
@@ -138,9 +144,10 @@ export function createPostgresCaptureSubscriptionStore(
       const result = await db.query(
         `insert into capture_subscriptions (
            id, platform, external_subscription_id, resource, change_type,
-           notification_url, lifecycle_notification_url, expires_at, status, last_error
+           notification_url, lifecycle_notification_url, expires_at, status, last_error,
+           workspace_id
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          on conflict (external_subscription_id) do update set
            expires_at = excluded.expires_at,
            status = excluded.status,
@@ -158,6 +165,7 @@ export function createPostgresCaptureSubscriptionStore(
           record.expiresAt,
           record.status,
           record.lastError ?? null,
+          workspaceId,
         ]
       )
       return mapRow(result.rows[0] as CaptureSubscriptionRow)

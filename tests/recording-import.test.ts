@@ -9,12 +9,16 @@ const mocks = vi.hoisted(() => ({
   deleteMeetingObject: vi.fn(),
   zoomDownload: vi.fn(),
   teamsDownload: vi.fn(),
+  repositoryWorkspaces: [] as string[],
 }))
 
 vi.mock("@/lib/meetings/store", () => ({
-  meetingRepository: {
-    findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
-    createMediaAsset: mocks.createMediaAsset,
+  getSystemMeetingRepository: (workspaceId: string) => {
+    mocks.repositoryWorkspaces.push(workspaceId)
+    return {
+      findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
+      createMediaAsset: mocks.createMediaAsset,
+    }
   },
 }))
 
@@ -54,6 +58,7 @@ const zoomEvent: CaptureEvent = {
 describe("importPlatformRecording", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.repositoryWorkspaces.length = 0
     mocks.findMediaAssetBySourceFile.mockResolvedValue(undefined)
     mocks.zoomDownload.mockResolvedValue({
       body: Readable.from([Buffer.from("audio")]),
@@ -87,10 +92,12 @@ describe("importPlatformRecording", () => {
 
     const result = await importPlatformRecording({
       meetingId: "meet_1",
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent: zoomEvent,
     })
 
+    expect(mocks.repositoryWorkspaces).toEqual(["ws_1"])
     expect(result).toEqual({
       assetId: "asset_zoom",
       storageKey: "meetings/meet_1/stored-zoom-zoom-uuid-1.m4a",
@@ -142,6 +149,7 @@ describe("importPlatformRecording", () => {
 
     const result = await importPlatformRecording({
       meetingId: "meet_1",
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent: zoomEvent,
     })
@@ -160,6 +168,7 @@ describe("importPlatformRecording", () => {
 
     await importPlatformRecording({
       meetingId: "meet_2",
+      workspaceId: "ws_1",
       platform: "teams",
       captureEvent: { ...zoomEvent, platform: "teams", externalId: "r1" },
     })
@@ -174,7 +183,7 @@ describe("importPlatformRecording", () => {
     mocks.createMediaAsset.mockRejectedValue(new Error("db down"))
 
     await expect(
-      importPlatformRecording({ meetingId: "meet_1", platform: "zoom", captureEvent: zoomEvent })
+      importPlatformRecording({ meetingId: "meet_1", workspaceId: "ws_1", platform: "zoom", captureEvent: zoomEvent })
     ).rejects.toThrow("db down")
     expect(mocks.deleteMeetingObject).toHaveBeenCalledWith(
       "meetings/meet_1/stored-zoom-zoom-uuid-1.m4a"
@@ -186,6 +195,7 @@ describe("importPlatformRecording", () => {
 
     const error = await importPlatformRecording({
       meetingId: "meet_1",
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent: zoomEvent,
     }).catch((caught: unknown) => caught)
@@ -198,6 +208,7 @@ describe("importPlatformRecording", () => {
 
     const error = await importPlatformRecording({
       meetingId: "meet_1",
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent: zoomEvent,
     }).catch((caught: unknown) => caught)
@@ -211,6 +222,7 @@ describe("importPlatformRecording", () => {
 
     const error = await importPlatformRecording({
       meetingId: "meet_1",
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent: zoomEvent,
     }).catch((caught: unknown) => caught)
@@ -223,7 +235,7 @@ describe("importPlatformRecording", () => {
     mocks.zoomDownload.mockRejectedValue(new CaptureConfigError("missing ZOOM_CLIENT_ID"))
 
     await expect(
-      importPlatformRecording({ meetingId: "meet_1", platform: "zoom", captureEvent: zoomEvent })
+      importPlatformRecording({ meetingId: "meet_1", workspaceId: "ws_1", platform: "zoom", captureEvent: zoomEvent })
     ).rejects.toBeInstanceOf(UnrecoverableError)
   })
 
@@ -231,7 +243,7 @@ describe("importPlatformRecording", () => {
     vi.stubEnv("MEETSUM_MAX_RECORDING_BYTES", "4")
 
     await expect(
-      importPlatformRecording({ meetingId: "meet_1", platform: "zoom", captureEvent: zoomEvent })
+      importPlatformRecording({ meetingId: "meet_1", workspaceId: "ws_1", platform: "zoom", captureEvent: zoomEvent })
     ).rejects.toBeInstanceOf(UnrecoverableError)
     expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
 
@@ -239,7 +251,7 @@ describe("importPlatformRecording", () => {
     mocks.storeMeetingObjectStream.mockRejectedValue(new UploadTooLargeError(1000))
 
     await expect(
-      importPlatformRecording({ meetingId: "meet_1", platform: "zoom", captureEvent: zoomEvent })
+      importPlatformRecording({ meetingId: "meet_1", workspaceId: "ws_1", platform: "zoom", captureEvent: zoomEvent })
     ).rejects.toBeInstanceOf(UnrecoverableError)
   })
 

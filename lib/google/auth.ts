@@ -3,10 +3,7 @@ import { readFileSync } from "node:fs"
 import { google } from "googleapis"
 
 import { getGoogleWorkspaceOAuthRefreshToken } from "@/lib/google/oauth-tokens"
-import {
-  getConfiguredWorkspaceSubject,
-  resolveWorkspaceSubject,
-} from "@/lib/google/workspace-subject"
+import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
 
 export type WorkspaceAuthStrategy =
   | "user-oauth"
@@ -39,15 +36,6 @@ function getJsonKeyFile() {
   } catch {
     return undefined
   }
-}
-
-/**
- * Resolve the Workspace subject to act as. Throws
- * WorkspaceSubjectNotConfiguredError when nothing is configured; see
- * lib/google/workspace-subject.ts for the resolution order.
- */
-export function getWorkspaceSubject(explicit?: string | null) {
-  return resolveWorkspaceSubject({ explicit })
 }
 
 export function getWorkspaceServiceAccountEmail() {

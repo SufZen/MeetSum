@@ -19,10 +19,13 @@ const mocks = vi.hoisted(() => ({
   processWebhookDeliveryJob: vi.fn(),
   importPlatformRecording: vi.fn(),
   renewTeamsSubscriptions: vi.fn(),
+  repositoryWorkspaces: [] as string[],
+  pollCalendar: vi.fn(),
+  applyMediaRetention: vi.fn(),
 }))
 
-vi.mock("@/lib/meetings/store", () => ({
-  meetingRepository: new Proxy(
+vi.mock("@/lib/meetings/store", () => {
+  const repository = new Proxy(
     {},
     {
       get(_target, property) {
@@ -30,8 +33,17 @@ vi.mock("@/lib/meetings/store", () => ({
         return typeof value === "function" ? value.bind(mocks.repository) : value
       },
     }
-  ),
-}))
+  )
+
+  return {
+    getSystemMeetingRepository: (workspaceId: string) => {
+      mocks.repositoryWorkspaces.push(workspaceId)
+      return repository
+    },
+    resolveMeetingWorkspaceId: async (meetingId: string) =>
+      (await mocks.repository.getMeeting(meetingId)) ? "ws_1" : undefined,
+  }
+})
 
 vi.mock("@/lib/ai/providers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ai/providers")>()
@@ -79,8 +91,12 @@ vi.mock("@/lib/google/meet-artifacts", () => ({
   syncMeetArtifacts: vi.fn(),
 }))
 
+vi.mock("@/lib/storage/retention", () => ({
+  applyMediaRetention: mocks.applyMediaRetention,
+}))
+
 vi.mock("@/lib/google/services", () => ({
-  pollCalendar: vi.fn(),
+  pollCalendar: mocks.pollCalendar,
   pollDrive: vi.fn(),
   pollGmail: vi.fn(),
 }))
@@ -190,6 +206,9 @@ beforeEach(() => {
   mocks.processWebhookDeliveryJob.mockReset()
   mocks.importPlatformRecording.mockReset()
   mocks.renewTeamsSubscriptions.mockReset()
+  mocks.pollCalendar.mockReset()
+  mocks.applyMediaRetention.mockReset()
+  mocks.repositoryWorkspaces.length = 0
   process.env.MEETSUM_STORAGE = "postgres"
 })
 
@@ -379,6 +398,7 @@ describe("processJob media pipeline", () => {
 
     expect(mocks.importPlatformRecording).toHaveBeenCalledWith({
       meetingId: meeting.id,
+      workspaceId: "ws_1",
       platform: "zoom",
       captureEvent,
     })
@@ -399,10 +419,84 @@ describe("processJob media pipeline", () => {
   })
 
   it("fails permanently when the meeting does not exist", async () => {
-    const job = await makeJob("media.ingest", { meetingId: "meet_missing" })
+    const job = await makeJob("media.ingest", {
+      meetingId: "meet_missing",
+      workspaceId: "ws_1",
+    })
 
     await expect(processJob(job)).rejects.toBeInstanceOf(UnrecoverableError)
     expect((await mocks.repository.getJob(String(job.data.jobRecordId)))?.status).toBe("failed")
+  })
+
+  it("never processes a job whose workspace cannot be resolved", async () => {
+    const updateJob = vi.spyOn(mocks.repository, "updateJob")
+    const job = await makeJob("google.drive.poll", { subject: "a@example.test" })
+
+    await expect(processJob(job)).rejects.toBeInstanceOf(UnrecoverableError)
+    expect(updateJob).not.toHaveBeenCalled()
+    expect(mocks.repositoryWorkspaces).toEqual([])
+  })
+})
+
+describe("processJob workspace scoping", () => {
+  it("runs in the payload workspace and tags every webhook event with it", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(
+      await makeJob("media.ingest", { meetingId: meeting.id, workspaceId: "ws_9" })
+    )
+
+    expect(new Set(mocks.repositoryWorkspaces)).toEqual(new Set(["ws_9"]))
+    const events = mocks.deliverWebhookEvent.mock.calls.map(([event]) => event)
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.every((event) => event.workspaceId === "ws_9")).toBe(true)
+  })
+
+  it("falls back to the meeting's workspace for payloads without one", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(new Set(mocks.repositoryWorkspaces)).toEqual(new Set(["ws_1"]))
+  })
+
+  it("polls Google as the workspace's google_subject", async () => {
+    mocks.query.mockImplementation(async (sql: string) =>
+      /from workspaces/.test(sql)
+        ? { rows: [{ google_subject: "Owner@W2.test" }] }
+        : { rows: [] }
+    )
+    mocks.pollCalendar.mockResolvedValue({ source: "calendar" })
+
+    await processJob(await makeJob("google.calendar.poll", { workspaceId: "ws_2" }))
+
+    expect(mocks.pollCalendar).toHaveBeenCalledWith({
+      subject: "owner@w2.test",
+      workspaceId: "ws_2",
+    })
+  })
+
+  it("fails a Google job permanently when the workspace has no subject", async () => {
+    const job = await makeJob("google.calendar.poll", { workspaceId: "ws_2" })
+
+    await expect(processJob(job)).rejects.toBeInstanceOf(UnrecoverableError)
+    expect(mocks.pollCalendar).not.toHaveBeenCalled()
+    expect((await mocks.repository.getJob(String(job.data.jobRecordId)))?.status).toBe(
+      "failed"
+    )
+  })
+
+  it("enforces media retention for the job's workspace", async () => {
+    mocks.applyMediaRetention.mockResolvedValue({ deleted: 2 })
+
+    await processJob(await makeJob("media.retention", { workspaceId: "ws_3" }))
+
+    expect(mocks.applyMediaRetention).toHaveBeenCalledWith({
+      workspaceId: "ws_3",
+      execute: true,
+    })
   })
 })
 
@@ -430,7 +524,7 @@ describe("processJob dispatch", () => {
   it("keeps legacy webhook.deliver payloads working", async () => {
     const job = await makeJob(
       "webhook.deliver",
-      { eventName: "summary.created", data: { meetingId: "m1" } },
+      { eventName: "summary.created", data: { meetingId: "m1" }, workspaceId: "ws_1" },
       { createRecord: false }
     )
 
@@ -439,6 +533,7 @@ describe("processJob dispatch", () => {
     expect(mocks.deliverWebhookEvent).toHaveBeenCalledWith({
       eventName: "summary.created",
       data: { meetingId: "m1" },
+      workspaceId: "ws_1",
     })
     expect(mocks.processWebhookDeliveryJob).not.toHaveBeenCalled()
   })

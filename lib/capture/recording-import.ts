@@ -13,7 +13,7 @@ import {
   type CaptureEvent,
 } from "@/lib/capture/types"
 import { zoomCaptureAdapter } from "@/lib/capture/zoom"
-import { meetingRepository } from "@/lib/meetings/store"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import {
   deleteMeetingObject,
   storeMeetingObjectStream,
@@ -65,10 +65,12 @@ export function classifyRecordingImportError(error: unknown): Error {
  */
 export async function importPlatformRecording(input: {
   meetingId: string
+  workspaceId: string
   platform: "zoom" | "teams"
   captureEvent: CaptureEvent
 }): Promise<PlatformRecordingImport> {
   const { meetingId, platform, captureEvent } = input
+  const meetingRepository = getSystemMeetingRepository(input.workspaceId)
   const adapter = adapters[platform]
 
   if (!adapter) {

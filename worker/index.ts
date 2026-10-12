@@ -4,8 +4,12 @@ import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import {
   getCaptureScheduleConfig,
   getGoogleSyncScheduleConfig,
+  getRetentionScheduleConfig,
 } from "@/lib/jobs/scheduler-config"
-import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
+import {
+  enqueueWorkspaceGooglePolls,
+  enqueueWorkspaceRetention,
+} from "@/lib/jobs/workspace-schedules"
 import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 
 assertRuntimeEnvironment()
@@ -33,50 +37,31 @@ process.on("SIGINT", async () => {
   process.exit(0)
 })
 
+/**
+ * Google polls run per workspace: each tick enqueues one job for every live
+ * workspace with a Google subject (workspaces.google_subject), carrying that
+ * workspace's id and subject. Workspaces without one are simply skipped.
+ */
 function scheduleGoogleSync() {
   const config = getGoogleSyncScheduleConfig()
 
   if (!config.enabled) return
 
-  const subject = getConfiguredWorkspaceSubject()
+  const schedules = [
+    { name: "google.calendar.poll", job: config.calendar, label: "Calendar sync" },
+    { name: "google.drive.poll", job: config.drive, label: "Drive sync" },
+    { name: "google.meet.poll", job: config.meet, label: "Meet artifact sync" },
+  ] as const
 
-  if (!subject) {
-    console.warn(
-      "Scheduled Google sync is enabled but GOOGLE_WORKSPACE_SUBJECT is not set; skipping scheduled sync."
-    )
-    return
-  }
+  for (const schedule of schedules) {
+    if (!schedule.job.enabled) continue
 
-  if (config.calendar.enabled) {
     scheduledTimers.push(
       setInterval(() => {
-        void enqueueMeetSumJob("google.calendar.poll", {
-          subject,
-          ...config.calendar.payload,
-        }).catch((error) => console.error("Scheduled Calendar sync failed", error))
-      }, config.calendar.minutes * 60 * 1000)
-    )
-  }
-
-  if (config.drive.enabled) {
-    scheduledTimers.push(
-      setInterval(() => {
-        void enqueueMeetSumJob("google.drive.poll", {
-          subject,
-          ...config.drive.payload,
-        }).catch((error) => console.error("Scheduled Drive sync failed", error))
-      }, config.drive.minutes * 60 * 1000)
-    )
-  }
-
-  if (config.meet.enabled) {
-    scheduledTimers.push(
-      setInterval(() => {
-        void enqueueMeetSumJob("google.meet.poll", {
-          subject,
-          ...config.meet.payload,
-        }).catch((error) => console.error("Scheduled Meet artifact sync failed", error))
-      }, config.meet.minutes * 60 * 1000)
+        void enqueueWorkspaceGooglePolls(schedule.name, schedule.job.payload).catch(
+          (error) => console.error(`Scheduled ${schedule.label} failed`, error)
+        )
+      }, schedule.job.minutes * 60 * 1000)
     )
   }
 }
@@ -94,6 +79,22 @@ function scheduleTeamsSubscriptionRenewal() {
   scheduledTimers.push(setInterval(enqueueRenewal, minutes * 60 * 1000))
 }
 
+/** Daily audioRetentionDays enforcement, opt-in (MEETSUM_RETENTION_ENFORCE). */
+function scheduleMediaRetention() {
+  const config = getRetentionScheduleConfig()
+
+  if (!config.enabled) return
+
+  scheduledTimers.push(
+    setInterval(() => {
+      void enqueueWorkspaceRetention().catch((error) =>
+        console.error("Scheduled media retention failed", error)
+      )
+    }, config.hours * 60 * 60 * 1000)
+  )
+}
+
 scheduleGoogleSync()
 scheduleTeamsSubscriptionRenewal()
+scheduleMediaRetention()
 console.log("MeetSum worker started")

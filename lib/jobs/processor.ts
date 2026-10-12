@@ -11,6 +11,7 @@ import {
 import { importPlatformRecording } from "@/lib/capture/recording-import"
 import { renewTeamsSubscriptions } from "@/lib/capture/teams-subscriptions"
 import type { CaptureEvent } from "@/lib/capture/types"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 import { getDatabasePool } from "@/lib/db/client"
 import {
   importMeetRecordingArtifactsForMeeting,
@@ -18,11 +19,22 @@ import {
   syncMeetArtifacts,
 } from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
-import { resolveWorkspaceSubject } from "@/lib/google/workspace-subject"
+import {
+  GoogleNotConfiguredError,
+  loadWorkspaceGoogleSubject,
+} from "@/lib/google/workspace-subject"
 import { cleanupTranscriptSegments, type MeetingIntelligence } from "@/lib/intelligence"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
-import type { MediaAsset, MeetingRecord } from "@/lib/meetings/repository"
-import { meetingRepository } from "@/lib/meetings/store"
+import type {
+  MediaAsset,
+  MeetingRecord,
+  MeetingRepository,
+} from "@/lib/meetings/repository"
+import {
+  getSystemMeetingRepository,
+  resolveMeetingWorkspaceId,
+} from "@/lib/meetings/store"
+import { applyMediaRetention } from "@/lib/storage/retention"
 import {
   deliverWebhookEvent,
   processWebhookDeliveryJob,
@@ -30,6 +42,62 @@ import {
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
 
 export type MeetSumJob = Job<MeetSumJobPayload, unknown, MeetSumJobName>
+
+/**
+ * Everything a job touches is scoped to one workspace: its jobs row, its
+ * meeting (through the workspace's system repository), its webhooks and its
+ * Google identity.
+ */
+type JobScope = {
+  workspaceId: string
+  repo: MeetingRepository
+}
+
+function readJobWorkspaceId(payload: MeetSumJobPayload) {
+  return typeof payload.workspaceId === "string" && payload.workspaceId.trim()
+    ? payload.workspaceId.trim()
+    : undefined
+}
+
+async function workspaceOfJobRow(jobRecordId: unknown): Promise<string | undefined> {
+  if (process.env.MEETSUM_STORAGE !== "postgres") return undefined
+  if (typeof jobRecordId !== "string" || !jobRecordId) return undefined
+
+  const result = await getDatabasePool().query(
+    `select workspace_id from jobs where id = $1 limit 1`,
+    [jobRecordId]
+  )
+
+  return (result.rows[0] as { workspace_id?: string | null } | undefined)
+    ?.workspace_id ?? undefined
+}
+
+/**
+ * Workspace a job runs in: payload.workspaceId → the meeting's workspace →
+ * (Teams renewal) the capture workspace → the persisted jobs row (jobs
+ * enqueued before M2) → otherwise a permanent failure. Never a default.
+ */
+export async function resolveJobWorkspaceId(job: MeetSumJob): Promise<string> {
+  const fromPayload = readJobWorkspaceId(job.data)
+
+  if (fromPayload) return fromPayload
+
+  if (job.data.meetingId) {
+    const fromMeeting = await resolveMeetingWorkspaceId(job.data.meetingId)
+
+    if (fromMeeting) return fromMeeting
+  }
+
+  if (job.name === "teams.subscription.renew") return getCaptureWorkspaceId()
+
+  const fromRow = await workspaceOfJobRow(job.data.jobRecordId).catch(() => undefined)
+
+  if (fromRow) return fromRow
+
+  throw new UnrecoverableError(
+    `Cannot resolve the workspace of ${job.name} job ${String(job.id)}`
+  )
+}
 
 const NO_RECORDING_MESSAGE =
   "This meeting has no recording attached yet. Import a Drive recording, sync Meet artifacts, or upload audio before processing."
@@ -60,8 +128,8 @@ function requireMeetingId(payload: MeetSumJobPayload): string {
   return payload.meetingId
 }
 
-async function loadMeeting(meetingId: string): Promise<MeetingRecord> {
-  const meeting = await meetingRepository.getMeeting(meetingId)
+async function loadMeeting(scope: JobScope, meetingId: string): Promise<MeetingRecord> {
+  const meeting = await scope.repo.getMeeting(meetingId)
 
   if (!meeting) {
     throw toPermanentError(new Error(`Meeting not found: ${meetingId}`))
@@ -70,10 +138,10 @@ async function loadMeeting(meetingId: string): Promise<MeetingRecord> {
   return meeting
 }
 
-async function markActive(job: MeetSumJob) {
+async function markActive(scope: JobScope, job: MeetSumJob) {
   const jobRecordId = String(job.data.jobRecordId ?? job.id)
 
-  await meetingRepository.updateJob(jobRecordId, {
+  await scope.repo.updateJob(jobRecordId, {
     status: "active",
     attempts: job.attemptsMade + 1,
   })
@@ -82,17 +150,23 @@ async function markActive(job: MeetSumJob) {
 }
 
 async function completeJob(
+  scope: JobScope,
   jobRecordId: string,
   result: Record<string, unknown> = {}
 ) {
-  await meetingRepository.updateJob(jobRecordId, {
+  await scope.repo.updateJob(jobRecordId, {
     status: "completed",
     result,
   })
 }
 
-async function failJob(jobRecordId: string, error: unknown, attempts: number) {
-  await meetingRepository.updateJob(jobRecordId, {
+async function failJob(
+  scope: JobScope,
+  jobRecordId: string,
+  error: unknown,
+  attempts: number
+) {
+  await scope.repo.updateJob(jobRecordId, {
     status: "failed",
     error: errorMessage(error),
     attempts,
@@ -100,20 +174,22 @@ async function failJob(jobRecordId: string, error: unknown, attempts: number) {
 }
 
 async function setStage(
+  scope: JobScope,
   jobRecordId: string | undefined,
   result: Record<string, unknown>
 ) {
   if (!jobRecordId) return
 
-  await meetingRepository.updateJob(jobRecordId, { result })
+  await scope.repo.updateJob(jobRecordId, { result })
 }
 
 async function deliverPlatformEvent(
+  scope: JobScope,
   eventName: Parameters<typeof deliverWebhookEvent>[0]["eventName"],
   data: Record<string, unknown>
 ) {
   try {
-    await deliverWebhookEvent({ eventName, data })
+    await deliverWebhookEvent({ eventName, data, workspaceId: scope.workspaceId })
   } catch {
     // Webhook delivery must never hide the primary processing result.
   }
@@ -230,6 +306,7 @@ function platformImportRequest(
 }
 
 async function resolveRecording(
+  scope: JobScope,
   meeting: MeetingRecord,
   payload: MeetSumJobPayload,
   jobRecordId?: string
@@ -244,17 +321,18 @@ async function resolveRecording(
     throw new UnrecoverableError(NO_RECORDING_MESSAGE)
   }
 
-  await setStage(jobRecordId, {
+  await setStage(scope, jobRecordId, {
     stage: "recording.download",
     platform: platformImport.platform,
   })
 
   const imported = await importPlatformRecording({
     meetingId: meeting.id,
+    workspaceId: scope.workspaceId,
     platform: platformImport.platform,
     captureEvent: platformImport.captureEvent,
   })
-  const refreshed = await loadMeeting(meeting.id)
+  const refreshed = await loadMeeting(scope, meeting.id)
   const asset = selectMediaAsset(refreshed, { assetId: imported.assetId })
 
   if (!asset) throw new UnrecoverableError(NO_RECORDING_MESSAGE)
@@ -262,7 +340,7 @@ async function resolveRecording(
   return { meeting: refreshed, asset }
 }
 
-async function summarizeAndPersist(options: {
+async function summarizeAndPersist(scope: JobScope, options: {
   meeting: MeetingRecord
   summaryInput: MeetingRecord
   task: string
@@ -317,10 +395,10 @@ async function summarizeAndPersist(options: {
     },
   })
 
-  await meetingRepository.updateMeetingStatus(meeting.id, "indexing")
-  await setStage(jobRecordId, { stage: "meeting.index", ...options.stageResult })
+  await scope.repo.updateMeetingStatus(meeting.id, "indexing")
+  await setStage(scope, jobRecordId, { stage: "meeting.index", ...options.stageResult })
 
-  const persisted = await meetingRepository.upsertMeetingIntelligence(
+  const persisted = await scope.repo.upsertMeetingIntelligence(
     meeting.id,
     intelligence,
     summaryRun.provider,
@@ -334,18 +412,20 @@ async function summarizeAndPersist(options: {
 }
 
 async function processMediaJob(
+  scope: JobScope,
   payload: MeetSumJobPayload,
   jobRecordId?: string
 ) {
   const meetingId = requireMeetingId(payload)
   const { meeting, asset } = await resolveRecording(
-    await loadMeeting(meetingId),
+    scope,
+    await loadMeeting(scope, meetingId),
     payload,
     jobRecordId
   )
 
-  await meetingRepository.updateMeetingStatus(meeting.id, "transcribing")
-  await setStage(jobRecordId, { stage: "audio.transcribe", assetId: asset.id })
+  await scope.repo.updateMeetingStatus(meeting.id, "transcribing")
+  await setStage(scope, jobRecordId, { stage: "audio.transcribe", assetId: asset.id })
 
   const inputAsset = { inputAsset: asset.id, inputStorageKey: asset.storageKey }
   const transcriptionStartedAt = Date.now()
@@ -399,15 +479,15 @@ async function processMediaJob(
           : 0,
     },
   })
-  await meetingRepository.replaceTranscriptSegments(meeting.id, transcript)
-  await meetingRepository.updateMeetingStatus(meeting.id, "summarizing")
-  await setStage(jobRecordId, {
+  await scope.repo.replaceTranscriptSegments(meeting.id, transcript)
+  await scope.repo.updateMeetingStatus(meeting.id, "summarizing")
+  await setStage(scope, jobRecordId, {
     stage: "summary.generate",
     transcriptSegments: transcript.length,
   })
 
-  const refreshed = await meetingRepository.getMeeting(meeting.id)
-  const { intelligence, newActionItems } = await summarizeAndPersist({
+  const refreshed = await scope.repo.getMeeting(meeting.id)
+  const { intelligence, newActionItems } = await summarizeAndPersist(scope, {
     meeting,
     summaryInput: refreshed ?? { ...meeting, transcript },
     task: "summary.generate",
@@ -415,13 +495,13 @@ async function processMediaJob(
     stageResult: { transcriptSegments: transcript.length },
   })
 
-  await deliverPlatformEvent("summary.created", {
+  await deliverPlatformEvent(scope, "summary.created", {
     meetingId: meeting.id,
     title: meeting.title,
     tags: intelligence.tags,
   })
   for (const item of newActionItems) {
-    await deliverPlatformEvent("action_item.created", {
+    await deliverPlatformEvent(scope, "action_item.created", {
       meetingId: meeting.id,
       actionItemId: item.id,
       title: item.title,
@@ -429,7 +509,7 @@ async function processMediaJob(
       priority: item.priority,
     })
   }
-  await deliverPlatformEvent("meeting.completed", {
+  await deliverPlatformEvent(scope, "meeting.completed", {
     meetingId: meeting.id,
     title: meeting.title,
   })
@@ -443,21 +523,22 @@ async function processMediaJob(
 }
 
 async function processIntelligenceOnlyJob(
+  scope: JobScope,
   payload: MeetSumJobPayload,
   jobRecordId?: string
 ) {
-  const meeting = await loadMeeting(requireMeetingId(payload))
+  const meeting = await loadMeeting(scope, requireMeetingId(payload))
 
-  await meetingRepository.updateMeetingStatus(meeting.id, "summarizing")
-  await setStage(jobRecordId, { stage: "summary.generate", mode: payload.mode })
+  await scope.repo.updateMeetingStatus(meeting.id, "summarizing")
+  await setStage(scope, jobRecordId, { stage: "summary.generate", mode: payload.mode })
 
   const cleanedTranscript = cleanupTranscriptSegments(meeting.transcript ?? [])
   if (cleanedTranscript.length) {
-    await meetingRepository.replaceTranscriptSegments(meeting.id, cleanedTranscript)
+    await scope.repo.replaceTranscriptSegments(meeting.id, cleanedTranscript)
   }
 
-  const refreshed = await meetingRepository.getMeeting(meeting.id)
-  const { intelligence, newActionItems } = await summarizeAndPersist({
+  const refreshed = await scope.repo.getMeeting(meeting.id)
+  const { intelligence, newActionItems } = await summarizeAndPersist(scope, {
     meeting,
     summaryInput: refreshed ?? { ...meeting, transcript: cleanedTranscript },
     task: String(payload.mode ?? "summary.generate"),
@@ -466,14 +547,14 @@ async function processIntelligenceOnlyJob(
     metadata: { mode: payload.mode },
   })
 
-  await deliverPlatformEvent("summary.created", {
+  await deliverPlatformEvent(scope, "summary.created", {
     meetingId: meeting.id,
     title: meeting.title,
     mode: payload.mode,
     tags: intelligence.tags,
   })
   for (const item of newActionItems) {
-    await deliverPlatformEvent("action_item.created", {
+    await deliverPlatformEvent(scope, "action_item.created", {
       meetingId: meeting.id,
       actionItemId: item.id,
       title: item.title,
@@ -481,7 +562,7 @@ async function processIntelligenceOnlyJob(
       priority: item.priority,
     })
   }
-  await deliverPlatformEvent("meeting.completed", {
+  await deliverPlatformEvent(scope, "meeting.completed", {
     meetingId: meeting.id,
     title: meeting.title,
     mode: payload.mode,
@@ -500,12 +581,13 @@ async function processIntelligenceOnlyJob(
  * is something to index and reports honestly instead of re-transcribing.
  */
 async function processIndexJob(
+  scope: JobScope,
   payload: MeetSumJobPayload,
   jobRecordId?: string
 ) {
-  const meeting = await loadMeeting(requireMeetingId(payload))
+  const meeting = await loadMeeting(scope, requireMeetingId(payload))
 
-  await setStage(jobRecordId, { stage: "meeting.index" })
+  await setStage(scope, jobRecordId, { stage: "meeting.index" })
 
   if (!meeting.transcript?.length) {
     throw new UnrecoverableError(
@@ -521,25 +603,27 @@ async function processIndexJob(
 }
 
 async function processArtifactImportJob(
+  scope: JobScope,
   payload: MeetSumJobPayload,
   jobRecordId?: string
 ) {
-  const { id: meetingId } = await loadMeeting(requireMeetingId(payload))
+  const { id: meetingId } = await loadMeeting(scope, requireMeetingId(payload))
 
-  await meetingRepository.updateMeetingStatus(meetingId, "transcribing")
-  await setStage(jobRecordId, { stage: "artifact.import" })
+  await scope.repo.updateMeetingStatus(meetingId, "transcribing")
+  await setStage(scope, jobRecordId, { stage: "artifact.import" })
 
   const artifactIds = Array.isArray(payload.artifactIds)
     ? payload.artifactIds.filter(
         (artifactId): artifactId is string => typeof artifactId === "string"
       )
     : undefined
-  const subject = typeof payload.subject === "string" ? payload.subject : undefined
+  const subject = await resolveJobGoogleSubject(scope, payload)
   let imported: Awaited<ReturnType<typeof importMeetTranscriptArtifactsForMeeting>>
 
   try {
     imported = await importMeetTranscriptArtifactsForMeeting({
       meetingId,
+      workspaceId: scope.workspaceId,
       subject,
       artifactIds,
     })
@@ -551,6 +635,7 @@ async function processArtifactImportJob(
     try {
       recordingImport = await importMeetRecordingArtifactsForMeeting({
         meetingId,
+        workspaceId: scope.workspaceId,
         subject,
         artifactIds,
       })
@@ -563,7 +648,7 @@ async function processArtifactImportJob(
       )
     }
 
-    await setStage(jobRecordId, {
+    await setStage(scope, jobRecordId, {
       stage: "drive.import",
       artifactIds: recordingImport.artifactIds,
       importedFiles: recordingImport.importedFiles,
@@ -581,11 +666,11 @@ async function processArtifactImportJob(
     }
   }
 
-  await meetingRepository.replaceTranscriptSegments(
+  await scope.repo.replaceTranscriptSegments(
     meetingId,
     imported.transcriptSegments
   )
-  await setStage(jobRecordId, {
+  await setStage(scope, jobRecordId, {
     stage: "summary.generate",
     importedEntries: imported.importedEntries,
     importedSmartNotes: imported.importedSmartNotes,
@@ -593,34 +678,61 @@ async function processArtifactImportJob(
   })
 
   return processIntelligenceOnlyJob(
+    scope,
     { ...payload, mode: "summary", source: "meet-artifact" },
     jobRecordId
   )
 }
 
+/**
+ * Google identity of a job: the subject the enqueuing (server-side) code put
+ * in the payload — routes only ever pass the workspace subject or the user's
+ * own mailbox — else the workspace's `google_subject`. No env fallback for
+ * other workspaces; nothing configured is a permanent failure.
+ */
+async function resolveJobGoogleSubject(
+  scope: JobScope,
+  payload: MeetSumJobPayload
+): Promise<string> {
+  const explicit =
+    typeof payload.subject === "string" ? payload.subject.trim().toLowerCase() : ""
+
+  if (explicit) return explicit
+
+  const subject = await loadWorkspaceGoogleSubject(scope.workspaceId)
+
+  if (!subject) {
+    throw toPermanentError(new GoogleNotConfiguredError(scope.workspaceId))
+  }
+
+  return subject
+}
+
 async function processGoogleJob(
+  scope: JobScope,
   name: MeetSumJobName,
   payload: MeetSumJobPayload
 ) {
-  const subject = resolveWorkspaceSubject({
-    explicit: typeof payload.subject === "string" ? payload.subject : undefined,
-  })
+  const target = {
+    subject: await resolveJobGoogleSubject(scope, payload),
+    workspaceId: scope.workspaceId,
+  }
 
   if (name === "google.calendar.poll") {
-    return pollCalendar(subject)
+    return pollCalendar(target)
   }
 
   if (name === "google.drive.poll") {
-    return pollDrive(subject)
+    return pollDrive(target)
   }
 
   if (name === "google.gmail.poll") {
-    return pollGmail(subject)
+    return pollGmail(target)
   }
 
   if (name === "google.meet.poll") {
     return syncMeetArtifacts({
-      subject,
+      ...target,
       limit:
         typeof payload.limit === "number"
           ? payload.limit
@@ -653,33 +765,37 @@ async function processWebhookJob(job: MeetSumJob) {
       job.data.data && typeof job.data.data === "object"
         ? (job.data.data as Record<string, unknown>)
         : {},
+    // Legacy payloads without a workspace are dropped by the fan-out.
+    workspaceId: readJobWorkspaceId(job.data),
   })
 }
 
 async function dispatchJob(
+  scope: JobScope,
   job: MeetSumJob,
   jobRecordId: string
 ): Promise<Record<string, unknown>> {
   if (job.name === "media.ingest" || job.name === "meeting.transcribe") {
-    return processMediaJob(job.data, jobRecordId)
+    return processMediaJob(scope, job.data, jobRecordId)
   }
   if (job.name === "meeting.index") {
-    return processIndexJob(job.data, jobRecordId)
+    return processIndexJob(scope, job.data, jobRecordId)
   }
   if (job.name === "artifact.import") {
-    return processArtifactImportJob(job.data, jobRecordId)
+    return processArtifactImportJob(scope, job.data, jobRecordId)
   }
   if (job.name === "meeting.summarize") {
     return job.data.mode === "full"
-      ? processMediaJob(job.data, jobRecordId)
-      : processIntelligenceOnlyJob(job.data, jobRecordId)
+      ? processMediaJob(scope, job.data, jobRecordId)
+      : processIntelligenceOnlyJob(scope, job.data, jobRecordId)
   }
   if (job.name.startsWith("google.")) {
-    return processGoogleJob(job.name, job.data)
+    return processGoogleJob(scope, job.name, job.data)
   }
   if (job.name === "realizeos.export") {
     return exportMeetingToRealizeOS({
       meetingId: job.data.meetingId,
+      workspaceId: scope.workspaceId,
       suggestionId:
         typeof job.data.suggestionId === "string" ? job.data.suggestionId : undefined,
       contextId:
@@ -688,6 +804,9 @@ async function dispatchJob(
   }
   if (job.name === "teams.subscription.renew") {
     return renewTeamsSubscriptions()
+  }
+  if (job.name === "media.retention") {
+    return applyMediaRetention({ workspaceId: scope.workspaceId, execute: true })
   }
 
   return {}
@@ -698,12 +817,17 @@ export async function processJob(job: MeetSumJob) {
     return processWebhookJob(job)
   }
 
-  const jobRecordId = await markActive(job)
+  const workspaceId = await resolveJobWorkspaceId(job)
+  const scope: JobScope = {
+    workspaceId,
+    repo: getSystemMeetingRepository(workspaceId),
+  }
+  const jobRecordId = await markActive(scope, job)
 
   try {
-    const result = await dispatchJob(job, jobRecordId)
+    const result = await dispatchJob(scope, job, jobRecordId)
 
-    await completeJob(jobRecordId, result)
+    await completeJob(scope, jobRecordId, result)
     return result
   } catch (error) {
     const attempts = job.attemptsMade + 1
@@ -714,20 +838,20 @@ export async function processJob(job: MeetSumJob) {
 
     if (!isFinal) {
       // BullMQ will retry: keep the meeting's state and stay quiet.
-      await meetingRepository
+      await scope.repo
         .updateJob(jobRecordId, { status: "queued", error: message, attempts })
         .catch(() => {})
       throw error
     }
 
-    await failJob(jobRecordId, error, attempts).catch(() => {})
+    await failJob(scope, jobRecordId, error, attempts).catch(() => {})
     // Only processing jobs own the meeting's status. A failed export or
     // index run must not flip an already processed meeting to "failed".
     if (job.data.meetingId && MEETING_PROCESSING_JOBS.has(job.name)) {
-      await meetingRepository
+      await scope.repo
         .updateMeetingStatus(job.data.meetingId, "failed")
         .catch(() => {})
-      await deliverPlatformEvent("meeting.process_failed", {
+      await deliverPlatformEvent(scope, "meeting.process_failed", {
         meetingId: job.data.meetingId,
         jobId: jobRecordId,
         jobName: job.name,

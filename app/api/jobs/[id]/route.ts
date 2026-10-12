@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import type { JobRecord } from "@/lib/meetings/repository"
-import { meetingRepository } from "@/lib/meetings/store"
 
 function serializeJob(job: JobRecord) {
   const stage =
@@ -15,22 +15,16 @@ function serializeJob(job: JobRecord) {
   return { ...job, stage }
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const GET = withAuthz<{ id: string }>(
+  "jobs:read",
+  async (_request, ctx, { params }) => {
+    const { id } = await params
+    const job = await ctx.meetings.getJob(id)
 
-  if (unauthorized) {
-    return unauthorized
+    if (!job) {
+      return jsonError("Job not found", 404)
+    }
+
+    return NextResponse.json({ job: serializeJob(job) })
   }
-
-  const { id } = await params
-  const job = await meetingRepository.getJob(id)
-
-  if (!job) {
-    return jsonError("Job not found", 404)
-  }
-
-  return NextResponse.json({ job: serializeJob(job) })
-}
+)

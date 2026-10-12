@@ -1,6 +1,10 @@
 import { Queue } from "bullmq"
 
-import { meetingRepository } from "@/lib/meetings/store"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
+import {
+  getSystemMeetingRepository,
+  resolveMeetingWorkspaceId,
+} from "@/lib/meetings/store"
 
 export type MeetSumJobName =
   | "media.ingest"
@@ -19,9 +23,17 @@ export type MeetSumJobName =
 
 export type MeetSumJobPayload = {
   meetingId?: string
-  /** M2 contract: owning workspace (required after Integration). */
+  /** Owning workspace; persisted on the jobs row and resolved by the worker. */
   workspaceId?: string
   [key: string]: unknown
+}
+
+/** A job that cannot be attributed to a workspace is never enqueued. */
+export class JobWorkspaceRequiredError extends Error {
+  constructor(name: MeetSumJobName) {
+    super(`${name} job requires a workspaceId`)
+    this.name = "JobWorkspaceRequiredError"
+  }
 }
 
 let queue: Queue<MeetSumJobPayload, unknown, MeetSumJobName> | undefined
@@ -44,21 +56,72 @@ export function getJobAttempts(
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 3
 }
 
+/**
+ * Workspace of a job about to be enqueued: the explicit payload value, else
+ * the meeting's workspace, else (Teams subscription renewal only, which is
+ * instance-level) the capture workspace.
+ */
+export async function resolveEnqueueWorkspaceId(
+  name: MeetSumJobName,
+  payload: MeetSumJobPayload
+): Promise<string | undefined> {
+  if (typeof payload.workspaceId === "string" && payload.workspaceId.trim()) {
+    return payload.workspaceId.trim()
+  }
+
+  if (payload.meetingId) {
+    const workspaceId = await resolveMeetingWorkspaceId(payload.meetingId)
+
+    if (workspaceId) return workspaceId
+  }
+
+  if (name === "teams.subscription.renew") return getCaptureWorkspaceId()
+
+  return undefined
+}
+
+/**
+ * Guarantees jobs.workspace_id is set even if the repository's createJob does
+ * not stamp it (the column has no default and is how job lists are scoped).
+ */
+async function persistJobWorkspace(jobId: string, workspaceId: string) {
+  if (process.env.MEETSUM_STORAGE !== "postgres") return
+
+  const { getDatabasePool } = await import("@/lib/db/client")
+
+  await getDatabasePool().query(
+    `update jobs set workspace_id = $2 where id = $1 and workspace_id is null`,
+    [jobId, workspaceId]
+  )
+}
+
+/**
+ * Records the job in the workspace's jobs table and adds it to BullMQ. The
+ * payload always carries `workspaceId` so the worker can scope its work.
+ * (`webhook.deliver` jobs bypass this: see lib/webhooks/delivery.ts.)
+ */
 export async function enqueueMeetSumJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload = {}
 ) {
+  const workspaceId = await resolveEnqueueWorkspaceId(name, payload)
+
+  if (!workspaceId) throw new JobWorkspaceRequiredError(name)
+
   const attempts = getJobAttempts()
-  const record = await meetingRepository.createJob({
+  const scopedPayload = { ...payload, workspaceId }
+  const record = await getSystemMeetingRepository(workspaceId).createJob({
     name,
     meetingId: payload.meetingId,
-    payload,
+    payload: scopedPayload,
     retryOfJobId:
       typeof payload.retryOfJobId === "string" ? payload.retryOfJobId : undefined,
     maxAttempts: attempts,
   })
 
-  await getMeetSumQueue().add(name, { ...payload, jobRecordId: record.id }, {
+  await persistJobWorkspace(record.id, workspaceId)
+
+  await getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
     jobId: record.id,
     attempts,
     backoff: { type: "exponential", delay: 3000 },

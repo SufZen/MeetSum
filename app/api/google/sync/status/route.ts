@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { getWorkspaceStatus } from "@/lib/ops/status"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
+export const GET = withAuthz("workspace:read", async (_request, ctx) => {
+  const status = await getWorkspaceStatus({
+    workspaceId: ctx.workspace.id,
+    googleSubject: ctx.workspace.googleSubject,
+    sessionEmail: ctx.user?.email,
+  })
 
-  if (unauthorized) return unauthorized
-
-  return NextResponse.json({ sync: (await getWorkspaceStatus()).sync })
-}
+  return NextResponse.json({ sync: status.sync })
+})

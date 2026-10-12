@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
+import { withPublicRoute } from "@/lib/auth/authz"
 import { validateTeamsClientState } from "@/lib/capture/teams"
 import { handleTeamsLifecycleNotifications } from "@/lib/capture/teams-subscriptions"
 
@@ -10,7 +11,12 @@ export const runtime = "nodejs"
  * POST /api/webhooks/teams/lifecycle — Microsoft Graph lifecycle
  * notifications (reauthorizationRequired, subscriptionRemoved, missed).
  */
-export async function POST(request: Request) {
+export const POST = withPublicRoute(
+  "Microsoft Graph lifecycle notifications: authenticated by the subscription clientState",
+  handleTeamsLifecycle
+)
+
+async function handleTeamsLifecycle(request: Request) {
   const validationToken = new URL(request.url).searchParams.get("validationToken")
 
   if (validationToken) {
