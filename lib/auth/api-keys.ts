@@ -62,10 +62,13 @@ export function hasAuthorizationHeader(headers: Headers): boolean {
 export function getConfiguredApiKeyHashes(
   env: NodeJS.ProcessEnv = process.env
 ): string[] {
-  const hashed = env.MEETSUM_API_KEY_HASHES?.split(",") ?? []
-  const raw = env.MEETSUM_API_KEYS?.split(",").map(createApiKeyHash) ?? []
+  const list = (value: string | undefined) =>
+    (value ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+  // Blank entries (`MEETSUM_API_KEYS=` or a trailing comma) are ignored; they
+  // must not make every bearer request fail.
+  const raw = list(env.MEETSUM_API_KEYS).map(createApiKeyHash)
 
-  return [...hashed, ...raw].map((hash) => hash.trim()).filter(Boolean)
+  return [...list(env.MEETSUM_API_KEY_HASHES), ...raw]
 }
 
 export function isAuthorizedApiRequest(

@@ -155,6 +155,16 @@ describe("getConfiguredApiKeyHashes", () => {
     const hashes = getConfiguredApiKeyHashes({} as unknown as NodeJS.ProcessEnv)
     expect(hashes).toHaveLength(0)
   })
+
+  it("ignores blank entries instead of throwing", () => {
+    const hashes = getConfiguredApiKeyHashes({
+      MEETSUM_API_KEYS: " ,raw-key-1,",
+      MEETSUM_API_KEY_HASHES: "",
+    } as unknown as NodeJS.ProcessEnv)
+
+    expect(hashes).toHaveLength(1)
+    expect(getConfiguredApiKeyHashes({ MEETSUM_API_KEYS: "" } as unknown as NodeJS.ProcessEnv)).toEqual([])
+  })
 })
 
 type Call = { text: string; values: unknown[] }
