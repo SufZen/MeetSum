@@ -1,3 +1,4 @@
+import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import type { MeetingStatus } from "@/lib/meetings/state"
 import {
   buildMeetingIntelligence,
@@ -220,6 +221,8 @@ export type MeetingRecord = {
   meetConferenceRecords?: MeetConferenceRecord[]
   aiRuns?: AiRunRecord[]
   qualityWarnings?: MeetingQualityWarning[]
+  externalSource?: string
+  externalId?: string
 }
 
 export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"
@@ -325,6 +328,7 @@ export type MeetingRepository = {
     payload?: Record<string, unknown>
     status?: JobStatus
     retryOfJobId?: string
+    maxAttempts?: number
   }) => Promise<JobRecord>
   updateJob: (
     id: string,
@@ -572,15 +576,43 @@ export function createInMemoryMeetingRepository(
   }
 
   return {
-    async findMeetingByExternalId(): Promise<MeetingRecord | undefined> {
-      throw new Error("not implemented (M1-A)")
+    async findMeetingByExternalId(source, externalId) {
+      for (const meeting of meetings.values()) {
+        if (meeting.externalSource === source && meeting.externalId === externalId) {
+          return hydrate(meeting)
+        }
+      }
+
+      return undefined
     },
-    async createMeetingIfAbsent(): Promise<{ meeting: MeetingRecord; created: boolean }> {
-      throw new Error("not implemented (M1-A)")
+
+    async createMeetingIfAbsent(input) {
+      const existing = await this.findMeetingByExternalId(
+        input.externalSource,
+        input.externalId
+      )
+
+      if (existing) return { meeting: existing, created: false }
+
+      return { meeting: await this.createMeeting(input), created: true }
     },
-    async discardMeeting(): Promise<boolean> {
-      throw new Error("not implemented (M1-A)")
+
+    async discardMeeting(id) {
+      const meeting = meetings.get(id)
+
+      if (!meeting || meeting.transcript?.length || meeting.summary) return false
+
+      meetings.delete(id)
+      for (const [participantId, participant] of participants) {
+        if (participant.meetingId === id) participants.delete(participantId)
+      }
+      for (const [jobId, job] of jobs) {
+        if (job.meetingId === id) jobs.set(jobId, { ...job, meetingId: undefined })
+      }
+
+      return true
     },
+
     async listMeetings(options?: MeetingListOptions): Promise<MeetingRecord[]> {
       return (await this.listMeetingsPage(options)).meetings
     },
@@ -622,6 +654,8 @@ export function createInMemoryMeetingRepository(
         startedAt: input.startedAt,
         participants: input.participants ?? [],
         isFavorite: false,
+        externalSource: input.externalSource,
+        externalId: input.externalId,
       }
 
       meetings.set(meeting.id, meeting)
@@ -676,8 +710,10 @@ export function createInMemoryMeetingRepository(
       return asset
     },
 
-    async findMediaAssetBySourceFile(source, sourceFileId) {
+    async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
       for (const meeting of meetings.values()) {
+        if (options.meetingId && meeting.id !== options.meetingId) continue
+
         const asset = meeting.mediaAssets?.find(
           (candidate) =>
             candidate.source === source &&
@@ -714,21 +750,37 @@ export function createInMemoryMeetingRepository(
         throw new Error(`Meeting not found: ${meetingId}`)
       }
 
+      const existing = meeting.summary?.actionItems ?? []
+      const plan = mergeActionItems(existing, intelligence.actionItems, () =>
+        createId("act")
+      )
+      const updates = new Map(plan.update.map((item) => [item.id, item]))
+      const kept = new Set(plan.keep.map((item) => item.id))
+      const actionItems = [
+        ...existing.flatMap((item) =>
+          kept.has(item.id) ? [item] : updates.has(item.id) ? [updates.get(item.id)!] : []
+        ),
+        ...plan.insert,
+      ]
+      const persisted: MeetingIntelligence = {
+        ...intelligence,
+        actionItems: actionItems as MeetingIntelligence["actionItems"],
+      }
       const updatedMeeting: MeetingRecord = {
         ...meeting,
         status: "completed",
-        intelligence,
+        intelligence: persisted,
         languageMetadata: intelligence.languageMetadata,
         tags: intelligence.tags,
         summary: {
           overview: intelligence.overview,
           decisions: intelligence.decisions,
-          actionItems: intelligence.actionItems,
+          actionItems,
         },
       }
 
       meetings.set(meetingId, updatedMeeting)
-      return intelligence
+      return persisted
     },
 
     async updateActionItem(id, patch): Promise<ActionItem> {
@@ -737,7 +789,23 @@ export function createInMemoryMeetingRepository(
         const index = actionItems.findIndex((item) => item.id === id)
 
         if (index >= 0) {
-          const updatedItem = { ...actionItems[index], ...patch }
+          const current = actionItems[index]
+          const contentEdited =
+            patch.title !== undefined ||
+            patch.owner !== undefined ||
+            patch.dueDate !== undefined ||
+            patch.priority !== undefined
+          const updatedItem: ActionItem = {
+            ...current,
+            ...patch,
+            editedByUser: current.editedByUser === true || contentEdited,
+            completedAt:
+              patch.status === "done"
+                ? (current.completedAt ?? new Date().toISOString())
+                : patch.status === "open"
+                  ? undefined
+                  : current.completedAt,
+          }
           const updatedActionItems = [...actionItems]
 
           updatedActionItems[index] = updatedItem
@@ -750,7 +818,7 @@ export function createInMemoryMeetingRepository(
               ? {
                   ...meeting.intelligence,
                   actionItems: meeting.intelligence.actionItems.map((item) =>
-                    item.id === id ? { ...item, ...patch } : item
+                    item.id === id ? { ...item, ...updatedItem } : item
                   ),
                 }
               : undefined,
@@ -772,7 +840,7 @@ export function createInMemoryMeetingRepository(
         payload: input.payload ?? {},
         result: {},
         attempts: 0,
-        maxAttempts: 3,
+        maxAttempts: input.maxAttempts ?? 3,
         retryOfJobId: input.retryOfJobId,
         retryable: false,
         createdAt: now,
