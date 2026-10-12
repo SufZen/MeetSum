@@ -2,13 +2,19 @@ import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
   sendWebhookTest,
   WEBHOOK_EVENT_NAMES,
+  WebhookNotFoundError,
   type WebhookEventName,
 } from "@/lib/webhooks/management"
 
 export async function POST(request: Request) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
@@ -44,7 +50,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to send webhook test",
-      400
+      error instanceof WebhookNotFoundError ? 404 : 400
     )
   }
 }

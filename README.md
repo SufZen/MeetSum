@@ -109,7 +109,7 @@ The compose stack includes:
 - `minio`: S3-compatible meeting media storage.
 - `n8n`: first automation surface.
 
-Production VPS deploy uses `docker-compose.prod.yml`, exposes MeetSum on host port `3005`, and includes Traefik labels for `meetsum.realization.co.il`.
+Production VPS deploy uses `docker-compose.prod.yml`, binds MeetSum to `127.0.0.1:3005` on the host (loopback only; public traffic goes through Traefik), and includes Traefik labels for `meetsum.realization.co.il`. Rate limiting trusts `MEETSUM_TRUSTED_PROXY_HOPS` (default `1`) proxies in `X-Forwarded-For`.
 
 ## Documentation
 

@@ -4,6 +4,7 @@ import {
   applyRateLimitHeaders,
   checkRateLimit,
   extractRateLimitKey,
+  getClientIp,
   RATE_LIMIT_PRESETS,
   type RateLimitConfig,
   rateLimitRequest,
@@ -204,5 +205,94 @@ describe("extractRateLimitKey", () => {
     const key = extractRateLimitKey(request)
 
     expect(key).toBe("unknown")
+  })
+})
+
+describe("getClientIp", () => {
+  function testEnv(vars: Record<string, string> = {}) {
+    return { NODE_ENV: "test", ...vars } as NodeJS.ProcessEnv
+  }
+
+  function request(headers: Record<string, string>) {
+    return new Request("http://localhost", { headers })
+  }
+
+  it("takes the entry appended by the single trusted proxy by default", () => {
+    expect(
+      getClientIp(request({ "x-forwarded-for": "6.6.6.6, 198.51.100.7" }), testEnv())
+    ).toBe("198.51.100.7")
+  })
+
+  it("honours MEETSUM_TRUSTED_PROXY_HOPS", () => {
+    const env = testEnv({ MEETSUM_TRUSTED_PROXY_HOPS: "2" })
+    // client -> CDN (appends client) -> Traefik (appends CDN) -> app
+    expect(
+      getClientIp(
+        request({ "x-forwarded-for": "6.6.6.6, 203.0.113.50, 10.0.0.2" }),
+        env
+      )
+    ).toBe("203.0.113.50")
+  })
+
+  it("ignores spoofed left-most entries", () => {
+    const spoofed = ["1.1.1.1", "2.2.2.2", "3.3.3.3"].map((fake) =>
+      getClientIp(request({ "x-forwarded-for": `${fake}, 198.51.100.7` }), testEnv())
+    )
+    expect(new Set(spoofed)).toEqual(new Set(["198.51.100.7"]))
+  })
+
+  it("falls back to x-real-ip when the chain is shorter than the hop count", () => {
+    const env = testEnv({ MEETSUM_TRUSTED_PROXY_HOPS: "3" })
+    expect(
+      getClientIp(
+        request({ "x-forwarded-for": "198.51.100.7", "x-real-ip": "203.0.113.9" }),
+        env
+      )
+    ).toBe("203.0.113.9")
+  })
+
+  it("uses MEETSUM_CLIENT_IP_HEADER when set and valid", () => {
+    const env = testEnv({ MEETSUM_CLIENT_IP_HEADER: "cf-connecting-ip" })
+    expect(
+      getClientIp(
+        request({
+          "cf-connecting-ip": "2001:4860:4860::8888",
+          "x-forwarded-for": "198.51.100.7",
+        }),
+        env
+      )
+    ).toBe("2001:4860:4860::8888")
+    expect(
+      getClientIp(
+        request({ "cf-connecting-ip": "garbage", "x-forwarded-for": "198.51.100.7" }),
+        env
+      )
+    ).toBe("198.51.100.7")
+  })
+
+  it("rejects invalid addresses instead of using them as keys", () => {
+    expect(getClientIp(request({ "x-forwarded-for": "not-an-ip" }), testEnv())).toBe(
+      "unknown"
+    )
+    expect(
+      getClientIp(request({ "x-forwarded-for": "1.2.3.4, <script>" }), testEnv())
+    ).toBe("unknown")
+    expect(getClientIp(request({ "x-real-ip": "999.1.1.1" }), testEnv())).toBe("unknown")
+  })
+
+  it("normalizes ports and brackets", () => {
+    expect(getClientIp(request({ "x-forwarded-for": "198.51.100.7:51234" }), testEnv())).toBe(
+      "198.51.100.7"
+    )
+    expect(getClientIp(request({ "x-forwarded-for": "[2001:db8::1]:443" }), testEnv())).toBe(
+      "2001:db8::1"
+    )
+  })
+
+  it("treats an invalid hop count as 1", () => {
+    const env = testEnv({ MEETSUM_TRUSTED_PROXY_HOPS: "zero" })
+    expect(
+      getClientIp(request({ "x-forwarded-for": "6.6.6.6, 198.51.100.7" }), env)
+    ).toBe("198.51.100.7")
   })
 })

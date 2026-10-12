@@ -4,7 +4,7 @@ This repo starts the self-hosted meeting platform as a modular monolith. The app
 
 ## Production Shape
 
-- `app`: Next.js App Router UI and REST API. Production exposes host port `3005` and serves locale-prefixed routes.
+- `app`: Next.js App Router UI and REST API. Production binds host port `3005` on `127.0.0.1` only (Traefik is the public entrypoint, so `X-Forwarded-For` is trustworthy) and serves locale-prefixed routes.
 - `worker`: background jobs for Google sync, media processing, transcription, summarization, embeddings, webhook retries, and agent runs.
 - `migrate`: one-shot migration runner that must complete before the app starts.
 - `postgres`: system of record for meetings, Google state, transcripts, summaries, action items, tags, contexts, intelligence runs, API keys, and MCP clients. Migrations live in `db/migrations` and run through `npm run db:migrate`.
