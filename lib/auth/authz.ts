@@ -390,10 +390,25 @@ async function contextForApiKey(
   key: ApiKeyPrincipal,
   store: WorkspaceStore
 ): Promise<AuthContext | undefined> {
-  const role = scopesToRole(key.scopes)
+  const scopeRole = scopesToRole(key.scopes)
   const workspace = await store.getWorkspace(key.workspaceId)
 
-  if (!role || !workspace) return undefined
+  if (!scopeRole || !workspace) return undefined
+
+  // A database key acts for the member who minted it: it stops working when
+  // that member is disabled or leaves the workspace, and never exceeds their
+  // current role (demoting the creator demotes their keys).
+  let role: WorkspaceRole = scopeRole
+
+  if (key.createdByUserId) {
+    const [creator, membership] = await Promise.all([
+      store.getUserById(key.createdByUserId),
+      store.getMembership(key.workspaceId, key.createdByUserId),
+    ])
+
+    if (!creator || creator.disabledAt || !membership) return undefined
+    if (roleRank(membership.role) < roleRank(role)) role = membership.role
+  }
 
   return buildContext({
     principal: "api_key",
