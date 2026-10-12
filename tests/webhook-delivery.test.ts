@@ -25,7 +25,9 @@ import { encryptSecret } from "@/lib/auth/secret-crypto"
 import { signWebhookPayload, type PlatformEvent } from "@/lib/platform/events"
 import {
   deliverWebhookEvent,
+  getWebhookDeliverySlotStats,
   processWebhookDeliveryJob,
+  QUEUE_UNAVAILABLE_ERROR,
 } from "@/lib/webhooks/delivery"
 import { UnsafeWebhookUrlError } from "@/lib/webhooks/url-guard"
 
@@ -200,6 +202,67 @@ describe("deliverWebhookEvent", () => {
     expect(lastStatusUpdate()[1]).toBe("failed")
   })
 
+  it("caps the fan-out per event", async () => {
+    vi.stubEnv("MEETSUM_WEBHOOK_MAX_SUBSCRIPTIONS_PER_EVENT", "2")
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    useDatabase({
+      subscriptions: Array.from({ length: 3 }, (_, index) => ({
+        id: `wh_${index}`,
+        url: `https://h${index}.example.com`,
+        events: ["summary.created"],
+      })),
+    })
+
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+
+    const select = query.mock.calls.find(([sql]) =>
+      /from webhook_subscriptions/.test(sql as string)
+    )
+    expect(select?.[0]).toMatch(/events \? \$1/)
+    expect(select?.[1]).toEqual(["summary.created", 3])
+    expect(queueAdd).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ queued: 2, truncated: true })
+  })
+
+  it("bounds inline work when the queue is down", async () => {
+    queueAdd.mockRejectedValue(new Error("ECONNREFUSED redis"))
+    guardedFetch.mockResolvedValue({ ok: true, status: 200, durationMs: 1 })
+    useDatabase({
+      subscriptions: Array.from({ length: 5 }, (_, index) => ({
+        id: `wh_${index}`,
+        url: `https://h${index}.example.com`,
+        events: ["summary.created"],
+      })),
+      delivery: deliveryRow(),
+    })
+
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+
+    // enqueue is tried once, then skipped for the rest
+    expect(queueAdd).toHaveBeenCalledTimes(1)
+    expect(guardedFetch).toHaveBeenCalledTimes(2)
+    const deferred = statusUpdates().filter(
+      (values) => values[1] === "failed" && values[3] === QUEUE_UNAVAILABLE_ERROR
+    )
+    expect(deferred).toHaveLength(3)
+    expect(result).toMatchObject({ queued: 0, delivered: 2, failed: 3 })
+  })
+
+  it("can disable the inline fallback entirely", async () => {
+    vi.stubEnv("MEETSUM_WEBHOOK_INLINE_FALLBACK_MAX", "0")
+    queueAdd.mockRejectedValue(new Error("ECONNREFUSED redis"))
+    useDatabase({
+      subscriptions: [
+        { id: "wh_1", url: "https://a.example.com", events: ["summary.created"] },
+      ],
+    })
+
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+
+    expect(guardedFetch).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ delivered: 0, failed: 1 })
+  })
+
   it("skips when storage is not postgres", async () => {
     vi.stubEnv("MEETSUM_STORAGE", "memory")
 
@@ -362,6 +425,67 @@ describe("processWebhookDeliveryJob", () => {
       status: "cancelled",
     })
     expect(guardedFetch).not.toHaveBeenCalled()
+  })
+
+  it("refuses to send once the lifetime attempt budget is spent", async () => {
+    vi.stubEnv("MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS", "8")
+    useDatabase({ delivery: { ...deliveryRow(), attempts: 8 } as ReturnType<typeof deliveryRow> })
+
+    await expect(processWebhookDeliveryJob(job)).rejects.toBeInstanceOf(
+      UnrecoverableError
+    )
+    expect(guardedFetch).not.toHaveBeenCalled()
+    expect(lastStatusUpdate()[1]).toBe("failed")
+  })
+
+  it("limits concurrent requests per target host and overall", async () => {
+    vi.stubEnv("MEETSUM_WEBHOOK_PER_HOST_CONCURRENCY", "2")
+    vi.stubEnv("MEETSUM_WEBHOOK_CONCURRENCY", "3")
+    const hostOf = (index: number) => (index < 4 ? "same.example.com" : `h${index}.example.com`)
+    query.mockImplementation(async (sql: string, values?: unknown[]) => {
+      if (/from webhook_deliveries d\s+left join/.test(sql)) {
+        const index = Number(String(values?.[0]).split("_")[1])
+        return { rows: [deliveryRow({ url: `https://${hostOf(index)}/hook` })] }
+      }
+      return { rows: [] }
+    })
+
+    const inFlight = new Map<string, number>()
+    let maxSameHost = 0
+    let maxTotal = 0
+    let total = 0
+    const releases: Array<() => void> = []
+    guardedFetch.mockImplementation(async (url: string) => {
+      const host = new URL(url).host
+      inFlight.set(host, (inFlight.get(host) ?? 0) + 1)
+      total += 1
+      maxSameHost = Math.max(maxSameHost, inFlight.get("same.example.com") ?? 0)
+      maxTotal = Math.max(maxTotal, total)
+      await new Promise<void>((resolve) => releases.push(resolve))
+      inFlight.set(host, (inFlight.get(host) ?? 1) - 1)
+      total -= 1
+      return { ok: true, status: 200, durationMs: 1 }
+    })
+
+    const jobs = Array.from({ length: 6 }, (_, index) =>
+      processWebhookDeliveryJob({ deliveryId: `whdel_${index}`, attempt: 1, maxAttempts: 3 })
+    )
+
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+    await flush()
+    expect(getWebhookDeliverySlotStats().active).toBe(3)
+    expect(getWebhookDeliverySlotStats().waiting).toBe(3)
+
+    while (releases.length || getWebhookDeliverySlotStats().active) {
+      releases.splice(0).forEach((release) => release())
+      await flush()
+    }
+    await Promise.all(jobs)
+
+    expect(maxSameHost).toBeLessThanOrEqual(2)
+    expect(maxTotal).toBeLessThanOrEqual(3)
+    expect(guardedFetch).toHaveBeenCalledTimes(6)
+    expect(getWebhookDeliverySlotStats()).toEqual({ active: 0, waiting: 0 })
   })
 
   it("does not resend an already-sent delivery", async () => {

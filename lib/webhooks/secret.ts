@@ -71,6 +71,43 @@ export function getWebhookMaxAttempts(
   return positiveInteger(env.MEETSUM_WEBHOOK_MAX_ATTEMPTS, 6)
 }
 
+/**
+ * Hard ceiling on attempts for one delivery across its lifetime, including
+ * manual retries. Manual retries only get the budget that is left.
+ */
+export function getWebhookMaxTotalAttempts(
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  return Math.max(
+    getWebhookMaxAttempts(env),
+    positiveInteger(env.MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS, 20)
+  )
+}
+
+/** Maximum subscriptions one event fans out to. */
+export function getWebhookMaxSubscriptionsPerEvent(
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  return positiveInteger(env.MEETSUM_WEBHOOK_MAX_SUBSCRIPTIONS_PER_EVENT, 50)
+}
+
+/** Inline (no-queue) attempts allowed per event when Redis is unavailable. */
+export function getWebhookInlineFallbackMax(
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  const parsed = Number(env.MEETSUM_WEBHOOK_INLINE_FALLBACK_MAX)
+
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 2
+}
+
+/** Concurrent outgoing webhook requests per process, overall and per target host. */
+export function getWebhookConcurrency(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    global: positiveInteger(env.MEETSUM_WEBHOOK_CONCURRENCY, 8),
+    perHost: positiveInteger(env.MEETSUM_WEBHOOK_PER_HOST_CONCURRENCY, 2),
+  }
+}
+
 /** Base delay (ms) for exponential webhook retry backoff. */
 export function getWebhookBackoffMs(
   env: NodeJS.ProcessEnv = process.env

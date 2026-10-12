@@ -209,8 +209,8 @@ describe("webhook subscription management (postgres)", () => {
 
   it("resets a failed delivery to queued and enqueues it", async () => {
     query.mockImplementation(async (sql: string) => {
-      if (/select d.id, d.status, s.enabled/.test(sql)) {
-        return { rows: [{ id: "whdel_1", status: "failed", enabled: true }] }
+      if (/select d.id, d.status, d.attempts, s.enabled/.test(sql)) {
+        return { rows: [{ id: "whdel_1", status: "failed", attempts: 6, enabled: true }] }
       }
       if (/select d.id, d.webhook_subscription_id/.test(sql)) {
         return {
@@ -247,9 +247,48 @@ describe("webhook subscription management (postgres)", () => {
   })
 
   it("refuses to retry an already-sent delivery", async () => {
-    query.mockResolvedValue({ rows: [{ id: "whdel_1", status: "sent", enabled: true }] })
+    query.mockResolvedValue({
+      rows: [{ id: "whdel_1", status: "sent", attempts: 1, enabled: true }],
+    })
 
     await expect(retryWebhookDelivery("whdel_1")).rejects.toThrow(/already sent/)
+    expect(queueAdd).not.toHaveBeenCalled()
+  })
+
+  it("refuses to retry a delivery that is still in progress", async () => {
+    query.mockResolvedValue({
+      rows: [{ id: "whdel_1", status: "retrying", attempts: 2, enabled: true }],
+    })
+
+    await expect(retryWebhookDelivery("whdel_1")).rejects.toThrow(/in progress/)
+    expect(queueAdd).not.toHaveBeenCalled()
+  })
+
+  it("only grants the remaining lifetime attempt budget on retry", async () => {
+    query.mockImplementation(async (sql: string) => {
+      if (/select d.id, d.status, d.attempts, s.enabled/.test(sql)) {
+        return { rows: [{ id: "whdel_1", status: "failed", attempts: 17, enabled: true }] }
+      }
+      if (/select d.id, d.webhook_subscription_id/.test(sql)) {
+        return { rows: [{ id: "whdel_1", webhook_subscription_id: "wh_1", subscription_url: PUBLIC_URL, event_name: "summary.created", status: "queued", attempts: 17, response_status: null, last_error: null, created_at: "2026-10-12T10:00:00.000Z" }] }
+      }
+      return { rows: [] }
+    })
+
+    await retryWebhookDelivery("whdel_1")
+
+    const [, values] = callsMatching(/set status = 'queued'/)[0]
+    expect(values).toEqual(["whdel_1", 3])
+    expect(queueAdd.mock.calls[0][2]).toMatchObject({ attempts: 3 })
+  })
+
+  it("refuses to retry once the lifetime attempt budget is spent", async () => {
+    vi.stubEnv("MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS", "10")
+    query.mockResolvedValue({
+      rows: [{ id: "whdel_1", status: "failed", attempts: 10, enabled: true }],
+    })
+
+    await expect(retryWebhookDelivery("whdel_1")).rejects.toThrow(/exhausted/)
     expect(queueAdd).not.toHaveBeenCalled()
   })
 

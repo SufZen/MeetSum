@@ -52,6 +52,13 @@ describe("isBlockedAddress", () => {
     "64:ff9b::a9fe:a9fe",
     "64:ff9b::10.0.0.1",
     "2002:7f00:1::",
+    "2002:c0a8:101::1",
+    "2002:a9fe:a9fe::",
+    "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+    "2001::1",
+    "::127.0.0.1",
+    "::ffff:0:127.0.0.1",
+    "64:ff9b:1::7f00:1",
     "not-an-ip",
   ])("blocks %s", (address) => {
     expect(isBlockedAddress(address)).toBe(true)
@@ -63,6 +70,7 @@ describe("isBlockedAddress", () => {
     "172.32.0.1",
     "100.128.0.1",
     "2606:4700:4700::1111",
+    "2001:4860:4860::8888",
     "::ffff:8.8.8.8",
     "64:ff9b::808:808",
   ])("allows public %s", (address) => {
@@ -96,6 +104,20 @@ describe("assertSafeWebhookUrl", () => {
     ["mapped IPv6", "https://[::ffff:127.0.0.1]/x"],
     ["private IP", "https://10.0.0.5/x"],
     ["invalid", "not a url"],
+    ["hex IPv4 shorthand", "https://0x7f.1/x"],
+    ["decimal IPv4", "https://2130706433/x"],
+    ["octal IPv4", "https://0177.0.0.1/x"],
+    ["short IPv4", "https://127.1/x"],
+    ["decimal metadata IP", "https://2852039166/latest"],
+    ["trailing-dot localhost", "https://localhost./x"],
+    ["uppercase localhost", "https://LOCALHOST/x"],
+    ["fullwidth localhost (IDN)", "https://ｌｏｃａｌｈｏｓｔ/x"],
+    ["trailing-dot internal", "https://metadata.google.internal./x"],
+    ["hex-mapped IPv6", "https://[::ffff:7f00:1]/x"],
+    ["NAT64 metadata", "https://[64:ff9b::a9fe:a9fe]/x"],
+    ["6to4 private", "https://[2002:c0a8:101::1]/x"],
+    ["Teredo", "https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/x"],
+    ["unspecified IPv4", "https://0.0.0.0/x"],
   ])("rejects %s", async (_label, url) => {
     await expect(
       assertSafeWebhookUrl(url, { env: prod, resolve: publicResolver })
@@ -155,6 +177,15 @@ describe("assertSafeWebhookUrl", () => {
     await expect(
       assertSafeWebhookUrl("https://svc.cluster/x", { env, resolve: loopbackResolver })
     ).rejects.toBeInstanceOf(UnsafeWebhookUrlError)
+    await expect(
+      assertSafeWebhookUrl("https://evilsvc.cluster/x", { env, resolve: loopbackResolver })
+    ).rejects.toBeInstanceOf(UnsafeWebhookUrlError)
+    await expect(
+      assertSafeWebhookUrl("https://n8n.evil.example/x", { env, resolve: loopbackResolver })
+    ).rejects.toBeInstanceOf(UnsafeWebhookUrlError)
+    await expect(
+      assertSafeWebhookUrl("https://N8N./x", { env, resolve: loopbackResolver })
+    ).resolves.toBe("https://n8n./x")
     await expect(
       assertSafeWebhookUrl("https://receiver.example.com/x", { env, resolve: privateResolver })
     ).resolves.toBe("https://receiver.example.com/x")
@@ -229,6 +260,73 @@ describe("guardedWebhookFetch", () => {
       )
     ).rejects.toBeInstanceOf(UnsafeWebhookUrlError)
     expect(requests).toEqual([])
+  })
+
+  it("re-checks DNS at connect time even when one family is public", async () => {
+    let calls = 0
+    const mixed: WebhookHostResolver = async () => {
+      calls += 1
+      return calls === 1
+        ? [{ address: "93.184.216.34", family: 4 }]
+        : [
+            { address: "93.184.216.34", family: 4 },
+            { address: "::1", family: 6 },
+          ]
+    }
+
+    await expect(
+      guardedWebhookFetch(
+        `http://mixed.example.com:${port}/hook`,
+        { body: "{}", timeoutMs: 5000 },
+        { env: { NODE_ENV: "test" } as NodeJS.ProcessEnv, resolve: mixed }
+      )
+    ).rejects.toBeInstanceOf(UnsafeWebhookUrlError)
+    expect(requests).toEqual([])
+  })
+
+  it("aborts a receiver that never answers within the timeout", async () => {
+    const slow = createServer(() => {
+      // never respond
+    })
+    await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve))
+    const slowPort = (slow.address() as AddressInfo).port
+    const started = Date.now()
+
+    try {
+      await expect(
+        guardedWebhookFetch(
+          `http://127.0.0.1:${slowPort}/hook`,
+          { body: "{}", timeoutMs: 300 },
+          { env: allowLoopback }
+        )
+      ).rejects.toThrow()
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      slow.closeAllConnections()
+      await new Promise<void>((resolve) => slow.close(() => resolve()))
+    }
+  })
+
+  it("discards large response bodies without reading them", async () => {
+    const big = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/octet-stream" })
+      response.end(Buffer.alloc(4 * 1024 * 1024))
+    })
+    await new Promise<void>((resolve) => big.listen(0, "127.0.0.1", resolve))
+    const bigPort = (big.address() as AddressInfo).port
+
+    try {
+      await expect(
+        guardedWebhookFetch(
+          `http://127.0.0.1:${bigPort}/hook`,
+          { body: "{}", timeoutMs: 5000 },
+          { env: allowLoopback }
+        )
+      ).resolves.toMatchObject({ status: 200, ok: true })
+    } finally {
+      big.closeAllConnections()
+      await new Promise<void>((resolve) => big.close(() => resolve()))
+    }
   })
 
   it("re-checks DNS at connect time (rebinding defence)", async () => {

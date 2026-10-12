@@ -10,8 +10,12 @@ import {
 } from "@/lib/platform/events"
 import {
   getWebhookBackoffMs,
+  getWebhookConcurrency,
   getWebhookFetchTimeoutMs,
+  getWebhookInlineFallbackMax,
   getWebhookMaxAttempts,
+  getWebhookMaxSubscriptionsPerEvent,
+  getWebhookMaxTotalAttempts,
   resolveSubscriptionSecret,
 } from "@/lib/webhooks/secret"
 import {
@@ -30,6 +34,7 @@ type DeliveryJobRow = {
   event_name: string
   event_payload: PlatformEvent<Record<string, unknown>> | string
   status: string
+  attempts?: number | null
   subscription_id: string | null
   url: string | null
   enabled: boolean | null
@@ -119,11 +124,19 @@ async function addDeliveryJob(
   )
 }
 
+export const QUEUE_UNAVAILABLE_ERROR =
+  "Webhook queue unavailable; retry this delivery from the dashboard"
+
 /**
- * Fans an event out to every enabled subscription: one queued
- * `webhook_deliveries` row per subscription, delivered by the worker through
- * `processWebhookDeliveryJob` with exponential-backoff retries. When the queue
- * cannot be reached, a single inline attempt is made instead.
+ * Fans an event out to enabled subscriptions (capped by
+ * MEETSUM_WEBHOOK_MAX_SUBSCRIPTIONS_PER_EVENT): one queued `webhook_deliveries`
+ * row per subscription, delivered by the worker through
+ * `processWebhookDeliveryJob` with exponential-backoff retries.
+ *
+ * When the queue cannot be reached the work stays bounded: enqueueing is not
+ * retried for the remaining subscriptions, at most
+ * MEETSUM_WEBHOOK_INLINE_FALLBACK_MAX deliveries get one concurrent inline
+ * attempt, and the rest are marked failed for a manual retry.
  */
 export async function deliverWebhookEvent(options: {
   eventName: PlatformEventName
@@ -136,20 +149,36 @@ export async function deliverWebhookEvent(options: {
   const pool = getDatabasePool()
   const event = createPlatformEvent(options.eventName, options.data)
   const maxAttempts = getWebhookMaxAttempts()
+  const fanOutLimit = getWebhookMaxSubscriptionsPerEvent()
   const subscriptions = await pool.query(
     `
       select id, url, events
       from webhook_subscriptions
       where enabled = true
-    `
+        and events ? $1
+      order by created_at asc
+      limit $2
+    `,
+    [options.eventName, fanOutLimit + 1]
   )
+  const matching = (subscriptions.rows as WebhookSubscriptionRow[]).filter(
+    (subscription) => parseEvents(subscription.events).includes(options.eventName)
+  )
+  const truncated = matching.length > fanOutLimit
+
+  if (truncated) {
+    console.warn(
+      `[webhooks] ${options.eventName}: fan-out capped at ${fanOutLimit} subscriptions`
+    )
+  }
+
   let queued = 0
-  let delivered = 0
-  let failed = 0
+  let queueAvailable = true
+  const inlineCandidates: string[] = []
+  const deferred: string[] = []
+  const inlineMax = getWebhookInlineFallbackMax()
 
-  for (const subscription of subscriptions.rows as WebhookSubscriptionRow[]) {
-    if (!parseEvents(subscription.events).includes(options.eventName)) continue
-
+  for (const subscription of matching.slice(0, fanOutLimit)) {
     const deliveryId = createId("whdel")
     await pool.query(
       `
@@ -168,27 +197,43 @@ export async function deliverWebhookEvent(options: {
       ]
     )
 
-    try {
-      await enqueueWebhookDelivery(deliveryId, maxAttempts)
-      queued += 1
-    } catch {
-      // Queue unavailable: make exactly one inline attempt so the event is not
-      // silently dropped. No retries will follow, so treat it as final.
+    if (queueAvailable) {
       try {
-        const result = await processWebhookDeliveryJob({
-          deliveryId,
-          attempt: 1,
-          maxAttempts: 1,
-        })
-        if (result.status === "sent") delivered += 1
-        else failed += 1
+        await enqueueWebhookDelivery(deliveryId, maxAttempts)
+        queued += 1
+        continue
       } catch {
-        failed += 1
+        // Don't pay the enqueue timeout again for every remaining subscription.
+        queueAvailable = false
       }
     }
+
+    if (inlineCandidates.length < inlineMax) inlineCandidates.push(deliveryId)
+    else deferred.push(deliveryId)
   }
 
-  return { queued, delivered, failed, eventId: event.id }
+  for (const deliveryId of deferred) {
+    await markDelivery(deliveryId, { status: "failed", lastError: QUEUE_UNAVAILABLE_ERROR })
+  }
+
+  // One final attempt each (no retries will follow), run concurrently so the
+  // caller waits at most about one request timeout.
+  const inlineResults = await Promise.allSettled(
+    inlineCandidates.map((deliveryId) =>
+      processWebhookDeliveryJob({ deliveryId, attempt: 1, maxAttempts: 1 })
+    )
+  )
+  const delivered = inlineResults.filter(
+    (result) => result.status === "fulfilled" && result.value.status === "sent"
+  ).length
+
+  return {
+    queued,
+    delivered,
+    failed: inlineResults.length - delivered + deferred.length,
+    truncated,
+    eventId: event.id,
+  }
 }
 
 async function markDelivery(
@@ -223,6 +268,69 @@ async function markDelivery(
   )
 }
 
+/**
+ * In-process limiter for outgoing webhook requests: at most `global` in flight
+ * per process and `perHost` per target host, so a burst of events (many
+ * `webhook.deliver` jobs picked up at once) cannot flood one receiver. Waiters
+ * are served FIFO. Each request is itself bounded by the fetch timeout.
+ */
+type Waiter = { host: string; run: () => void }
+let activeTotal = 0
+const activePerHost = new Map<string, number>()
+const waiters: Waiter[] = []
+
+function canStart(host: string) {
+  const limits = getWebhookConcurrency()
+  return (
+    activeTotal < limits.global && (activePerHost.get(host) ?? 0) < limits.perHost
+  )
+}
+
+function acquire(host: string) {
+  activeTotal += 1
+  activePerHost.set(host, (activePerHost.get(host) ?? 0) + 1)
+}
+
+function release(host: string) {
+  activeTotal -= 1
+  const remaining = (activePerHost.get(host) ?? 1) - 1
+  if (remaining > 0) activePerHost.set(host, remaining)
+  else activePerHost.delete(host)
+
+  for (let index = 0; index < waiters.length; index += 1) {
+    if (canStart(waiters[index].host)) {
+      const [next] = waiters.splice(index, 1)
+      acquire(next.host)
+      next.run()
+      break
+    }
+  }
+}
+
+async function withDeliverySlot<T>(host: string, task: () => Promise<T>): Promise<T> {
+  if (canStart(host)) acquire(host)
+  else await new Promise<void>((resolve) => waiters.push({ host, run: resolve }))
+
+  try {
+    return await task()
+  } finally {
+    release(host)
+  }
+}
+
+function hostKey(url: string) {
+  try {
+    return new URL(url).host.toLowerCase()
+  } catch {
+    return url
+  }
+}
+
+/** Test hook: current limiter occupancy. */
+export function getWebhookDeliverySlotStats() {
+  return { active: activeTotal, waiting: waiters.length }
+}
+
 /** True for 4xx responses that will not succeed on retry (408 and 429 are retryable). */
 function isPermanentClientError(status: number) {
   return status >= 400 && status < 500 && status !== 408 && status !== 429
@@ -248,7 +356,7 @@ export async function processWebhookDeliveryJob(input: {
   const pool = getDatabasePool()
   const result = await pool.query(
     `
-      select d.id, d.event_name, d.event_payload, d.status,
+      select d.id, d.event_name, d.event_payload, d.status, d.attempts,
              s.id as subscription_id, s.url, s.enabled, s.secret_ciphertext
       from webhook_deliveries d
       left join webhook_subscriptions s on s.id = d.webhook_subscription_id
@@ -272,6 +380,13 @@ export async function processWebhookDeliveryJob(input: {
         : "Webhook subscription no longer exists",
     })
     return { deliveryId, status: "cancelled" }
+  }
+
+  // Lifetime ceiling, independent of how many manual retries were requested.
+  if ((row.attempts ?? 0) >= getWebhookMaxTotalAttempts()) {
+    const message = "Webhook delivery exhausted its total attempt budget"
+    await markDelivery(deliveryId, { status: "failed", lastError: message })
+    throw new UnrecoverableError(message)
   }
 
   await pool.query(
@@ -300,17 +415,20 @@ export async function processWebhookDeliveryJob(input: {
 
   let response: Awaited<ReturnType<typeof guardedWebhookFetch>>
   try {
-    response = await guardedWebhookFetch(row.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-meetsum-signature": signature,
-        "x-meetsum-event": row.event_name,
-        "x-meetsum-delivery": deliveryId,
-      },
-      body: JSON.stringify(event),
-      timeoutMs: getWebhookFetchTimeoutMs(),
-    })
+    const url = row.url
+    response = await withDeliverySlot(hostKey(url), () =>
+      guardedWebhookFetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-meetsum-signature": signature,
+          "x-meetsum-event": row.event_name,
+          "x-meetsum-delivery": deliveryId,
+        },
+        body: JSON.stringify(event),
+        timeoutMs: getWebhookFetchTimeoutMs(),
+      })
+    )
   } catch (error) {
     if (error instanceof UnsafeWebhookUrlError) {
       await markDelivery(deliveryId, { status: "failed", lastError: error.message })

@@ -14,6 +14,7 @@ import {
   generateWebhookSecret,
   getWebhookFetchTimeoutMs,
   getWebhookMaxAttempts,
+  getWebhookMaxTotalAttempts,
   getWebhookSigningSecret,
   MIN_WEBHOOK_SECRET_LENGTH,
   resolveSubscriptionSecret,
@@ -469,7 +470,7 @@ export async function retryWebhookDelivery(id: string) {
   const pool = getDatabasePool()
   const result = await pool.query(
     `
-      select d.id, d.status, s.enabled
+      select d.id, d.status, d.attempts, s.enabled
       from webhook_deliveries d
       join webhook_subscriptions s on s.id = d.webhook_subscription_id
       where d.id = $1
@@ -478,14 +479,25 @@ export async function retryWebhookDelivery(id: string) {
     [id]
   )
   const row = result.rows[0] as
-    | { id: string; status: string; enabled: boolean }
+    | { id: string; status: string; attempts: number; enabled: boolean }
     | undefined
 
   if (!row) throw new WebhookNotFoundError("Webhook delivery not found")
   if (!row.enabled) throw new Error("Webhook subscription is disabled")
   if (row.status === "sent") throw new Error("Webhook delivery was already sent")
+  if (row.status === "queued" || row.status === "active" || row.status === "retrying") {
+    throw new Error("Webhook delivery is already in progress")
+  }
 
-  const maxAttempts = getWebhookMaxAttempts()
+  // A retry only gets the attempt budget that is left under the lifetime cap,
+  // so repeated manual retries cannot keep a delivery hammering a receiver.
+  const remaining = getWebhookMaxTotalAttempts() - (row.attempts ?? 0)
+
+  if (remaining <= 0) {
+    throw new Error("Webhook delivery has exhausted its total attempt budget")
+  }
+
+  const maxAttempts = Math.min(getWebhookMaxAttempts(), remaining)
   await pool.query(
     `
       update webhook_deliveries

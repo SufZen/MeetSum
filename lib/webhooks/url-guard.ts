@@ -61,6 +61,8 @@ for (const [network, prefix] of [
   ["fe80::", 10],
   ["ff00::", 8],
   ["2001:db8::", 32],
+  // Teredo tunnels carry an obfuscated IPv4 endpoint; refuse the whole prefix.
+  ["2001::", 32],
 ] as const) {
   blockedV6.addSubnet(network, prefix, "ipv6")
 }
@@ -230,6 +232,21 @@ function isAddressPermitted(address: string, policy: AllowPolicy) {
   return isAddressAllowlisted(address, policy) || !isBlockedAddress(address)
 }
 
+/**
+ * True for a normalized DNS name made of letter/digit/hyphen/underscore labels
+ * whose final label is not purely numeric or hex-looking (those would be IPv4
+ * shorthands that some resolvers still accept).
+ */
+function isPlainDnsName(host: string) {
+  if (host.length > 253) return false
+  const labels = host.split(".")
+  if (labels.some((label) => !/^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/.test(label))) {
+    return false
+  }
+  const last = labels[labels.length - 1]
+  return !/^(?:\d+|0x[0-9a-f]*)$/.test(last)
+}
+
 const systemResolver: WebhookHostResolver = (hostname) =>
   new Promise((resolve, reject) => {
     dnsLookupCallback(
@@ -300,6 +317,14 @@ export async function assertSafeWebhookUrl(
     throw new UnsafeWebhookUrlError("Webhook URL must include a host")
   }
 
+  // WHATWG URL parsing already canonicalizes IPv4 shorthands (0x7f.1,
+  // 2130706433, 0177.0.0.1, 127.1 → 127.0.0.1), lowercases and punycodes IDNs.
+  // Anything that is not then a plain IP literal or an LDH-style DNS name is
+  // refused rather than handed to a resolver that might interpret it oddly.
+  if (literalFamily === 0 && !isPlainDnsName(host)) {
+    throw new UnsafeWebhookUrlError("Webhook URL host is not a valid DNS name")
+  }
+
   if (hostAllowlisted || literalAllowlisted) return parsed.toString()
 
   if (
@@ -350,25 +375,39 @@ type LookupCallback = (
 function createGuardedLookup(env: NodeJS.ProcessEnv, resolve: WebhookHostResolver) {
   return (
     hostname: string,
-    options: { all?: boolean } | number | undefined,
+    options: { all?: boolean; family?: number | string } | number | undefined,
     callback: LookupCallback
   ) => {
     const policy = parseAllowPolicy(env)
     const host = normalizeHost(hostname)
     const wantsAll = typeof options === "object" && options?.all === true
+    const rawFamily = typeof options === "object" ? options?.family : options
+    const family =
+      rawFamily === 4 || rawFamily === "IPv4"
+        ? 4
+        : rawFamily === 6 || rawFamily === "IPv6"
+          ? 6
+          : 0
 
+    // Always our resolver, never a fallback to the system lookup: the
+    // addresses validated here are exactly the ones handed to the socket.
     resolve(host)
-      .then((addresses) => {
-        if (!addresses.length) {
-          throw new UnsafeWebhookUrlError(`Webhook host ${host} could not be resolved`)
-        }
+      .then((resolved) => {
         if (
           !isHostAllowlisted(host, policy) &&
-          addresses.some((entry) => !isAddressPermitted(entry.address, policy))
+          resolved.some((entry) => !isAddressPermitted(entry.address, policy))
         ) {
           throw new UnsafeWebhookUrlError(
             "Webhook URL resolves to a private or reserved address"
           )
+        }
+
+        const addresses = family
+          ? resolved.filter((entry) => entry.family === family)
+          : resolved
+
+        if (!addresses.length) {
+          throw new UnsafeWebhookUrlError(`Webhook host ${host} could not be resolved`)
         }
 
         if (wantsAll) callback(null, addresses)
@@ -377,6 +416,9 @@ function createGuardedLookup(env: NodeJS.ProcessEnv, resolve: WebhookHostResolve
       .catch((error: NodeJS.ErrnoException) => callback(error, wantsAll ? [] : ""))
   }
 }
+
+/** Upper bound on response bytes undici will accept before aborting. */
+const MAX_RESPONSE_BYTES = 64 * 1024
 
 export type GuardedWebhookResponse = {
   ok: boolean
@@ -402,8 +444,19 @@ export async function guardedWebhookFetch(
   const env = options.env ?? process.env
   const resolve = options.resolve ?? systemResolver
   const safeUrl = await assertSafeWebhookUrl(url, { env, resolve })
+  // Every phase is bounded so a slow or hostile receiver cannot pin a worker:
+  // connect, headers and body each time out, the response body is capped and
+  // then discarded, and the whole request is aborted at `timeoutMs`.
   const dispatcher = new Agent({
-    connect: { lookup: createGuardedLookup(env, resolve) },
+    connect: {
+      lookup: createGuardedLookup(env, resolve),
+      timeout: init.timeoutMs,
+    },
+    headersTimeout: init.timeoutMs,
+    bodyTimeout: init.timeoutMs,
+    maxResponseSize: MAX_RESPONSE_BYTES,
+    connections: 1,
+    pipelining: 0,
   })
   const startedAt = Date.now()
 
