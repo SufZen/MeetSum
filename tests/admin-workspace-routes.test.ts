@@ -113,6 +113,8 @@ describe("/api/me and workspace switching", () => {
   })
 
   it("creates a workspace (creator = owner) and makes it active", async () => {
+    vi.stubEnv("MEETSUM_ALLOW_WORKSPACE_CREATION", "true")
+
     const response = await createWorkspace(
       makeRequest(`${BASE}/api/workspaces`, { method: "POST", cookie: as(member), body: { name: "Side" } }),
       noParams
@@ -125,6 +127,20 @@ describe("/api/me and workspace switching", () => {
     expect(response.headers.get("set-cookie")).toMatch(/HttpOnly/i)
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "workspace.created", workspaceId: body.workspace.id }))
   })
+
+  it.each(["", "1", "yes"])(
+    "refuses workspace creation by default (MEETSUM_ALLOW_WORKSPACE_CREATION=%j)",
+    async (value) => {
+      vi.stubEnv("MEETSUM_ALLOW_WORKSPACE_CREATION", value)
+
+      const response = await createWorkspace(
+        makeRequest(`${BASE}/api/workspaces`, { method: "POST", cookie: as(member), body: { name: "Side" } }),
+        noParams
+      )
+
+      expect(response.status).toBe(403)
+    }
+  )
 
   it("refuses workspace creation when MEETSUM_ALLOW_WORKSPACE_CREATION=false", async () => {
     vi.stubEnv("MEETSUM_ALLOW_WORKSPACE_CREATION", "false")

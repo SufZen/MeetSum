@@ -14,9 +14,12 @@ export function setActiveWorkspaceCookie(response: NextResponse, workspaceId: st
   })
 }
 
-/** `MEETSUM_ALLOW_WORKSPACE_CREATION` (default true). */
+/**
+ * `MEETSUM_ALLOW_WORKSPACE_CREATION` (default false: self-service workspace
+ * creation must be opted into explicitly with `true`).
+ */
 export function isWorkspaceCreationAllowed(env: NodeJS.ProcessEnv = process.env) {
-  return env.MEETSUM_ALLOW_WORKSPACE_CREATION?.trim().toLowerCase() !== "false"
+  return env.MEETSUM_ALLOW_WORKSPACE_CREATION?.trim().toLowerCase() === "true"
 }
 
 /** Parses a JSON object body; undefined for invalid JSON or non-objects. */

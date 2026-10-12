@@ -16,6 +16,7 @@ Milestone M0 "Baseline & honesty" (see `docs/parity/PLAN.md`).
 - Production boot refuses placeholder secrets (`dev-secret`, `replace-with-…`) for `WEBHOOK_SIGNING_SECRET` and `MEETSUM_SESSION_SECRET`.
 - Added `.dockerignore`: `.env*` (except `.env.example`), `.secrets`, `.git`, agent worktrees, `node_modules`, `.next` and build/test artifacts are no longer sent to the Docker build context. Previously `COPY . .` baked `.env.local` into the builder layer.
 - Notion export (`POST /api/meetings/:id/export/notion`) requires `meeting:write` + `integrations:manage` and a per-request token; the `NOTION_TOKEN` server fallback was removed (it allowed cross-tenant writes into the operator's Notion).
+- `MEETSUM_ALLOW_WORKSPACE_CREATION` now defaults to `false`: self-service workspace creation must be enabled explicitly with `true`.
 
 ### Fixed
 - Flaky `tests/meet-artifacts-identity.test.ts` timeout: the test no longer loads googleapis/BullMQ/S3 transitively (~1s import) and now runs in milliseconds.

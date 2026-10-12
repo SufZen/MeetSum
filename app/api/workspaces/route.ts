@@ -13,7 +13,7 @@ import { getWorkspaceStore } from "@/lib/workspaces/store"
 
 /**
  * POST /api/workspaces — create a workspace owned by the caller and make it
- * active. Gated by `MEETSUM_ALLOW_WORKSPACE_CREATION` (default true).
+ * active. Gated by `MEETSUM_ALLOW_WORKSPACE_CREATION` (default false).
  */
 export const POST = withSession(async (request, session) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
