@@ -54,10 +54,11 @@ export async function POST(request: Request) {
       return jsonError("ZOOM_WEBHOOK_SECRET not configured", 503)
     }
 
-    if (
-      headers["x-zm-signature"] &&
-      !verifyZoomSignature(headers, rawBody, secret)
-    ) {
+    // Always require a valid signature: the challenge response is
+    // HMAC(secret, plainToken), the same primitive Zoom uses to sign events,
+    // so answering unsigned challenges would be a signing oracle that lets
+    // anyone forge `recording.completed` events.
+    if (!verifyZoomSignature(headers, rawBody, secret)) {
       return jsonError("Invalid Zoom webhook signature", 401)
     }
 

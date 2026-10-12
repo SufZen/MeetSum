@@ -81,18 +81,36 @@ export function getZoomWebhookSecret(env: NodeJS.ProcessEnv = process.env) {
   return env.ZOOM_WEBHOOK_SECRET?.trim() ?? ""
 }
 
+/** Zoom signs with a request timestamp; older (or future) requests are replays. */
+export const ZOOM_SIGNATURE_TOLERANCE_SECONDS = 300
+
 /**
- * Verify Zoom webhook HMAC-SHA256 signature.
+ * Verify Zoom webhook HMAC-SHA256 signature, rejecting timestamps outside
+ * the tolerance window so captured requests cannot be replayed.
  */
 export function verifyZoomSignature(
   headers: Record<string, string>,
   body: string,
-  secret: string
+  secret: string,
+  options: { now?: number; toleranceSeconds?: number } = {}
 ): boolean {
   const timestamp = headers["x-zm-request-timestamp"] ?? ""
   const signature = headers["x-zm-signature"] ?? ""
 
   if (!secret || !timestamp || !signature) return false
+
+  const parsed = Number(timestamp)
+
+  if (!Number.isFinite(parsed)) return false
+
+  // Zoom sends epoch seconds; accept milliseconds defensively.
+  const timestampMs = parsed > 1e12 ? parsed : parsed * 1000
+  const toleranceMs =
+    (options.toleranceSeconds ?? ZOOM_SIGNATURE_TOLERANCE_SECONDS) * 1000
+
+  if (Math.abs((options.now ?? Date.now()) - timestampMs) > toleranceMs) {
+    return false
+  }
 
   const message = `v0:${timestamp}:${body}`
   const expected = `v0=${createHmac("sha256", secret).update(message).digest("hex")}`

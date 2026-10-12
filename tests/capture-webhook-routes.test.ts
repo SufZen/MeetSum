@@ -147,6 +147,20 @@ describe("zoom webhook route", () => {
     expect(forged.status).toBe(401)
   })
 
+  it("refuses unsigned challenges so the endpoint is not a signing oracle", async () => {
+    const { POST } = await import("@/app/api/webhooks/zoom/route")
+    // An attacker would use plainToken = "v0:<ts>:<forged body>" to mint a
+    // valid event signature from the challenge response.
+    const response = await POST(
+      zoomRequest(
+        { event: "endpoint.url_validation", payload: { plainToken: "v0:1:{}" } },
+        false
+      )
+    )
+
+    expect(response.status).toBe(401)
+  })
+
   it("rejects unsigned recording events", async () => {
     const { POST } = await import("@/app/api/webhooks/zoom/route")
     const response = await POST(zoomRequest(zoomEvent, false))

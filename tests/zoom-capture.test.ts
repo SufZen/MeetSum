@@ -78,6 +78,19 @@ describe("zoom webhook signature", () => {
 
     expect(verifyZoomSignature(headers, body + "tampered", MOCK_SECRET)).toBe(false)
   })
+
+  it("rejects correctly signed but stale requests (replay)", () => {
+    const body = JSON.stringify(sampleRecordingEvent)
+    const headers = createZoomHeaders(body, MOCK_SECRET)
+    const signedAtMs = Number(headers["x-zm-request-timestamp"]) * 1000
+
+    expect(
+      verifyZoomSignature(headers, body, MOCK_SECRET, { now: signedAtMs + 299_000 })
+    ).toBe(true)
+    expect(
+      verifyZoomSignature(headers, body, MOCK_SECRET, { now: signedAtMs + 301_000 })
+    ).toBe(false)
+  })
 })
 
 describe("zoom capture adapter", () => {
