@@ -17,6 +17,7 @@ Milestone M0 "Baseline & honesty" (see `docs/parity/PLAN.md`).
 - Added `.dockerignore`: `.env*` (except `.env.example`), `.secrets`, `.git`, agent worktrees, `node_modules`, `.next` and build/test artifacts are no longer sent to the Docker build context. Previously `COPY . .` baked `.env.local` into the builder layer.
 - Notion export (`POST /api/meetings/:id/export/notion`) requires `meeting:write` + `integrations:manage` and a per-request token; the `NOTION_TOKEN` server fallback was removed (it allowed cross-tenant writes into the operator's Notion).
 - `MEETSUM_ALLOW_WORKSPACE_CREATION` now defaults to `false`: self-service workspace creation must be enabled explicitly with `true`.
+- M2 security review: private meetings stay private everywhere — RealizeOS export list/retry, Google Meet artifact listings, Drive recording listing/import (no attaching media to an invisible meeting), and storage media assets apply the caller's visibility scope; `GET /api/google/meet/artifacts` requires `integrations:manage`; webhook events for private meetings carry a minimal payload; any participant email change requires owner-or-admin rights; ad-hoc webhook tests use a throwaway signing secret; `workspaces.google_subject` is cleared when its owner is demoted or removed; a desktop `captureId` held by an invisible meeting returns `409 capture_conflict`.
 
 ### Fixed
 - Flaky `tests/meet-artifacts-identity.test.ts` timeout: the test no longer loads googleapis/BullMQ/S3 transitively (~1s import) and now runs in milliseconds.
