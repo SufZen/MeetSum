@@ -1,33 +1,34 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { retryRealizeOSExport } from "@/lib/integrations/realizeos"
+import { withAuthz } from "@/lib/auth/authz"
+import {
+  RealizeOSExportNotFoundError,
+  retryRealizeOSExport,
+} from "@/lib/integrations/realizeos"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const POST = withAuthz<{ id: string }>(
+  "meeting:write",
+  async (_request, ctx, { params }) => {
+    const { id } = await params
 
-  if (unauthorized) return unauthorized
+    try {
+      const result = await retryRealizeOSExport(ctx.workspace.id, id)
+      await recordAuditLog({
+        ...ctx.audit,
+        action: "realizeos.export.retried",
+        targetType: "suggested_agent_run",
+        targetId: id,
+        metadata: result,
+      })
 
-  const { id } = await params
-
-  try {
-    const result = await retryRealizeOSExport(id)
-    await recordAuditLog({
-      action: "realizeos.export.retried",
-      targetType: "suggested_agent_run",
-      targetId: id,
-      metadata: result,
-    })
-
-    return NextResponse.json(result)
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Unable to retry RealizeOS export",
-      400
-    )
+      return NextResponse.json(result)
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unable to retry RealizeOS export",
+        error instanceof RealizeOSExportNotFoundError ? 404 : 400
+      )
+    }
   }
-}
+)

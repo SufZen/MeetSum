@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess, jsonError } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
   listWebhookSubscriptions,
@@ -8,21 +9,17 @@ import {
 } from "@/lib/webhooks/management"
 
 /**
- * GET /api/admin/webhooks/stats — Webhook system health dashboard.
+ * GET /api/admin/webhooks/stats — Webhook health of the active workspace.
  */
-export async function GET(request: Request) {
+export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
   try {
     const [subscriptions, deliveries] = await Promise.all([
-      listWebhookSubscriptions(),
-      listWebhookDeliveries({ limit: 100 }),
+      listWebhookSubscriptions(ctx.workspace.id),
+      listWebhookDeliveries(ctx.workspace.id, { limit: 100 }),
     ])
 
     const activeSubscriptions = subscriptions.filter((s) => s.enabled)
@@ -96,4 +93,4 @@ export async function GET(request: Request) {
       500
     )
   }
-}
+})

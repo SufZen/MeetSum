@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { withAuthz } from "@/lib/auth/authz"
 import type { JobRecord, JobStatus } from "@/lib/meetings/repository"
 
 function serializeJob(job: JobRecord) {
@@ -30,19 +29,15 @@ function serializeJob(job: JobRecord) {
   }
 }
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const GET = withAuthz("jobs:read", async (request, ctx) => {
   const url = new URL(request.url)
   const meetingId = url.searchParams.get("meetingId") ?? undefined
   const status = url.searchParams.get("status") as JobStatus | null
 
-  const jobs = await meetingRepository.listJobs({
-      meetingId,
-      status: status ?? undefined,
-    })
+  const jobs = await ctx.meetings.listJobs({
+    meetingId,
+    status: status ?? undefined,
+  })
 
   return NextResponse.json({ jobs: jobs.map(serializeJob) })
-}
+})

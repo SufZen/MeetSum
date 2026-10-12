@@ -12,7 +12,6 @@ vi.mock("@/lib/db/client", () => ({
 // persistence logic under test only touches the database, so stub them out.
 vi.mock("@/lib/google/auth", () => ({
   createDelegatedGoogleClient: vi.fn(),
-  getWorkspaceSubject: vi.fn(),
 }))
 
 vi.mock("@/lib/google/services", () => ({
@@ -32,7 +31,43 @@ describe("Meet artifact identity persistence", () => {
     const { getMeetGoogleIdentityId } = await import("@/lib/google/meet-artifacts")
 
     await expect(
-      getMeetGoogleIdentityId("info@realization.co.il")
+      getMeetGoogleIdentityId({
+        subject: "info@realization.co.il",
+        workspaceId: "ws_default",
+      })
     ).resolves.toBe("gident_existing_calendar_id")
+  })
+
+  it("keeps the legacy account for ws_default and gives other workspaces their own", async () => {
+    query.mockResolvedValue({ rows: [] })
+
+    const { ensureGoogleIdentity } = await import("@/lib/google/identity")
+
+    const legacy = await ensureGoogleIdentity({
+      subject: "Info@Realization.co.il",
+      workspaceId: "ws_default",
+    })
+    const other = await ensureGoogleIdentity({
+      subject: "info@realization.co.il",
+      workspaceId: "ws_2",
+    })
+
+    const identityInserts = query.mock.calls.filter(([sql]) =>
+      /insert into google_identities/.test(sql as string)
+    )
+    expect(identityInserts[0][1]).toEqual([
+      legacy,
+      "workspace_realization",
+      "info@realization.co.il",
+      "ws_default",
+    ])
+    expect(identityInserts[1][1]).toEqual([
+      other,
+      "wsacct_ws_2",
+      "info@realization.co.il",
+      "ws_2",
+    ])
+    expect(other).not.toBe(legacy)
+    expect(identityInserts[0][0]).toMatch(/workspace_id = excluded.workspace_id/)
   })
 })

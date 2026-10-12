@@ -1,6 +1,9 @@
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
-import type { JobRecord, MediaAsset } from "@/lib/meetings/repository"
-import { meetingRepository } from "@/lib/meetings/store"
+import type {
+  JobRecord,
+  MediaAsset,
+  MeetingRepository,
+} from "@/lib/meetings/repository"
 import {
   buildDesktopCaptureIngestionPlan,
   normalizeDesktopCaptureMetadata,
@@ -71,7 +74,11 @@ export function captureIdFromUploadFields(
 }
 
 /** Finds a previous non-failed job for the same capture asset (idempotent retries). */
-async function findReusableJob(meetingId: string, assetId: string) {
+async function findReusableJob(
+  meetingRepository: MeetingRepository,
+  meetingId: string,
+  assetId: string
+) {
   const jobs = await meetingRepository.listJobs({ meetingId })
 
   return jobs.find(
@@ -89,12 +96,15 @@ async function findReusableJob(meetingId: string, assetId: string) {
  */
 export async function ingestDesktopCapture(options: {
   meetingId: string
+  /** The caller's scoped repository (ctx.meetings) — never an unscoped one. */
+  repository: MeetingRepository
+  workspaceId: string
   upload: ParsedMediaUpload
   language?: string
   captureSource?: "desktop" | "upload"
   metadataOverrides?: Partial<DesktopCaptureMetadata>
 }): Promise<DesktopCaptureIngestResult> {
-  const { upload } = options
+  const { upload, repository: meetingRepository } = options
   const parsed = readDesktopUploadFields(upload.fields, options.language ?? "he")
   const metadata: DesktopCaptureMetadata = Object.fromEntries(
     Object.entries({ ...parsed.metadata, ...options.metadataOverrides }).filter(
@@ -134,7 +144,11 @@ export async function ingestDesktopCapture(options: {
         // The media for this capture is already stored: drop the re-upload.
         await upload.cleanup()
 
-        const existingJob = await findReusableJob(options.meetingId, asset.id)
+        const existingJob = await findReusableJob(
+          meetingRepository,
+          options.meetingId,
+          asset.id
+        )
 
         if (existingJob) {
           return {
@@ -189,6 +203,7 @@ export async function ingestDesktopCapture(options: {
 
     const job = await enqueueMeetSumJob(plan.jobName, {
       meetingId: options.meetingId,
+      workspaceId: options.workspaceId,
       assetId: asset?.id,
       storageKey: asset?.storageKey,
       bucket: upload.file && asset?.storageKey === upload.file.storageKey

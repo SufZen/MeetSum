@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { getRealizeOSStatus } from "@/lib/integrations/realizeos"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const GET = withAuthz("workspace:read", async () => {
   const status = await getRealizeOSStatus()
 
   return NextResponse.json({ status })
-}
+})

@@ -8,7 +8,7 @@ import {
 } from "@/lib/ai/providers"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
-import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
+import { getWorkspaceGoogleSubject } from "@/lib/google/workspace-subject"
 
 export type ProviderStatus = {
   id: string
@@ -107,30 +107,46 @@ export function getProviderStatus(): ProviderStatus[] {
   ]
 }
 
+/**
+ * Google + sync + job health of one workspace. Without a workspaceId nothing
+ * tenant-specific is read (fail closed): sync states come from the
+ * workspace's own Google identities, job counts from its jobs rows.
+ */
 export async function getWorkspaceStatus(
   options: {
     sessionEmail?: string | null
-    /** M2 contract: accepted but not yet used for scoping (Package C). */
     workspaceId?: string
+    /** The workspace's `google_subject` (ctx.workspace.googleSubject). */
+    googleSubject?: string | null
   } = {}
 ): Promise<WorkspaceStatus> {
   const sync: WorkspaceStatus["sync"] = []
   const jobs = { queued: 0, active: 0, failed: 0 }
+  const workspaceId = options.workspaceId?.trim()
 
-  if (process.env.MEETSUM_STORAGE === "postgres") {
+  if (process.env.MEETSUM_STORAGE === "postgres" && workspaceId) {
     const pool = getDatabasePool()
     const [syncResult, jobsResult] = await Promise.all([
-      pool.query(`
-        select source, status, updated_at, last_synced_at, last_error
-             , next_poll_at, metadata
-        from google_sync_states
-        order by updated_at desc
-      `),
-      pool.query(`
-        select status, count(*)::int as count
-        from jobs
-        group by status
-      `),
+      pool.query(
+        `
+          select s.source, s.status, s.updated_at, s.last_synced_at, s.last_error
+               , s.next_poll_at, s.metadata
+          from google_sync_states s
+          join google_identities gi on gi.id = s.google_identity_id
+          where gi.workspace_id = $1
+          order by s.updated_at desc
+        `,
+        [workspaceId]
+      ),
+      pool.query(
+        `
+          select status, count(*)::int as count
+          from jobs
+          where workspace_id = $1
+          group by status
+        `,
+        [workspaceId]
+      ),
     ])
 
     sync.push(
@@ -175,9 +191,11 @@ export async function getWorkspaceStatus(
     }
   }
 
+  const workspaceSubject = workspaceId
+    ? getWorkspaceGoogleSubject({ id: workspaceId, googleSubject: options.googleSubject })
+    : undefined
   const authStatus = getWorkspaceAuthStatus(
-    getConfiguredWorkspaceSubject() ??
-      (options.sessionEmail?.trim().toLowerCase() || null)
+    workspaceSubject ?? (options.sessionEmail?.trim().toLowerCase() || null)
   )
   const userOAuth = authStatus.subject
     ? await getGoogleWorkspaceOAuthConnectionStatus(authStatus.subject)

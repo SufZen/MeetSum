@@ -1,9 +1,10 @@
 import { getDatabasePool } from "@/lib/db/client"
 import { recordAuditLog } from "@/lib/audit"
-import { meetingRepository } from "@/lib/meetings/store"
+import type { MeetingRecord } from "@/lib/meetings/repository"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
 
-export function createRealizeOSPayload(meeting: Awaited<ReturnType<typeof meetingRepository.getMeeting>>) {
+export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
   if (!meeting) {
     throw new Error("Meeting is required for RealizeOS export")
   }
@@ -114,13 +115,36 @@ async function updateSuggestedRun(
   )
 }
 
+/** Raised when a meeting/export does not exist in the caller's workspace. */
+export class RealizeOSExportNotFoundError extends Error {
+  constructor(message = "RealizeOS export not found") {
+    super(message)
+    this.name = "RealizeOSExportNotFoundError"
+  }
+}
+
 export async function exportMeetingToRealizeOS(options: {
   meetingId?: string
+  workspaceId: string
   suggestionId?: string
   contextId?: string
 }) {
   if (!options.meetingId) {
     throw new Error("meetingId is required for RealizeOS export")
+  }
+
+  if (!options.workspaceId) {
+    throw new Error("workspaceId is required for RealizeOS export")
+  }
+
+  // The workspace's system repository returns nothing for another
+  // workspace's meeting, so an export can never read across tenants.
+  const meeting = await getSystemMeetingRepository(options.workspaceId).getMeeting(
+    options.meetingId
+  )
+
+  if (!meeting) {
+    throw new RealizeOSExportNotFoundError(`Meeting not found: ${options.meetingId}`)
   }
 
   if (options.suggestionId) {
@@ -133,7 +157,6 @@ export async function exportMeetingToRealizeOS(options: {
     throw new Error("REALIZEOS_API_URL is not configured")
   }
 
-  const meeting = await meetingRepository.getMeeting(options.meetingId)
   const payload = {
     ...createRealizeOSPayload(meeting),
     contextId: options.contextId,
@@ -176,6 +199,7 @@ export async function exportMeetingToRealizeOS(options: {
       })
     }
     await recordAuditLog({
+      workspaceId: options.workspaceId,
       action: "realizeos.export.failed",
       targetType: "meeting",
       targetId: options.meetingId,
@@ -186,6 +210,7 @@ export async function exportMeetingToRealizeOS(options: {
       },
     })
     await deliverWebhookEvent({
+      workspaceId: options.workspaceId,
       eventName: "realizeos.export.failed",
       data: {
         meetingId: options.meetingId,
@@ -204,6 +229,7 @@ export async function exportMeetingToRealizeOS(options: {
     })
   }
   await recordAuditLog({
+    workspaceId: options.workspaceId,
     action: "realizeos.export.sent",
     targetType: "meeting",
     targetId: options.meetingId,
@@ -214,6 +240,7 @@ export async function exportMeetingToRealizeOS(options: {
     },
   })
   await deliverWebhookEvent({
+    workspaceId: options.workspaceId,
     eventName: "realizeos.export.sent",
     data: {
       meetingId: options.meetingId,
@@ -247,24 +274,33 @@ export async function getRealizeOSStatus() {
   }
 }
 
-export async function listRealizeOSExports(options: { meetingId?: string; limit?: number } = {}) {
+/**
+ * Exports of one workspace (suggested_agent_runs has no workspace column; the
+ * meeting it belongs to decides).
+ */
+export async function listRealizeOSExports(
+  workspaceId: string,
+  options: { meetingId?: string; limit?: number } = {}
+) {
   if (process.env.MEETSUM_STORAGE !== "postgres") return []
 
-  const values: unknown[] = ["realizeos"]
-  const clauses = ["target = $1"]
+  const values: unknown[] = ["realizeos", workspaceId]
+  const clauses = ["s.target = $1", "m.workspace_id = $2"]
 
   if (options.meetingId) {
     values.push(options.meetingId)
-    clauses.push(`meeting_id = $${values.length}`)
+    clauses.push(`s.meeting_id = $${values.length}`)
   }
 
   values.push(Math.min(Math.max(Math.trunc(options.limit ?? 25), 1), 100))
   const result = await getDatabasePool().query(
     `
-      select id, meeting_id, target, payload, response, status, last_error, created_at
-      from suggested_agent_runs
+      select s.id, s.meeting_id, s.target, s.payload, s.response, s.status,
+             s.last_error, s.created_at
+      from suggested_agent_runs s
+      join meetings m on m.id = s.meeting_id
       where ${clauses.join(" and ")}
-      order by created_at desc
+      order by s.created_at desc
       limit $${values.length}
     `,
     values
@@ -285,26 +321,28 @@ export async function listRealizeOSExports(options: { meetingId?: string; limit?
   }))
 }
 
-export async function retryRealizeOSExport(id: string) {
+export async function retryRealizeOSExport(workspaceId: string, id: string) {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     throw new Error("RealizeOS export retry requires Postgres storage")
   }
 
   const result = await getDatabasePool().query(
     `
-      select id, meeting_id
-      from suggested_agent_runs
-      where id = $1 and target = 'realizeos'
+      select s.id, s.meeting_id
+      from suggested_agent_runs s
+      join meetings m on m.id = s.meeting_id
+      where s.id = $1 and s.target = 'realizeos' and m.workspace_id = $2
       limit 1
     `,
-    [id]
+    [id, workspaceId]
   )
   const row = result.rows[0] as { id?: string; meeting_id?: string } | undefined
 
-  if (!row?.id || !row.meeting_id) throw new Error("RealizeOS export not found")
+  if (!row?.id || !row.meeting_id) throw new RealizeOSExportNotFoundError()
 
   return exportMeetingToRealizeOS({
     meetingId: row.meeting_id,
+    workspaceId,
     suggestionId: row.id,
   })
 }

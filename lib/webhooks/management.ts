@@ -112,9 +112,24 @@ const DELIVERY_COLUMNS = `d.id, d.webhook_subscription_id, s.url as subscription
 const memorySubscriptions = new Map<string, WebhookSubscriptionView>()
 const memorySecrets = new Map<string, string>()
 const memoryDeliveries = new Map<string, WebhookDeliveryView>()
+/** subscription id -> owning workspace id (memory storage). */
+const memoryWorkspaces = new Map<string, string>()
 
 function isPostgres() {
   return process.env.MEETSUM_STORAGE === "postgres"
+}
+
+function requireWorkspaceId(workspaceId: string) {
+  if (!workspaceId?.trim()) throw new Error("workspaceId is required")
+
+  return workspaceId
+}
+
+/** A memory subscription visible to `workspaceId`, or undefined. */
+function memorySubscriptionIn(workspaceId: string, id: string) {
+  return memoryWorkspaces.get(id) === workspaceId
+    ? memorySubscriptions.get(id)
+    : undefined
 }
 
 function createId(prefix: string) {
@@ -187,26 +202,38 @@ function mapDelivery(row: DeliveryRow): WebhookDeliveryView {
 }
 
 /** Signs a sample event with the given secret so operators can verify their receiver. */
-export function createWebhookTestSignature(url: string, secret: string) {
-  const event = createPlatformEvent("summary.created", { url })
+export function createWebhookTestSignature(
+  url: string,
+  secret: string,
+  workspaceId?: string
+) {
+  const event = createPlatformEvent("summary.created", { url }, { workspaceId })
   const signature = signWebhookPayload(event, secret)
 
   return { event, signature }
 }
 
-export async function listWebhookSubscriptions() {
+/**
+ * Every function below is scoped to one workspace: ids that belong to another
+ * workspace behave exactly like unknown ids (WebhookNotFoundError → 404).
+ */
+export async function listWebhookSubscriptions(workspaceId: string) {
+  requireWorkspaceId(workspaceId)
+
   if (!isPostgres()) {
-    return [...memorySubscriptions.values()].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt)
-    )
+    return [...memorySubscriptions.values()]
+      .filter((subscription) => memoryWorkspaces.get(subscription.id) === workspaceId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
   const result = await getDatabasePool().query(
     `
       select ${SUBSCRIPTION_COLUMNS}
       from webhook_subscriptions
+      where workspace_id = $1
       order by created_at desc
-    `
+    `,
+    [workspaceId]
   )
 
   return (result.rows as SubscriptionRow[]).map(mapSubscription)
@@ -216,11 +243,15 @@ export async function listWebhookSubscriptions() {
  * Creates a subscription after the SSRF guard accepts its URL. The signing
  * secret is stored encrypted and returned exactly once, here.
  */
-export async function createWebhookSubscription(input: {
-  url: string
-  events?: unknown
-  secret?: unknown
-}): Promise<Required<WebhookSubscriptionWithSecret>> {
+export async function createWebhookSubscription(
+  workspaceId: string,
+  input: {
+    url: string
+    events?: unknown
+    secret?: unknown
+  }
+): Promise<Required<WebhookSubscriptionWithSecret>> {
+  requireWorkspaceId(workspaceId)
   const url = await assertSafeWebhookUrl(input.url)
   const events = normalizeEvents(input.events)
   const { secret, ref } = resolveNewSecret(input.secret)
@@ -237,6 +268,7 @@ export async function createWebhookSubscription(input: {
 
     memorySubscriptions.set(subscription.id, subscription)
     memorySecrets.set(subscription.id, secret)
+    memoryWorkspaces.set(subscription.id, workspaceId)
 
     return { subscription, secret }
   }
@@ -244,14 +276,15 @@ export async function createWebhookSubscription(input: {
   const result = await getDatabasePool().query(
     `
       insert into webhook_subscriptions (
-        id, url, events, secret_ref, secret_hash, secret_ciphertext, enabled,
-        updated_at
+        id, workspace_id, url, events, secret_ref, secret_hash,
+        secret_ciphertext, enabled, updated_at
       )
-      values ($1, $2, $3::jsonb, $4, $5, $6, true, now())
+      values ($1, $2, $3, $4::jsonb, $5, $6, $7, true, now())
       returning ${SUBSCRIPTION_COLUMNS}
     `,
     [
       createId("wh"),
+      workspaceId,
       url,
       JSON.stringify(events),
       ref,
@@ -264,6 +297,7 @@ export async function createWebhookSubscription(input: {
 }
 
 export async function updateWebhookSubscription(
+  workspaceId: string,
   id: string,
   patch: {
     url?: unknown
@@ -272,6 +306,7 @@ export async function updateWebhookSubscription(
     rotateSecret?: unknown
   }
 ): Promise<WebhookSubscriptionWithSecret> {
+  requireWorkspaceId(workspaceId)
   const url =
     typeof patch.url === "string" ? await assertSafeWebhookUrl(patch.url) : undefined
   const enabled = typeof patch.enabled === "boolean" ? patch.enabled : undefined
@@ -289,7 +324,7 @@ export async function updateWebhookSubscription(
   }
 
   if (!isPostgres()) {
-    const subscription = memorySubscriptions.get(id)
+    const subscription = memorySubscriptionIn(workspaceId, id)
 
     if (!subscription) throw new WebhookNotFoundError("Webhook subscription not found")
 
@@ -335,12 +370,14 @@ export async function updateWebhookSubscription(
   }
 
   values.push(id)
+  const idIndex = values.length
+  values.push(workspaceId)
   const result = await getDatabasePool().query(
     `
       update webhook_subscriptions
       set ${updates.join(", ")},
           updated_at = now()
-      where id = $${values.length}
+      where id = $${idIndex} and workspace_id = $${values.length}
       returning ${SUBSCRIPTION_COLUMNS}
     `,
     values
@@ -353,12 +390,16 @@ export async function updateWebhookSubscription(
 }
 
 /** Deletes a subscription together with its delivery history. */
-export async function deleteWebhookSubscription(id: string) {
+export async function deleteWebhookSubscription(workspaceId: string, id: string) {
+  requireWorkspaceId(workspaceId)
+
   if (!isPostgres()) {
-    if (!memorySubscriptions.delete(id)) {
+    if (!memorySubscriptionIn(workspaceId, id)) {
       throw new WebhookNotFoundError("Webhook subscription not found")
     }
+    memorySubscriptions.delete(id)
     memorySecrets.delete(id)
+    memoryWorkspaces.delete(id)
     for (const [deliveryId, delivery] of memoryDeliveries) {
       if (delivery.subscriptionId === id) memoryDeliveries.delete(deliveryId)
     }
@@ -366,17 +407,23 @@ export async function deleteWebhookSubscription(id: string) {
   }
 
   // One statement: the FK from webhook_deliveries is checked at statement end,
-  // after the CTE has removed the dependent rows.
+  // after the CTE has removed the dependent rows. Both deletes only touch a
+  // subscription of this workspace.
   const result = await getDatabasePool().query(
     `
-      with removed_deliveries as (
-        delete from webhook_deliveries where webhook_subscription_id = $1
+      with target as (
+        select id from webhook_subscriptions
+        where id = $1 and workspace_id = $2
+      ),
+      removed_deliveries as (
+        delete from webhook_deliveries
+        where webhook_subscription_id in (select id from target)
       )
       delete from webhook_subscriptions
-      where id = $1
+      where id in (select id from target)
       returning id
     `,
-    [id]
+    [id, workspaceId]
   )
 
   if (!result.rows[0]) {
@@ -386,12 +433,18 @@ export async function deleteWebhookSubscription(id: string) {
   return { id, deleted: true }
 }
 
-export async function listWebhookDeliveries(options: {
-  subscriptionId?: string
-  limit?: number
-} = {}) {
+export async function listWebhookDeliveries(
+  workspaceId: string,
+  options: {
+    subscriptionId?: string
+    limit?: number
+  } = {}
+) {
+  requireWorkspaceId(workspaceId)
+
   if (!isPostgres()) {
     return [...memoryDeliveries.values()]
+      .filter((delivery) => memoryWorkspaces.get(delivery.subscriptionId) === workspaceId)
       .filter((delivery) =>
         options.subscriptionId
           ? delivery.subscriptionId === options.subscriptionId
@@ -401,8 +454,8 @@ export async function listWebhookDeliveries(options: {
       .slice(0, Math.min(Math.max(Math.trunc(options.limit ?? 25), 1), 100))
   }
 
-  const values: unknown[] = []
-  const clauses: string[] = []
+  const values: unknown[] = [workspaceId]
+  const clauses: string[] = ["s.workspace_id = $1"]
 
   if (options.subscriptionId) {
     values.push(options.subscriptionId)
@@ -411,13 +464,12 @@ export async function listWebhookDeliveries(options: {
 
   values.push(Math.min(Math.max(Math.trunc(options.limit || 25), 1), 100))
   const limitIndex = values.length
-  const where = clauses.length ? `where ${clauses.join(" and ")}` : ""
   const result = await getDatabasePool().query(
     `
       select ${DELIVERY_COLUMNS}
       from webhook_deliveries d
       join webhook_subscriptions s on s.id = d.webhook_subscription_id
-      ${where}
+      where ${clauses.join(" and ")}
       order by d.created_at desc
       limit $${limitIndex}
     `,
@@ -427,16 +479,16 @@ export async function listWebhookDeliveries(options: {
   return (result.rows as DeliveryRow[]).map(mapDelivery)
 }
 
-async function getDeliveryView(id: string) {
+async function getDeliveryView(workspaceId: string, id: string) {
   const result = await getDatabasePool().query(
     `
       select ${DELIVERY_COLUMNS}
       from webhook_deliveries d
       join webhook_subscriptions s on s.id = d.webhook_subscription_id
-      where d.id = $1
+      where d.id = $1 and s.workspace_id = $2
       limit 1
     `,
-    [id]
+    [id, workspaceId]
   )
   const row = result.rows[0] as DeliveryRow | undefined
 
@@ -450,11 +502,15 @@ async function getDeliveryView(id: string) {
  * enqueues a `webhook.deliver` job. Falls back to one inline attempt when the
  * queue is unavailable.
  */
-export async function retryWebhookDelivery(id: string) {
+export async function retryWebhookDelivery(workspaceId: string, id: string) {
+  requireWorkspaceId(workspaceId)
+
   if (!isPostgres()) {
     const delivery = memoryDeliveries.get(id)
 
-    if (!delivery) throw new WebhookNotFoundError("Webhook delivery not found")
+    if (!delivery || memoryWorkspaces.get(delivery.subscriptionId) !== workspaceId) {
+      throw new WebhookNotFoundError("Webhook delivery not found")
+    }
 
     const updated = {
       ...delivery,
@@ -473,10 +529,10 @@ export async function retryWebhookDelivery(id: string) {
       select d.id, d.status, d.attempts, s.enabled
       from webhook_deliveries d
       join webhook_subscriptions s on s.id = d.webhook_subscription_id
-      where d.id = $1
+      where d.id = $1 and s.workspace_id = $2
       limit 1
     `,
-    [id]
+    [id, workspaceId]
   )
   const row = result.rows[0] as
     | { id: string; status: string; attempts: number; enabled: boolean }
@@ -518,12 +574,12 @@ export async function retryWebhookDelivery(id: string) {
     )
   }
 
-  return getDeliveryView(id)
+  return getDeliveryView(workspaceId, id)
 }
 
-async function getSubscriptionForTest(id: string) {
+async function getSubscriptionForTest(workspaceId: string, id: string) {
   if (!isPostgres()) {
-    const subscription = memorySubscriptions.get(id)
+    const subscription = memorySubscriptionIn(workspaceId, id)
     if (!subscription) throw new WebhookNotFoundError("Webhook subscription not found")
     return {
       url: subscription.url,
@@ -536,10 +592,10 @@ async function getSubscriptionForTest(id: string) {
     `
       select url, enabled, secret_ciphertext
       from webhook_subscriptions
-      where id = $1
+      where id = $1 and workspace_id = $2
       limit 1
     `,
-    [id]
+    [id, workspaceId]
   )
   const row = result.rows[0] as
     | { url: string; enabled: boolean; secret_ciphertext: string | null }
@@ -558,11 +614,15 @@ async function getSubscriptionForTest(id: string) {
  * Sends a signed test event through the SSRF guard. A subscription test uses
  * that subscription's own secret; an ad-hoc URL test uses the global secret.
  */
-export async function sendWebhookTest(input: {
-  url?: string
-  subscriptionId?: string
-  eventName?: WebhookEventName
-}) {
+export async function sendWebhookTest(
+  workspaceId: string,
+  input: {
+    url?: string
+    subscriptionId?: string
+    eventName?: WebhookEventName
+  }
+) {
+  requireWorkspaceId(workspaceId)
   const eventName = normalizeEvents(
     input.eventName ? [input.eventName] : ["meeting.completed"]
   )[0]
@@ -572,7 +632,7 @@ export async function sendWebhookTest(input: {
   if (input.url) {
     url = await assertSafeWebhookUrl(input.url)
   } else if (input.subscriptionId) {
-    const subscription = await getSubscriptionForTest(input.subscriptionId)
+    const subscription = await getSubscriptionForTest(workspaceId, input.subscriptionId)
 
     if (!subscription.enabled) throw new Error("Webhook subscription is disabled")
     url = subscription.url
@@ -581,11 +641,15 @@ export async function sendWebhookTest(input: {
 
   if (!url) throw new Error("Webhook URL or subscriptionId is required")
 
-  const event = createPlatformEvent(eventName, {
-    test: true,
-    source: "meetsum",
-    sentAt: new Date().toISOString(),
-  })
+  const event = createPlatformEvent(
+    eventName,
+    {
+      test: true,
+      source: "meetsum",
+      sentAt: new Date().toISOString(),
+    },
+    { workspaceId }
+  )
   const deliveryId = createId("whtest")
   const response = await guardedWebhookFetch(url, {
     method: "POST",

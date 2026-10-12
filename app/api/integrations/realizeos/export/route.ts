@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
+import { withAuthz } from "@/lib/auth/authz"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
-import { meetingRepository } from "@/lib/meetings/store"
 import { createPlatformEvent } from "@/lib/platform/events"
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) {
-    return unauthorized
-  }
-
-  const { meetingId, contextId } = (await request.json()) as {
+export const POST = withAuthz("meeting:write", async (request, ctx) => {
+  const { meetingId, contextId } = (await request.json().catch(() => ({}))) as {
     meetingId?: string
     contextId?: string
   }
@@ -22,11 +16,15 @@ export async function POST(request: Request) {
     return jsonError("meetingId is required", 400)
   }
 
+  if (!(await ctx.meetings.getMeeting(meetingId))) {
+    return jsonError("Meeting not found", 404)
+  }
+
   try {
     const intelligence =
-      (await meetingRepository.getMeetingIntelligence(meetingId)) ??
-      (await meetingRepository.runMeetingIntelligence(meetingId))
-    const suggestion = await meetingRepository.createSuggestedAgentRun({
+      (await ctx.meetings.getMeetingIntelligence(meetingId)) ??
+      (await ctx.meetings.runMeetingIntelligence(meetingId))
+    const suggestion = await ctx.meetings.createSuggestedAgentRun({
       meetingId,
       target: "realizeos",
       payload: {
@@ -36,10 +34,12 @@ export async function POST(request: Request) {
     })
     const job = await enqueueMeetSumJob("realizeos.export", {
       meetingId,
+      workspaceId: ctx.workspace.id,
       contextId,
       suggestionId: suggestion.id,
     })
     await recordAuditLog({
+      ...ctx.audit,
       action: "realizeos.export.queued",
       targetType: "meeting",
       targetId: meetingId,
@@ -53,10 +53,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       suggestion,
       job,
-      event: createPlatformEvent("agent.triggered", {
-        agent: "realizeos-export",
-        meetingId,
-      }),
+      event: createPlatformEvent(
+        "agent.triggered",
+        { agent: "realizeos-export", meetingId },
+        { workspaceId: ctx.workspace.id }
+      ),
     })
   } catch (error) {
     return jsonError(
@@ -64,4 +65,4 @@ export async function POST(request: Request) {
       404
     )
   }
-}
+})

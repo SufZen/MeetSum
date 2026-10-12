@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { randomUUID } from "node:crypto"
 
-import { requireAppAccess } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import {
   DESKTOP_CAPTURE_SOURCE,
   captureIdFromUploadFields,
@@ -19,8 +19,11 @@ import {
   type ParsedMediaUpload,
 } from "@/lib/capture/multipart-upload"
 import type { MeetingRecord } from "@/lib/meetings/repository"
-import { meetingRepository } from "@/lib/meetings/store"
 import { createPlatformEvent } from "@/lib/platform/events"
+import {
+  getAppSettings,
+  resolveDefaultMeetingLanguage,
+} from "@/lib/settings/app-settings"
 
 export const runtime = "nodejs"
 
@@ -28,15 +31,10 @@ export const runtime = "nodejs"
  * POST /api/desktop-capture/ingest — desktop companion / manual import for a
  * meeting that doesn't exist yet. Media is streamed to
  * `meetings/_incoming/<uuid>/…`; the meeting is created idempotently per
- * desktop `captureId`, so spooled retries never duplicate meetings or jobs.
+ * desktop `captureId` within the caller's workspace, so spooled retries never
+ * duplicate meetings or jobs.
  */
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) {
-    return unauthorized
-  }
-
+export const POST = withAuthz("meeting:create", async (request, ctx) => {
   const limits = getUploadLimits()
   let upload: ParsedMediaUpload
 
@@ -48,12 +46,12 @@ export async function POST(request: Request) {
         const captureId = captureIdFromUploadFields(fields)
 
         if (captureId) {
-          const existingMeeting = await meetingRepository.findMeetingByExternalId(
+          const existingMeeting = await ctx.meetings.findMeetingByExternalId(
             DESKTOP_CAPTURE_SOURCE,
             captureId
           )
           const existingAsset = existingMeeting
-            ? await meetingRepository.findMediaAssetBySourceFile?.(
+            ? await ctx.meetings.findMediaAssetBySourceFile?.(
                 DESKTOP_CAPTURE_SOURCE,
                 captureId,
                 { meetingId: existingMeeting.id }
@@ -73,11 +71,15 @@ export async function POST(request: Request) {
 
   let parsedMeeting: ReturnType<typeof parseDesktopMeetingInput>
   let captureId: string | undefined
+  let settings: Awaited<ReturnType<typeof getAppSettings>>
 
   try {
+    settings = await getAppSettings(ctx.workspace.id)
+
     try {
       parsedMeeting = parseDesktopMeetingInput(
-        parseDesktopJsonField(upload.fields, "meeting")
+        parseDesktopJsonField(upload.fields, "meeting"),
+        { defaultLanguage: resolveDefaultMeetingLanguage(settings) }
       )
     } catch (error) {
       throw error instanceof UploadError
@@ -108,11 +110,16 @@ export async function POST(request: Request) {
 
   let meeting: MeetingRecord
   let created: boolean
+  const meetingInput = {
+    ...parsedMeeting.meeting,
+    ownerUserId: ctx.user?.id ?? ctx.apiKey?.createdByUserId,
+    visibility: settings.defaultMeetingVisibility,
+  }
 
   try {
     if (captureId) {
-      const outcome = await meetingRepository.createMeetingIfAbsent({
-        ...parsedMeeting.meeting,
+      const outcome = await ctx.meetings.createMeetingIfAbsent({
+        ...meetingInput,
         externalSource: DESKTOP_CAPTURE_SOURCE,
         externalId: captureId,
       })
@@ -120,7 +127,7 @@ export async function POST(request: Request) {
       meeting = outcome.meeting
       created = outcome.created
     } else {
-      meeting = await meetingRepository.createMeeting(parsedMeeting.meeting)
+      meeting = await ctx.meetings.createMeeting(meetingInput)
       created = true
     }
   } catch (error) {
@@ -131,6 +138,8 @@ export async function POST(request: Request) {
   try {
     const result = await ingestDesktopCapture({
       meetingId: meeting.id,
+      repository: ctx.meetings,
+      workspaceId: ctx.workspace.id,
       upload,
       language: meeting.language,
       captureSource: "desktop",
@@ -147,7 +156,11 @@ export async function POST(request: Request) {
         transcriptSegments: result.transcriptSegments.length,
         captureMetadata: result.captureMetadata,
         event: created
-          ? createPlatformEvent("meeting.created", { meetingId: meeting.id })
+          ? createPlatformEvent(
+              "meeting.created",
+              { meetingId: meeting.id },
+              { workspaceId: ctx.workspace.id }
+            )
           : undefined,
       },
       { status: deduplicated ? 200 : 202 }
@@ -157,7 +170,7 @@ export async function POST(request: Request) {
     // references it. For a meeting created by this request, discard it (with
     // its asset rows) and then delete the stored object as well.
     if (created) {
-      const discarded = await meetingRepository
+      const discarded = await ctx.meetings
         .discardMeeting(meeting.id)
         .catch(() => false)
 
@@ -166,4 +179,4 @@ export async function POST(request: Request) {
 
     return uploadErrorResponse(error, "Invalid desktop capture payload")
   }
-}
+})

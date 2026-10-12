@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { listMeetArtifacts } from "@/lib/google/meet-artifacts"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const GET = withAuthz("workspace:read", async (request, ctx) => {
   const searchParams = new URL(request.url).searchParams
-  const resolved = await resolveRequestWorkspaceSubject(
-    searchParams.get("subject")
-  )
+  const resolved = resolveRequestWorkspaceSubject(ctx, searchParams.get("subject"))
 
   if ("response" in resolved) return resolved.response
 
@@ -21,9 +16,15 @@ export async function GET(request: Request) {
   const pageToken = searchParams.get("pageToken") ?? undefined
   const meetingId = searchParams.get("meetingId") ?? undefined
 
+  // A meeting filter must name a meeting this principal can see.
+  if (meetingId && !(await ctx.meetings.getMeeting(meetingId))) {
+    return jsonError("Meeting not found", 404)
+  }
+
   try {
     const result = await listMeetArtifacts({
       subject,
+      workspaceId: ctx.workspace.id,
       limit: pageSize,
       pageToken,
       meetingId,
@@ -34,9 +35,6 @@ export async function GET(request: Request) {
     const message =
       error instanceof Error ? error.message : "Unable to list Google Meet artifacts"
 
-    return jsonError(
-      message,
-      500
-    )
+    return jsonError(message, 500)
   }
-}
+})

@@ -46,7 +46,20 @@ function mapMediaAsset(row: MediaAssetRow): MediaAssetView {
   }
 }
 
-export async function listMediaAssets(options: { limit?: number } = {}) {
+/** Raised for asset ids that do not exist in the caller's workspace. */
+export class MediaAssetNotFoundError extends Error {
+  constructor() {
+    super("Media asset not found")
+    this.name = "MediaAssetNotFoundError"
+  }
+}
+
+/** Media of one workspace (storage admin view). */
+export async function listMediaAssets(
+  workspaceId: string,
+  options: { limit?: number } = {}
+) {
+  if (!workspaceId) throw new Error("workspaceId is required")
   if (process.env.MEETSUM_STORAGE !== "postgres") return []
 
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100)
@@ -56,16 +69,18 @@ export async function listMediaAssets(options: { limit?: number } = {}) {
              a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
+      where a.workspace_id = $1 and m.workspace_id = $1
       order by a.created_at desc
-      limit $1
+      limit $2
     `,
-    [limit]
+    [workspaceId, limit]
   )
 
   return (result.rows as MediaAssetRow[]).map(mapMediaAsset)
 }
 
-export async function deleteMediaAsset(id: string) {
+export async function deleteMediaAsset(workspaceId: string, id: string) {
+  if (!workspaceId) throw new Error("workspaceId is required")
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     throw new Error("Media asset deletion requires Postgres storage")
   }
@@ -77,16 +92,19 @@ export async function deleteMediaAsset(id: string) {
              a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
-      where a.id = $1
+      where a.id = $1 and a.workspace_id = $2 and m.workspace_id = $2
     `,
-    [id]
+    [id, workspaceId]
   )
   const row = result.rows[0] as MediaAssetRow | undefined
 
-  if (!row) throw new Error("Media asset not found")
+  if (!row) throw new MediaAssetNotFoundError()
 
   await deleteMeetingObject(row.storage_key)
-  await pool.query("delete from media_assets where id = $1", [id])
+  await pool.query("delete from media_assets where id = $1 and workspace_id = $2", [
+    id,
+    workspaceId,
+  ])
 
   return mapMediaAsset(row)
 }
