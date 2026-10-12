@@ -29,6 +29,7 @@ import type {
   MediaAsset,
   MeetingRecord,
   MeetingRepository,
+  MeetingVisibility,
 } from "@/lib/meetings/repository"
 import {
   getSystemMeetingRepository,
@@ -183,13 +184,72 @@ async function setStage(
   await scope.repo.updateJob(jobRecordId, { result })
 }
 
+/**
+ * Event fields that never reveal meeting content, kept for private meetings.
+ * Everything else (title, tags, action item text/owner, error text) is
+ * dropped: an admin registering a webhook must not read private meetings.
+ */
+const PRIVATE_EVENT_FIELDS = new Set([
+  "meetingId",
+  "actionItemId",
+  "jobId",
+  "jobName",
+  "attempts",
+  "permanent",
+  "mode",
+])
+
+/**
+ * Webhook payload for a meeting event: full data for workspace/link
+ * meetings, a minimal `{ meetingId, workspace_id, visibility: "private", ... }`
+ * payload for private ones (or when visibility cannot be determined).
+ */
+export function platformEventData(
+  workspaceId: string,
+  data: Record<string, unknown>,
+  visibility: MeetingVisibility | undefined
+): Record<string, unknown> {
+  if (visibility === "workspace" || visibility === "link") return data
+
+  return {
+    ...Object.fromEntries(
+      Object.entries(data).filter(([key]) => PRIVATE_EVENT_FIELDS.has(key))
+    ),
+    workspace_id: workspaceId,
+    visibility: "private",
+  }
+}
+
+async function meetingVisibility(
+  scope: JobScope,
+  meetingId: unknown
+): Promise<MeetingVisibility | undefined> {
+  if (typeof meetingId !== "string" || !meetingId) return undefined
+
+  try {
+    const meeting = await scope.repo.getMeeting(meetingId)
+
+    return meeting ? (meeting.visibility ?? "workspace") : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function deliverPlatformEvent(
   scope: JobScope,
   eventName: Parameters<typeof deliverWebhookEvent>[0]["eventName"],
   data: Record<string, unknown>
 ) {
   try {
-    await deliverWebhookEvent({ eventName, data, workspaceId: scope.workspaceId })
+    // Re-read the meeting so a visibility change made during processing is
+    // honoured; an unknown visibility fails closed (minimal payload).
+    const visibility = await meetingVisibility(scope, data.meetingId)
+
+    await deliverWebhookEvent({
+      eventName,
+      data: platformEventData(scope.workspaceId, data, visibility),
+      workspaceId: scope.workspaceId,
+    })
   } catch {
     // Webhook delivery must never hide the primary processing result.
   }

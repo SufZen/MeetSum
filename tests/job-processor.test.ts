@@ -575,3 +575,80 @@ describe("processJob dispatch", () => {
     expect(mocks.transcribe).not.toHaveBeenCalled()
   })
 })
+
+describe("processJob webhook payloads respect meeting visibility", () => {
+  async function seedPrivateMeeting() {
+    return mocks.repository.createMeeting({
+      title: "Board compensation review",
+      source: "upload",
+      language: "he",
+      startedAt: "2026-04-23T09:00:00.000Z",
+      visibility: "private",
+      ownerUserId: "usr_owner",
+    })
+  }
+
+  it("sends full payloads for workspace meetings", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(eventsNamed("summary.created")[0].data).toMatchObject({
+      meetingId: meeting.id,
+      title: "Weekly sync",
+    })
+    expect(eventsNamed("action_item.created")[0].data).toMatchObject({
+      title: "Send deck",
+    })
+  })
+
+  it("sends minimal payloads without title, tags or action items for private meetings", async () => {
+    const meeting = await seedPrivateMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    const summary = eventsNamed("summary.created")[0]
+    expect(summary.data).toEqual({
+      meetingId: meeting.id,
+      workspace_id: "ws_1",
+      visibility: "private",
+    })
+    const [item] = eventsNamed("action_item.created")
+    expect(item.data).toEqual({
+      meetingId: meeting.id,
+      actionItemId: "t1",
+      workspace_id: "ws_1",
+      visibility: "private",
+    })
+    expect(eventsNamed("meeting.completed")[0].data).toEqual({
+      meetingId: meeting.id,
+      workspace_id: "ws_1",
+      visibility: "private",
+    })
+    const serialized = JSON.stringify(mocks.deliverWebhookEvent.mock.calls)
+    expect(serialized).not.toContain("Board compensation review")
+    expect(serialized).not.toContain("Send deck")
+  })
+
+  it("strips the error text from meeting.process_failed for private meetings", async () => {
+    const meeting = await seedPrivateMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    mocks.transcribe.mockRejectedValue(new Error("ASR failed on Board compensation review"))
+    const job = await makeJob("media.ingest", { meetingId: meeting.id }, { attemptsMade: 2 })
+
+    await expect(processJob(job)).rejects.toThrow()
+
+    const [failure] = eventsNamed("meeting.process_failed")
+    expect(failure.data).toEqual({
+      meetingId: meeting.id,
+      jobId: job.data.jobRecordId,
+      jobName: "media.ingest",
+      attempts: 3,
+      permanent: false,
+      workspace_id: "ws_1",
+      visibility: "private",
+    })
+  })
+})

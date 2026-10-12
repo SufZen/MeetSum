@@ -209,6 +209,14 @@ The URL must be `https` (plain `http` only outside production or for allowlisted
 
 Deliveries are signed with that secret (`x-meetsum-signature`, HMAC-SHA256 hex of the JSON body) and carry `x-meetsum-event` and `x-meetsum-delivery`. Redirects are not followed.
 
+**Private meetings.** Meeting events (`summary.created`, `action_item.created`, `meeting.completed`, `meeting.process_failed`) for a meeting whose visibility is `private` carry a minimal payload, because webhook subscribers (admins) must not read private meetings:
+
+```json
+{ "meetingId": "meet_…", "workspace_id": "ws_…", "visibility": "private" }
+```
+
+Only non-content identifiers are kept (`actionItemId`, `jobId`, `jobName`, `attempts`, `permanent`, `mode` where the event has them); `title`, `tags`, action item text/owner/priority and error text are omitted. `workspace` and `link` meetings receive the full payload. A meeting whose visibility cannot be read is treated as private.
+
 ### `PATCH /api/webhooks/subscriptions/:id`
 Update subscription. Body: `{ url?, enabled?, events?, rotateSecret? }`. With `rotateSecret: true` the response includes the new `secret` once.
 
