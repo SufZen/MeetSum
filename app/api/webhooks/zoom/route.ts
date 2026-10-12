@@ -2,7 +2,11 @@ import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { zoomCaptureAdapter, handleZoomChallenge } from "@/lib/capture/zoom"
+import {
+  handleZoomChallenge,
+  isZoomChallenge,
+  zoomCaptureAdapter,
+} from "@/lib/capture/zoom"
 import { meetingRepository } from "@/lib/meetings/store"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 
@@ -24,15 +28,8 @@ export async function POST(request: Request) {
   }
 
   // Handle Zoom URL validation challenge (no signature check needed)
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    (body as { event?: string }).event === "endpoint.url_validation"
-  ) {
-    const challenge = handleZoomChallenge(
-      body as Parameters<typeof handleZoomChallenge>[0]
-    )
-    return NextResponse.json(challenge)
+  if (isZoomChallenge(body)) {
+    return NextResponse.json(handleZoomChallenge(body))
   }
 
   // Validate webhook signature

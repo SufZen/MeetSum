@@ -16,6 +16,22 @@ export type RuntimeEnvironmentReport = {
   }
 }
 
+/**
+ * Secret values shipped in .env.example (or used historically as defaults).
+ * They are fine for local development but must never reach production.
+ */
+const PLACEHOLDER_SECRETS = new Set(["dev-secret", "changeme", "change-me"])
+
+export function isPlaceholderSecret(value: string | undefined): boolean {
+  if (!value) return false
+
+  const normalized = value.trim().toLowerCase()
+
+  return (
+    PLACEHOLDER_SECRETS.has(normalized) || normalized.startsWith("replace-with-")
+  )
+}
+
 function collectFatalIssues(env: NodeJS.ProcessEnv): string[] {
   const fatal: string[] = []
   const isProduction = env.NODE_ENV === "production"
@@ -41,6 +57,16 @@ function collectFatalIssues(env: NodeJS.ProcessEnv): string[] {
 
   if (isProduction && !env.WEBHOOK_SIGNING_SECRET) {
     fatal.push("WEBHOOK_SIGNING_SECRET is required in production.")
+  } else if (isProduction && isPlaceholderSecret(env.WEBHOOK_SIGNING_SECRET)) {
+    fatal.push(
+      "WEBHOOK_SIGNING_SECRET is still a development placeholder; set a long random value in production."
+    )
+  }
+
+  if (isProduction && isPlaceholderSecret(env.MEETSUM_SESSION_SECRET)) {
+    fatal.push(
+      "MEETSUM_SESSION_SECRET is still a development placeholder; set a long random value in production."
+    )
   }
 
   if (isProduction && env.MEETSUM_STORAGE === "postgres" && !env.DATABASE_URL) {

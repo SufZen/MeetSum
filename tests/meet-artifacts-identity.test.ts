@@ -6,6 +6,19 @@ vi.mock("@/lib/db/client", () => ({
   getDatabasePool: () => ({ query }),
 }))
 
+// lib/google/meet-artifacts transitively imports googleapis, BullMQ and the
+// AWS S3 SDK through these modules. Loading them took ~1s in isolation and
+// blew past the 5s test timeout under a parallel `vitest run`. The identity
+// persistence logic under test only touches the database, so stub them out.
+vi.mock("@/lib/google/auth", () => ({
+  createDelegatedGoogleClient: vi.fn(),
+  getWorkspaceSubject: vi.fn(),
+}))
+
+vi.mock("@/lib/google/services", () => ({
+  importDriveRecordings: vi.fn(),
+}))
+
 describe("Meet artifact identity persistence", () => {
   beforeEach(() => {
     query.mockReset()

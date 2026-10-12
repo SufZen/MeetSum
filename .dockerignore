@@ -1,0 +1,48 @@
+# Keep the Docker build context small and free of secrets.
+# The image needs: package*.json, app, components, hooks, lib, public, db
+# (migrations), bin, mcp, scripts, worker, instrumentation.ts, proxy.ts and the
+# root configs (next/postcss/tsconfig/components.json). Runtime config is
+# supplied via env_file at `docker compose up`, never baked into the image.
+
+# Secrets and local env files (keep the documented template)
+.env
+.env.*
+!.env.example
+.secrets
+.mcp.json
+*.pem
+
+# Dependencies and build output (rebuilt inside the image)
+node_modules
+.next
+out
+build
+*.tsbuildinfo
+next-env.d.ts
+
+# Desktop recorder build artifacts (Electron app is not part of the server image)
+desktop-recorder/release
+desktop-recorder/dist
+
+# VCS, editor and agent tooling
+.git
+.github
+.claude
+.agent
+.agents
+.vscode
+.idea
+.DS_Store
+
+# Test and debugging artifacts
+coverage
+test-results
+playwright-report
+.playwright-mcp
+.playwright-*.png
+.next-dev*
+dev-server*.log
+npm-debug.log*
+
+# Large docs assets not needed at build or runtime
+docs/presentation

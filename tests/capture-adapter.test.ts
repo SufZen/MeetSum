@@ -16,7 +16,7 @@ import {
 const mockAdapter: CaptureAdapter = {
   platform: "test-platform",
 
-  validateWebhook(_headers, _body): WebhookValidation {
+  validateWebhook(): WebhookValidation {
     return { valid: true }
   },
 

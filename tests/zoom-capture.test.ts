@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { verifyZoomSignature, zoomCaptureAdapter } from "@/lib/capture/zoom"
+import {
+  isZoomChallenge,
+  verifyZoomSignature,
+  zoomCaptureAdapter,
+} from "@/lib/capture/zoom"
 import { createHmac } from "node:crypto"
 
 const MOCK_SECRET = "test-zoom-webhook-secret"
@@ -125,5 +129,28 @@ describe("zoom adapter validation", () => {
     }
 
     if (origSecret) process.env.ZOOM_WEBHOOK_SECRET = origSecret
+  })
+})
+
+describe("zoom url validation challenge", () => {
+  it("recognizes a well-formed endpoint.url_validation payload", () => {
+    expect(
+      isZoomChallenge({
+        event: "endpoint.url_validation",
+        payload: { plainToken: "abc123" },
+      })
+    ).toBe(true)
+  })
+
+  it("rejects challenges without a string plainToken and other events", () => {
+    expect(isZoomChallenge({ event: "endpoint.url_validation" })).toBe(false)
+    expect(
+      isZoomChallenge({
+        event: "endpoint.url_validation",
+        payload: { plainToken: 42 },
+      })
+    ).toBe(false)
+    expect(isZoomChallenge(sampleRecordingEvent)).toBe(false)
+    expect(isZoomChallenge(null)).toBe(false)
   })
 })

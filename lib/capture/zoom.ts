@@ -46,11 +46,17 @@ type ZoomChallenge = {
   }
 }
 
-function isZoomChallenge(body: unknown): body is ZoomChallenge {
+export function isZoomChallenge(body: unknown): body is ZoomChallenge {
+  if (typeof body !== "object" || body === null) return false
+
+  const candidate = body as {
+    event?: unknown
+    payload?: { plainToken?: unknown }
+  }
+
   return (
-    typeof body === "object" &&
-    body !== null &&
-    (body as { event?: string }).event === "endpoint.url_validation"
+    candidate.event === "endpoint.url_validation" &&
+    typeof candidate.payload?.plainToken === "string"
   )
 }
 

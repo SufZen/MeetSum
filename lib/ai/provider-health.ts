@@ -52,7 +52,12 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
     warnings.push("Local Whisper selected but WHISPER_API_URL is not configured")
   }
 
-  const model = process.env.GEMINI_MODEL ?? "gemini-3.5-flash"
+  // GOOGLE_GEMINI_SUMMARY_MODEL is canonical (used by providers/processor);
+  // GEMINI_MODEL is kept as a legacy alias.
+  const model =
+    process.env.GOOGLE_GEMINI_SUMMARY_MODEL ??
+    process.env.GEMINI_MODEL ??
+    "gemini-3.5-flash"
 
   return {
     ai: {
