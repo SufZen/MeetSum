@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { withAuthz } from "@/lib/auth/authz"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { importDriveRecordings, validateDriveImportFileIds } from "@/lib/google/services"
 
@@ -33,7 +33,10 @@ export const POST = withAuthz("meeting:create", async (request, ctx) => {
     const result = await importDriveRecordings(
       { subject: resolved.subject, workspaceId: ctx.workspace.id },
       fileIds,
-      { ownerUserId: ctx.user?.id ?? ctx.apiKey?.createdByUserId }
+      {
+        ownerUserId: ctx.user?.id ?? ctx.apiKey?.createdByUserId,
+        scope: toRepoScope(ctx),
+      }
     )
 
     return NextResponse.json(result, { status: 202 })

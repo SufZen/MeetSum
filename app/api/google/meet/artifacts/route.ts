@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { withAuthz } from "@/lib/auth/authz"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { listMeetArtifacts } from "@/lib/google/meet-artifacts"
 
-export const GET = withAuthz("workspace:read", async (request, ctx) => {
+export const GET = withAuthz("integrations:manage", async (request, ctx) => {
   const searchParams = new URL(request.url).searchParams
   const resolved = resolveRequestWorkspaceSubject(ctx, searchParams.get("subject"))
 
@@ -28,6 +28,7 @@ export const GET = withAuthz("workspace:read", async (request, ctx) => {
       limit: pageSize,
       pageToken,
       meetingId,
+      scope: toRepoScope(ctx),
     })
 
     return NextResponse.json(result)

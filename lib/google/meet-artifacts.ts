@@ -8,7 +8,8 @@ import {
 import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
-import type { TranscriptSegment } from "@/lib/meetings/repository"
+import type { RepoScope, TranscriptSegment } from "@/lib/meetings/repository"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 
 type SyncStatus = "idle" | "running" | "completed" | "failed"
 
@@ -649,13 +650,33 @@ async function upsertMeetArtifact(options: {
   return true
 }
 
+/** Visibility scope for a Meet listing: the caller's, else system scope. */
+function meetListingScope(options: { workspaceId: string; scope?: RepoScope }): RepoScope {
+  if (options.scope && options.scope.workspaceId !== options.workspaceId) {
+    throw new Error("Visibility scope does not match the Google workspace target")
+  }
+
+  return options.scope ?? { kind: "system", workspaceId: options.workspaceId }
+}
+
+/**
+ * Persisted conference records of the subject's identity. Records linked to a
+ * meeting the caller cannot see (directly, or through the calendar event of
+ * such a meeting) are omitted, so private meeting titles/ids never leak.
+ */
 export async function listPersistedMeetArtifacts(options: {
   subject: string
   workspaceId: string
   limit?: number
   meetingId?: string
+  /** Caller's visibility scope (defaults to system scope). */
+  scope?: RepoScope
 }): Promise<PersistedMeetConferenceRecord[]> {
-  const identityId = await getMeetGoogleIdentityId(options)
+  const scope = meetListingScope(options)
+  const identityId = await getMeetGoogleIdentityId({
+    subject: options.subject,
+    workspaceId: options.workspaceId,
+  })
   const values: unknown[] = [identityId, options.workspaceId]
   const meetingFilter = options.meetingId
     ? (() => {
@@ -671,6 +692,18 @@ export async function listPersistedMeetArtifacts(options: {
         `
       })()
     : ""
+  const visibleMeeting = meetingScopeSql(scope, "m", values)
+  const hiddenCalendarMeeting =
+    scope.kind === "system"
+      ? ""
+      : `
+        and not exists (
+          select 1 from meetings mh
+          where mh.calendar_event_id = mcr.calendar_event_id
+            and mcr.calendar_event_id is not null
+            and mh.workspace_id = $2
+            and not coalesce(${meetingScopeSql(scope, "mh", values)}, false)
+        )`
   values.push(Math.max(1, Math.min(options.limit ?? 10, 50)))
   const result = await getDatabasePool().query(
     `
@@ -708,6 +741,8 @@ export async function listPersistedMeetArtifacts(options: {
       left join meetings m on m.id = mcr.meeting_id and m.workspace_id = $2
       left join calendar_events ce on ce.id = mcr.calendar_event_id
       where mcr.google_identity_id = $1
+        and (mcr.meeting_id is null or ${visibleMeeting})
+        ${hiddenCalendarMeeting}
         ${meetingFilter}
       group by mcr.id, m.id, m.title, ce.title
       order by mcr.start_time desc nulls last, mcr.updated_at desc
@@ -1045,8 +1080,10 @@ export async function listMeetArtifacts(options: {
   limit?: number
   pageToken?: string
   meetingId?: string
+  /** Caller's visibility scope (defaults to system scope). */
+  scope?: RepoScope
 }): Promise<MeetArtifactListResult> {
-  const { subject, workspaceId } = options
+  const { subject, workspaceId, scope } = options
   const limit = Math.max(1, Math.min(options.limit ?? 20, 50))
 
   try {
@@ -1059,6 +1096,7 @@ export async function listMeetArtifacts(options: {
           workspaceId,
           limit,
           meetingId: options.meetingId,
+          scope,
         }),
         setup: setupState(true),
       }
@@ -1073,6 +1111,7 @@ export async function listMeetArtifacts(options: {
       subject,
       workspaceId,
       limit: 10,
+      scope,
     })
 
     return {
@@ -1094,6 +1133,7 @@ export async function listMeetArtifacts(options: {
         workspaceId,
         limit: 10,
         meetingId: options.meetingId,
+        scope,
       }).catch(() => []),
       setup: setupState(false, message),
     }
@@ -1104,8 +1144,10 @@ export async function syncMeetArtifacts(options: {
   subject: string
   workspaceId: string
   limit?: number
+  /** Caller's visibility scope for the returned records (defaults to system). */
+  scope?: RepoScope
 }): Promise<MeetArtifactSyncResult> {
-  const { subject, workspaceId } = options
+  const { subject, workspaceId, scope } = options
   const target = { subject, workspaceId }
   const limit = Math.max(1, Math.min(options.limit ?? 10, 25))
 
@@ -1173,7 +1215,7 @@ export async function syncMeetArtifacts(options: {
       nextPollAt: new Date(Date.now() + 30 * 60 * 1000),
     })
 
-    const records = await listPersistedMeetArtifacts({ ...target, limit: 10 })
+    const records = await listPersistedMeetArtifacts({ ...target, limit: 10, scope })
 
     return {
       subject,

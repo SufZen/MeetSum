@@ -17,8 +17,16 @@ import {
 } from "@/lib/google/identity"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
-import type { MeetingRecord, MeetingRepository } from "@/lib/meetings/repository"
-import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import type {
+  MeetingRecord,
+  MeetingRepository,
+  RepoScope,
+} from "@/lib/meetings/repository"
+import {
+  getScopedMeetingRepository,
+  getSystemMeetingRepository,
+} from "@/lib/meetings/store"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { getAppSettings, type AppSettings } from "@/lib/settings/app-settings"
 import { storeMeetingObject } from "@/lib/storage/object-storage"
 
@@ -570,9 +578,17 @@ async function storeDriveMedia(options: {
   return store(media)
 }
 
-/** Finds or creates the workspace meeting a Drive recording belongs to. */
+/**
+ * Finds or creates the workspace meeting a Drive recording belongs to.
+ * `visibleRepo` is scoped to the caller: an explicitly preferred meeting must
+ * be visible to them (else undefined), and a calendar-matched meeting is only
+ * reused when visible; otherwise a new meeting is created, so a recording is
+ * never attached to (and re-transcribed into) a private meeting the caller
+ * cannot see.
+ */
 async function resolveDriveImportMeeting(options: {
   repo: MeetingRepository
+  visibleRepo: MeetingRepository
   settings: ImportSettings
   preferredMeetingId?: string
   matchedMeetingId?: string | null
@@ -580,9 +596,15 @@ async function resolveDriveImportMeeting(options: {
   startedAt: string
   ownerUserId?: string
 }): Promise<MeetingRecord | undefined> {
-  const targetId = options.preferredMeetingId ?? options.matchedMeetingId
+  if (options.preferredMeetingId) {
+    return options.visibleRepo.getMeeting(options.preferredMeetingId)
+  }
 
-  if (targetId) return options.repo.getMeeting(targetId)
+  if (options.matchedMeetingId) {
+    const matched = await options.visibleRepo.getMeeting(options.matchedMeetingId)
+
+    if (matched) return matched
+  }
 
   return options.repo.createMeeting({
     title: options.title,
@@ -668,29 +690,61 @@ async function setSyncState(
   )
 }
 
+/** Visibility scope for a Google target: the caller's, else system scope. */
+function targetScope(target: GoogleWorkspaceTarget, scope?: RepoScope): RepoScope {
+  if (scope && scope.workspaceId !== target.workspaceId) {
+    throw new Error("Visibility scope does not match the Google workspace target")
+  }
+
+  return scope ?? { kind: "system", workspaceId: target.workspaceId }
+}
+
+/**
+ * Calendar event best matching a Drive file. Only meetings visible to `scope`
+ * are joined, and calendar events linked to a meeting the caller cannot see
+ * are skipped entirely (their title would reveal the private meeting).
+ */
 async function findMatchingCalendarEvent(options: {
   identityId: string
-  workspaceId: string
+  scope: RepoScope
   fileName: string
   fileTime?: Date
 }) {
   if (!options.fileTime) return undefined
 
   const pool = getDatabasePool()
+  const values: unknown[] = [options.identityId, options.fileTime.toISOString()]
+  const visible = meetingScopeSql(options.scope, "m", values)
+  let hidden = ""
+
+  if (options.scope.kind !== "system") {
+    values.push(options.scope.workspaceId)
+    const workspaceParam = `$${values.length}`
+
+    hidden = `
+        and not exists (
+          select 1 from meetings mh
+          where mh.calendar_event_id = ce.id
+            and mh.workspace_id = ${workspaceParam}
+            and not coalesce(${meetingScopeSql(options.scope, "mh", values)}, false)
+        )`
+  }
+
   const result = await pool.query(
     `
       select ce.id, ce.title, ce.starts_at, m.id as meeting_id
       from calendar_events ce
       left join meetings m on m.calendar_event_id = ce.id
-        and m.workspace_id = $3
+        and ${visible}
       where ce.google_identity_id = $1
         and ce.starts_at between ($2::timestamptz - interval '12 hours')
                             and ($2::timestamptz + interval '12 hours')
         and coalesce(ce.status, '') <> 'cancelled'
+        ${hidden}
       order by abs(extract(epoch from (ce.starts_at - $2::timestamptz))) asc
       limit 20
     `,
-    [options.identityId, options.fileTime.toISOString(), options.workspaceId]
+    values
   )
 
   let best:
@@ -731,10 +785,14 @@ async function findMatchingCalendarEvent(options: {
 
 async function getDriveImportStatus(options: {
   identityId: string
-  workspaceId: string
+  scope: RepoScope
   googleFileId: string
 }) {
   const pool = getDatabasePool()
+  const values: unknown[] = [options.identityId, options.googleFileId]
+  const visible = meetingScopeSql(options.scope, "m", values)
+  values.push(options.scope.workspaceId)
+  const workspaceParam = `$${values.length}`
   const result = await pool.query(
     `
       select
@@ -744,9 +802,9 @@ async function getDriveImportStatus(options: {
         j.status as job_status
       from drive_files df
       left join meeting_drive_files mdf on mdf.drive_file_id = df.id
-        and mdf.meeting_id in (select id from meetings where workspace_id = $3)
+        and mdf.meeting_id in (select m.id from meetings m where ${visible})
       left join jobs j on j.meeting_id = mdf.meeting_id
-        and j.workspace_id = $3
+        and j.workspace_id = ${workspaceParam}
         and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
         and j.status in ('completed', 'queued', 'active', 'failed')
       where df.google_identity_id = $1 and df.google_file_id = $2
@@ -755,7 +813,7 @@ async function getDriveImportStatus(options: {
         j.created_at desc nulls last
       limit 1
     `,
-    [options.identityId, options.googleFileId, options.workspaceId]
+    values
   )
   const row = result.rows[0] as
     | {
@@ -849,9 +907,12 @@ export async function listDriveRecordings(
     cursor?: string
     query?: string
     includeImported?: boolean
+    /** Caller's visibility scope (defaults to system scope). */
+    scope?: RepoScope
   } = {}
 ): Promise<DriveRecordingListResult> {
-  const { subject, workspaceId } = target
+  const { subject } = target
+  const scope = targetScope(target, options.scope)
   const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
   const drive = google.drive({ version: "v3", auth })
   const identityId = await getIdentityId(target)
@@ -890,7 +951,7 @@ export async function listDriveRecordings(
 
       const importStatus = await getDriveImportStatus({
         identityId,
-        workspaceId,
+        scope,
         googleFileId: file.id,
       })
 
@@ -904,7 +965,7 @@ export async function listDriveRecordings(
 
       const match = await findMatchingCalendarEvent({
         identityId,
-        workspaceId,
+        scope,
         fileName: file.name,
         fileTime: safeDate(file.createdTime ?? file.modifiedTime),
       })
@@ -950,14 +1011,22 @@ export async function listDriveRecordings(
 export async function importDriveRecordings(
   target: GoogleWorkspaceTarget,
   fileIds: string[],
-  options: { preferredMeetingId?: string; ownerUserId?: string } = {}
+  options: {
+    preferredMeetingId?: string
+    ownerUserId?: string
+    /** Caller's visibility scope (defaults to system scope). */
+    scope?: RepoScope
+  } = {}
 ): Promise<DriveRecordingImportResult> {
   const { subject, workspaceId } = target
+  const scope = targetScope(target, options.scope)
   const selectedFileIds = validateDriveImportFileIds(fileIds)
   const auth = await createDelegatedGoogleClient(subject, GOOGLE_WORKSPACE_SCOPES.drive)
   const drive = google.drive({ version: "v3", auth })
   const pool = getDatabasePool()
   const repo = getSystemMeetingRepository(workspaceId)
+  const visibleRepo =
+    scope.kind === "system" ? repo : getScopedMeetingRepository(scope)
   const settings = await loadImportSettings(workspaceId)
   const identityId = await getIdentityId(target)
   const maxImportBytes = Number(
@@ -1001,7 +1070,7 @@ export async function importDriveRecordings(
 
       const match = await findMatchingCalendarEvent({
         identityId,
-        workspaceId,
+        scope,
         fileName: file.name,
         fileTime: safeDate(file.createdTime ?? file.modifiedTime),
       })
@@ -1024,6 +1093,8 @@ export async function importDriveRecordings(
           driveFileId,
         ])
 
+        const existingValues: unknown[] = [driveFileId, workspaceId]
+        const existingVisible = meetingScopeSql(scope, "m", existingValues)
         const existing = await lockClient.query(
           `
             select
@@ -1034,7 +1105,7 @@ export async function importDriveRecordings(
               j.error as job_error
             from drive_files df
             left join meeting_drive_files mdf on mdf.drive_file_id = df.id
-              and mdf.meeting_id in (select id from meetings where workspace_id = $2)
+              and mdf.meeting_id in (select m.id from meetings m where ${existingVisible})
             left join jobs j on j.meeting_id = mdf.meeting_id
               and j.workspace_id = $2
               and j.name in ('media.ingest', 'meeting.transcribe', 'meeting.summarize', 'meeting.index')
@@ -1045,7 +1116,7 @@ export async function importDriveRecordings(
               j.created_at desc nulls last
             limit 1
           `,
-          [driveFileId, workspaceId]
+          existingValues
         )
         const existingRow = existing.rows[0] as
           | {
@@ -1079,6 +1150,7 @@ export async function importDriveRecordings(
 
         const meeting = await resolveDriveImportMeeting({
           repo,
+          visibleRepo,
           settings,
           preferredMeetingId: options.preferredMeetingId,
           matchedMeetingId: match?.meeting_id,
@@ -1456,7 +1528,7 @@ export async function pollDrive(target: GoogleWorkspaceTarget): Promise<SyncStat
       const proposedDriveFileId = createHashedId("gdrive", `${identityId}:${file.id}`)
       const match = await findMatchingCalendarEvent({
         identityId,
-        workspaceId,
+        scope: { kind: "system", workspaceId },
         fileName: file.name,
         fileTime,
       })
@@ -1510,6 +1582,7 @@ export async function pollDrive(target: GoogleWorkspaceTarget): Promise<SyncStat
 
       const meeting = await resolveDriveImportMeeting({
         repo,
+        visibleRepo: repo,
         settings,
         matchedMeetingId: match?.meeting_id,
         title: match?.title ?? file.name.replace(/\.[^.]+$/, ""),

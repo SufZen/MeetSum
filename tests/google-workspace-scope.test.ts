@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   calendarListList: vi.fn(),
   eventsList: vi.fn(),
   filesGet: vi.fn(),
+  filesList: vi.fn(),
+  scopedGetMeeting: vi.fn(),
+  scopedRepositories: [] as unknown[],
 }))
 
 vi.mock("@/lib/db/client", () => ({
@@ -34,7 +37,7 @@ vi.mock("googleapis", () => ({
       calendarList: { list: mocks.calendarListList },
       events: { list: mocks.eventsList },
     }),
-    drive: () => ({ files: { get: mocks.filesGet, list: vi.fn() } }),
+    drive: () => ({ files: { get: mocks.filesGet, list: mocks.filesList } }),
     gmail: () => ({}),
   },
 }))
@@ -53,6 +56,10 @@ vi.mock("node:child_process", () => ({
 }))
 
 vi.mock("@/lib/meetings/store", () => ({
+  getScopedMeetingRepository: (scope: unknown) => {
+    mocks.scopedRepositories.push(scope)
+    return { getMeeting: mocks.scopedGetMeeting }
+  },
   getSystemMeetingRepository: (workspaceId: string) => {
     mocks.repositoryWorkspaces.push(workspaceId)
     return {
@@ -75,9 +82,14 @@ vi.mock("@/lib/storage/object-storage", () => ({
   storeMeetingObject: mocks.storeMeetingObject,
 }))
 
-const { pollCalendar, importDriveRecordings } = await import("@/lib/google/services")
-const { listMeetingTranscriptArtifactCandidates, listMeetingRecordingArtifactCandidates } =
-  await import("@/lib/google/meet-artifacts")
+const { pollCalendar, importDriveRecordings, listDriveRecordings } = await import(
+  "@/lib/google/services"
+)
+const {
+  listMeetingTranscriptArtifactCandidates,
+  listMeetingRecordingArtifactCandidates,
+  listPersistedMeetArtifacts,
+} = await import("@/lib/google/meet-artifacts")
 
 const W2 = { subject: "owner@w2.test", workspaceId: "ws_2" }
 
@@ -85,9 +97,19 @@ function callsMatching(pattern: RegExp) {
   return mocks.query.mock.calls.filter(([sql]) => pattern.test(sql as string))
 }
 
+// An admin of W2: admins do NOT bypass private meetings.
+const ADMIN_W2 = {
+  kind: "member" as const,
+  workspaceId: "ws_2",
+  userId: "usr_admin",
+  email: "admin@w2.test",
+  role: "admin" as const,
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.repositoryWorkspaces.length = 0
+  mocks.scopedRepositories.length = 0
   mocks.settings = {
     autoProcessImportedMedia: true,
     retainVideoByDefault: false,
@@ -232,7 +254,7 @@ describe("importDriveRecordings workspace scoping + settings effects", () => {
     expect(result.files[0]).toMatchObject({ status: "queued", jobId: "job_1" })
     const [[lockSql, lockValues]] = callsMatching(/from drive_files df/)
     expect(lockSql).toMatch(/workspace_id = \$2/)
-    expect(lockValues).toEqual(["gdrive_1", "ws_2"])
+    expect(lockValues).toEqual(["gdrive_1", "ws_2", "ws_2"])
   })
 
   it("stores but does not process when autoProcessImportedMedia is off", async () => {
@@ -287,5 +309,170 @@ describe("Meet artifact candidates are workspace-scoped", () => {
     expect(sql).toMatch(/select id from google_identities where workspace_id = \$2/)
     expect(sql).toMatch(/where id = \$1 and workspace_id = \$2/)
     expect(values).toEqual(["meet_1", "ws_2"])
+  })
+})
+
+describe("Drive import honours the caller's private-meeting visibility", () => {
+  function driveFile() {
+    mocks.filesGet.mockImplementation(async (params: { alt?: string }) =>
+      params.alt === "media"
+        ? { data: Readable.from([Buffer.from("raw-media")]) }
+        : {
+            data: {
+              id: "file_1",
+              name: "Meet recording.m4a",
+              mimeType: "audio/mp4",
+              size: "100",
+              createdTime: "2026-10-12T10:00:00Z",
+            },
+          }
+    )
+  }
+
+  function calendarMatch(meetingId: string | null) {
+    const fallback = mocks.query.getMockImplementation()!
+    mocks.query.mockImplementation(async (sql: string, values?: unknown[]) => {
+      if (/from calendar_events ce/.test(sql)) {
+        return {
+          rows: [
+            {
+              id: "gcal_1",
+              title: "Meet recording",
+              starts_at: "2026-10-12T10:00:00Z",
+              meeting_id: meetingId,
+            },
+          ],
+        }
+      }
+      return fallback(sql, values)
+    })
+  }
+
+  it("matches calendar events only through meetings visible to the caller", async () => {
+    driveFile()
+
+    await importDriveRecordings(W2, ["file_1"], { scope: ADMIN_W2 })
+
+    const [[sql, values]] = callsMatching(/from calendar_events ce/)
+    expect(sql).toMatch(/m\.visibility in \('workspace', 'link'\)/)
+    expect(sql).toMatch(/m\.owner_user_id = \$4/)
+    expect(sql).toMatch(/not exists \(\s*select 1 from meetings mh/)
+    expect(sql).toMatch(/not coalesce\(/)
+    expect(values).toEqual(
+      expect.arrayContaining(["gident_w2", "ws_2", "usr_admin", "admin@w2.test"])
+    )
+    const [[lockSql, lockValues]] = callsMatching(/from drive_files df/)
+    expect(lockSql).toMatch(/m\.owner_user_id = \$4/)
+    expect(lockValues).toEqual(["gdrive_1", "ws_2", "ws_2", "usr_admin", "admin@w2.test"])
+  })
+
+  it("creates a new meeting instead of attaching to an invisible matched meeting", async () => {
+    driveFile()
+    calendarMatch("meet_private_w2")
+    mocks.scopedGetMeeting.mockResolvedValue(undefined)
+
+    const result = await importDriveRecordings(W2, ["file_1"], {
+      ownerUserId: "usr_admin",
+      scope: ADMIN_W2,
+    })
+
+    expect(mocks.scopedRepositories).toEqual([ADMIN_W2])
+    expect(mocks.scopedGetMeeting).toHaveBeenCalledWith("meet_private_w2")
+    expect(mocks.getMeeting).not.toHaveBeenCalled()
+    expect(mocks.createMeeting).toHaveBeenCalledTimes(1)
+    expect(mocks.createMediaAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ meetingId: "meet_drive_1" })
+    )
+    expect(mocks.enqueueMeetSumJob).toHaveBeenCalledWith(
+      "media.ingest",
+      expect.objectContaining({ meetingId: "meet_drive_1" })
+    )
+    expect(result.files[0]).toMatchObject({ meetingId: "meet_drive_1" })
+  })
+
+  it("reuses a matched meeting the caller can see", async () => {
+    driveFile()
+    calendarMatch("meet_shared_w2")
+    mocks.scopedGetMeeting.mockResolvedValue({ id: "meet_shared_w2" })
+
+    const result = await importDriveRecordings(W2, ["file_1"], { scope: ADMIN_W2 })
+
+    expect(mocks.createMeeting).not.toHaveBeenCalled()
+    expect(result.files[0]).toMatchObject({ meetingId: "meet_shared_w2" })
+  })
+
+  it("refuses an invisible preferred meeting without storing media", async () => {
+    driveFile()
+    mocks.scopedGetMeeting.mockResolvedValue(undefined)
+
+    const result = await importDriveRecordings(W2, ["file_1"], {
+      preferredMeetingId: "meet_private_w2",
+      scope: ADMIN_W2,
+    })
+
+    expect(mocks.createMediaAsset).not.toHaveBeenCalled()
+    expect(mocks.enqueueMeetSumJob).not.toHaveBeenCalled()
+    expect(result.files[0]).toMatchObject({ status: "failed" })
+  })
+
+  it("rejects a scope of another workspace", async () => {
+    await expect(
+      importDriveRecordings(W2, ["file_1"], {
+        scope: { ...ADMIN_W2, workspaceId: "ws_1" },
+      })
+    ).rejects.toThrow(/does not match/)
+  })
+
+  it("lists Drive recordings with import status and matches scoped to the caller", async () => {
+    mocks.filesList.mockResolvedValue({
+      data: {
+        files: [
+          {
+            id: "file_1",
+            name: "Meet recording.m4a",
+            mimeType: "audio/mp4",
+            createdTime: "2026-10-12T10:00:00Z",
+          },
+        ],
+      },
+    })
+
+    await listDriveRecordings(W2, { scope: ADMIN_W2 })
+
+    const [[statusSql, statusValues]] = callsMatching(/from drive_files df/)
+    expect(statusSql).toMatch(/select m\.id from meetings m where/)
+    expect(statusSql).toMatch(/m\.owner_user_id = \$4/)
+    expect(statusValues).toEqual([
+      "gident_w2",
+      "file_1",
+      "ws_2",
+      "usr_admin",
+      "admin@w2.test",
+      "ws_2",
+    ])
+    const [[matchSql]] = callsMatching(/from calendar_events ce/)
+    expect(matchSql).toMatch(/not exists/)
+  })
+})
+
+describe("Persisted Meet artifacts honour the caller's visibility", () => {
+  it("omits records linked to meetings the caller cannot see", async () => {
+    await listPersistedMeetArtifacts({ ...W2, scope: ADMIN_W2 })
+
+    const [[sql, values]] = callsMatching(/from meet_conference_records mcr/)
+    expect(sql).toMatch(/mcr\.meeting_id is null or \(m\.workspace_id = \$3/)
+    expect(sql).toMatch(/m\.owner_user_id = \$4/)
+    expect(sql).toMatch(/where mh\.calendar_event_id = mcr\.calendar_event_id/)
+    expect(values).toEqual(
+      expect.arrayContaining(["gident_w2", "ws_2", "usr_admin", "admin@w2.test"])
+    )
+  })
+
+  it("keeps the workspace-only filter for system callers", async () => {
+    await listPersistedMeetArtifacts(W2)
+
+    const [[sql]] = callsMatching(/from meet_conference_records mcr/)
+    expect(sql).toMatch(/mcr\.meeting_id is null or \(m\.workspace_id = \$3\)/)
+    expect(sql).not.toMatch(/mh\.calendar_event_id/)
   })
 })

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { withAuthz } from "@/lib/auth/authz"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { syncMeetArtifacts } from "@/lib/google/meet-artifacts"
 import { createPlatformEvent } from "@/lib/platform/events"
@@ -22,6 +22,7 @@ export const POST = withAuthz("meeting:create", async (request, ctx) => {
       subject,
       workspaceId: ctx.workspace.id,
       limit: body.limit,
+      scope: toRepoScope(ctx),
     })
 
     return NextResponse.json({
