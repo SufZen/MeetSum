@@ -21,6 +21,13 @@ export const POST = withAuthz<{ id: string }>(
 
     if (!(await loadVisibleMeeting(ctx, id))) return meetingNotFound()
 
+    // Child-id IDOR guard: the room must belong to the caller's workspace.
+    const contexts = await ctx.meetings.listContexts()
+
+    if (!contexts.some((context) => context.id === contextId)) {
+      return jsonError("Room not found", 404)
+    }
+
     try {
       const meeting = await ctx.meetings.linkMeetingContext(id, contextId)
 

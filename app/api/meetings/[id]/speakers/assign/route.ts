@@ -19,11 +19,19 @@ export const POST = withAuthz<{ id: string }>(
 
     if (!(await loadVisibleMeeting(ctx, id))) return meetingNotFound()
 
+    // Child-id IDOR guard: the participant must belong to this meeting.
+    const participantId = String(body.participantId)
+    const participants = await ctx.meetings.listMeetingParticipants(id)
+
+    if (!participants.some((participant) => participant.id === participantId)) {
+      return jsonError("Participant not found", 404)
+    }
+
     try {
       const participant = await ctx.meetings.assignSpeakerToParticipant(
         id,
         String(body.speakerLabel),
-        String(body.participantId)
+        participantId
       )
 
       return NextResponse.json({ participant })

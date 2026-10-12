@@ -470,6 +470,7 @@ export function CommandCenterShell({
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        meetingId: selectedMeeting?.id,
         status: item.status === "done" ? "open" : "done",
       }),
     })
@@ -562,6 +563,8 @@ export function CommandCenterShell({
   async function approveAgentRun(run: SuggestedAgentRun) {
     const response = await fetch(`/api/agent-runs/${run.id}/approve`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ meetingId: run.meetingId }),
     })
     const body = await response.json()
 
