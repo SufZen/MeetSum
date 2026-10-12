@@ -5,9 +5,9 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 ## Milestones
 | # | Milestone | Branch | State | PR |
 |---|---|---|---|---|
-| M0 | Baseline & honesty | `parity/m0-baseline` | in progress | — |
-| M1 | Pipeline correctness & security | `parity/m1-pipeline` | todo | — |
-| M2 | Multi-user workspaces | `parity/m2-workspaces` | todo | — |
+| M0 | Baseline & honesty | `parity/m0-baseline` | PR open | #16 |
+| M1 | Pipeline correctness & security | `parity/m1-pipeline` | PR open (stacked on #16) | #17 |
+| M2 | Multi-user workspaces | `parity/m2-workspaces` | in progress (spec: m2.md) | — |
 | M3 | Hebrew ASR + diarization | `parity/m3-asr` | todo (needs RunPod/HF/Soniox keys) | — |
 | M4 | Player & transcript UX | `parity/m4-player` | todo | — |
 | M5 | Intelligence parity | `parity/m5-intelligence` | todo (Claude key) | — |
@@ -21,7 +21,7 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 | Area | Fireflies | MeetSum | Milestone |
 |---|---|---|---|
 | Auto-join bot (Meet/Teams/Zoom) | ✓ | ✗ | M7 |
-| Upload / desktop / browser recording | ✓ | ✓ (bugs) | M1 |
+| Upload / desktop / browser recording | ✓ | ✓ (streaming, idempotent; Zoom/Teams wired) | M1 ✅ |
 | Speaker diarization + names | ✓ | ✗ | M3 |
 | Player + click-to-seek transcript, editing | ✓ | ✗ (mock) | M4 |
 | Summaries, templates, chapters/topics | ✓ | partial | M5 |
@@ -44,3 +44,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 
 ## Log
 - 2026-10-12: review complete, plan approved, `main` fast-forwarded to `5124c83`, M0 started.
+- 2026-10-12: M0 PR #16 (378 tests). M1 PR #17 (718 tests, 2 security reviews, Zoom signing-oracle fix). Known: db/schema.sql stale (M10); no live Postgres/Redis/MinIO run yet.
