@@ -230,6 +230,26 @@ export function createInMemoryWorkspaceStore(
     return next
   }
 
+  /**
+   * `google_subject` (DWD identity) is settable only by an owner to their own
+   * email; once that member is demoted below owner or leaves, it is cleared.
+   */
+  const clearGoogleSubjectOf = (workspaceId: string, userId: string) => {
+    const workspace = workspaces.get(workspaceId)
+    const user = users.get(userId)
+
+    if (
+      workspace?.googleSubject &&
+      user &&
+      normalizeEmail(workspace.googleSubject) === normalizeEmail(user.email)
+    ) {
+      const next = { ...workspace }
+
+      delete next.googleSubject
+      workspaces.set(workspaceId, next)
+    }
+  }
+
   const store: WorkspaceStore = {
     async getUserById(id) {
       return users.get(id)
@@ -360,7 +380,11 @@ export function createInMemoryWorkspaceStore(
         throw new WorkspaceStoreError("last_owner", "A workspace needs at least one owner")
       }
 
-      return upsertMembership({ ...existing, role: input.role }, true)
+      const membership = upsertMembership({ ...existing, role: input.role }, true)
+
+      if (input.role !== "owner") clearGoogleSubjectOf(input.workspaceId, input.userId)
+
+      return membership
     },
 
     async removeMember(input) {
@@ -373,6 +397,7 @@ export function createInMemoryWorkspaceStore(
       }
 
       memberships.delete(key)
+      clearGoogleSubjectOf(input.workspaceId, input.userId)
 
       return existing
     },
@@ -611,6 +636,24 @@ export function createInMemoryWorkspaceStore(
 /** A pool (with `connect` for transactions) or a single client. */
 export type WorkspaceDb = Queryable & {
   connect?: () => Promise<Queryable & { release: () => void }>
+}
+
+/**
+ * Clears `workspaces.google_subject` when it is the email of `userId` (run
+ * when that member is demoted below owner or removed).
+ */
+async function clearGoogleSubjectOfSql(
+  client: Queryable,
+  workspaceId: string,
+  userId: string
+) {
+  await client.query(
+    `update workspaces set google_subject = null, updated_at = now()
+     where id = $1
+       and google_subject is not null
+       and lower(google_subject) = (select lower(email) from users where id = $2)`,
+    [workspaceId, userId]
+  )
 }
 
 async function withTransaction<T>(
@@ -943,6 +986,10 @@ export function createPostgresWorkspaceStore(db: WorkspaceDb): WorkspaceStore {
           client
         )
 
+        if (input.role !== "owner") {
+          await clearGoogleSubjectOfSql(client, input.workspaceId, input.userId)
+        }
+
         return mapMembership(row as Row)
       })
     },
@@ -961,6 +1008,7 @@ export function createPostgresWorkspaceStore(db: WorkspaceDb): WorkspaceStore {
           `delete from memberships where workspace_id = $1 and user_id = $2`,
           [input.workspaceId, input.userId]
         )
+        await clearGoogleSubjectOfSql(client, input.workspaceId, input.userId)
 
         const { ownerCount, ...membership } = target
         void ownerCount

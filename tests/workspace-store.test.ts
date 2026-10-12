@@ -83,6 +83,33 @@ describe("in-memory WorkspaceStore", () => {
     ).rejects.toMatchObject({ code: "last_owner" })
   })
 
+  it("clears google_subject when its owner is demoted below owner", async () => {
+    const { owner, workspace } = await seedWorkspace(store, "Acme", "owner@example.com")
+    await addMember(store, workspace.id, "second@example.com", "owner")
+    await store.updateWorkspace(workspace.id, { googleSubject: "Owner@Example.com" })
+
+    // Owner -> owner keeps it; demotion clears it.
+    await store.setMemberRole({ workspaceId: workspace.id, userId: owner.id, role: "owner" })
+    expect((await store.getWorkspace(workspace.id))?.googleSubject).toBe("owner@example.com")
+
+    await store.setMemberRole({ workspaceId: workspace.id, userId: owner.id, role: "admin" })
+    expect((await store.getWorkspace(workspace.id))?.googleSubject).toBeUndefined()
+  })
+
+  it("clears google_subject when its owner is removed, and keeps another owner's", async () => {
+    const { owner, workspace } = await seedWorkspace(store, "Acme", "owner@example.com")
+    const second = await addMember(store, workspace.id, "second@example.com", "owner")
+    const member = await addMember(store, workspace.id, "member@example.com", "member")
+    await store.updateWorkspace(workspace.id, { googleSubject: "second@example.com" })
+
+    await store.removeMember({ workspaceId: workspace.id, userId: member.id })
+    await store.setMemberRole({ workspaceId: workspace.id, userId: owner.id, role: "owner" })
+    expect((await store.getWorkspace(workspace.id))?.googleSubject).toBe("second@example.com")
+
+    await store.removeMember({ workspaceId: workspace.id, userId: second.id })
+    expect((await store.getWorkspace(workspace.id))?.googleSubject).toBeUndefined()
+  })
+
   it("re-inviting revokes the older pending invitation", async () => {
     const { workspace } = await seedWorkspace(store, "Acme", "owner@example.com")
     const first = await store.createInvitation({
@@ -266,6 +293,46 @@ describe("postgres WorkspaceStore", () => {
     expect(calls.some((call) => /for update/.test(call.text))).toBe(true)
     expect(calls.some((call) => call.text.startsWith("update memberships"))).toBe(false)
     expect(calls.at(-1)?.text).toBe("rollback")
+  })
+
+  it.each([
+    ["demoting an owner", "setMemberRole"],
+    ["removing a member", "removeMember"],
+  ] as const)("clears the member's google_subject in the same transaction when %s", async (_label, method) => {
+    const owner = { workspace_id: "ws_a", user_id: "usr_1", role: "owner" }
+    const second = { workspace_id: "ws_a", user_id: "usr_2", role: "owner" }
+    const { db, calls } = scriptedDb([
+      (call) => (call.text.includes("role = 'owner' for update") ? [owner, second] : undefined),
+      (call) => (call.text.includes("user_id = $2 for update") ? [owner] : undefined),
+      (call) =>
+        call.text.startsWith("update memberships") ? [{ ...owner, role: "admin" }] : undefined,
+    ])
+    const store = createPostgresWorkspaceStore(db)
+
+    if (method === "setMemberRole") {
+      await store.setMemberRole({ workspaceId: "ws_a", userId: "usr_1", role: "admin" })
+    } else {
+      await store.removeMember({ workspaceId: "ws_a", userId: "usr_1" })
+    }
+
+    const clear = calls.find((call) => call.text.startsWith("update workspaces set google_subject = null"))
+    expect(clear?.text).toMatch(/lower\(google_subject\) = \(select lower\(email\) from users where id = \$2\)/)
+    expect(clear?.values).toEqual(["ws_a", "usr_1"])
+    expect(calls.indexOf(clear!)).toBeLessThan(calls.findIndex((call) => call.text === "commit"))
+  })
+
+  it("keeps google_subject when an owner stays owner", async () => {
+    const owner = { workspace_id: "ws_a", user_id: "usr_1", role: "owner" }
+    const { db, calls } = scriptedDb([
+      (call) => (call.text.includes("role = 'owner' for update") ? [owner] : undefined),
+      (call) => (call.text.includes("user_id = $2 for update") ? [owner] : undefined),
+      (call) => (call.text.startsWith("update memberships") ? [owner] : undefined),
+    ])
+    const store = createPostgresWorkspaceStore(db)
+
+    await store.setMemberRole({ workspaceId: "ws_a", userId: "usr_1", role: "owner" })
+
+    expect(calls.some((call) => call.text.startsWith("update workspaces"))).toBe(false)
   })
 
   it("stores only the token hash and revokes older pending invites in the same transaction", async () => {
