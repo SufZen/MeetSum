@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { listDriveRecordings } from "@/lib/google/services"
 
 export async function GET(request: Request) {
@@ -14,7 +14,13 @@ export async function GET(request: Request) {
   const cursor = searchParams.get("cursor") ?? undefined
   const query = searchParams.get("query") ?? undefined
   const includeImported = searchParams.get("includeImported") === "true"
-  const subject = searchParams.get("subject") ?? getWorkspaceSubject()
+  const resolved = await resolveRequestWorkspaceSubject(
+    searchParams.get("subject")
+  )
+
+  if ("response" in resolved) return resolved.response
+
+  const { subject } = resolved
 
   try {
     const result = await listDriveRecordings(subject, {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { importDriveRecordings, validateDriveImportFileIds } from "@/lib/google/services"
 
 export async function POST(request: Request) {
@@ -28,11 +28,12 @@ export async function POST(request: Request) {
     )
   }
 
+  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+
+  if ("response" in resolved) return resolved.response
+
   try {
-    const result = await importDriveRecordings(
-      body.subject ?? getWorkspaceSubject(),
-      fileIds
-    )
+    const result = await importDriveRecordings(resolved.subject, fileIds)
 
     return NextResponse.json(result, { status: 202 })
   } catch (error) {

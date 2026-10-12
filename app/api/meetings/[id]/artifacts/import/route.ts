@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { meetingRepository } from "@/lib/meetings/store"
 
@@ -58,9 +58,13 @@ export async function POST(
     )
   }
 
+  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+
+  if ("response" in resolved) return resolved.response
+
   const job = await enqueueMeetSumJob("artifact.import", {
     meetingId: id,
-    subject: body.subject ?? getWorkspaceSubject(),
+    subject: resolved.subject,
     artifactIds,
     stage: "artifact.import",
     source: "google_meet_artifact",

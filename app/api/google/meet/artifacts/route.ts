@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { listMeetArtifacts } from "@/lib/google/meet-artifacts"
 
 export async function GET(request: Request) {
@@ -10,7 +10,13 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized
 
   const searchParams = new URL(request.url).searchParams
-  const subject = searchParams.get("subject") ?? getWorkspaceSubject()
+  const resolved = await resolveRequestWorkspaceSubject(
+    searchParams.get("subject")
+  )
+
+  if ("response" in resolved) return resolved.response
+
+  const { subject } = resolved
   const pageSize = Math.max(1, Math.min(Number(searchParams.get("limit") ?? 20), 50))
   const pageToken = searchParams.get("pageToken") ?? undefined
   const meetingId = searchParams.get("meetingId") ?? undefined

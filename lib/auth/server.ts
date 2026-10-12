@@ -3,7 +3,7 @@ import { cookies } from "next/headers"
 import {
   SESSION_COOKIE,
   getSessionSecret,
-  parseAllowedEmails,
+  getAllowedEmails,
   verifySessionCookie,
   type UserSession,
 } from "@/lib/auth/session"
@@ -13,6 +13,6 @@ export async function getCurrentSession(): Promise<UserSession | undefined> {
 
   return verifySessionCookie(cookieStore.get(SESSION_COOKIE)?.value, {
     secret: getSessionSecret(),
-    allowedEmails: parseAllowedEmails(process.env.MEETSUM_ALLOWED_EMAILS),
+    allowedEmails: getAllowedEmails(),
   })
 }

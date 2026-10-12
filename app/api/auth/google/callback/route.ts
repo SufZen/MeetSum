@@ -5,7 +5,7 @@ import {
   OAUTH_STATE_COOKIE,
   createSessionCookie,
   getSessionSecret,
-  parseAllowedEmails,
+  getAllowedEmails,
 } from "@/lib/auth/session"
 import { saveGoogleWorkspaceOAuthConnection } from "@/lib/google/oauth-tokens"
 
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     )
     const session = createSessionCookie(identity, {
       secret: getSessionSecret(),
-      allowedEmails: parseAllowedEmails(process.env.MEETSUM_ALLOWED_EMAILS),
+      allowedEmails: getAllowedEmails(),
     })
 
     await saveGoogleWorkspaceOAuthConnection({

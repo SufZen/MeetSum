@@ -2445,7 +2445,9 @@ export function OperationalPage({
                   description="Browser auth and Workspace consent are tied to the first admin account."
                 >
                   <span className="font-mono text-xs text-muted-foreground">
-                    info@realization.co.il
+                    {workspaceStatus
+                      ? (workspaceStatus.google.subject ?? "Not configured")
+                      : "Checking…"}
                   </span>
                 </SettingRow>
                 <SettingRow
