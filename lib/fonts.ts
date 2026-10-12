@@ -7,7 +7,8 @@ import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Sans_Hebrew } from "next/font/go
  *
  * adjustFontFallback is off for the two sans faces: the generated metric
  * fallback (local Arial) covers Hebrew, so it would capture Hebrew glyphs
- * before IBM Plex Sans Hebrew in the --font-ui stack.
+ * before IBM Plex Sans Hebrew in the --font-ui stack. Turbopack still emits
+ * it, which is why tokens.css lists the literal family names first.
  */
 export const plexSans = IBM_Plex_Sans({
   subsets: ["latin", "latin-ext"],

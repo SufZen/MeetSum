@@ -92,11 +92,14 @@
   --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
 
   /* ---- 5. Type --------------------------------------------------------- */
-  /* next/font (app layouts) sets --font-plex-*; the literal family names are
-     the fallback for the static showcase. */
-  --font-ui: var(--font-plex-sans, "IBM Plex Sans"), var(--font-plex-hebrew, "IBM Plex Sans Hebrew"), ui-sans-serif, system-ui, sans-serif;
-  --font-he: var(--font-plex-hebrew, "IBM Plex Sans Hebrew"), var(--font-plex-sans, "IBM Plex Sans"), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Literal family names first: they are what next/font (Turbopack) and the
+     static showcase register, and they keep Plex Sans -> Plex Sans Hebrew
+     adjacent so Hebrew glyphs never land in the metric fallback (local
+     Arial). The --font-plex-* variables from lib/fonts.ts follow for builds
+     that hash the family names. */
+  --font-ui: "IBM Plex Sans", "IBM Plex Sans Hebrew", var(--font-plex-sans, ui-sans-serif), var(--font-plex-hebrew, system-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-he: "IBM Plex Sans Hebrew", "IBM Plex Sans", var(--font-plex-hebrew, ui-sans-serif), var(--font-plex-sans, system-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", var(--font-plex-mono, ui-monospace), ui-monospace, "SFMono-Regular", Menlo, monospace;
   --font-label: var(--font-mono);             /* eyebrows, day headers; Hebrew swaps to --font-he */
 
   /* size / line-height pairs. Body = 14px. html stays 16px (drop the

@@ -1,10 +1,9 @@
 import { redirect } from "next/navigation"
 import { AlertCircleIcon, LockIcon } from "lucide-react"
 
-import { SigmaMark } from "@/components/ui/sigma-mark"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { SigmaMark } from "@/components/ui/sigma-mark"
 import { getCurrentSession } from "@/lib/auth/server"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
