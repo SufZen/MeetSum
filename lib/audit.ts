@@ -33,6 +33,17 @@ export type AuditAction =
   | "backup.restored"
   | "capture.zoom.recording"
   | "capture.teams.recording"
+  | "workspace.created"
+  | "workspace.updated"
+  | "member.role_changed"
+  | "member.removed"
+  | "member.left"
+  | "invitation.created"
+  | "invitation.resent"
+  | "invitation.revoked"
+  | "invitation.accepted"
+  | "meeting.visibility.changed"
+  | "auth.login.denied"
 
 export async function recordAuditLog(input: {
   action: AuditAction
@@ -40,6 +51,10 @@ export async function recordAuditLog(input: {
   targetType?: string
   targetId?: string
   metadata?: Record<string, unknown>
+  /** M2 contract: accepted but not yet persisted (Package B). */
+  workspaceId?: string
+  actorUserId?: string
+  actorApiKeyId?: string
 }) {
   if (process.env.MEETSUM_STORAGE !== "postgres") return
 

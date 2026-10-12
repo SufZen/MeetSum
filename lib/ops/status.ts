@@ -108,7 +108,11 @@ export function getProviderStatus(): ProviderStatus[] {
 }
 
 export async function getWorkspaceStatus(
-  options: { sessionEmail?: string | null } = {}
+  options: {
+    sessionEmail?: string | null
+    /** M2 contract: accepted but not yet used for scoping (Package C). */
+    workspaceId?: string
+  } = {}
 ): Promise<WorkspaceStatus> {
   const sync: WorkspaceStatus["sync"] = []
   const jobs = { queued: 0, active: 0, failed: 0 }

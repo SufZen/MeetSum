@@ -15,9 +15,12 @@ export type MeetSumJobName =
   | "webhook.deliver"
   | "realizeos.export"
   | "teams.subscription.renew"
+  | "media.retention"
 
 export type MeetSumJobPayload = {
   meetingId?: string
+  /** M2 contract: owning workspace (required after Integration). */
+  workspaceId?: string
   [key: string]: unknown
 }
 

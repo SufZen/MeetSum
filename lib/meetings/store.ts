@@ -3,8 +3,10 @@ import { DEMO_MEETINGS } from "@/lib/meetings/demo-data"
 import {
   createInMemoryMeetingRepository,
   type MeetingRepository,
+  type RepoScope,
 } from "@/lib/meetings/repository"
 import { createPostgresMeetingRepository } from "@/lib/meetings/postgres-repository"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 export function createMeetingRepositoryFromEnv(
   env: NodeJS.ProcessEnv = process.env
@@ -41,6 +43,50 @@ export function getMeetingRepository(): MeetingRepository {
 }
 
 /**
+ * Repository restricted to what `scope` may see (M2 contract).
+ * COMPAT: until Package B lands this delegates to the unscoped repository.
+ */
+export function getScopedMeetingRepository(scope: RepoScope): MeetingRepository {
+  void scope
+
+  return getMeetingRepository()
+}
+
+/**
+ * Repository for background work (worker, signed webhooks) filtered by
+ * workspace only (M2 contract).
+ * COMPAT: until Package B lands this delegates to the unscoped repository.
+ */
+export function getSystemMeetingRepository(workspaceId: string): MeetingRepository {
+  void workspaceId
+
+  return getMeetingRepository()
+}
+
+/** Cross-workspace share-token lookup used by the public share pages. */
+export type ShareLookup = Pick<MeetingRepository, "getShareByToken">
+
+export function getShareLookup(): ShareLookup {
+  const repository = getMeetingRepository()
+
+  return {
+    getShareByToken: (token) => repository.getShareByToken(token),
+  }
+}
+
+/** Workspace owning a meeting, or undefined when the meeting does not exist. */
+export async function resolveMeetingWorkspaceId(
+  meetingId: string
+): Promise<string | undefined> {
+  const meeting = await getMeetingRepository().getMeeting(meetingId)
+
+  return meeting ? (meeting.workspaceId ?? DEFAULT_WORKSPACE_ID) : undefined
+}
+
+/**
+ * @deprecated M2: use `ctx.meetings` (routes), `getScopedMeetingRepository`,
+ * `getSystemMeetingRepository` or `getShareLookup`. Removed at Integration.
+ *
  * Lazily resolved repository. Resolving at first use (instead of at module
  * load) keeps `next build` — which imports every route module while
  * collecting page data — from requiring runtime-only configuration such as

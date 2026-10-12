@@ -19,6 +19,8 @@ export type AppSettings = {
   audioRetentionDays: number
   retainVideoByDefault: boolean
   requireApiKeyForMachines: boolean
+  /** Visibility of newly created meetings (M2). */
+  defaultMeetingVisibility: "workspace" | "private"
 }
 
 type AppSettingsRow = {
@@ -40,9 +42,33 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   audioRetentionDays: 180,
   retainVideoByDefault: false,
   requireApiKeyForMachines: true,
+  defaultMeetingVisibility: "workspace",
 }
 
-const memorySettings: AppSettings = { ...DEFAULT_APP_SETTINGS }
+/** In-memory (non-postgres) settings, keyed by workspace id. */
+const memorySettings = new Map<string, AppSettings>()
+
+function getMemorySettings(workspaceId: string): AppSettings {
+  let settings = memorySettings.get(workspaceId)
+
+  if (!settings) {
+    settings = { ...DEFAULT_APP_SETTINGS }
+    memorySettings.set(workspaceId, settings)
+  }
+
+  return settings
+}
+
+/** Language used for new meetings when the request does not specify one. */
+export const LEGACY_DEFAULT_MEETING_LANGUAGE = "he"
+
+export function resolveDefaultMeetingLanguage(
+  settings: Pick<AppSettings, "meetingLanguageMode">
+): string {
+  return settings.meetingLanguageMode === "auto"
+    ? LEGACY_DEFAULT_MEETING_LANGUAGE
+    : settings.meetingLanguageMode
+}
 
 function isSummaryTemplate(value: unknown): value is AppSettings["summaryTemplate"] {
   return (
@@ -128,12 +154,19 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
       raw.requireApiKeyForMachines,
       DEFAULT_APP_SETTINGS.requireApiKeyForMachines
     ),
+    defaultMeetingVisibility:
+      raw.defaultMeetingVisibility === "private" ? "private" : "workspace",
   }
 }
 
-export async function getAppSettings(): Promise<AppSettings> {
+/**
+ * Settings of a workspace.
+ * COMPAT (M2 Step 0): postgres storage still reads the instance-wide
+ * `app_settings` table; Package B moves it to `workspace_settings`.
+ */
+export async function getAppSettings(workspaceId: string): Promise<AppSettings> {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
-    return { ...memorySettings }
+    return { ...getMemorySettings(workspaceId) }
   }
 
   const result = await getDatabasePool().query(
@@ -149,14 +182,17 @@ export async function getAppSettings(): Promise<AppSettings> {
 }
 
 export async function updateAppSettings(
+  workspaceId: string,
   patch: Partial<AppSettings>
 ): Promise<AppSettings> {
-  const current = await getAppSettings()
+  const current = await getAppSettings(workspaceId)
   const next = normalizeSettings({ ...current, ...patch })
 
   if (process.env.MEETSUM_STORAGE !== "postgres") {
-    Object.assign(memorySettings, next)
-    return { ...memorySettings }
+    const settings = getMemorySettings(workspaceId)
+
+    Object.assign(settings, next)
+    return { ...settings }
   }
 
   const pool = getDatabasePool()

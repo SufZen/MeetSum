@@ -4,6 +4,7 @@ import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { meetingRepository } from "@/lib/meetings/store"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 function shareUrl(request: Request, token: string) {
   const url = new URL(request.url)
@@ -23,7 +24,7 @@ export async function POST(
   const body = await request.json().catch(() => ({}))
 
   try {
-    const settings = await getAppSettings()
+    const settings = await getAppSettings(DEFAULT_WORKSPACE_ID)
 
     if (!settings.publicSharingEnabled) {
       return jsonError("Public sharing is disabled in Settings", 403)
@@ -70,7 +71,7 @@ export async function PATCH(
   const body = await request.json().catch(() => ({}))
 
   try {
-    const settings = await getAppSettings()
+    const settings = await getAppSettings(DEFAULT_WORKSPACE_ID)
 
     if (!settings.publicSharingEnabled && body.revoked !== true) {
       return jsonError("Public sharing is disabled in Settings", 403)

@@ -3,13 +3,14 @@ import { NextResponse } from "next/server"
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { getAppSettings, updateAppSettings } from "@/lib/settings/app-settings"
 import { LOCALE_COOKIE } from "@/lib/i18n/locales"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 export async function GET(request: Request) {
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
 
-  return NextResponse.json({ settings: await getAppSettings() })
+  return NextResponse.json({ settings: await getAppSettings(DEFAULT_WORKSPACE_ID) })
 }
 
 export async function PATCH(request: Request) {
@@ -19,7 +20,7 @@ export async function PATCH(request: Request) {
 
   try {
     const patch = (await request.json()) as Record<string, unknown>
-    const settings = await updateAppSettings(patch)
+    const settings = await updateAppSettings(DEFAULT_WORKSPACE_ID, patch)
     const response = NextResponse.json({ settings })
 
     response.cookies.set(LOCALE_COOKIE, settings.defaultLocale, {

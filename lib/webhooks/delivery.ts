@@ -141,6 +141,8 @@ export const QUEUE_UNAVAILABLE_ERROR =
 export async function deliverWebhookEvent(options: {
   eventName: PlatformEventName
   data: Record<string, unknown>
+  /** M2 contract: accepted but not yet used for fan-out scoping (Package C). */
+  workspaceId?: string
 }) {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
     return { queued: 0, delivered: 0, failed: 0, skipped: true }

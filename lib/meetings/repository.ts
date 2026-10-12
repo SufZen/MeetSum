@@ -199,6 +199,24 @@ export type MeetingQualityWarning = {
   detail: string
 }
 
+/** Who can see a meeting (M2). */
+export type MeetingVisibility = "private" | "workspace" | "link"
+
+/**
+ * Data-access scope (M2). Every repository built for a request carries one;
+ * see lib/meetings/visibility.ts for the visibility rules it implies.
+ */
+export type RepoScope =
+  | {
+      kind: "member"
+      workspaceId: string
+      userId: string
+      email: string
+      role: "owner" | "admin" | "member" | "viewer"
+    }
+  | { kind: "api_key"; workspaceId: string; ownerUserId?: string }
+  | { kind: "system"; workspaceId: string }
+
 export type MeetingRecord = {
   id: string
   title: string
@@ -223,6 +241,9 @@ export type MeetingRecord = {
   qualityWarnings?: MeetingQualityWarning[]
   externalSource?: string
   externalId?: string
+  workspaceId?: string
+  ownerUserId?: string
+  visibility?: MeetingVisibility
 }
 
 export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"
@@ -261,6 +282,8 @@ export type CreateMeetingInput = {
   participants?: string[]
   externalSource?: string
   externalId?: string
+  ownerUserId?: string
+  visibility?: MeetingVisibility
 }
 
 export type MeetingAnswer = {
@@ -377,6 +400,11 @@ export type MeetingRepository = {
   getShareByToken: (
     token: string
   ) => Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined>
+  /** M2 contract (Package B implements; leaving `link` revokes shares). */
+  updateMeetingVisibility: (
+    meetingId: string,
+    visibility: MeetingVisibility
+  ) => Promise<MeetingRecord>
   listMeetingParticipants: (meetingId: string) => Promise<MeetingParticipant[]>
   updateMeetingParticipant: (
     participantId: string,
@@ -1095,6 +1123,10 @@ export function createInMemoryMeetingRepository(
 
       shares.set(share.id, share)
       return share
+    },
+
+    async updateMeetingVisibility(): Promise<MeetingRecord> {
+      throw new Error("updateMeetingVisibility is not implemented yet (M2)")
     },
 
     async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {

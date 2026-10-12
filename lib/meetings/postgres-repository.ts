@@ -1815,6 +1815,10 @@ export function createPostgresMeetingRepository(
       return mapMeetingShare(result.rows[0] as MeetingShareRow)
     },
 
+    async updateMeetingVisibility(): Promise<MeetingRecord> {
+      throw new Error("updateMeetingVisibility is not implemented yet (M2)")
+    },
+
     async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
       // Operate on the latest ACTIVE share so an edit never silently mutates a
       // revoked link. The one exception is an explicit un-revoke
