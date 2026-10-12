@@ -4,8 +4,10 @@ import {
   buildDesktopCaptureIngestionPlan,
   normalizeDesktopCaptureMetadata,
   normalizeDesktopTranscriptSegments,
+  parseDesktopJsonField,
   parseDesktopMeetingInput,
 } from "@/lib/capture/desktop-ingestion"
+import { captureIdFromUploadFields } from "@/lib/capture/desktop-upload"
 
 describe("desktop capture ingestion", () => {
   it("normalizes unknown desktop meeting payloads into MeetSum meetings", () => {
@@ -124,5 +126,27 @@ describe("desktop capture ingestion", () => {
       jobName: "media.ingest",
       mode: "desktop-media",
     })
+  })
+
+  it("parses JSON fields from streamed multipart field maps as well as FormData", () => {
+    const form = new FormData()
+    form.set("transcript", '[{"text":"hi"}]')
+
+    expect(parseDesktopJsonField(form, "transcript")).toEqual([{ text: "hi" }])
+    expect(parseDesktopJsonField({ transcript: '[{"text":"hi"}]' }, "transcript")).toEqual([
+      { text: "hi" },
+    ])
+    expect(parseDesktopJsonField({}, "transcript")).toBeUndefined()
+    expect(() => parseDesktopJsonField({ transcript: "{" }, "transcript")).toThrow(
+      "transcript must be valid JSON"
+    )
+  })
+
+  it("reads the capture id from upload fields without throwing on bad JSON", () => {
+    expect(
+      captureIdFromUploadFields({ captureMetadata: '{"captureId":" cap_1 "}' })
+    ).toBe("cap_1")
+    expect(captureIdFromUploadFields({ captureMetadata: "{" })).toBeUndefined()
+    expect(captureIdFromUploadFields({})).toBeUndefined()
   })
 })

@@ -1,3 +1,6 @@
+import type { Readable } from "node:stream"
+import type { ReadableStream as WebReadableStream } from "node:stream/web"
+
 import type { CreateMeetingInput } from "@/lib/meetings/repository"
 
 /**
@@ -31,13 +34,35 @@ export type WebhookValidation =
   | { valid: false; reason: string }
 
 /**
- * Result of downloading a recording.
+ * A streamed recording download. The body is consumed exactly once (piped
+ * into object storage) and never buffered whole in memory.
  */
 export type RecordingDownload = {
-  buffer: Buffer
+  body: Readable | WebReadableStream<Uint8Array> | ReadableStream<Uint8Array>
   filename: string
   contentType: string
-  sizeBytes: number
+  sizeBytes?: number
+}
+
+/** Missing/invalid platform credentials or configuration (not retryable). */
+export class CaptureConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CaptureConfigError"
+  }
+}
+
+/** HTTP failure while talking to a capture platform (status drives retries). */
+export class RecordingDownloadError extends Error {
+  readonly status: number
+  readonly platform: string
+
+  constructor(platform: string, status: number, message?: string) {
+    super(message ?? `${platform} recording download failed: ${status}`)
+    this.name = "RecordingDownloadError"
+    this.status = status
+    this.platform = platform
+  }
 }
 
 /**
@@ -67,13 +92,18 @@ export type CaptureAdapter = {
   parseEvent: (body: unknown) => CaptureEvent | null
 
   /**
+   * Parse every relevant event in a (possibly batched) webhook payload.
+   * Defaults to `[parseEvent(body)]` when an adapter doesn't batch.
+   */
+  parseEvents?: (body: unknown) => CaptureEvent[]
+
+  /**
    * Convert a CaptureEvent into a CreateMeetingInput for the repository.
    */
   toMeetingInput: (event: CaptureEvent) => CreateMeetingInput
 
   /**
-   * Download the recording file from the platform.
-   * Returns the raw audio/video buffer with metadata.
+   * Download the recording file from the platform as a stream.
    */
   downloadRecording: (event: CaptureEvent) => Promise<RecordingDownload>
 }
