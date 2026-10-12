@@ -2,7 +2,70 @@ create table if not exists users (
   id text primary key,
   email text not null unique,
   display_name text,
-  created_at timestamptz not null default now()
+  name text,
+  picture_url text,
+  last_login_at timestamptz,
+  default_workspace_id text,
+  disabled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists uq_users_email_lower on users (lower(email));
+
+-- M2 tenancy (018_workspaces.sql). Workspace = tenant.
+create table if not exists workspaces (
+  id text primary key,
+  name text not null,
+  slug text not null unique,
+  google_subject text,
+  created_by_user_id text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'users_default_workspace_fk') then
+    alter table users add constraint users_default_workspace_fk
+      foreign key (default_workspace_id) references workspaces(id) on delete set null;
+  end if;
+end $$;
+
+create table if not exists memberships (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  role text not null check (role in ('owner','admin','member','viewer')),
+  invited_by_user_id text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, user_id)
+);
+
+create table if not exists invitations (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  email text not null,
+  role text not null check (role in ('admin','member','viewer')),
+  token_hash text not null unique,
+  status text not null default 'pending' check (status in ('pending','accepted','revoked','expired')),
+  invited_by_user_id text references users(id) on delete set null,
+  accepted_by_user_id text references users(id) on delete set null,
+  expires_at timestamptz not null,
+  accepted_at timestamptz,
+  last_sent_at timestamptz,
+  send_count integer not null default 0,
+  last_send_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists workspace_settings (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  key text not null,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, key)
 );
 
 create table if not exists workspace_accounts (
@@ -22,7 +85,8 @@ create table if not exists google_identities (
   oauth_refresh_token text,
   oauth_scope text,
   oauth_connected_at timestamptz,
-  oauth_last_error text
+  oauth_last_error text,
+  workspace_id text references workspaces(id) on delete set null
 );
 
 create table if not exists google_sync_states (
@@ -33,46 +97,6 @@ create table if not exists google_sync_states (
   watch_channel_id text,
   watch_expires_at timestamptz,
   updated_at timestamptz not null default now()
-);
-
-create table if not exists meeting_drive_files (
-  meeting_id text not null references meetings(id) on delete cascade,
-  drive_file_id text not null references drive_files(id) on delete cascade,
-  match_method text not null default 'time_window',
-  confidence numeric,
-  created_at timestamptz not null default now(),
-  primary key (meeting_id, drive_file_id)
-);
-
-create table if not exists meet_conference_records (
-  id text primary key,
-  google_identity_id text not null references google_identities(id) on delete cascade,
-  conference_record_name text not null unique,
-  meeting_id text references meetings(id) on delete set null,
-  calendar_event_id text references calendar_events(id) on delete set null,
-  space_name text,
-  start_time timestamptz,
-  end_time timestamptz,
-  expire_time timestamptz,
-  raw jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists meet_artifacts (
-  id text primary key,
-  conference_record_id text not null references meet_conference_records(id) on delete cascade,
-  artifact_type text not null,
-  artifact_name text not null,
-  drive_file_id text references drive_files(id) on delete set null,
-  document_name text,
-  state text,
-  start_time timestamptz,
-  end_time timestamptz,
-  raw jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (conference_record_id, artifact_type, artifact_name)
 );
 
 create table if not exists calendar_events (
@@ -120,7 +144,59 @@ create table if not exists meetings (
   google_meet_link text,
   external_source text,
   external_id text,
+  -- M2: no default, so an unscoped insert fails loudly.
+  workspace_id text not null references workspaces(id),
+  owner_user_id text references users(id) on delete set null,
+  visibility text not null default 'workspace'
+    constraint meetings_visibility_check check (visibility in ('private','workspace','link')),
   created_at timestamptz not null default now()
+);
+
+create table if not exists meeting_drive_files (
+  meeting_id text not null references meetings(id) on delete cascade,
+  drive_file_id text not null references drive_files(id) on delete cascade,
+  match_method text not null default 'time_window',
+  confidence numeric,
+  created_at timestamptz not null default now(),
+  primary key (meeting_id, drive_file_id)
+);
+
+create table if not exists meet_conference_records (
+  id text primary key,
+  google_identity_id text not null references google_identities(id) on delete cascade,
+  conference_record_name text not null unique,
+  meeting_id text references meetings(id) on delete set null,
+  calendar_event_id text references calendar_events(id) on delete set null,
+  space_name text,
+  start_time timestamptz,
+  end_time timestamptz,
+  expire_time timestamptz,
+  raw jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists meet_artifacts (
+  id text primary key,
+  conference_record_id text not null references meet_conference_records(id) on delete cascade,
+  artifact_type text not null,
+  artifact_name text not null,
+  drive_file_id text references drive_files(id) on delete set null,
+  document_name text,
+  state text,
+  start_time timestamptz,
+  end_time timestamptz,
+  raw jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (conference_record_id, artifact_type, artifact_name)
+);
+
+create table if not exists meeting_favorites (
+  user_id text not null references users(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, meeting_id)
 );
 
 create table if not exists media_assets (
@@ -135,6 +211,7 @@ create table if not exists media_assets (
   source_file_id text,
   checksum_sha256 text,
   metadata jsonb not null default '{}'::jsonb,
+  workspace_id text not null references workspaces(id),
   created_at timestamptz not null default now()
 );
 
@@ -230,6 +307,7 @@ create table if not exists webhook_subscriptions (
   secret_hash text,
   secret_ciphertext text,
   enabled boolean not null default true,
+  workspace_id text not null references workspaces(id) on delete cascade,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -258,9 +336,16 @@ create table if not exists mcp_clients (
 
 create table if not exists api_keys (
   id text primary key,
-  name text not null,
+  name text,
+  label text not null default '',
+  key_prefix text not null default '',
   key_hash text not null,
-  scopes jsonb not null default '[]'::jsonb,
+  scopes jsonb not null default '["read"]'::jsonb,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  created_by_user_id text references users(id) on delete set null,
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  last_used_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -271,9 +356,13 @@ create table if not exists audit_logs (
   target_type text,
   target_id text,
   metadata jsonb not null default '{}'::jsonb,
+  workspace_id text references workspaces(id) on delete cascade,
+  actor_user_id text,
+  actor_api_key_id text,
   created_at timestamptz not null default now()
 );
 
+-- Unused since M2 (settings live in workspace_settings); dropped in M10.
 create table if not exists app_settings (
   key text primary key,
   value jsonb not null,
@@ -291,6 +380,7 @@ create table if not exists capture_subscriptions (
   expires_at timestamptz not null,
   status text not null default 'active',
   last_error text,
+  workspace_id text references workspaces(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -308,6 +398,8 @@ create table if not exists jobs (
   max_attempts integer not null default 3,
   started_at timestamptz,
   completed_at timestamptz,
+  -- Nullable only for instance-level jobs (teams.subscription.renew).
+  workspace_id text references workspaces(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -334,7 +426,8 @@ alter table drive_files
 
 create table if not exists tags (
   id text primary key,
-  name text not null unique,
+  name text not null,
+  workspace_id text not null references workspaces(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
@@ -349,6 +442,7 @@ create table if not exists contexts (
   id text primary key,
   name text not null,
   description text,
+  workspace_id text not null references workspaces(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -463,6 +557,40 @@ create index if not exists meetings_status_idx
 create index if not exists meetings_favorite_idx
   on meetings(is_favorite, started_at desc);
 
+create index if not exists idx_memberships_user on memberships(user_id);
+
+create unique index if not exists uq_invitations_pending_email
+  on invitations(workspace_id, lower(email)) where status = 'pending';
+
+create index if not exists idx_meetings_workspace_started
+  on meetings(workspace_id, started_at desc);
+
+create index if not exists idx_meetings_owner on meetings(owner_user_id);
+
+create unique index if not exists uq_tags_workspace_name on tags(workspace_id, name);
+
+create index if not exists idx_contexts_workspace on contexts(workspace_id, name);
+
+create index if not exists idx_jobs_workspace on jobs(workspace_id, created_at desc);
+
+create index if not exists idx_webhook_subscriptions_workspace
+  on webhook_subscriptions(workspace_id);
+
+create index if not exists idx_api_keys_active
+  on api_keys(revoked_at) where revoked_at is null;
+
+create index if not exists idx_api_keys_workspace_active
+  on api_keys(workspace_id) where revoked_at is null;
+
+create index if not exists idx_audit_logs_workspace
+  on audit_logs(workspace_id, created_at desc);
+
+create index if not exists idx_media_assets_workspace
+  on media_assets(workspace_id, created_at desc);
+
+create index if not exists idx_google_identities_workspace
+  on google_identities(workspace_id);
+
 create index if not exists meet_conference_records_identity_time_idx
   on meet_conference_records(google_identity_id, start_time desc);
 
@@ -517,7 +645,7 @@ create unique index if not exists uq_media_assets_meeting_capture
   where source in ('desktop_capture','zoom','teams') and source_file_id is not null;
 
 create unique index if not exists uq_meetings_external_ref
-  on meetings(external_source, external_id) where external_id is not null;
+  on meetings(workspace_id, external_source, external_id) where external_id is not null;
 
 create index if not exists idx_capture_subscriptions_platform_expires
   on capture_subscriptions(platform, status, expires_at);
@@ -548,3 +676,7 @@ create index if not exists idx_audit_logs_action_created
 
 create index if not exists idx_audit_logs_target_created
   on audit_logs(target_type, target_id, created_at desc);
+
+-- The workspace every pre-M2 row belongs to (018).
+insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
+  on conflict (id) do nothing;
