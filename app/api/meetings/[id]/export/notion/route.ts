@@ -7,7 +7,7 @@ import {
 } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { withAuthz } from "@/lib/auth/authz"
+import { can, withAuthz } from "@/lib/auth/authz"
 import {
   buildNotionBlocks,
   buildNotionProperties,
@@ -16,13 +16,24 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 /**
  * POST /api/meetings/:id/export/notion — Export meeting to Notion.
- * Body: { databaseId: string, token?: string }
+ * Body: { databaseId: string, token: string }
  *
- * Uses Notion integration token from body or NOTION_TOKEN env var.
+ * Writes meeting content to an external workspace, so it needs
+ * `meeting:write` plus `integrations:manage` (role >= admin). The Notion
+ * integration token must come from the request body: there is deliberately
+ * no server-wide fallback token (it would let any tenant write into the
+ * operator's Notion workspace).
  */
 export const POST = withAuthz<{ id: string }>(
-  "meeting:read",
+  "meeting:write",
   async (request, ctx, { params }) => {
+    if (!can(ctx.role, "integrations:manage")) {
+      return NextResponse.json(
+        { error: "Forbidden", permission: "integrations:manage" },
+        { status: 403 }
+      )
+    }
+
     const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
 
     if (rateLimit.blocked) return rateLimit.blocked
@@ -39,10 +50,7 @@ export const POST = withAuthz<{ id: string }>(
 
     const databaseId =
       typeof body.databaseId === "string" ? body.databaseId.trim() : ""
-    const token =
-      typeof body.token === "string"
-        ? body.token.trim()
-        : (process.env.NOTION_TOKEN ?? "")
+    const token = typeof body.token === "string" ? body.token.trim() : ""
 
     if (!databaseId) {
       return jsonError("databaseId is required", 400)
@@ -50,7 +58,7 @@ export const POST = withAuthz<{ id: string }>(
 
     if (!token) {
       return jsonError(
-        "Notion token required. Set NOTION_TOKEN env var or pass 'token' in body.",
+        "Notion token required. Pass the Notion integration 'token' in the body.",
         400
       )
     }

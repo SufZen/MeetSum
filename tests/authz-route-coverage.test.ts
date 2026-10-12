@@ -113,6 +113,37 @@ describe("API route authz coverage", () => {
     expect(offenders).toEqual([])
   })
 
+  it("guards sensitive routes with the documented permission", () => {
+    /** `<route> <METHOD>` -> permission passed to `withAuthz`. */
+    const REQUIRED: Record<string, string> = {
+      // Live conference records of the subject mailbox (security review M2).
+      "google/meet/artifacts GET": "integrations:manage",
+      // Writes meeting content to an external workspace; the route also
+      // checks `integrations:manage` in its body.
+      "meetings/[id]/export/notion POST": "meeting:write",
+      "storage/media-assets GET": "storage:manage",
+      "storage/media-assets/[id] DELETE": "storage:manage",
+      "webhooks/test POST": "webhooks:manage",
+    }
+    const permissionPattern = (method: string) =>
+      new RegExp(
+        `export\\s+const\\s+${method}\\s*=\\s*withAuthz(?:<[^>]*>)?\\(\\s*"([^"]+)"`
+      )
+    const actual = Object.fromEntries(
+      Object.keys(REQUIRED).map((key) => {
+        const [route, method] = key.split(" ")
+        const file = routes.find((candidate) => candidate.route === route)
+
+        return [key, file?.source.match(permissionPattern(method))?.[1]]
+      })
+    )
+
+    expect(actual).toEqual(REQUIRED)
+    const notion = routes.find((route) => route.route === "meetings/[id]/export/notion")
+    expect(notion?.source).toMatch(/can\(ctx\.role, "integrations:manage"\)/)
+    expect(notion?.source).not.toMatch(/process\.env\.NOTION_TOKEN/)
+  })
+
   it("passes a workspace to every recordAuditLog call", () => {
     const missing = routes.flatMap((route) =>
       callArguments(route.source, "recordAuditLog")

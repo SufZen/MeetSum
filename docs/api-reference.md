@@ -111,6 +111,9 @@ Export as PDF. **Rate limit:** 20 req/min.
 ### `POST /api/meetings/:id/export/docx`
 Export as DOCX (Word). Returns `.docx` file download. **Rate limit:** 20 req/min.
 
+### `POST /api/meetings/:id/export/notion`
+Create a page for the meeting in a Notion database. Body: `{ databaseId, token }` — `token` is the caller's Notion integration token and is **required** (there is no server-wide `NOTION_TOKEN` fallback). Requires `meeting:write` and `integrations:manage` (role admin or owner; API keys need the `admin` scope); a private meeting must also be visible to the caller (else 404). **Rate limit:** 20 req/min.
+
 ---
 
 ## Rooms
