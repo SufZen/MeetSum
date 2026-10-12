@@ -4,7 +4,6 @@ import {
   createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
   createInMemoryShareLookup,
-  DEFAULT_SYSTEM_SCOPE,
   type InMemoryMeetingDatabase,
   type MeetingRepository,
   type RepoScope,
@@ -56,34 +55,19 @@ export function createScopedMeetingRepository(
     : createInMemoryMeetingRepository(backend.db, scope)
 }
 
-export function createMeetingRepositoryFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-  scope: RepoScope = DEFAULT_SYSTEM_SCOPE
-): MeetingRepository {
-  return createScopedMeetingRepository(createMeetingBackendFromEnv(env), scope)
-}
-
+/**
+ * Resolved at first use (not at module load) so `next build`, which imports
+ * every route module while collecting page data, does not need runtime-only
+ * configuration such as MEETSUM_STORAGE / DATABASE_URL. Production
+ * misconfiguration is still caught at boot by instrumentation.ts and on
+ * first use here.
+ */
 let cachedBackend: MeetingBackend | undefined
 
 function getMeetingBackend(): MeetingBackend {
   cachedBackend ??= createMeetingBackendFromEnv()
 
   return cachedBackend
-}
-
-let cachedRepository: MeetingRepository | undefined
-
-/**
- * @deprecated M2: system repository of the default workspace (legacy
- * single-tenant behaviour). Removed at Integration with `meetingRepository`.
- */
-export function getMeetingRepository(): MeetingRepository {
-  cachedRepository ??= createScopedMeetingRepository(
-    getMeetingBackend(),
-    DEFAULT_SYSTEM_SCOPE
-  )
-
-  return cachedRepository
 }
 
 /**
@@ -142,26 +126,3 @@ export async function resolveMeetingWorkspaceId(
 
   return row ? (row.workspace_id ?? DEFAULT_WORKSPACE_ID) : undefined
 }
-
-/**
- * @deprecated M2: use `ctx.meetings` (routes), `getScopedMeetingRepository`,
- * `getSystemMeetingRepository` or `getShareLookup`. Removed at Integration.
- * Until then it is the system repository of the default workspace.
- *
- * Lazily resolved repository. Resolving at first use (instead of at module
- * load) keeps `next build` — which imports every route module while
- * collecting page data — from requiring runtime-only configuration such as
- * MEETSUM_STORAGE / DATABASE_URL. Production misconfiguration is still caught
- * at boot by instrumentation.ts (lib/ops/environment) and on first use here.
- */
-export const meetingRepository: MeetingRepository = new Proxy(
-  {} as MeetingRepository,
-  {
-    get(_target, property) {
-      const repository = getMeetingRepository()
-      const value = Reflect.get(repository, property, repository)
-
-      return typeof value === "function" ? value.bind(repository) : value
-    },
-  }
-)

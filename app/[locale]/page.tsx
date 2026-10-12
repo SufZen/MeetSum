@@ -2,12 +2,11 @@ import { redirect } from "next/navigation"
 
 import { AppShell } from "@/components/app-shell"
 import { NoWorkspaceState } from "@/components/no-workspace-state"
+import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { buildMeetingIntelligence } from "@/lib/intelligence"
 import { selectRecentRooms } from "@/lib/rooms"
-
-import { resolveServerPageAuth } from "./server-auth"
 
 export default async function Page({
   params,
@@ -18,27 +17,29 @@ export default async function Page({
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
     : "en"
-  const auth = await resolveServerPageAuth()
+  const auth = await getServerAuthState()
 
-  if (auth.kind === "anonymous") {
+  if (auth.status === "unauthenticated") {
     redirect(`/${supportedLocale}/login`)
   }
 
   const dictionary = getDictionary(supportedLocale)
 
-  if (auth.kind === "no_workspace") {
+  if (auth.status === "no_workspace") {
     return (
       <NoWorkspaceState
         dictionary={dictionary}
         locale={supportedLocale}
-        email={auth.user.email}
+        email={auth.session.user.email}
       />
     )
   }
 
+  const { ctx } = auth
+  const user = auth.session.user
   const [meetingList, rooms] = await Promise.all([
-    auth.meetings.listMeetings({ limit: 5 }),
-    auth.meetings.listRooms().catch(() => []),
+    ctx.meetings.listMeetings({ limit: 5 }),
+    ctx.meetings.listRooms().catch(() => []),
   ])
   const meetings = meetingList.map((meeting) => {
     const intelligence =
@@ -60,9 +61,9 @@ export default async function Page({
       meetings={meetings}
       rooms={selectRecentRooms(rooms)}
       user={{
-        email: auth.user.email,
-        ...(auth.user.name ? { name: auth.user.name } : {}),
-        ...(auth.user.picture ? { picture: auth.user.picture } : {}),
+        email: user.email,
+        ...(user.name ? { name: user.name } : {}),
+        ...(user.picture ? { picture: user.picture } : {}),
       }}
     />
   )

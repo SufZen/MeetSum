@@ -16,7 +16,6 @@ vi.mock("@/lib/api/responses", async () => {
   const { NextResponse } = await import("next/server")
 
   return {
-    requireAppAccess: vi.fn(async () => undefined),
     jsonError: (message: string, status = 400) =>
       NextResponse.json({ error: message }, { status }),
   }

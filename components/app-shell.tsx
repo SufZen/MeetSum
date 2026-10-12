@@ -19,7 +19,7 @@ export function AppShell({
   user?: SidebarUser
 }) {
   return (
-    <WorkspaceProvider initialUser={user}>
+    <WorkspaceProvider>
       <CommandCenterShell
         dictionary={dictionary}
         locale={locale}

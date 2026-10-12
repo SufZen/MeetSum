@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { POST } from "@/app/api/share/[token]/verify/route"
-import { meetingRepository } from "@/lib/meetings/store"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 import {
   SHARE_ACCESS_COOKIE,
   verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
+
+const meetingRepository = getSystemMeetingRepository(DEFAULT_WORKSPACE_ID)
 
 const SECRET = "share-verify-route-secret"
 let previousSecret: string | undefined
