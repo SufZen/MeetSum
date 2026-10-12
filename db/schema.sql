@@ -116,6 +116,10 @@ create table if not exists meetings (
   started_at timestamptz not null,
   participants jsonb not null default '[]'::jsonb,
   is_favorite boolean not null default false,
+  language_metadata jsonb not null default '{}'::jsonb,
+  google_meet_link text,
+  external_source text,
+  external_id text,
   created_at timestamptz not null default now()
 );
 
@@ -127,6 +131,10 @@ create table if not exists media_assets (
   content_type text not null,
   size_bytes bigint not null,
   retention text not null default 'audio',
+  source text,
+  source_file_id text,
+  checksum_sha256 text,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -172,6 +180,16 @@ create table if not exists action_items (
   title text not null,
   owner text,
   status text not null default 'open',
+  due_date timestamptz,
+  priority text not null default 'normal',
+  confidence numeric,
+  source_quote text,
+  source_start_ms integer,
+  kind text not null default 'explicit',
+  edited_by_user boolean not null default false,
+  origin text not null default 'ai',
+  original_title text,
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -184,6 +202,11 @@ create table if not exists ai_runs (
   status text not null,
   metadata jsonb not null default '{}'::jsonb,
   job_id text,
+  model text,
+  latency_ms integer,
+  cost_estimate numeric,
+  confidence numeric,
+  input_hash text,
   started_at timestamptz,
   completed_at timestamptz,
   error text,
@@ -205,6 +228,7 @@ create table if not exists webhook_subscriptions (
   events jsonb not null default '[]'::jsonb,
   secret_ref text,
   secret_hash text,
+  secret_ciphertext text,
   enabled boolean not null default true,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
@@ -216,9 +240,12 @@ create table if not exists webhook_deliveries (
   event_name text not null,
   status text not null,
   attempts integer not null default 0,
+  max_attempts integer not null default 6,
   last_error text,
   event_payload jsonb not null default '{}'::jsonb,
   response_status integer,
+  delivered_at timestamptz,
+  duration_ms integer,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -253,6 +280,21 @@ create table if not exists app_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists capture_subscriptions (
+  id text primary key,
+  platform text not null,
+  external_subscription_id text not null unique,
+  resource text not null,
+  change_type text not null,
+  notification_url text not null,
+  lifecycle_notification_url text,
+  expires_at timestamptz not null,
+  status text not null default 'active',
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists jobs (
   id text primary key,
   name text not null,
@@ -269,25 +311,6 @@ create table if not exists jobs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-alter table meetings
-  add column if not exists language_metadata jsonb not null default '{}'::jsonb;
-
-alter table meetings
-  add column if not exists google_meet_link text;
-
-alter table media_assets
-  add column if not exists source text,
-  add column if not exists source_file_id text,
-  add column if not exists checksum_sha256 text,
-  add column if not exists metadata jsonb not null default '{}'::jsonb;
-
-alter table ai_runs
-  add column if not exists model text,
-  add column if not exists latency_ms integer,
-  add column if not exists cost_estimate numeric,
-  add column if not exists confidence numeric,
-  add column if not exists input_hash text;
 
 alter table google_sync_states
   add column if not exists status text not null default 'idle',
@@ -308,15 +331,6 @@ alter table drive_files
   add column if not exists modified_time timestamptz,
   add column if not exists size_bytes bigint,
   add column if not exists imported_at timestamptz;
-
-alter table action_items
-  add column if not exists created_at timestamptz not null default now(),
-  add column if not exists due_date timestamptz,
-  add column if not exists priority text not null default 'normal',
-  add column if not exists confidence numeric,
-  add column if not exists source_quote text,
-  add column if not exists source_start_ms integer,
-  add column if not exists kind text not null default 'explicit';
 
 create table if not exists tags (
   id text primary key,
@@ -417,9 +431,6 @@ create table if not exists export_records (
   created_at timestamptz not null default now()
 );
 
-alter table meetings
-  add column if not exists is_favorite boolean not null default false;
-
 alter table contexts
   add column if not exists color text,
   add column if not exists kind text not null default 'room';
@@ -500,6 +511,16 @@ create index if not exists idx_google_sync_states_next_poll
 
 create index if not exists idx_media_assets_source_file
   on media_assets(source, source_file_id);
+
+create unique index if not exists uq_media_assets_meeting_capture
+  on media_assets(meeting_id, source, source_file_id)
+  where source in ('desktop_capture','zoom','teams') and source_file_id is not null;
+
+create unique index if not exists uq_meetings_external_ref
+  on meetings(external_source, external_id) where external_id is not null;
+
+create index if not exists idx_capture_subscriptions_platform_expires
+  on capture_subscriptions(platform, status, expires_at);
 
 create index if not exists idx_calendar_events_calendar_id
   on calendar_events(calendar_id, starts_at desc);
