@@ -1,0 +1,468 @@
+/* =============================================================================
+   MeetSum Cadence — design tokens v2.0
+   Drop-in replacement for the token section of app/globals.css.
+
+   Layers
+     1. Primitive ramps  — never used by components directly
+     2. Semantic tokens  — surfaces, text, lines, brand, AI, live, status
+     3. Domain tokens    — speakers, timecodes, provenance
+     4. shadcn aliases   — keep every existing --background/--primary/... name
+     5. Type, space, radius, elevation, motion
+     6. Tailwind v4 @theme registration (so `bg-surface`, `text-fg-muted`,
+        `border-line`, `ease-out-expo`, `animate-ms-rise` etc. exist and the
+        `bg-[var(--divider)]` bracket pattern can be deleted)
+
+   Rules
+     - Colour is OKLCH. Light values on :root, dark values on .dark.
+     - Physical direction is never encoded in a token. Use logical utilities.
+     - The AI hue (iris, h≈290) is reserved for machine-generated content and
+       model state. Nothing else may use it.
+     - The live hue (h≈25) is reserved for "recording now".
+   ========================================================================== */
+
+:root {
+  /* ---- 2. Semantic: surfaces (Radix-style steps 1–4) ------------------- */
+  --canvas: oklch(0.982 0.004 215);          /* app ground, behind panels   */
+  --surface: oklch(1 0 0);                    /* panels, cards                */
+  --surface-2: oklch(0.973 0.005 215);        /* subtle fill, rails, inputs  */
+  --surface-3: oklch(0.953 0.007 215);        /* hover                        */
+  --surface-4: oklch(0.932 0.009 215);        /* pressed / selected-neutral  */
+  --overlay: oklch(0.2 0.02 245 / 0.32);      /* scrim behind dialogs        */
+
+  /* ---- Lines (steps 6–7) ---------------------------------------------- */
+  --line: oklch(0.915 0.008 225);
+  --line-strong: oklch(0.86 0.011 225);
+  --line-control: oklch(0.66 0.016 230);     /* input/checkbox boundaries, ≥3:1 (WCAG 1.4.11) */
+
+  /* ---- Text (steps 11–12). All pass 4.5:1 on --surface and --canvas --- */
+  --fg: oklch(0.21 0.022 248);
+  --fg-2: oklch(0.42 0.022 248);              /* secondary copy               */
+  --fg-3: oklch(0.52 0.02 248);               /* meta, captions (≥12px)       */
+  --fg-disabled: oklch(0.7 0.012 248);
+
+  /* ---- Brand: "Signal" teal -------------------------------------------- */
+  --brand: oklch(0.53 0.112 184);
+  --brand-hover: oklch(0.48 0.108 184);
+  --brand-press: oklch(0.44 0.1 184);
+  --brand-soft: oklch(0.958 0.028 184);
+  --brand-soft-2: oklch(0.925 0.045 184);
+  --brand-text: oklch(0.45 0.1 184);          /* brand-coloured text on light */
+  --on-brand: oklch(0.995 0.004 184);
+
+  /* ---- AI provenance: "Iris" (reserved) ------------------------------- */
+  --ai: oklch(0.53 0.165 289);
+  --ai-text: oklch(0.47 0.16 289);
+  --ai-soft: oklch(0.965 0.022 289);
+  --ai-line: oklch(0.86 0.06 289);
+  --ai-glow: oklch(0.7 0.16 289 / 0.28);
+
+  /* ---- Live / recording (reserved) ------------------------------------ */
+  --live: oklch(0.6 0.215 25);
+  --live-soft: oklch(0.962 0.028 25);
+  --live-text: oklch(0.5 0.19 25);
+
+  /* ---- Status ---------------------------------------------------------- */
+  --ok: oklch(0.56 0.13 152);
+  --ok-soft: oklch(0.962 0.03 152);
+  --ok-text: oklch(0.45 0.11 152);
+  --warn: oklch(0.74 0.15 72);
+  --warn-soft: oklch(0.966 0.04 82);
+  --warn-text: oklch(0.47 0.1 62);
+  --mark-action: oklch(0.62 0.15 62);        /* action markers on the timeline, ≥3:1 */
+  --danger: oklch(0.56 0.2 27);
+  --danger-soft: oklch(0.962 0.025 27);
+  --danger-text: oklch(0.5 0.19 27);
+  --info: oklch(0.55 0.13 245);
+  --info-soft: oklch(0.962 0.022 245);
+  --info-text: oklch(0.47 0.13 245);
+
+  /* ---- 3. Domain: speakers — matched lightness so no voice dominates -- */
+  --spk-1: oklch(0.6 0.14 252);
+  --spk-2: oklch(0.64 0.15 48);
+  --spk-3: oklch(0.6 0.13 156);
+  --spk-4: oklch(0.6 0.16 332);
+  --spk-5: oklch(0.66 0.13 85);
+  --spk-6: oklch(0.6 0.11 208);
+  --spk-7: oklch(0.6 0.12 122);
+  --spk-8: oklch(0.6 0.17 8);
+  --spk-soft-mix: 14%;                         /* color-mix % for spk tints   */
+
+  /* ---- Focus ----------------------------------------------------------- */
+  --focus: oklch(0.58 0.13 184);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
+
+  /* ---- 5. Type --------------------------------------------------------- */
+  --font-ui: "IBM Plex Sans", "IBM Plex Sans Hebrew", ui-sans-serif, system-ui, sans-serif;
+  --font-he: "IBM Plex Sans Hebrew", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-label: var(--font-mono);             /* eyebrows, day headers; Hebrew swaps to --font-he */
+
+  /* size / line-height pairs. Body = 14px. html stays 16px (drop the
+     current `html { font-size: 14px }` hack — it breaks rem everywhere). */
+  --text-3xs: 0.5625rem;  --lh-3xs: 0.75rem;   /* 9  — avatar initials only */
+  --text-2xs: 0.6875rem;  --lh-2xs: 1rem;      /* 11 — mono labels only     */
+  --text-xs: 0.75rem;     --lh-xs: 1rem;       /* 12 — meta, chips          */
+  --text-sm: 0.8125rem;   --lh-sm: 1.25rem;    /* 13 — dense UI, tables     */
+  --text-base: 0.875rem;  --lh-base: 1.375rem; /* 14 — body, controls       */
+  --text-md: 1rem;        --lh-md: 1.5rem;     /* 16 — reading (transcript) */
+  --text-lg: 1.125rem;    --lh-lg: 1.625rem;   /* 18 — section titles       */
+  --text-xl: 1.375rem;    --lh-xl: 1.75rem;    /* 22 — page titles          */
+  --text-2xl: 1.75rem;    --lh-2xl: 2.125rem;  /* 28 — empty-state heroes   */
+  --text-3xl: 2.25rem;    --lh-3xl: 2.625rem;  /* 36 — marketing/share only */
+  --tracking-tight: -0.012em;                  /* Latin ≥ 18px only          */
+  --tracking-caps: 0.06em;                     /* uppercase eyebrows         */
+
+  /* ---- Space (4px grid) ------------------------------------------------ */
+  --space-0: 0;     --space-px: 1px;  --space-0_5: 0.125rem; --space-1: 0.25rem;
+  --space-1_5: 0.375rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+  --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem;
+  --space-12: 3rem; --space-16: 4rem;
+  --control-sm: 1.75rem;  /* 28 — toolbar icons (24px target + 4 slop)    */
+  --control-md: 2rem;     /* 32 — default buttons, inputs                 */
+  --control-lg: 2.5rem;   /* 40 — primary CTAs, touch                     */
+  --row-dense: 2.25rem;   /* 36 — list rows                               */
+  --row-comfy: 3.5rem;    /* 56 — meeting inbox rows                      */
+
+  /* ---- Measure, icons, layers ------------------------------------------ */
+  --measure: 44rem;          /* reading column max width (~68ch Latin)        */
+  --icon-xs: 0.75rem;        /* 12 — inside pills, chips                      */
+  --icon-sm: 0.875rem;       /* 14 — dense rows                               */
+  --icon-md: 1rem;           /* 16 — default                                  */
+  --icon-lg: 1.25rem;        /* 20 — rail, empty states                       */
+  --z-sticky: 10;            /* sticky player, headers                        */
+  --z-dock: 15;              /* recorder dock, follow pill                    */
+  --z-popover: 20;           /* citation peek, menus, tooltips                */
+  --z-toast: 30;
+  --z-overlay: 40;           /* dialogs, palette                              */
+
+  /* ---- Radius (by role, not by habit) --------------------------------- */
+  --radius: 0.5rem;           /* shadcn base — controls                    */
+  --radius-xs: 0.25rem;       /* timecode chips, kbd                       */
+  --radius-sm: 0.375rem;      /* tags, small buttons                       */
+  --radius-md: 0.5rem;        /* buttons, inputs                           */
+  --radius-lg: 0.75rem;       /* cards, popovers                           */
+  --radius-xl: 1rem;          /* sheets, dialogs, player                   */
+  --radius-full: 999px;       /* pills, avatars, record button             */
+
+  /* ---- Elevation: light uses shadow; dark uses lighter surface + rim -- */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px oklch(0.25 0.03 248 / 0.06), 0 0 0 1px var(--line);
+  --shadow-2: 0 1px 2px oklch(0.25 0.03 248 / 0.05), 0 4px 12px -2px oklch(0.25 0.03 248 / 0.08), 0 0 0 1px var(--line);
+  --shadow-3: 0 2px 4px oklch(0.25 0.03 248 / 0.05), 0 12px 32px -8px oklch(0.25 0.03 248 / 0.18), 0 0 0 1px var(--line);
+  --shadow-4: 0 4px 8px oklch(0.25 0.03 248 / 0.06), 0 24px 64px -12px oklch(0.25 0.03 248 / 0.28), 0 0 0 1px var(--line);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  /* Durations — productive (≤160ms) for routine UI, expressive (240–400)
+     for meaning-changing moments, ambient (≥700) for loops only.         */
+  --dur-0: 0ms;
+  --dur-1: 70ms;    /* hover, press, colour                               */
+  --dur-2: 120ms;   /* toggles, checkboxes, small state                   */
+  --dur-3: 160ms;   /* menus, tooltips, popovers in                       */
+  --dur-4: 240ms;   /* panels, sheets, tab content                        */
+  --dur-5: 400ms;   /* view change, summary reveal, celebrate             */
+  --dur-6: 700ms;   /* ambient: waveform cycle                            */
+  --dur-pulse: 1600ms;   /* live-dot halo loop                         */
+  --dur-shimmer: 1400ms; /* skeleton and progress shimmer loop         */
+  --stagger: 35ms;  /* per-item list stagger, max 8 items then 0          */
+  /* Named moments — the only motion allowed past 400ms, each explains something */
+  --dur-flash: 1200ms;  /* a landed citation fades its brand highlight     */
+  --dur-trace: 900ms;   /* cited speaker lanes glow as a line lands        */
+  --dur-scan: 1300ms;   /* source-trace scan line across the timeline      */
+  --dur-sigma: 760ms;   /* speaker lanes rotate into the Σ mark            */
+  --dur-reveal: 480ms;  /* theme switch circular reveal                    */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9);    /* in-place change */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);           /* enter           */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);               /* exit            */
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);       /* view transitions*/
+  /* Gentle spring (~4% overshoot). Spatial only — never on opacity/colour */
+  --ease-spring: linear(0, 0.06 2.5%, 0.24 6%, 0.53 11%, 0.8 17%, 0.96 23%, 1.03 29%, 1.042 34%, 1.03 41%, 1.01 50%, 0.998 62%, 1);
+  --dur-spring: 520ms;
+
+  /* ---- 4. shadcn aliases (existing component code keeps working) ------ */
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: var(--surface-3);
+  --secondary-foreground: var(--fg);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--fg-3);
+  --accent: var(--surface-3);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-control);
+  --ring: var(--focus);
+  --chart-1: var(--brand);
+  --chart-2: var(--spk-1);
+  --chart-3: var(--spk-5);
+  --chart-4: var(--spk-3);
+  --chart-5: var(--ai);
+  --sidebar: var(--canvas);
+  --sidebar-foreground: var(--fg-2);
+  --sidebar-primary: var(--brand-soft);
+  --sidebar-primary-foreground: var(--brand-text);
+  --sidebar-accent: var(--surface-3);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--focus);
+
+  /* legacy names still referenced in components (remove after migration) */
+  --divider: var(--line);
+  --surface-subtle: var(--surface-2);
+  --rail: var(--surface-2);
+  --selected: var(--brand-soft);
+  --app-bg: var(--canvas);
+  --text-primary: var(--fg);
+  --text-secondary: var(--fg-2);
+  --text-muted: var(--fg-3);
+  --surface-hover: var(--surface-3);
+  --status-info: var(--info);
+  --status-warning: var(--warn);
+  --status-success: var(--ok);
+  --status-error: var(--danger);
+  --status-ai: var(--ai);
+  --tag-technical: var(--info-soft);   --tag-technical-fg: var(--info-text);
+  --tag-business: var(--brand-soft);   --tag-business-fg: var(--brand-text);
+  --tag-action: var(--warn-soft);      --tag-action-fg: var(--warn-text);
+  --tag-ai: var(--ai-soft);            --tag-ai-fg: var(--ai-text);
+}
+
+.dark {
+  --canvas: oklch(0.155 0.012 242);
+  --surface: oklch(0.19 0.014 242);
+  --surface-2: oklch(0.215 0.015 242);
+  --surface-3: oklch(0.245 0.016 242);
+  --surface-4: oklch(0.275 0.018 242);
+  --overlay: oklch(0.08 0.01 242 / 0.6);
+
+  --line: oklch(1 0 0 / 0.085);
+  --line-strong: oklch(1 0 0 / 0.15);
+  --line-control: oklch(0.52 0.014 242);
+
+  --fg: oklch(0.955 0.005 242);
+  --fg-2: oklch(0.8 0.012 242);
+  --fg-3: oklch(0.67 0.014 242);
+  --fg-disabled: oklch(0.47 0.012 242);
+
+  --brand: oklch(0.77 0.12 182);
+  --brand-hover: oklch(0.81 0.115 182);
+  --brand-press: oklch(0.72 0.115 182);
+  --brand-soft: oklch(0.29 0.045 184);
+  --brand-soft-2: oklch(0.34 0.06 184);
+  --brand-text: oklch(0.82 0.11 182);
+  --on-brand: oklch(0.18 0.03 190);
+
+  --ai: oklch(0.76 0.13 289);
+  --ai-text: oklch(0.82 0.1 289);
+  --ai-soft: oklch(0.27 0.055 289);
+  --ai-line: oklch(0.44 0.09 289);
+  --ai-glow: oklch(0.7 0.16 289 / 0.32);
+
+  --live: oklch(0.68 0.2 25);
+  --live-soft: oklch(0.29 0.07 25);
+  --live-text: oklch(0.8 0.13 25);
+
+  --ok: oklch(0.72 0.13 152);   --ok-soft: oklch(0.28 0.05 152);   --ok-text: oklch(0.82 0.11 152);
+  --warn: oklch(0.8 0.13 78);   --warn-soft: oklch(0.3 0.055 78);  --warn-text: oklch(0.86 0.1 82);
+  --mark-action: oklch(0.8 0.13 78);
+  --danger: oklch(0.68 0.19 27); --danger-soft: oklch(0.29 0.07 27); --danger-text: oklch(0.8 0.13 27);
+  --info: oklch(0.72 0.11 245); --info-soft: oklch(0.28 0.05 245); --info-text: oklch(0.82 0.09 245);
+
+  --spk-1: oklch(0.74 0.12 252);
+  --spk-2: oklch(0.76 0.13 52);
+  --spk-3: oklch(0.74 0.12 156);
+  --spk-4: oklch(0.74 0.14 332);
+  --spk-5: oklch(0.8 0.12 88);
+  --spk-6: oklch(0.75 0.1 208);
+  --spk-7: oklch(0.76 0.12 122);
+  --spk-8: oklch(0.74 0.15 10);
+  --spk-soft-mix: 22%;
+
+  --focus: oklch(0.78 0.12 182);
+
+  --shadow-1: 0 0 0 1px var(--line), inset 0 1px 0 oklch(1 0 0 / 0.03);
+  --shadow-2: 0 0 0 1px var(--line-strong), 0 6px 16px -4px oklch(0 0 0 / 0.5), inset 0 1px 0 oklch(1 0 0 / 0.04);
+  --shadow-3: 0 0 0 1px var(--line-strong), 0 16px 40px -8px oklch(0 0 0 / 0.6), inset 0 1px 0 oklch(1 0 0 / 0.05);
+  --shadow-4: 0 0 0 1px var(--line-strong), 0 28px 72px -12px oklch(0 0 0 / 0.7), inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+
+/* ---- Hebrew: per-script metrics. Applies to any subtree with lang="he". --
+   Hebrew sets larger on the same size and needs more leading; it never gets
+   negative tracking, uppercase transforms or italics. Mono has no Hebrew
+   glyphs, so labels switch to the Hebrew face. */
+:lang(he) {
+  --lh-sm: 1.375rem;
+  --lh-base: 1.5rem;
+  --lh-md: 1.625rem;
+  --lh-lg: 1.75rem;
+  --lh-xl: 1.875rem;
+  --lh-2xl: 2.25rem;
+  --tracking-tight: 0;
+  --tracking-caps: 0;
+  --font-label: var(--font-he);
+}
+
+/* ---- Reduced motion: keep feedback, drop travel ------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-4: 120ms;
+    --dur-5: 160ms;
+    --dur-6: 0ms;
+    --stagger: 0ms;
+    --ease-spring: var(--ease-out);
+    --dur-spring: 160ms;
+    --dur-scan: 0ms;
+    --dur-sigma: 0ms;
+    --dur-reveal: 0ms;
+  }
+}
+
+/* =============================================================================
+   6. Tailwind v4 registration — paste below `@import "shadcn/tailwind.css";`
+   Keep the :root / .dark blocks above UNLAYERED. @theme emits its own
+   variables inside @layer theme, so unlayered definitions always win and the
+   `--x: var(--x)` registrations below resolve to the Cadence values.
+   ========================================================================== */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-overlay: var(--overlay);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-control: var(--line-control);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-2: var(--brand-soft-2);
+  --color-brand-text: var(--brand-text);
+  --color-on-brand: var(--on-brand);
+  --color-ai: var(--ai);
+  --color-ai-text: var(--ai-text);
+  --color-ai-soft: var(--ai-soft);
+  --color-ai-line: var(--ai-line);
+  --color-live: var(--live);
+  --color-live-soft: var(--live-soft);
+  --color-live-text: var(--live-text);
+  --color-ok: var(--ok);         --color-ok-soft: var(--ok-soft);         --color-ok-text: var(--ok-text);
+  --color-warn: var(--warn);     --color-warn-soft: var(--warn-soft);     --color-warn-text: var(--warn-text);
+  --color-mark-action: var(--mark-action);
+  --color-danger: var(--danger); --color-danger-soft: var(--danger-soft); --color-danger-text: var(--danger-text);
+  --color-info: var(--info);     --color-info-soft: var(--info-soft);     --color-info-text: var(--info-text);
+  --color-spk-1: var(--spk-1); --color-spk-2: var(--spk-2); --color-spk-3: var(--spk-3); --color-spk-4: var(--spk-4);
+  --color-spk-5: var(--spk-5); --color-spk-6: var(--spk-6); --color-spk-7: var(--spk-7); --color-spk-8: var(--spk-8);
+
+  /* keep the shadcn colour registrations */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-ui);
+  --font-hebrew: var(--font-he);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-ui);
+  --font-label: var(--font-label);
+
+  --text-3xs: var(--text-3xs);   --text-3xs--line-height: var(--lh-3xs);
+  --text-2xs: var(--text-2xs);   --text-2xs--line-height: var(--lh-2xs);
+  --text-xs: var(--text-xs);     --text-xs--line-height: var(--lh-xs);
+  --text-sm: var(--text-sm);     --text-sm--line-height: var(--lh-sm);
+  --text-base: var(--text-base); --text-base--line-height: var(--lh-base);
+  --text-md: var(--text-md);     --text-md--line-height: var(--lh-md);
+  --text-lg: var(--text-lg);     --text-lg--line-height: var(--lh-lg);
+  --text-xl: var(--text-xl);     --text-xl--line-height: var(--lh-xl);
+  --text-2xl: var(--text-2xl);   --text-2xl--line-height: var(--lh-2xl);
+  --text-3xl: var(--text-3xl);   --text-3xl--line-height: var(--lh-3xl);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --shadow-4: var(--shadow-4);
+  --shadow-focus: var(--focus-ring);
+
+  --tracking-caps: var(--tracking-caps);
+  --tracking-tight: var(--tracking-tight);
+
+  --ease-standard: var(--ease-standard);
+  --ease-out-expo: var(--ease-out);
+  --ease-exit: var(--ease-in);
+  --ease-emphasized: var(--ease-emphasized);
+  --ease-spring: var(--ease-spring);
+
+  --animate-ms-rise: ms-rise var(--dur-4) var(--ease-out) both;
+  --animate-ms-fade: ms-fade var(--dur-3) var(--ease-standard) both;
+  /* scale springs, opacity never does: two animations on one element */
+  --animate-ms-pop: ms-pop var(--dur-spring) var(--ease-spring) both, ms-fade var(--dur-3) var(--ease-out) both;
+  /* overlays (menu, popover, dialog, toast): productive, no spring */
+  --animate-ms-pop-in: ms-pop-in var(--dur-3) var(--ease-out) both, ms-fade var(--dur-3) var(--ease-out) both;
+  --animate-ms-shimmer: ms-shimmer var(--dur-shimmer) linear infinite;
+  --animate-ms-live: ms-live var(--dur-pulse) var(--ease-standard) infinite;
+  --animate-ms-flash: ms-flash var(--dur-flash) var(--ease-out) both;
+  --animate-ms-caret: ms-caret 1s steps(2, jump-none) infinite;
+}
+
+/* ---- Keyframes (logical: rise uses translateY only, safe in RTL) -------- */
+@keyframes ms-rise  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ms-fade  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ms-pop   { from { transform: scale(0.92); } to { transform: none; } }
+@keyframes ms-pop-in { from { transform: scale(0.96); } to { transform: none; } }
+@keyframes ms-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+@keyframes ms-live  { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--live) 45%, transparent); } 70% { box-shadow: 0 0 0 6px transparent; } }
+@keyframes ms-flash { 0% { background-color: color-mix(in oklch, var(--brand) 26%, transparent); } 100% { background-color: transparent; } }
+@keyframes ms-caret { to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes ms-rise { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes ms-pop  { from { transform: none; } to { transform: none; } }
+  @keyframes ms-pop-in { from { transform: none; } to { transform: none; } }
+  @keyframes ms-live { 0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--live) 35%, transparent); } }
+}
+
+/* Breakpoints used by the workspace layout (static values, not var()) */
+@theme {
+  --breakpoint-rail: 45rem;   /* < 720px: rail hides, actions go full width */
+  --breakpoint-inbox: 67.5rem; /* < 1080px: inbox becomes a slide-over */
+}
