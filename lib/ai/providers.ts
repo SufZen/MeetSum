@@ -138,6 +138,7 @@ export async function whisperHealthCheck(
     try {
       const response = await fetch(`${config.baseUrl}/v1/models`, {
         signal: controller.signal,
+        ...(config.apiKey ? { headers: { Authorization: `Bearer ${config.apiKey}` } } : {}),
       })
       const elapsedMs = Date.now() - startTime
 
@@ -170,6 +171,8 @@ export type LocalWhisperProviderConfig = {
   model: string
   language: string
   timeoutMs: number
+  /** Bearer token for hosted OpenAI-compatible Whisper (LOCAL_TRANSCRIPTION_API_KEY). */
+  apiKey?: string
 }
 
 const DEFAULT_LOCAL_WHISPER_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"
@@ -210,6 +213,7 @@ export function getLocalWhisperProviderConfig(
   return {
     baseUrl: (env.LOCAL_TRANSCRIPTION_URL ?? "").replace(/\/+$/, ""),
     model: env.LOCAL_TRANSCRIPTION_MODEL ?? DEFAULT_LOCAL_WHISPER_MODEL,
+    ...(env.LOCAL_TRANSCRIPTION_API_KEY?.trim() ? { apiKey: env.LOCAL_TRANSCRIPTION_API_KEY.trim() } : {}),
     language: env.LOCAL_TRANSCRIPTION_LANGUAGE ?? DEFAULT_LOCAL_WHISPER_LANGUAGE,
     timeoutMs: positiveNumber(
       env.LOCAL_TRANSCRIPTION_TIMEOUT_MS,

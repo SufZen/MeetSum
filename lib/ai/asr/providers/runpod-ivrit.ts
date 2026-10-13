@@ -267,7 +267,8 @@ type RunpodStatus = {
 export const RUNPOD_BAD_MEDIA_KIND = "bad_media"
 const BAD_MEDIA_PREFIX = `[${RUNPOD_BAD_MEDIA_KIND}]`
 
-function hasBadMediaMarker(value: unknown, message: string): boolean {
+/** True when a worker error carries asr-worker's explicit decode-failure marker. */
+export function hasBadMediaMarker(value: unknown, message: string): boolean {
   if (message.trimStart().startsWith(BAD_MEDIA_PREFIX)) return true
   if (Array.isArray(value)) return value.some((item) => hasBadMediaMarker(item, ""))
   if (isRecord(value)) return value.error_kind === RUNPOD_BAD_MEDIA_KIND
@@ -301,32 +302,47 @@ function failureError(status: RunpodStatus): AsrError {
   return new AsrError(`RunPod job failed: ${message.slice(0, 300)}`, "server", PROVIDER, true)
 }
 
+/**
+ * `meetsum-asr/v1` job input for our asr-worker (asr-worker/schema.py),
+ * shared by the RunPod (`RUNPOD_ASR_WORKER=meetsum`) and Modal providers.
+ */
+export function buildMeetsumAsrInput(
+  models: { model: string; multilingualModel: string },
+  req: AsrRequest,
+  handoff: AsrHandoff,
+  env: AsrEnv
+): Record<string, unknown> {
+  const hebrew = isHebrewLanguage(req.language)
+  const hotwords = buildHotwords(req.glossary, { maxChars: hotwordsMaxChars(env) }) || undefined
+  const initialPrompt = buildInitialPrompt(req.glossary, env)
+
+  return {
+    schema: MEETSUM_ASR_SCHEMA,
+    audio: handoff.type === "url" ? { type: "url", url: handoff.url } : { type: "blob", data: handoff.data },
+    model: hebrew ? models.model : models.multilingualModel,
+    language: hebrew ? "he" : providerLanguage(req.language) || null,
+    diarize: req.diarize,
+    ...(req.speakers?.min ? { min_speakers: req.speakers.min } : {}),
+    ...(req.speakers?.max ? { max_speakers: req.speakers.max } : {}),
+    ...(hotwords ? { hotwords } : {}),
+    ...(initialPrompt ? { initial_prompt: initialPrompt } : {}),
+    word_timestamps: true,
+  }
+}
+
 export function buildRunpodInput(
   config: RunpodConfig,
   req: AsrRequest,
   handoff: AsrHandoff,
   env: AsrEnv
 ): Record<string, unknown> {
+  if (config.worker === "meetsum") return buildMeetsumAsrInput(config, req, handoff, env)
+
   const hebrew = isHebrewLanguage(req.language)
   const model = hebrew ? config.model : config.multilingualModel
   const hotwords = buildHotwords(req.glossary, { maxChars: hotwordsMaxChars(env) }) || undefined
   const initialPrompt = buildInitialPrompt(req.glossary, env)
   const media = handoff.type === "url" ? { type: "url", url: handoff.url } : { type: "blob", data: handoff.data }
-
-  if (config.worker === "meetsum") {
-    return {
-      schema: MEETSUM_ASR_SCHEMA,
-      audio: media,
-      model,
-      language: hebrew ? "he" : providerLanguage(req.language) || null,
-      diarize: req.diarize,
-      ...(req.speakers?.min ? { min_speakers: req.speakers.min } : {}),
-      ...(req.speakers?.max ? { max_speakers: req.speakers.max } : {}),
-      ...(hotwords ? { hotwords } : {}),
-      ...(initialPrompt ? { initial_prompt: initialPrompt } : {}),
-      word_timestamps: true,
-    }
-  }
 
   return {
     ...media,

@@ -107,14 +107,44 @@ export function hotwordsMaxChars(env: AsrEnv): number {
 /**
  * Optional Whisper initial prompt ("בפגישה הוזכרו: …"). Off unless
  * `MEETSUM_ASR_USE_INITIAL_PROMPT=true` — prompts can bias Whisper into
- * hallucinating the listed terms over silence.
+ * hallucinating the listed terms over silence. `maxTokens` drops whole
+ * terms from the end until the prompt fits (see {@link estimateWhisperTokens}).
  */
-export function buildInitialPrompt(glossary: AsrGlossary, env: AsrEnv): string | undefined {
+export function buildInitialPrompt(
+  glossary: AsrGlossary,
+  env: AsrEnv,
+  options: { maxTokens?: number } = {}
+): string | undefined {
   if (!envFlag(env, "MEETSUM_ASR_USE_INITIAL_PROMPT")) return undefined
 
   const terms = hotwordTerms(glossary, { maxChars: hotwordsMaxChars(env) })
+  const prompt = (selected: string[]) => `בפגישה הוזכרו: ${selected.join(", ")}.`
 
-  return terms.length ? `בפגישה הוזכרו: ${terms.join(", ")}.` : undefined
+  if (options.maxTokens !== undefined) {
+    while (terms.length && estimateWhisperTokens(prompt(terms)) > options.maxTokens) terms.pop()
+  }
+
+  return terms.length ? prompt(terms) : undefined
+}
+
+/** Whisper ignores prompt text beyond this many tokens (OpenAI / Groq limit). */
+export const WHISPER_PROMPT_MAX_TOKENS = 224
+
+/**
+ * Conservative Whisper token estimate without a tokenizer: ~3 ASCII
+ * characters per token and one token per non-ASCII character (Hebrew
+ * letters usually merge better than that).
+ */
+export function estimateWhisperTokens(text: string): number {
+  let ascii = 0
+  let other = 0
+
+  for (const char of text) {
+    if (char.charCodeAt(0) < 128) ascii += 1
+    else other += 1
+  }
+
+  return Math.ceil(ascii / 3) + other
 }
 
 function splitEdges(text: string): { lead: string; core: string; trail: string } {
