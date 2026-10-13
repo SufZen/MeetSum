@@ -1,12 +1,18 @@
 /**
- * GET /api/me/invitations: pending invitations for the session email (docs/parity/m9.md C1).
- * M9 Step 0 stub behind its final guard (withSession rejects API keys);
- * owner: Package C.
+ * GET /api/me/invitations: pending invitations addressed to the session
+ * email, in any workspace (docs/parity/m9.md C1). withSession rejects API keys.
  */
+import { NextResponse } from "next/server"
+
 import { withSession } from "@/lib/auth/authz"
-import { notImplementedResponse } from "@/lib/http/m9-stubs"
+import { listMyInvitations } from "@/lib/notifications/invitations"
+import { getWorkspaceStore } from "@/lib/workspaces/store"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export const GET = withSession(async () => notImplementedResponse("invitations"))
+export const GET = withSession(async (_request, session) => {
+  const invitations = await listMyInvitations(session.user, getWorkspaceStore())
+
+  return NextResponse.json({ invitations }, { headers: { "cache-control": "private, no-store" } })
+})
