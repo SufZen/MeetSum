@@ -191,6 +191,11 @@ describe("clip shares", () => {
     ["public sharing disabled", async () => {
       sharingEnabled = false
     }],
+    ["the meeting has no visibility (M9 fail-closed)", async () => {
+      const meeting = db.meetings.get("m_a")
+
+      if (meeting) db.meetings.set("m_a", { ...meeting, visibility: undefined })
+    }],
   ])("fails closed when %s", async (_label, mutate) => {
     const clip = await createClip(ctx, "m_a", { segmentIds: ["s1"] })
     const share = await createClipShare(ctx, clip.id)

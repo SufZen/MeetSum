@@ -562,7 +562,8 @@ export async function createClipShare(
   const access = await getClipAccess(ctx, clipId)
 
   if (!access) throw new ClipNotFoundError()
-  if ((access.meeting.visibility ?? "workspace") === "private") {
+  // Fail closed (M9): a meeting without visibility counts as private.
+  if ((access.meeting.visibility ?? "private") === "private") {
     throw new ClipShareError("meeting_private")
   }
 
@@ -769,13 +770,13 @@ export async function lookupClipShare(
       title: row.meeting_title,
       startedAt: toIso(row.meeting_started_at) ?? "",
       language: row.meeting_language,
-      visibility: (row.meeting_visibility ?? "workspace") as ClipMeetingFacts["visibility"],
+      visibility: (row.meeting_visibility ?? "private") as ClipMeetingFacts["visibility"],
       workspaceId: row.meeting_workspace_id,
       primaryLanguage: row.meeting_primary_language ?? undefined,
     }
   }
 
-  if ((facts.visibility ?? "workspace") === "private") return { kind: "clip_unavailable" }
+  if ((facts.visibility ?? "private") === "private") return { kind: "clip_unavailable" }
 
   try {
     const enabled = await (deps.publicSharingEnabled ?? defaultPublicSharingEnabled)(

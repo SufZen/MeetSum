@@ -1285,7 +1285,8 @@ export function createInMemoryMeetingRepository(
 
   function isVisible(meeting: MeetingRecord): boolean {
     if (meetingWorkspaceId(meeting) !== workspaceId) return false
-    if (scope.kind !== "member" || (meeting.visibility ?? "workspace") !== "private") {
+    // Fail closed (M9): a missing visibility takes the private (participant) path.
+    if (scope.kind !== "member" || (meeting.visibility ?? "private") !== "private") {
       return canViewMeeting(scope, meeting)
     }
 

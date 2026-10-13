@@ -37,7 +37,8 @@ export function canViewMeeting(
   if (workspaceId !== scope.workspaceId) return false
   if (scope.kind === "system") return true
 
-  const visibility: MeetingVisibility = meeting.visibility ?? "workspace"
+  // Fail closed (M9): a record without visibility is treated as private.
+  const visibility: MeetingVisibility = meeting.visibility ?? "private"
 
   if (SHARED_VISIBILITIES.includes(visibility)) return true
 
@@ -62,7 +63,7 @@ export function canViewMeeting(
 
 /** True when the meeting is visible to every member of its workspace. */
 export function isWorkspaceVisibleMeeting(meeting: Pick<MeetingRecord, "visibility">): boolean {
-  return SHARED_VISIBILITIES.includes(meeting.visibility ?? "workspace")
+  return SHARED_VISIBILITIES.includes(meeting.visibility ?? "private")
 }
 
 /**

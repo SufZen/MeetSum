@@ -247,8 +247,9 @@ export function platformEventData(
   }
 }
 
-async function meetingVisibility(
-  scope: JobScope,
+/** Exported for tests: the visibility a platform event is filtered by. */
+export async function meetingVisibility(
+  scope: Pick<JobScope, "repo">,
   meetingId: unknown
 ): Promise<MeetingVisibility | undefined> {
   if (typeof meetingId !== "string" || !meetingId) return undefined
@@ -256,7 +257,8 @@ async function meetingVisibility(
   try {
     const meeting = await scope.repo.getMeeting(meetingId)
 
-    return meeting ? (meeting.visibility ?? "workspace") : undefined
+    // Fail closed: a missing visibility stays undefined → minimal payload.
+    return meeting ? meeting.visibility : undefined
   } catch {
     return undefined
   }
