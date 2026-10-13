@@ -24,6 +24,7 @@ import { dockEntriesFrom, type DockStopAction } from "@/components/bot/recorder-
 import { StopBotDialog } from "@/components/bot/stop-bot-dialog"
 import { useBotSessions } from "@/components/bot/use-bot-sessions"
 import { useBrowserRecorder } from "@/components/bot/use-browser-recorder"
+import { CommandPaletteHost } from "@/components/command-palette"
 import { useWorkspace } from "@/components/workspace-context"
 import {
   DriveRecordingPickerDrawer,
@@ -64,7 +65,6 @@ import { selectRecentRooms } from "@/lib/rooms"
 import type {
   ActionItem,
   JobRecord,
-  MeetingAnswer,
   MeetingListItem,
   MeetingParticipant,
   MeetingRecord,
@@ -181,9 +181,6 @@ export function CommandCenterShell({
   })
   const [meetingsLoading, setMeetingsLoading] = useState(false)
   const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
-  const [askQuestion, setAskQuestion] = useState(dictionary.askDefaultQuestion)
-  const [askAnswer, setAskAnswer] = useState("")
-  const [askCitations, setAskCitations] = useState<MeetingAnswer["citations"]>([])
   const [detail, setDetail] = useState<DetailEntry | null>(null)
   const detailCacheRef = useRef(new Map<string, DetailEntry>())
   const detailAbortRef = useRef<AbortController | null>(null)
@@ -503,14 +500,6 @@ export function CommandCenterShell({
     router.replace(`?${params.toString()}`, { scroll: false })
   }, [router])
 
-  // Answers and their citations belong to one meeting's transcript.
-  useEffect(() => {
-    queueMicrotask(() => {
-      setAskAnswer("")
-      setAskCitations([])
-    })
-  }, [selectedMeetingId])
-
   async function refreshMeeting(meetingId = selectedMeeting?.id) {
     if (!meetingId) return
 
@@ -728,7 +717,6 @@ export function CommandCenterShell({
     toast.info(`Uploading ${file.name}`)
     startTransition(() =>
       void uploadFile(file).catch((error) => {
-        setAskAnswer(error.message)
         toast.error(error.message)
       })
     )
@@ -742,7 +730,6 @@ export function CommandCenterShell({
     toast.info(`Importing desktop recording ${file.name}`)
     startTransition(() =>
       void importDesktopFile(file).catch((error) => {
-        setAskAnswer(error.message)
         toast.error(error.message)
       })
     )
@@ -758,7 +745,6 @@ export function CommandCenterShell({
     toast.info("Recording saved. Uploading audio...")
     startTransition(() =>
       void uploadFile(file, target).catch((error) => {
-        setAskAnswer(error.message)
         toast.error(error.message)
       })
     )
@@ -768,32 +754,9 @@ export function CommandCenterShell({
     toast.info("Recording saved. Uploading audio...")
     startTransition(() =>
       void uploadFile(file, selectedMeeting ?? undefined).catch((error) => {
-        setAskAnswer(error.message)
         toast.error(error.message)
       })
     )
-  }
-
-  async function askMeeting() {
-    if (!selectedMeeting) return
-
-    setAskAnswer("")
-    setAskCitations([])
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question: askQuestion }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      setAskAnswer(body.error ?? "Unable to ask meeting memory")
-      return
-    }
-
-    setAskAnswer(body.answer.answer)
-    setAskCitations(Array.isArray(body.answer.citations) ? body.answer.citations : [])
-    toast.success("Meeting answer ready")
   }
 
   async function toggleActionItem(item: ActionItem) {
@@ -808,7 +771,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      setAskAnswer(body.error ?? "Unable to update action item")
+      toast.error(body.error ?? "Unable to update action item")
       return
     }
 
@@ -849,7 +812,7 @@ export function CommandCenterShell({
       const body = await response.json()
 
       if (!response.ok) {
-        setAskAnswer(body.error ?? "Unable to export to RealizeOS")
+        toast.error(body.error ?? "Unable to export to RealizeOS")
         return
       }
 
@@ -1375,7 +1338,6 @@ export function CommandCenterShell({
               "Unable to sync Google Workspace"
             )
 
-            setAskAnswer(message)
             toast.error(message)
             return
           }
@@ -1434,7 +1396,7 @@ export function CommandCenterShell({
         const body = await response.json()
 
         if (!response.ok) {
-          setAskAnswer(body.error ?? "Unable to retry job")
+          toast.error(body.error ?? "Unable to retry job")
           return
         }
 
@@ -1540,10 +1502,6 @@ export function CommandCenterShell({
         locale={locale}
         meeting={selectedMeeting}
         jobs={jobs}
-        question={askQuestion}
-        answer={askAnswer}
-        askCitations={askCitations}
-        asking={isPending}
         transcript={transcript}
         permissions={selectedPermissions}
         initialMs={
@@ -1551,8 +1509,6 @@ export function CommandCenterShell({
         }
         onRename={renameMeeting}
         onDelete={deleteMeeting}
-        onQuestionChange={setAskQuestion}
-        onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
         onReprocessMeeting={reprocessMeeting}
         onProcessMeeting={processMeeting}
@@ -1986,6 +1942,8 @@ export function CommandCenterShell({
         onStop={handleDockStop}
         onHeightChange={setDockHeight}
       />
+      {/* M6: Ctrl/Cmd+K command palette, available on every shell view. */}
+      <CommandPaletteHost locale={locale} dictionary={dictionary} />
     </main>
     </BotSessionsProvider>
   )

@@ -24,7 +24,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
-import { AskMeetingPanel, type AskCitation } from "@/components/ask-meeting-panel"
+import { AskMeetingPanel } from "@/components/ask-meeting-panel"
 import { useJson } from "@/components/intelligence/use-json"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
@@ -206,23 +206,11 @@ export function MeetingWorkspace({
   locale: SupportedLocale
   meeting: MeetingRecord | null
   jobs: JobRecord[]
-  /** @deprecated M6: the Ask tab streams its own answers; ignored. */
-  question?: string
-  /** @deprecated ignored (M6). */
-  answer?: string
-  /** @deprecated ignored (M6). */
-  askCitations?: readonly AskCitation[]
-  /** @deprecated ignored (M6). */
-  asking?: boolean
   /** Transcript of the selected meeting (`useMeetingTranscript`). */
   transcript?: MeetingTranscriptHandle
   permissions?: MeetingPermissions
   /** `?t=` for this meeting, in ms. */
   initialMs?: number
-  /** @deprecated ignored (M6). */
-  onQuestionChange?: (value: string) => void
-  /** @deprecated ignored (M6). */
-  onAsk?: () => void
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: ReprocessMode) => void
   onProcessMeeting: () => void

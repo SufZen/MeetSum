@@ -58,4 +58,23 @@ describe("M6 UI guardrails", () => {
     expect(source).toContain('from "@/components/ask-meeting-panel"')
     expect(readFileSync("components/ask-meeting-panel.tsx", "utf8")).toContain('from "@/components/ask/lazy"')
   })
+
+  it("mounts the command palette app-wide and routes Ctrl/Cmd+K to it", () => {
+    const shell = readFileSync("components/command-center-shell.tsx", "utf8")
+    const topBar = readFileSync("components/top-command-bar.tsx", "utf8")
+
+    expect(shell).toMatch(/<CommandPaletteHost locale=\{locale\} dictionary=\{dictionary\} \/>/)
+    expect(topBar).toContain("openCommandPalette()")
+    expect(topBar).toContain("isPaletteShortcut(event)")
+  })
+
+  it("has no legacy one-shot Ask state left in the shell or the workspace", () => {
+    const shell = readFileSync("components/command-center-shell.tsx", "utf8")
+    const workspace = readFileSync("components/meeting-workspace.tsx", "utf8")
+
+    expect(shell).not.toMatch(/(askQuestion|askAnswer|askCitations|setAskAnswer|askMeeting)/)
+    expect(shell).not.toMatch(/onAsk=|onQuestionChange=/)
+    expect(workspace).not.toMatch(/@deprecated/)
+    expect(workspace).not.toMatch(/onAsk\?:|onQuestionChange\?:|asking\?:/)
+  })
 })

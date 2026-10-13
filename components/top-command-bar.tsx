@@ -1,6 +1,6 @@
 "use client"
 
-import { type ChangeEvent, useEffect, useRef, useState } from "react"
+import { type ChangeEvent, useEffect, useState } from "react"
 import {
   BotIcon,
   ChevronDownIcon,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 
 import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
+import { isPaletteShortcut, openCommandPalette } from "@/components/command-palette"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { MediaIngestionDrawer } from "@/components/media-ingestion-drawer"
 import { Button } from "@/components/ui/button"
@@ -89,7 +90,6 @@ export function TopCommandBar({
   /** Opens "Send bot to a meeting"; undefined hides it (bot disabled or no meeting:create). */
   onSendBot?: () => void
 }) {
-  const searchInputRef = useRef<HTMLInputElement>(null)
   const { can, activeWorkspace } = useWorkspace()
   const [recorderEnabled, setRecorderEnabled] = useState(true)
   const activeWorkspaceId = activeWorkspace?.id
@@ -114,12 +114,13 @@ export function TopCommandBar({
   }, [activeWorkspaceId])
 
   useEffect(() => {
+    // M6: Ctrl/Cmd+K opens the command palette. The app-wide
+    // CommandPaletteHost listens for the same shortcut; whichever listener
+    // runs first marks the event handled so the palette opens exactly once.
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
-        event.preventDefault()
-        searchInputRef.current?.focus()
-        searchInputRef.current?.select()
-      }
+      if (event.defaultPrevented || !isPaletteShortcut(event)) return
+      event.preventDefault()
+      openCommandPalette()
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -131,8 +132,6 @@ export function TopCommandBar({
       <div className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] lg:max-w-[390px]">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
-          ref={searchInputRef}
-          aria-keyshortcuts="Control+K Meta+K"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={dictionary.commandPlaceholder}

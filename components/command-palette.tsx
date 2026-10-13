@@ -36,7 +36,8 @@ export function CommandPaletteHost({ locale, dictionary }: { locale: string; dic
       setOpen(true)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isPaletteShortcut(event)) return
+      // Another listener (the top command bar) already opened the palette.
+      if (event.defaultPrevented || !isPaletteShortcut(event)) return
       event.preventDefault()
       setLoaded(true)
       setOpen((current) => !current)
