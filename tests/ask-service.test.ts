@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { LlmError, type LlmStreamEvent, type LlmStreamRequest } from "@/lib/ai/llm/types"
 import { askOnce, askStream, resetAskCountersForTesting, setAskDepsForTesting } from "@/lib/ask/service"
+import { askResultStatus } from "@/lib/ask/http"
 import { sseResponse } from "@/lib/http/sse"
 import { createThreadStore, resetMemoryThreadStoreForTesting } from "@/lib/ask/thread-store"
 import type { AskStreamEvent } from "@/lib/ask/types"
@@ -332,6 +333,23 @@ describe("askStream", () => {
     await vi.waitFor(async () => {
       expect((await store.getThread(threadId!))?.messages[1]).toMatchObject({ status: "aborted", content: expect.stringMatching(/^חלקי \[s1\]/) })
     })
+  })
+
+  it("reports llm_not_configured (not 'try again later') when no LLM provider is configured", async () => {
+    setAskDepsForTesting({
+      retrieve: retrieving([passage("m_w1")]),
+      stream: vi.fn(async function* (): AsyncGenerator<LlmStreamEvent> {
+        throw new LlmError("No LLM provider is configured for chat", "config", "none", false)
+      }),
+      settings: async () => ({}),
+    })
+
+    const he = await collect(askStream(await member(), { question: QUESTION, scope: { kind: "workspace" } }))
+    const en = await askOnce(await member(), { question: "What was approved?", scope: { kind: "workspace" }, persist: false })
+
+    expect(he.at(-1)).toEqual({ type: "error", code: "llm_not_configured", message: "לא הוגדר ספק AI לתשובות. מנהל סביבת העבודה יכול להגדיר אותו בהגדרות." })
+    expect(en.error).toEqual({ code: "llm_not_configured", message: "No AI provider is configured for answers. A workspace admin can set one up in Settings." })
+    expect(askResultStatus(en)).toBe(503)
   })
 
   it("passes the abort signal to the LLM stream", async () => {

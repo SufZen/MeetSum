@@ -155,6 +155,7 @@ export function askErrorCode(status: number, body?: { error?: unknown; code?: un
   const code = typeof body?.code === "string" ? body.code : typeof body?.error === "string" ? body.error : ""
 
   if (code === "daily_limit") return "daily_limit"
+  if (code === "llm_not_configured") return "llm_not_configured"
   if (status === 429 || code === "rate_limited") return "rate_limited"
   if (status === 404 || code === "not_found") return "not_found"
   if (status === 503 || code === "llm_unavailable") return "llm_unavailable"

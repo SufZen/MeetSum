@@ -13,6 +13,7 @@ export const ASK_MESSAGES = {
     dailyLimit: "הגעת למגבלת השאלות היומית. אפשר לנסות שוב מחר.",
     rateLimited: "יותר מדי שאלות בזמן קצר. אפשר לנסות שוב בעוד רגע.",
     llmUnavailable: "שירות התשובות אינו זמין כרגע. אפשר לנסות שוב מאוחר יותר.",
+    llmNotConfigured: "לא הוגדר ספק AI לתשובות. מנהל סביבת העבודה יכול להגדיר אותו בהגדרות.",
     internal: "אירעה שגיאה בעיבוד השאלה.",
   },
   en: {
@@ -22,6 +23,7 @@ export const ASK_MESSAGES = {
     dailyLimit: "You have reached the daily question limit. Try again tomorrow.",
     rateLimited: "Too many questions in a short time. Try again in a moment.",
     llmUnavailable: "The answer service is unavailable right now. Try again later.",
+    llmNotConfigured: "No AI provider is configured for answers. A workspace admin can set one up in Settings.",
     internal: "Something went wrong while answering.",
   },
 } as const satisfies Record<AskLanguage, Record<string, string>>

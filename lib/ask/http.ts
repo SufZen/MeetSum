@@ -92,6 +92,7 @@ export function askResultStatus(result: AskOnceResult): number {
     case "rate_limited":
       return 429
     case "llm_unavailable":
+    case "llm_not_configured":
       return 503
     default:
       return 500

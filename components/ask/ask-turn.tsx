@@ -34,6 +34,7 @@ const ERROR_KEYS = {
   rate_limited: "askErrorRateLimited",
   daily_limit: "askErrorDailyLimit",
   llm_unavailable: "askErrorUnavailable",
+  llm_not_configured: "askErrorNotConfigured",
   not_found: "askErrorNotFound",
   internal: "askErrorInternal",
 } as const

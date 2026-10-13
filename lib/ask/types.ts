@@ -49,7 +49,8 @@ export type AskStreamEvent =
     }
   | {
       type: "error"
-      code: "rate_limited" | "daily_limit" | "llm_unavailable" | "not_found" | "internal"
+      // "llm_not_configured" added additively by the M6 review fixes (no provider set up).
+      code: "rate_limited" | "daily_limit" | "llm_unavailable" | "llm_not_configured" | "not_found" | "internal"
       message: string
     }
 

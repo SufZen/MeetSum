@@ -186,6 +186,7 @@ function errorEvent(
     rate_limited: "rateLimited",
     daily_limit: "dailyLimit",
     llm_unavailable: "llmUnavailable",
+    llm_not_configured: "llmNotConfigured",
     not_found: "notFound",
     internal: "internal",
   } as const
@@ -441,7 +442,10 @@ export async function* askStream(
           grounded: null,
           error: error instanceof LlmError ? `llm_${error.kind}` : "internal",
         })
-        yield errorEvent(error instanceof LlmError ? "llm_unavailable" : "internal", language)
+        yield errorEvent(
+          error instanceof LlmError ? (error.kind === "config" ? "llm_not_configured" : "llm_unavailable") : "internal",
+          language
+        )
         return
       }
     }

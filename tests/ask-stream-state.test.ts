@@ -140,6 +140,7 @@ describe("askErrorCode", () => {
   it("maps HTTP failures", () => {
     expect(askErrorCode(429)).toBe("rate_limited")
     expect(askErrorCode(429, { error: "daily_limit" })).toBe("daily_limit")
+    expect(askErrorCode(503, { error: "llm_not_configured" })).toBe("llm_not_configured")
     expect(askErrorCode(404)).toBe("not_found")
     expect(askErrorCode(503)).toBe("llm_unavailable")
     expect(askErrorCode(500)).toBe("internal")
