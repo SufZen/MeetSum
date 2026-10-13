@@ -10,6 +10,7 @@
  */
 import {
   produceBotBlocked,
+  produceShareAttempts,
   produceInvited,
   produceMeetingFailed,
   produceMeetingProcessed,
@@ -37,4 +38,17 @@ export async function notifyInvited(input: NotifyInvitedInput): Promise<void> {
 
 export async function notifyBotBlocked(input: NotifyBotBlockedInput): Promise<void> {
   await produceBotBlocked(input)
+}
+
+export type NotifyShareAttemptsInput = {
+  workspaceId: string
+  meetingId: string
+  ownerUserId?: string
+  shareId: string
+  failures: number
+}
+
+/** share_attempts `sa:<shareId>:<day>`: the meeting owner (no password data). */
+export async function notifyShareAttempts(input: NotifyShareAttemptsInput): Promise<void> {
+  await produceShareAttempts(input)
 }

@@ -1441,6 +1441,13 @@ create index if not exists idx_segment_revisions_group on transcript_segment_rev
 update app_settings set value = '"he"'::jsonb where key = 'defaultLocale' and value #>> '{}' in ('pt','es','it');
 update workspace_settings set value = '"he"'::jsonb where key = 'defaultLocale' and value #>> '{}' in ('pt','es','it');
 
+-- 031: the share_attempts notification kind
+do $$ begin
+  alter table notifications drop constraint if exists notifications_kind_check;
+  alter table notifications add constraint notifications_kind_check check (kind in
+    ('mention','reply','task_assigned','integration_reauth','invited','meeting_processed','meeting_failed','bot_blocked','share_attempts')) not valid;
+end $$;
+
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
   on conflict (id) do nothing;

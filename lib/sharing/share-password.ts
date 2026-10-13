@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, type ScryptOptions } from "node:crypto"
 
 import { verifyApiKey } from "@/lib/auth/api-keys"
+import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN } from "@/lib/sharing/password-policy"
 
 /**
  * Share-link passwords (M9 B4, docs/parity/m9.md; M4 carry-over).
@@ -9,11 +10,11 @@ import { verifyApiKey } from "@/lib/auth/api-keys"
  * `meeting_shares.password_hash` (N=2^15, r=8, p=1, 16-byte salt, 32-byte
  * key). Verification is constant-time and also accepts the memory
  * repository's legacy `sha256:` hashes so existing dev data keeps working.
- * Passwords are 8–128 characters and are never logged or audited.
+ * New passwords are 10–128 characters (lib/sharing/password-policy.ts;
+ * older 8–9 character passwords still verify) and are never logged or audited.
  */
 
-export const SHARE_PASSWORD_MIN = 8
-export const SHARE_PASSWORD_MAX = 128
+export { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN } from "@/lib/sharing/password-policy"
 
 const PREFIX = "scrypt"
 const N = 2 ** 15

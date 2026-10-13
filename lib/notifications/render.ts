@@ -17,6 +17,7 @@ const TEMPLATE: Record<NotificationKind, string> = {
   meeting_processed: "notifKindMeetingProcessed",
   meeting_failed: "notifKindMeetingFailed",
   bot_blocked: "notifKindBotBlocked",
+  share_attempts: "notifKindShareAttempts",
 }
 
 const NO_ACTOR: Partial<Record<NotificationKind, string>> = {

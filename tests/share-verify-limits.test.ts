@@ -1,24 +1,36 @@
 /**
- * M9 follow-up (review "Share verify", reworked after the security review):
+ * M9 follow-up (review "Share verify", final design after two security
+ * reviews: neither brute force nor lockout):
+ * - a per-token failure throttle across IPs: after 10 failures, attempts are
+ *   spaced 2 s, doubling to a 30 s cap (~2,880 guesses a day); never a lock;
+ *   a success resets it; at 50 failures the meeting owner is notified once;
  * - the per-IP-per-token limit (10/min) still applies;
- * - the per-token layer never locks a link: many failures from distinct IPs
- *   do not stop a correct password from a new IP; above a high ceiling it
- *   only sheds load (429 + Retry-After), and a valid access cookie bypasses
- *   verification entirely;
- * - scrypt runs under a process-wide semaphore with a per-token share and a
- *   short queue timeout (busy → 503).
+ * - a valid share-access cookie bypasses verification;
+ * - scrypt runs under a process-wide semaphore (one token holds at most 2
+ *   slots) with a short queue timeout.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+
+const notify = vi.hoisted(() => ({ shareAttempts: vi.fn(async (input: unknown) => void input) }))
+
+vi.mock("@/lib/notifications/notify", () => ({ notifyShareAttempts: notify.shareAttempts }))
 
 import { POST } from "@/app/api/share/[token]/verify/route"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { resetRateLimitsForTesting } from "@/lib/rate-limit"
 import { SHARE_ACCESS_COOKIE, createShareAccessCookie } from "@/lib/sharing/share-access"
 import { ShareVerifyBusyError, createConcurrencyLimiter } from "@/lib/sharing/share-password"
+import {
+  SHARE_VERIFY_THROTTLE,
+  createShareVerifyThrottle,
+  getShareVerifyThrottle,
+  shareVerifySpacingMs,
+} from "@/lib/sharing/share-verify-throttle"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 const SECRET = "share-verify-limits-secret"
-const KEYS = ["MEETSUM_SESSION_SECRET", "MEETSUM_RATE_LIMIT", "MEETSUM_TRUSTED_PROXY_HOPS", "MEETSUM_SHARE_VERIFY_TOKEN_CEILING"] as const
+const PASSWORD = "correct-horse-battery"
+const KEYS = ["MEETSUM_SESSION_SECRET", "MEETSUM_RATE_LIMIT", "MEETSUM_TRUSTED_PROXY_HOPS"] as const
 const previous = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]))
 
 beforeAll(() => {
@@ -34,9 +46,68 @@ afterAll(() => {
   }
 })
 
-beforeEach(() => resetRateLimitsForTesting())
-afterEach(() => {
-  delete process.env.MEETSUM_SHARE_VERIFY_TOKEN_CEILING
+describe("share verify throttle (unit, fake clock)", () => {
+  it("spaces attempts 2 s → 30 s after 10 failures", () => {
+    expect([0, 9, 10, 11, 12, 13, 14, 40].map((failures) => shareVerifySpacingMs(failures))).toEqual([
+      0, 0, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000,
+    ])
+  })
+
+  it("holds brute force from 100 IPs to the spacing schedule (~2,880 guesses a day)", () => {
+    let clock = 0
+    const throttle = createShareVerifyThrottle(() => clock)
+    const allowedAt: number[] = []
+
+    // 100 IPs, each trying every 10 s (one attempt every 100 ms overall), for a day.
+    for (clock = 0; clock < 86_400_000; clock += 100) {
+      if (throttle.begin("tok").allowed) {
+        allowedAt.push(clock)
+        throttle.fail("tok")
+      }
+    }
+
+    for (let index = SHARE_VERIFY_THROTTLE.freeFailures + 1; index < allowedAt.length; index++) {
+      expect(allowedAt[index]! - allowedAt[index - 1]!).toBeGreaterThanOrEqual(2_000)
+    }
+    expect(allowedAt.slice(0, SHARE_VERIFY_THROTTLE.freeFailures).every((at) => at < 1_000)).toBe(true)
+    expect(allowedAt.length).toBeLessThanOrEqual(2_880 + 20)
+    expect(allowedAt.length).toBeGreaterThan(2_000)
+  })
+
+  it("never locks: the rightful user gets in within the 30 s cap, and success resets the counter", () => {
+    let clock = 0
+    const throttle = createShareVerifyThrottle(() => clock)
+
+    for (let index = 0; index < 40; index++) {
+      while (!throttle.begin("tok").allowed) clock += 1_000
+      throttle.fail("tok")
+    }
+
+    const blocked = throttle.begin("tok")
+
+    expect(blocked.allowed).toBe(false)
+    expect(blocked.allowed ? 0 : blocked.retryAfterMs).toBeLessThanOrEqual(SHARE_VERIFY_THROTTLE.maxSpacingMs)
+    clock += SHARE_VERIFY_THROTTLE.maxSpacingMs
+    expect(throttle.begin("tok").allowed).toBe(true)
+    throttle.succeed("tok")
+    expect(throttle.begin("tok").allowed).toBe(true)
+    throttle.fail("tok")
+    expect(throttle.begin("tok").allowed).toBe(true)
+  })
+
+  it("reports the owner notification once when failures reach 50 in the window", () => {
+    let clock = 0
+    const throttle = createShareVerifyThrottle(() => clock)
+    const notices: number[] = []
+
+    for (let index = 0; index < 80; index++) {
+      clock += 31_000
+      throttle.begin("tok")
+      if (throttle.fail("tok").notifyOwner) notices.push(index + 1)
+    }
+
+    expect(notices).toEqual([50])
+  })
 })
 
 async function protectedShare() {
@@ -49,7 +120,7 @@ async function protectedShare() {
     participants: [],
   })
 
-  return repository.createMeetingShare({ meetingId: meeting.id, password: "correct-horse" })
+  return { meeting, share: await repository.createMeetingShare({ meetingId: meeting.id, password: PASSWORD }) }
 }
 
 function attempt(token: string, ip: string, password = "wrong-password", cookie?: string) {
@@ -67,56 +138,78 @@ function attempt(token: string, ip: string, password = "wrong-password", cookie?
   )
 }
 
-describe("share verify limits", () => {
-  it("never locks the link: after many failures from distinct IPs a correct password from a new IP gets in", async () => {
-    const share = await protectedShare()
-    const failures = await Promise.all(
-      Array.from({ length: 60 }, (_, index) => attempt(share.token, `203.0.113.${index + 1}`).then((response) => response.status))
-    )
+describe("POST /api/share/:token/verify limits", () => {
+  let now = Date.parse("2026-10-13T12:00:00Z")
+  const advance = (ms: number) => {
+    now += ms
+    vi.setSystemTime(now)
+  }
 
-    // A simultaneous burst past the token's short queue is shed (503), never locked.
-    expect(failures.every((status) => status === 403 || status === 503)).toBe(true)
-    expect(failures.filter((status) => status === 403).length).toBeGreaterThanOrEqual(18)
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(now)
+    resetRateLimitsForTesting()
+    getShareVerifyThrottle().reset()
+    notify.shareAttempts.mockClear()
+  })
 
-    const started = Date.now()
-    const correct = await attempt(share.token, "198.51.100.7", "correct-horse")
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("after 10 failures from distinct IPs an early attempt waits (429 + Retry-After), then gets in; success resets", async () => {
+    const { share } = await protectedShare()
+
+    for (let index = 0; index < 10; index++) expect((await attempt(share.token, `203.0.113.${index + 1}`)).status).toBe(403)
+
+    const early = await attempt(share.token, "198.51.100.7", PASSWORD)
+
+    expect(early.status).toBe(429)
+    expect(Number(early.headers.get("retry-after"))).toBeGreaterThan(0)
+    expect(Number(early.headers.get("retry-after"))).toBeLessThanOrEqual(2)
+
+    advance(2_000)
+    const correct = await attempt(share.token, "198.51.100.7", PASSWORD)
 
     expect(correct.status).toBe(200)
     expect(await correct.json()).toMatchObject({ valid: true })
-    expect(Date.now() - started).toBeLessThan(5_000)
-  }, 60_000)
-
-  it("a flood on one link does not starve another share", async () => {
-    const [flooded, other] = await Promise.all([protectedShare(), protectedShare()])
-    const flood = Array.from({ length: 30 }, (_, index) => attempt(flooded.token, `203.0.113.${index + 101}`))
-    const started = Date.now()
-    const response = await attempt(other.token, "198.51.100.8", "correct-horse")
-
-    expect(response.status).toBe(200)
-    expect(Date.now() - started).toBeLessThan(5_000)
-    await Promise.all(flood)
-  }, 60_000)
+    // The counter was reset: the next attempt is not spaced.
+    expect((await attempt(share.token, "198.51.100.8")).status).toBe(403)
+  }, 30_000)
 
   it("still applies the per-IP limit", async () => {
-    const share = await protectedShare()
+    const { share } = await protectedShare()
     const statuses: number[] = []
 
-    for (let index = 0; index < 11; index++) statuses.push((await attempt(share.token, "192.0.2.10")).status)
+    for (let index = 0; index < 11; index++) {
+      statuses.push((await attempt(share.token, "192.0.2.10")).status)
+      advance(3_000)
+    }
 
     expect(statuses.slice(0, 10).every((status) => status === 403)).toBe(true)
     expect(statuses[10]).toBe(429)
   }, 30_000)
 
-  it("above the token ceiling only sheds load (429 + Retry-After); a valid access cookie bypasses verify", async () => {
-    process.env.MEETSUM_SHARE_VERIFY_TOKEN_CEILING = "3"
-    const share = await protectedShare()
+  it("notifies the meeting owner once when a link crosses 50 failures, with no password data", async () => {
+    const { meeting, share } = await protectedShare()
 
-    for (let index = 0; index < 3; index++) expect((await attempt(share.token, `203.0.113.${index + 1}`)).status).toBe(403)
+    for (let index = 0; index < 55; index++) {
+      expect((await attempt(share.token, `203.0.113.${index + 1}`)).status, `attempt ${index + 1}`).toBe(403)
+      advance(SHARE_VERIFY_THROTTLE.maxSpacingMs + 1_000)
+    }
 
-    const shed = await attempt(share.token, "203.0.113.99", "correct-horse")
+    expect(notify.shareAttempts).toHaveBeenCalledTimes(1)
+    expect(notify.shareAttempts).toHaveBeenCalledWith(
+      expect.objectContaining({ meetingId: meeting.id, shareId: share.id, failures: 50 })
+    )
+    expect(JSON.stringify(notify.shareAttempts.mock.calls)).not.toMatch(/wrong-password|correct-horse|scrypt/)
+  }, 60_000)
 
-    expect(shed.status).toBe(429)
-    expect(Number(shed.headers.get("retry-after"))).toBeGreaterThan(0)
+  it("a valid access cookie bypasses verification, even while the token is throttled", async () => {
+    const { share } = await protectedShare()
+
+    for (let index = 0; index < 10; index++) await attempt(share.token, `203.0.113.${index + 1}`)
+    expect((await attempt(share.token, "203.0.113.99")).status).toBe(429)
 
     const cookie = createShareAccessCookie({ token: share.token, passwordHash: share.passwordHash!, secret: SECRET })
     const bypass = await attempt(share.token, "203.0.113.100", "", `${SHARE_ACCESS_COOKIE}=${cookie.value}`)
@@ -124,6 +217,15 @@ describe("share verify limits", () => {
     expect(bypass.status).toBe(200)
     expect(await bypass.json()).toMatchObject({ valid: true })
   }, 30_000)
+
+  it("a flood on one link does not starve another share", async () => {
+    const [flooded, other] = await Promise.all([protectedShare(), protectedShare()])
+    const flood = Array.from({ length: 30 }, (_, index) => attempt(flooded.share.token, `203.0.113.${index + 101}`))
+    const response = await attempt(other.share.token, "198.51.100.9", PASSWORD)
+
+    expect(response.status).toBe(200)
+    await Promise.all(flood)
+  }, 60_000)
 })
 
 describe("scrypt semaphore", () => {
@@ -149,11 +251,13 @@ describe("scrypt semaphore", () => {
     while (gates.length || limiter.stats().running) {
       gates.shift()?.()
       // A fresh caller arriving mid-handoff must not exceed the cap.
-      void limiter.run(async () => {
-        active += 1
-        peak = Math.max(peak, active)
-        active -= 1
-      }).catch(() => undefined)
+      void limiter
+        .run(async () => {
+          active += 1
+          peak = Math.max(peak, active)
+          active -= 1
+        })
+        .catch(() => undefined)
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     await expect(Promise.all(running)).resolves.toEqual([true, true, true, true])
@@ -170,5 +274,24 @@ describe("scrypt semaphore", () => {
     release()
     await holder
     await expect(limiter.run(async () => "ok")).resolves.toBe("ok")
+  })
+})
+
+describe("share_attempts notification", () => {
+  it("goes to the meeting owner once per link per day, with counts only", async () => {
+    const { createCollabMemoryDb } = await import("@/lib/clips/db")
+    const { produceShareAttempts } = await import("@/lib/notifications/producers")
+    const db = createCollabMemoryDb()
+    const backend = { kind: "memory" as const, db }
+    const input = { workspaceId: "ws_1", meetingId: "m_1", ownerUserId: "usr_owner", shareId: "share_1", failures: 50 }
+
+    await produceShareAttempts(input, { backend })
+    await produceShareAttempts({ ...input, failures: 51 }, { backend })
+
+    const rows = db.notifications as Array<{ userId: string; kind: string; payload: Record<string, unknown> }>
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ userId: "usr_owner", kind: "share_attempts" })
+    expect(Object.keys(rows[0]!.payload).sort()).toEqual(["failures", "meetingId", "shareId"])
   })
 })

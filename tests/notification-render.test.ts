@@ -79,8 +79,8 @@ describe("NotificationItem", () => {
   it("wraps names and titles in bdi, labels unread for screen readers and links the target", () => {
     const html = render(dto("mention"))
 
-    expect(html).toContain("<bdi>Dana Levi</bdi>")
-    expect(html).toMatch(/<bdi lang="he">סנכרון Lisboa‏? 12<\/bdi>/)
+    expect(html).toContain('<bdi dir="auto">Dana Levi</bdi>')
+    expect(html).toMatch(/<bdi dir="auto" lang="he">סנכרון Lisboa‏? 12<\/bdi>/)
     expect(html).toContain('<span class="sr-only">לא נקרא</span>')
     expect(html).toContain('href="/he?meeting=m1"')
     expect(html).toContain('dateTime="2026-10-13T09:00:00.000Z"')

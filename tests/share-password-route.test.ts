@@ -111,7 +111,7 @@ describe("PATCH /api/meetings/:id/share { password } (M9 B4)", () => {
     expect(stored?.share.passwordHash).toBeUndefined()
   })
 
-  it("rejects passwords outside 8–128 characters and non-strings", async () => {
+  it("rejects passwords outside 10–128 characters and non-strings", async () => {
     setRouteCtx(await createTestCtx({ role: "member", meetings: meetings() }))
 
     expect(await (await patch("m_mine", { password: "short" })).json()).toEqual({ error: "password_too_short" })

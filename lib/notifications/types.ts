@@ -14,6 +14,7 @@ export const NOTIFICATION_KINDS = [
   "meeting_processed",
   "meeting_failed",
   "bot_blocked",
+  "share_attempts",
 ] as const
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
@@ -40,6 +41,9 @@ export type MeetingFailedPayload = { meetingId: string; jobId: string }
 
 export type BotBlockedPayload = { meetingId: string; sessionId: string; reason?: string }
 
+/** Many wrong passwords on a meeting's share link (no password data, ever). */
+export type ShareAttemptsPayload = { meetingId: string; shareId: string; failures: number }
+
 export type NotificationPayloadByKind = {
   mention: MentionPayload
   reply: ReplyPayload
@@ -49,6 +53,7 @@ export type NotificationPayloadByKind = {
   meeting_processed: MeetingProcessedPayload
   meeting_failed: MeetingFailedPayload
   bot_blocked: BotBlockedPayload
+  share_attempts: ShareAttemptsPayload
 }
 
 export type NotificationPayload = {

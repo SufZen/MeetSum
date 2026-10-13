@@ -22,6 +22,7 @@ const LABELS: Record<NotificationKind, string> = {
   meeting_processed: "notifPrefMeetingProcessed",
   meeting_failed: "notifPrefMeetingFailed",
   bot_blocked: "notifPrefBotBlocked",
+  share_attempts: "notifPrefShareAttempts",
 }
 
 /** Accepts `{ notifications }` or `{ preferences: { notifications } }`. */

@@ -62,6 +62,9 @@ const PAYLOAD_KEYS = new Set([
   "jobId",
   "sessionId",
   "reason",
+  // share_attempts: which link and how many failures (never password data).
+  "shareId",
+  "failures",
 ])
 
 const SHORT_CODE = /^[A-Za-z0-9_.:-]{1,64}$/
@@ -129,6 +132,10 @@ export function defaultDedupeKey(
     case "bot_blocked": {
       const id = str(payload.sessionId)
       return id ? `bb:${id}` : undefined
+    }
+    case "share_attempts": {
+      const id = str(payload.shareId)
+      return id ? `sa:${id}:${utcDay(now)}` : undefined
     }
   }
 }

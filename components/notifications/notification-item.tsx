@@ -11,6 +11,7 @@ import {
   AtSignIcon,
   BotIcon,
   CircleCheckIcon,
+  KeyRoundIcon,
   ListTodoIcon,
   MessageSquareIcon,
   PlugIcon,
@@ -39,6 +40,7 @@ const ICONS: Record<NotificationKind, LucideIcon> = {
   meeting_processed: CircleCheckIcon,
   meeting_failed: TriangleAlertIcon,
   bot_blocked: BotIcon,
+  share_attempts: KeyRoundIcon,
 }
 
 export function NotificationItem({

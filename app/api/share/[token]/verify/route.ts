@@ -13,24 +13,11 @@ import {
   verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
 import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
+import { getShareVerifyThrottle } from "@/lib/sharing/share-verify-throttle"
+import { notifyShareAttempts } from "@/lib/notifications/notify"
 
 /** Password attempts per IP per share token. */
 const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
-
-/**
- * Load-shedding ceiling per share token across every IP. Deliberately high:
- * it never locks the link (a failed guess is not a strike against the
- * token); above it requests get 429 + Retry-After for the rest of the
- * minute. Fairness comes from the scrypt scheduler (one token can hold at
- * most 2 of the process's verify slots), so a correct password from a new IP
- * still gets in under a flood. `MEETSUM_SHARE_VERIFY_TOKEN_CEILING` (per
- * minute, default 300).
- */
-function tokenCeiling() {
-  const parsed = Number.parseInt(process.env.MEETSUM_SHARE_VERIFY_TOKEN_CEILING ?? "", 10)
-
-  return { maxRequests: Number.isFinite(parsed) && parsed > 0 ? parsed : 300, windowMs: 60_000 }
-}
 
 function cookieValue(request: Request, name: string): string | undefined {
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
@@ -123,24 +110,50 @@ export const POST = withPublicRoute<{ token: string }>(
       return form ? redirectToShare(token) : NextResponse.json({ valid: true, passwordRequired: true })
     }
 
-    const ceiling = rateLimitRequest(request, tokenCeiling(), `share-verify-token:${token}`)
-
-    if (ceiling.blocked) {
-      return form ? redirectToShare(token, "rate_limited") : ceiling.blocked
-    }
-
     const password = await readPassword(request, form)
+    const throttle = getShareVerifyThrottle()
     let isValid = false
 
-    try {
-      isValid = Boolean(password) && (await verifySharePassword(password, share.passwordHash, { key: token }))
-    } catch (error) {
-      if (!(error instanceof ShareVerifyBusyError)) throw error
+    if (password) {
+      // Per-token failure spacing across every IP (never a lock): after 10
+      // failures attempts are spaced 2 s → 30 s; an early attempt gets 429.
+      const decision = throttle.begin(token)
 
-      // The verifier stayed saturated past the short queue timeout.
-      return form
-        ? redirectToShare(token, "rate_limited")
-        : NextResponse.json({ error: "Service busy" }, { status: 503, headers: { "Retry-After": "5" } })
+      if (!decision.allowed) {
+        const retryAfter = String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000)))
+
+        return form
+          ? redirectToShare(token, "rate_limited")
+          : NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": retryAfter } })
+      }
+
+      try {
+        isValid = await verifySharePassword(password, share.passwordHash, { key: token })
+      } catch (error) {
+        if (!(error instanceof ShareVerifyBusyError)) throw error
+
+        // The verifier stayed saturated past the short queue timeout.
+        return form
+          ? redirectToShare(token, "rate_limited")
+          : NextResponse.json({ error: "Service busy" }, { status: 503, headers: { "Retry-After": "5" } })
+      }
+
+      if (isValid) {
+        throttle.succeed(token)
+      } else {
+        const { failures, notifyOwner } = throttle.fail(token)
+
+        if (notifyOwner && result.meeting.workspaceId) {
+          // Once per streak: the owner learns the link is being guessed (no password data).
+          await notifyShareAttempts({
+            workspaceId: result.meeting.workspaceId,
+            meetingId: result.meeting.id,
+            ownerUserId: result.meeting.ownerUserId,
+            shareId: share.id,
+            failures,
+          }).catch(() => undefined)
+        }
+      }
     }
 
     if (!isValid) {

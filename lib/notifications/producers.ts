@@ -199,6 +199,29 @@ export async function produceInvited(input: { invitationId: string }, deps: Prod
   })
 }
 
+/**
+ * share_attempts: the meeting owner, once per share link per day
+ * [sa:<shareId>:<utc day>]. The payload never carries password data.
+ */
+export async function produceShareAttempts(
+  input: { workspaceId: string; meetingId: string; ownerUserId?: string; shareId: string; failures: number },
+  deps: ProducerDeps = {}
+): Promise<void> {
+  await quietly(async () => {
+    if (!input.ownerUserId) return
+
+    await enqueueNotification(
+      {
+        workspaceId: input.workspaceId,
+        userId: input.ownerUserId,
+        kind: "share_attempts",
+        payload: { meetingId: input.meetingId, shareId: input.shareId, failures: input.failures },
+      },
+      deps.backend
+    )
+  })
+}
+
 export async function produceBotBlocked(
   input: { workspaceId: string; meetingId: string; sessionId: string },
   deps: ProducerDeps = {}

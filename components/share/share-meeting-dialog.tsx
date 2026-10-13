@@ -7,7 +7,7 @@
  * On open it creates the link, or first asks to confirm widening a private
  * meeting. The owner chooses the M5 sections (summary, decisions, action
  * items, transcript, participants, and the opt-in recording) and can set,
- * change or remove a password (8–128 characters, stored as scrypt; the
+ * change or remove a password (10–128 characters, or generate one, stored as scrypt; the
  * server never returns it). Errors are shown from the dictionary, never the
  * server's English message.
  */
@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
+import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, generateSharePassword } from "@/lib/sharing/password-policy"
 import type { ShareSection } from "@/lib/sharing/share-sections"
 
 export type ShareMeetingDialogProps = {
@@ -92,6 +93,8 @@ export function ShareMeetingDialog({
   const [passwordError, setPasswordError] = useState<keyof Dictionary | null>(null)
   const [busy, setBusy] = useState(false)
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false)
+  // A generated password is shown in clear text so the owner can copy it.
+  const [showPassword, setShowPassword] = useState(false)
   const [linkRevoked, setLinkRevoked] = useState(false)
   // A public link widens a private meeting to the workspace: confirm first.
   const [sharePrivateConfirm, setSharePrivateConfirm] = useState(meeting.visibility === "private")
@@ -164,11 +167,12 @@ export function ShareMeetingDialog({
 
     const length = [...password].length
 
-    if (length < 8 || !password.trim()) return setPasswordError("shareDialogPasswordTooShort")
-    if (length > 128) return setPasswordError("shareDialogPasswordTooLong")
+    if (length < SHARE_PASSWORD_MIN || !password.trim()) return setPasswordError("shareDialogPasswordTooShort")
+    if (length > SHARE_PASSWORD_MAX) return setPasswordError("shareDialogPasswordTooLong")
 
     if (await patchShare({ password }, t.shareDialogPasswordSet)) {
       setPassword("")
+      setShowPassword(false)
       setEditingPassword(false)
     }
   }
@@ -312,7 +316,7 @@ export function ShareMeetingDialog({
                 <div className="flex gap-2">
                   <Input
                     id={`${ids}-password`}
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     dir="auto"
                     autoFocus
@@ -320,10 +324,29 @@ export function ShareMeetingDialog({
                     maxLength={256}
                     aria-invalid={passwordError ? true : undefined}
                     aria-describedby={passwordError ? passwordErrorId : `${ids}-password-hint`}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setShowPassword(false)
+                      setPassword(event.target.value)
+                    }}
                   />
                   <Button type="submit" disabled={busy || !password}>
                     {t.shareDialogPasswordSave}
+                  </Button>
+                </div>
+                <div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setPassword(generateSharePassword())
+                      setShowPassword(true)
+                      setPasswordError(null)
+                      toast.info(t.shareDialogPasswordGenerated)
+                    }}
+                  >
+                    {t.shareDialogPasswordGenerate}
                   </Button>
                 </div>
                 {passwordError ? (

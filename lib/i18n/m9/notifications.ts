@@ -22,6 +22,7 @@ export const m9NotificationsMessages = {
     notifKindMeetingProcessed: "Summary ready: {meeting}",
     notifKindMeetingFailed: "Processing failed: {meeting}",
     notifKindBotBlocked: "The meeting bot could not join {meeting}",
+    notifKindShareAttempts: "Many wrong passwords were tried on the share link of {meeting}",
     notifKindMentionNoActor: "New mention in {meeting}",
     notifKindReplyNoActor: "New reply in {meeting}",
     notifKindTaskAssignedNoActor: "New task in {meeting}",
@@ -48,6 +49,7 @@ export const m9NotificationsMessages = {
     notifPrefMeetingProcessed: "Summaries ready",
     notifPrefMeetingFailed: "Processing failures",
     notifPrefBotBlocked: "Meeting bot could not join",
+    notifPrefShareAttempts: "Repeated wrong passwords on a share link",
   },
   he: {
     notifBellLabel: "התראות",
@@ -68,6 +70,7 @@ export const m9NotificationsMessages = {
     notifKindMeetingProcessed: "הסיכום מוכן: {meeting}",
     notifKindMeetingFailed: "העיבוד נכשל: {meeting}",
     notifKindBotBlocked: "בוט הפגישה לא הצליח להצטרף אל {meeting}",
+    notifKindShareAttempts: "נוסו סיסמאות שגויות רבות בקישור השיתוף של {meeting}",
     notifKindMentionNoActor: "אזכור חדש בפגישה {meeting}",
     notifKindReplyNoActor: "תגובה חדשה בפגישה {meeting}",
     notifKindTaskAssignedNoActor: "משימה חדשה בפגישה {meeting}",
@@ -95,5 +98,6 @@ export const m9NotificationsMessages = {
     notifPrefMeetingProcessed: "סיכומים מוכנים",
     notifPrefMeetingFailed: "כשלי עיבוד",
     notifPrefBotBlocked: "בוט הפגישה לא הצליח להצטרף",
+    notifPrefShareAttempts: "ניסיונות חוזרים של סיסמה שגויה בקישור שיתוף",
   },
 }

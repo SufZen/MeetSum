@@ -76,6 +76,7 @@ describe("migration versions (M6 Step 0)", () => {
     expect(names).toContain("028_integration_token_generation.sql")
     expect(names).toContain("029_integration_refresh_lease.sql")
     expect(names).toContain("030_i18n_notifications_onboarding.sql")
+    expect(names).toContain("031_share_attempts_notification.sql")
   })
 
   it("never reuses a version number", () => {
@@ -88,10 +89,10 @@ describe("migration versions (M6 Step 0)", () => {
     expect(duplicateVersions(withDuplicate)).toEqual(["025: 025_search_ask.sql, 025_other_branch.sql"])
   })
 
-  it("numbers the migrations contiguously from 001 (001-030)", () => {
+  it("numbers the migrations contiguously from 001 (001-031)", () => {
     expect(versionGaps(migrations)).toEqual([])
     expect(migrations.map((file) => file.version)).toEqual(
-      Array.from({ length: 30 }, (_, index) => String(index + 1).padStart(3, "0"))
+      Array.from({ length: 31 }, (_, index) => String(index + 1).padStart(3, "0"))
     )
     expect(versionGaps(migrations.filter((file) => file.version !== "024"))).toEqual(["024"])
   })
