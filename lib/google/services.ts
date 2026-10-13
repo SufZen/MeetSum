@@ -7,7 +7,7 @@ import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import { promisify } from "node:util"
 
-import { google, type calendar_v3 } from "googleapis"
+import { google } from "googleapis"
 
 import { FFMPEG_INPUT_PROTOCOLS } from "@/lib/ai/asr/audio"
 import { hasConferenceLink } from "@/lib/bot/calendar-links"
@@ -17,15 +17,7 @@ import { redactBotError } from "@/lib/bot/redact"
 import type { CalendarEventLike } from "@/lib/bot/types"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
-import {
-  clearDeferredRow,
-  findCanonicalMeetingId,
-  isDeferredRowBlocked,
-  listDeferredDuplicateRows,
-  markDeferredRow,
-  markPromotedRow,
-  withCalendarDedupeLock,
-} from "@/lib/integrations/microsoft/calendar-dedupe"
+import { findCanonicalMeetingId, withCalendarDedupeLock } from "@/lib/integrations/microsoft/calendar-dedupe"
 import {
   ensureGoogleIdentity,
   type GoogleWorkspaceTarget,
@@ -1293,132 +1285,6 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
     const lookbackDays = envInt("MEETSUM_CALENDAR_LOOKBACK_DAYS", 30)
     const lookaheadDays = envInt("MEETSUM_CALENDAR_LOOKAHEAD_DAYS", 60)
 
-    type GoogleCalendarEvent = calendar_v3.Schema$Event
-
-    /**
-     * The meeting for a non-cancelled Google row: its own, or a new one
-     * unless another calendar's row is canonical. The canonical check and
-     * the insert run under the dedupe lock (first-sync concurrency, M8
-     * review fix #8); the M7 bot sync runs after it.
-     */
-    const materialize = async (event: GoogleCalendarEvent, calendarEventId: string, startsAt: string, countSkips = true) => {
-      const meetingId = await withCalendarDedupeLock(
-        pool,
-        { workspaceId, icalUid: event.iCalUID, startsAt },
-        async (db): Promise<string | undefined> => {
-          const existingMeeting = await db.query(
-            `select id from meetings
-             where calendar_event_id = $1 and workspace_id = $2 limit 1`,
-            [calendarEventId, workspaceId]
-          )
-          const ownMeetingId = (existingMeeting.rows[0] as { id?: string } | undefined)?.id
-
-          // M8 iCalUID dedupe (shared helper with the Outlook path): only a
-          // same-workspace row with the same start, bot link and either the
-          // same owner or a visible meeting with the same organizer counts.
-          if (
-            !ownMeetingId &&
-            (await findCanonicalMeetingId(db, {
-              workspaceId,
-              icalUid: event.iCalUID,
-              startsAt,
-              calendarEventId,
-              organizerEmail: event.organizer?.email,
-              event: event as CalendarEventLike,
-              owner: { email: subject },
-            }))
-          ) {
-            await markDeferredRow(db, workspaceId, calendarEventId)
-            if (countSkips) stats.skipped = (stats.skipped ?? 0) + 1
-            return
-          }
-          // A deferred duplicate is created only once promotable (a sibling
-          // cancelled, no user opt-out); a deleted canonical meeting never
-          // resurrects it.
-          if (!ownMeetingId && (await isDeferredRowBlocked(db, workspaceId, calendarEventId))) {
-            if (countSkips) stats.skipped = (stats.skipped ?? 0) + 1
-            return
-          }
-
-          const meetingId = ownMeetingId ?? createHashedId("meet_google", calendarEventId)
-          const title = event.summary ?? "Untitled meeting"
-          const participantRecords = calendarParticipants({
-            organizer: event.organizer,
-            attendees: event.attendees as CalendarAttendee[] | null | undefined,
-          })
-          // New meetings belong to the workspace (owner = the subject's user
-          // when known, visibility/language from workspace settings); the
-          // conflict update never touches another workspace's row.
-          const upserted = await db.query(
-            `
-              insert into meetings (
-                id, calendar_event_id, title, source, language, status,
-                retention, started_at, participants, google_meet_link,
-                workspace_id, owner_user_id, visibility
-              )
-              values ($1, $2, $3, 'google_meet', $7, 'scheduled',
-                'audio', $4, $5::jsonb, $6,
-                $8,
-                (select id from users where lower(email) = lower($9) limit 1),
-                $10)
-              on conflict (id)
-              do update set
-                title = excluded.title,
-                calendar_event_id = excluded.calendar_event_id,
-                started_at = excluded.started_at,
-                participants = excluded.participants,
-                google_meet_link = excluded.google_meet_link
-              where meetings.workspace_id = excluded.workspace_id
-              returning id
-            `,
-            [
-              meetingId,
-              calendarEventId,
-              title,
-              startsAt,
-              JSON.stringify(
-                participantRecords
-                  .map((participant) => participant.name || participant.email)
-                  .filter(Boolean)
-              ),
-              extractMeetLink(event),
-              importedMeetingLanguage(settings),
-              workspaceId,
-              subject,
-              settings.defaultMeetingVisibility,
-            ]
-          )
-
-          if (!upserted.rows.length) return
-          await markPromotedRow(db, workspaceId, calendarEventId)
-
-          await upsertMeetingParticipantsFromCalendar({
-            meetingId,
-            event: {
-              organizer: event.organizer,
-              attendees: event.attendees as CalendarAttendee[] | null | undefined,
-            },
-          })
-
-          return meetingId
-        }
-      )
-
-      if (!meetingId) return
-
-      if (isBotEnabled()) {
-        await syncCalendarBotSession({
-          workspaceId,
-          subject,
-          calendarEventId,
-          meetingId,
-          event,
-        }).catch((error: unknown) => {
-          stats.errors?.push(`bot: ${redactBotError(error)}`)
-        })
-      }
-    }
-
     for (const item of calendarList.data.items ?? []) {
       if (!item.id) continue
 
@@ -1450,12 +1316,6 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
         for (const event of events.data.items ?? []) {
           if (!event.id) continue
           if (!shouldImportCalendarEvent(event, importAll)) {
-            // Now filtered: an earlier deferred duplicate stops being a candidate.
-            await clearDeferredRow(
-              pool,
-              workspaceId,
-              createHashedId("gcal", `${identityId}:${item.id}:${event.id}`)
-            ).catch(() => undefined)
             stats.skipped = (stats.skipped ?? 0) + 1
             continue
           }
@@ -1545,7 +1405,121 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
             continue
           }
 
-          if (startsAt) await materialize(event, calendarEventId, startsAt)
+          if (startsAt) {
+            let meetingId: string | undefined
+
+            try {
+              // Canonical check + meeting insert: one transaction under the
+              // dedupe lock (first-sync concurrency, M8 review fix #8).
+              meetingId = await withCalendarDedupeLock(
+                pool,
+                { workspaceId, icalUid: event.iCalUID, startsAt },
+                async (db): Promise<string | undefined> => {
+                  const existingMeeting = await db.query(
+                    `select id from meetings
+                     where calendar_event_id = $1 and workspace_id = $2 limit 1`,
+                    [calendarEventId, workspaceId]
+                  )
+                  const ownMeetingId = (existingMeeting.rows[0] as { id?: string } | undefined)?.id
+
+                  // M8 iCalUID dedupe (shared helper with the Outlook path): only a
+                  // same-workspace row with the same start, bot link and either the
+                  // same owner or a visible meeting with the same organizer counts.
+                  if (
+                    !ownMeetingId &&
+                    (await findCanonicalMeetingId(db, {
+                      workspaceId,
+                      icalUid: event.iCalUID,
+                      startsAt,
+                      calendarEventId,
+                      organizerEmail: event.organizer?.email,
+                      event: event as CalendarEventLike,
+                      owner: { email: subject },
+                    }))
+                  ) {
+                    stats.skipped = (stats.skipped ?? 0) + 1
+                    return undefined
+                  }
+
+                  const meetingId = ownMeetingId ?? createHashedId("meet_google", calendarEventId)
+                  const participantRecords = calendarParticipants({
+                    organizer: event.organizer,
+                    attendees: event.attendees as CalendarAttendee[] | null | undefined,
+                  })
+                  // New meetings belong to the workspace (owner = the subject's user
+                  // when known, visibility/language from workspace settings); the
+                  // conflict update never touches another workspace's row.
+                  const upserted = await db.query(
+                    `
+                      insert into meetings (
+                        id, calendar_event_id, title, source, language, status,
+                        retention, started_at, participants, google_meet_link,
+                        workspace_id, owner_user_id, visibility
+                      )
+                      values ($1, $2, $3, 'google_meet', $7, 'scheduled',
+                        'audio', $4, $5::jsonb, $6,
+                        $8,
+                        (select id from users where lower(email) = lower($9) limit 1),
+                        $10)
+                      on conflict (id)
+                      do update set
+                        title = excluded.title,
+                        calendar_event_id = excluded.calendar_event_id,
+                        started_at = excluded.started_at,
+                        participants = excluded.participants,
+                        google_meet_link = excluded.google_meet_link
+                      where meetings.workspace_id = excluded.workspace_id
+                      returning id
+                    `,
+                    [
+                      meetingId,
+                      calendarEventId,
+                      title,
+                      startsAt,
+                      JSON.stringify(
+                        participantRecords
+                          .map((participant) => participant.name || participant.email)
+                          .filter(Boolean)
+                      ),
+                      extractMeetLink(event),
+                      importedMeetingLanguage(settings),
+                      workspaceId,
+                      subject,
+                      settings.defaultMeetingVisibility,
+                    ]
+                  )
+
+                  return upserted.rows.length ? meetingId : undefined
+                }
+              )
+            } catch (error) {
+              // Fail closed: no meeting (and no bot) when the lock, lookup or insert fails.
+              stats.errors?.push(`dedupe: ${error instanceof Error ? error.name : "error"}`)
+              continue
+            }
+
+            if (!meetingId) continue
+
+            await upsertMeetingParticipantsFromCalendar({
+              meetingId,
+              event: {
+                organizer: event.organizer,
+                attendees: event.attendees as CalendarAttendee[] | null | undefined,
+              },
+            })
+
+            if (isBotEnabled()) {
+              await syncCalendarBotSession({
+                workspaceId,
+                subject,
+                calendarEventId,
+                meetingId,
+                event,
+              }).catch((error: unknown) => {
+                stats.errors?.push(`bot: ${redactBotError(error)}`)
+              })
+            }
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Calendar page failed"
@@ -1553,29 +1527,6 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
         stats.errors?.push(`${item.summary ?? item.id}: ${message}`)
         delete nextCursor[item.id]
       }
-    }
-
-    // Deferred duplicates of this identity whose canonical meeting was
-    // cancelled or deleted: promote them (M8 review fix #8).
-    // Promotion goes through the SAME filters as a normal create: the
-    // calendar must still be listed and not excluded, the event must pass
-    // the import filters (title/all-day/meeting signal) and not be
-    // cancelled; the bot sync then re-runs the M7 rules and consent gate.
-    const calendarsById = new Map((calendarList.data.items ?? []).filter((item) => item.id).map((item) => [item.id as string, item]))
-
-    for (const row of await listDeferredDuplicateRows(pool, { workspaceId, googleIdentityId: identityId })) {
-      const startsAt = row.starts_at ? new Date(row.starts_at).toISOString() : undefined
-      const calendarItem = row.calendar_id ? calendarsById.get(row.calendar_id) : undefined
-      const event = row.raw as GoogleCalendarEvent
-
-      if (!startsAt || !calendarItem || shouldSkipCalendar(calendarItem, importAll)) continue
-      if (event.status === "cancelled" || !shouldImportCalendarEvent(event, importAll)) {
-        await clearDeferredRow(pool, workspaceId, row.id).catch(() => undefined)
-        continue
-      }
-      await materialize(event, row.id, startsAt, false).catch((error: unknown) => {
-        stats.errors?.push(`dedupe: ${error instanceof Error ? error.name : "error"}`)
-      })
     }
 
     try {

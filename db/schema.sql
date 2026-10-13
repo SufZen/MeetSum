@@ -1386,18 +1386,6 @@ alter table integration_connections
 alter table integration_connections
   add column if not exists refresh_lease_until timestamptz;
 
--- 030: calendar dedupe state (only deferred duplicates are ever promoted).
-alter table calendar_events
-  add column if not exists dedupe_state text;
-do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'calendar_events_dedupe_state_check') then
-    alter table calendar_events add constraint calendar_events_dedupe_state_check
-      check (dedupe_state is null or dedupe_state in ('deferred', 'promoted'));
-  end if;
-end $$;
-create index if not exists idx_calendar_events_dedupe_deferred
-  on calendar_events(workspace_id, ical_uid, starts_at) where dedupe_state = 'deferred';
-
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
   on conflict (id) do nothing;

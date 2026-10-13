@@ -184,7 +184,7 @@ No real keys are needed. This is Acceptance 14 (`tests/e2e/m8-integrations.spec.
 1. `docker compose up postgres redis`
 2. `npm run db:migrate`
 3. `npm run integrations:e2e-seed` (writes test session cookies and ids to `E2E_ENV_FILE`, default `.secrets/e2e.env`, gitignored; nothing is printed)
-4. `npm run integrations:fake` (fake Slack, Microsoft, Notion, HubSpot and Google on `127.0.0.1:4010`, plus a webhook receiver). The spec reads the recorded, token-redacted requests with `GET /__fake/requests?provider=<id>` and clears them with `DELETE /__fake/requests`; the webhook receiver records `provider: "webhook"` with the raw body for the signature check. The fake Outlook event uses the iCalUID `e2e-m8-shared-event@meetsum.test`, the one the seed puts on a Google row.
+4. `npm run integrations:fake` (fake Slack, Microsoft, Notion, HubSpot and Google on `127.0.0.1:4010`, plus a webhook receiver). The spec reads the recorded, token-redacted requests with `GET /__fake/requests?provider=<id>` and clears them with `DELETE /__fake/requests`; the webhook receiver records `provider: "webhook"` with the raw body for the signature check. The fake Outlook event uses the iCalUID `e2e-m8-shared-event@meetsum.test`, the start (tomorrow 09:00 UTC) and the Teams link the seed puts on a Google row (`fakeSharedEvent()`), so the dedupe triggers.
 5. Start the app and the worker with:
    - `NODE_ENV=development`
    - `MEETSUM_INTEGRATIONS_FAKE_BASE_URL=http://127.0.0.1:4010`
@@ -217,6 +217,7 @@ Run each one in a test workspace with a Hebrew sample meeting (a summary, two ac
 2. Turn on "Sync my Outlook calendar"; wait one sync interval (or trigger `calendarSync`).
 3. An Outlook event with a Teams link appears as a scheduled meeting and follows the bot rules; an event that is also on a synced Google calendar is not duplicated.
 4. A private or confidential Outlook event creates a private meeting.
+5. Known limitation: when the same meeting is on two calendars (same iCalUID, start and meeting link), only the first synced copy gets a meeting and a bot. If that canonical event is later cancelled, the other copy stays skipped (no meeting, no bot is sent automatically). Use "Join now" on the meeting link or re-add the event to the calendar.
 5. Disconnect; remove the app from myapps.microsoft.com if it should be fully revoked (Microsoft has no revoke API).
 
 ### Notion

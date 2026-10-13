@@ -93,10 +93,6 @@ export async function findCanonicalMeetingId(db: Queryable, lookup: CanonicalLoo
         and ce.ical_uid = $2
         and ce.starts_at = $3::timestamptz
         and ce.id <> $4
-        -- A cancelled or deleted canonical event no longer suppresses its
-        -- duplicates: they are promoted on their next sync.
-        and coalesce(ce.status, '') <> 'cancelled'
-        and m.status <> 'failed'
       order by m.created_at asc, m.id asc
       limit 20`,
     [lookup.workspaceId, icalUid, lookup.startsAt, lookup.calendarEventId]
@@ -131,12 +127,20 @@ const dedupeLocksInProcess = new Map<string, Promise<unknown>>()
 
 /**
  * First-sync concurrency (M8 review fix #8): the canonical check and the
- * meeting insert for one real meeting (workspace, iCalUID, start) run under
- * a session advisory lock held on a dedicated pooled connection, so a Google
- * and an Outlook sync of the same event never both create a meeting. An
- * in-process mutex on the same key covers callers sharing one connection
- * (PGlite, where session advisory locks are re-entrant). Rows without an
- * iCalUID or a start are never deduped and run unlocked.
+ * meeting insert for one real meeting (workspace, iCalUID, start) run in ONE
+ * transaction on a dedicated pooled connection holding a transaction-level
+ * advisory lock, so a Google and an Outlook sync of the same event never
+ * both create a meeting, and a failure rolls everything back (never a
+ * half-applied meeting). An in-process mutex on the same key covers callers
+ * sharing one connection (PGlite, where advisory locks are re-entrant and a
+ * transaction would span unrelated interleaved queries).
+ *
+ * Callers fail closed: any error here (lock, lookup, insert) means no
+ * meeting for this row on this sync.
+ *
+ * Known limitation (by decision): when the canonical event is later
+ * cancelled, a non-canonical row stays skipped (no meeting, no bot). The
+ * user can still use "Join now" or re-add the event.
  */
 export async function withCalendarDedupeLock<T>(
   db: LockableQueryable,
@@ -145,10 +149,14 @@ export async function withCalendarDedupeLock<T>(
 ): Promise<T> {
   const icalUid = key.icalUid?.trim()
   const startsAt = key.startsAt ? new Date(key.startsAt) : undefined
+  // Rows without an iCalUID or start are never deduped: one key per row id is not needed.
+  const lockKey =
+    icalUid && startsAt && !Number.isNaN(startsAt.getTime())
+      ? `meetsum:calendar-dedupe:${key.workspaceId}:${icalUid}:${startsAt.toISOString()}`
+      : undefined
 
-  if (!icalUid || !startsAt || Number.isNaN(startsAt.getTime())) return fn(db)
+  if (!lockKey) return fn(db)
 
-  const lockKey = `meetsum:calendar-dedupe:${key.workspaceId}:${icalUid}:${startsAt.toISOString()}`
   const previous = dedupeLocksInProcess.get(lockKey) ?? Promise.resolve()
   let release!: () => void
   const mine = new Promise<void>((resolve) => {
@@ -160,132 +168,34 @@ export async function withCalendarDedupeLock<T>(
   await previous.catch(() => undefined)
 
   try {
-    const connection = typeof db.connect === "function" ? await db.connect() : undefined
-    const client: Queryable = connection ?? db
+    if (typeof db.connect !== "function") {
+      await db.query("select pg_advisory_lock(hashtext($1))", [lockKey])
+      try {
+        return await fn(db)
+      } finally {
+        await db.query("select pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined)
+      }
+    }
+
+    const client = await db.connect()
 
     try {
-      await client.query("select pg_advisory_lock(hashtext($1))", [lockKey])
+      await client.query("begin")
       try {
-        return await fn(client)
-      } finally {
-        await client.query("select pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined)
+        await client.query("select pg_advisory_xact_lock(hashtext($1))", [lockKey])
+        const result = await fn(client)
+
+        await client.query("commit")
+        return result
+      } catch (error) {
+        await client.query("rollback").catch(() => undefined)
+        throw error
       }
     } finally {
-      connection?.release()
+      client.release()
     }
   } finally {
     release()
     if (dedupeLocksInProcess.get(lockKey) === chained) dedupeLocksInProcess.delete(lockKey)
   }
-}
-
-export type DeferredCalendarRow = {
-  id: string
-  raw: unknown
-  title: string | null
-  starts_at: string | Date | null
-  ends_at: string | Date | null
-  meet_link: string | null
-  organizer_email: string | null
-  ical_uid: string | null
-  external_event_id: string | null
-  calendar_id: string | null
-}
-
-/** A row skipped as non-canonical: `dedupe_state = 'deferred'` (migration 030). */
-export async function markDeferredRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
-  await db.query(
-    "update calendar_events set dedupe_state = 'deferred' where id = $1 and workspace_id = $2 and dedupe_state is null",
-    [calendarEventId, workspaceId]
-  )
-}
-
-/** The row got its own meeting: a deferred row becomes 'promoted' (never promoted again). */
-export async function markPromotedRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
-  await db.query(
-    "update calendar_events set dedupe_state = 'promoted' where id = $1 and workspace_id = $2 and dedupe_state = 'deferred'",
-    [calendarEventId, workspaceId]
-  )
-}
-
-/** The event no longer passes the import filters: it stops being a promotion candidate. */
-export async function clearDeferredRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
-  await db.query(
-    "update calendar_events set dedupe_state = null where id = $1 and workspace_id = $2 and dedupe_state = 'deferred'",
-    [calendarEventId, workspaceId]
-  )
-}
-
-/**
- * SQL predicate (alias `ce`): a deferred row may be promoted only when a
- * sibling row of the same real meeting (workspace, iCalUID, start) was
- * CANCELLED and its meeting closed by that cancellation (a canonical
- * meeting the user deleted counts as a tombstone: never revived), and no
- * sibling's bot session was opted out by the user ("Don't send bot" wins).
- */
-const PROMOTABLE_SQL = `
-        exists (
-          select 1 from calendar_events s
-           where s.workspace_id = ce.workspace_id and s.ical_uid = ce.ical_uid
-             and s.starts_at = ce.starts_at and s.id <> ce.id and s.status = 'cancelled'
-             -- Its meeting still exists, closed by the cancellation: a
-             -- canonical meeting the user DELETED is a tombstone, never revived.
-             and exists (select 1 from meetings m where m.calendar_event_id = s.id and m.status = 'failed'))
-        and not exists (
-          select 1 from calendar_events s
-            join bot_sessions b on b.calendar_event_id = s.id and b.workspace_id = ce.workspace_id
-           where s.workspace_id = ce.workspace_id and s.ical_uid = ce.ical_uid
-             and s.starts_at = ce.starts_at and b.status_reason = 'user_opt_out')`
-
-/**
- * True when a new meeting must NOT be created for this row although no
- * canonical meeting matches: it is a deferred duplicate that is not
- * promotable (see PROMOTABLE_SQL). Normal rows are never blocked.
- */
-export async function isDeferredRowBlocked(db: Queryable, workspaceId: string, calendarEventId: string): Promise<boolean> {
-  const result = await db.query(
-    `select (ce.dedupe_state = 'deferred' and not (${PROMOTABLE_SQL})) as blocked
-       from calendar_events ce where ce.id = $1 and ce.workspace_id = $2`,
-    [calendarEventId, workspaceId]
-  )
-
-  return Boolean((result.rows[0] as { blocked?: boolean } | undefined)?.blocked)
-}
-
-/**
- * Deferred duplicates of ONE calendar (a Google identity or an Outlook
- * connection) that are promotable now (M8 review fix #8): upcoming, not
- * cancelled themselves, no meeting, `dedupe_state = 'deferred'`, a sibling
- * cancelled and no user opt-out. Each sync re-evaluates them through the
- * same filters as a normal create, so a duplicate is promoted on its next
- * sync even when the provider's incremental feed does not return it.
- */
-export async function listDeferredDuplicateRows(
-  db: Queryable,
-  scope: { workspaceId: string; googleIdentityId?: string; connectionId?: string },
-  now: Date = new Date()
-): Promise<DeferredCalendarRow[]> {
-  const column = scope.googleIdentityId ? "google_identity_id" : "integration_connection_id"
-  const owner = scope.googleIdentityId ?? scope.connectionId
-
-  if (!owner) return []
-
-  const result = await db.query(
-    `select ce.id, ce.raw, ce.title, ce.starts_at, ce.ends_at, ce.meet_link, ce.organizer_email, ce.ical_uid,
-            ce.external_event_id, ce.calendar_id
-       from calendar_events ce
-      where ce.workspace_id = $1
-        and ce.${column} = $2
-        and ce.dedupe_state = 'deferred'
-        and ce.ical_uid is not null
-        and ce.starts_at >= $3::timestamptz
-        and coalesce(ce.status, '') <> 'cancelled'
-        and not exists (select 1 from meetings m where m.calendar_event_id = ce.id)
-        and ${PROMOTABLE_SQL}
-      order by ce.starts_at asc
-      limit 50`,
-    [scope.workspaceId, owner, new Date(now.getTime() - 24 * 60 * 60_000).toISOString()]
-  )
-
-  return result.rows as DeferredCalendarRow[]
 }
