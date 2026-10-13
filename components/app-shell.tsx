@@ -3,7 +3,7 @@ import type { SidebarRoom, SidebarUser } from "@/components/main-sidebar"
 import { WorkspaceProvider } from "@/components/workspace-context"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import type { MeetingRecord } from "@/lib/meetings/repository"
+import type { MeetingListItem } from "@/lib/meetings/repository"
 
 export function AppShell({
   dictionary,
@@ -14,7 +14,7 @@ export function AppShell({
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
-  meetings: MeetingRecord[]
+  meetings: MeetingListItem[]
   rooms: SidebarRoom[]
   user?: SidebarUser
 }) {
