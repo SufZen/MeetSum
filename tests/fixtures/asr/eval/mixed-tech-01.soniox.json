@@ -1,0 +1,54 @@
+{
+  "_synthetic": true,
+  "provider": "soniox",
+  "model": "stt-async-v3",
+  "language": "he",
+  "durationMs": 12000,
+  "segments": [
+    {
+      "startMs": 0,
+      "endMs": 6600,
+      "text": "העברנו את ה-database ל-Supabase והגדרנו אם סי פי סרבר.",
+      "speaker": "Speaker 1",
+      "turnIndex": 0,
+      "language": "he",
+      "words": []
+    },
+    {
+      "startMs": 6600,
+      "endMs": 12000,
+      "text": "אחר כך בדקנו את קלוד קוד על הריפו.",
+      "speaker": "Speaker 2",
+      "turnIndex": 1,
+      "language": "he",
+      "words": []
+    }
+  ],
+  "speakers": [
+    {
+      "label": "Speaker 1",
+      "talkTimeMs": 6600,
+      "wordCount": 9,
+      "segmentCount": 1,
+      "firstStartMs": 0
+    },
+    {
+      "label": "Speaker 2",
+      "talkTimeMs": 5400,
+      "wordCount": 7,
+      "segmentCount": 1,
+      "firstStartMs": 6600
+    }
+  ],
+  "diarization": "provider",
+  "cost": {
+    "usd": 0.000333,
+    "basis": "audio_hours",
+    "unitPrice": 0.1
+  },
+  "timings": {
+    "totalMs": 10000
+  },
+  "glossaryReplacements": 0,
+  "warnings": []
+}

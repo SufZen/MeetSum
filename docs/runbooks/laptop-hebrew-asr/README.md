@@ -4,6 +4,35 @@
 > Nothing here is imported, built, or executed by MeetSum. These are manual
 > steps + helper files you run by hand when setting up the laptop ASR host.
 
+## M3 update — the laptop is now the `local-whisper-chunked` provider
+
+Since M3 the worker transcribes through the ASR router (`lib/ai/asr`). The
+laptop server is the `local-whisper-chunked` provider, **last** in the default
+Hebrew chain `runpod-ivrit → soniox → local-whisper-chunked`
+(`MEETSUM_ASR_CHAIN`). Gemini is no longer an automatic fallback (only with
+`MEETSUM_ASR_ALLOW_GEMINI=true`); `MEETSUM_TRANSCRIPTION_PROVIDER` is
+deprecated (`local-whisper` still maps to "local only").
+
+What changed for this host:
+
+- The worker transcodes to 16 kHz mono Opus and sends **≤ 10 min chunks**
+  cut at silences (`LOCAL_TRANSCRIPTION_CHUNK_MS=600000`,
+  `LOCAL_TRANSCRIPTION_CHUNK_SEARCH_MS=60000`), one at a time, one retry each.
+  Long CPU runs no longer need a huge `LOCAL_TRANSCRIPTION_TIMEOUT_MS` — it is
+  now per chunk.
+- Each request carries `timestamp_granularities[]=word`, `hotwords` (workspace
+  glossary, Latin terms first) and optionally `prompt`
+  (`MEETSUM_ASR_USE_INITIAL_PROMPT=true`). **Redeploy the updated `app.py`**
+  in this folder: it returns per-word timings (`words`, OpenAI verbose_json
+  shape) and passes `hotwords` / `initial_prompt` to faster-whisper (needs
+  faster-whisper ≥ 1.0). An old `app.py` still works, but the worker then
+  synthesizes word timings and flags `synthetic_word_timings`.
+- No diarization here: transcripts are one `Speaker 1` with the
+  `diarization_unavailable` warning. Diarized Hebrew comes from RunPod
+  (`asr-worker/` or the ivrit-ai image) or Soniox.
+
+The rest of this runbook (host setup, keep-awake, Tailscale) is unchanged.
+
 ## Why
 
 MeetSum's Hebrew ASR currently runs on the VPS `faster-whisper` container. The

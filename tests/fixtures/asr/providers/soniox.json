@@ -1,0 +1,27 @@
+{
+  "_synthetic": true,
+  "_note": "Hand-written Soniox async API responses following the public v1 REST docs (files, transcriptions, transcript tokens). Field names must be verified and the fixture re-recorded and scrubbed when SONIOX_API_KEY is available.",
+  "file": { "id": "file_abc123", "filename": "meeting.ogg", "size": 15 },
+  "created": { "id": "tr_42", "status": "queued", "model": "stt-async-v3" },
+  "processing": { "id": "tr_42", "status": "processing" },
+  "completed": { "id": "tr_42", "status": "completed", "audio_duration_ms": 9000 },
+  "transcript": {
+    "id": "tr_42",
+    "text": "שלום, עוברים לסופבייס היום. Next.js works great",
+    "tokens": [
+      { "text": "של", "start_ms": 0, "end_ms": 200, "confidence": 0.9, "speaker": "1", "language": "he" },
+      { "text": "ום", "start_ms": 200, "end_ms": 420, "confidence": 0.8, "speaker": "1", "language": "he" },
+      { "text": ",", "start_ms": 420, "end_ms": 440, "confidence": 0.99, "speaker": "1", "language": "he" },
+      { "text": " עוברים", "start_ms": 600, "end_ms": 1000, "confidence": 0.95, "speaker": "1", "language": "he" },
+      { "text": " לסופ", "start_ms": 1050, "end_ms": 1400, "confidence": 0.7, "speaker": "1", "language": "he" },
+      { "text": "בייס", "start_ms": 1400, "end_ms": 1800, "confidence": 0.6, "speaker": "1", "language": "he" },
+      { "text": " היום", "start_ms": 1850, "end_ms": 2200, "confidence": 0.97, "speaker": "1", "language": "he" },
+      { "text": ".", "start_ms": 2200, "end_ms": 2220, "confidence": 0.99, "speaker": "1", "language": "he" },
+      { "text": "<end>", "start_ms": 2220, "end_ms": 2220, "confidence": 1, "speaker": "1" },
+      { "text": " Next", "start_ms": 4000, "end_ms": 4300, "confidence": 0.93, "speaker": "2", "language": "en" },
+      { "text": ".js", "start_ms": 4300, "end_ms": 4600, "confidence": 0.91, "speaker": "2", "language": "en" },
+      { "text": " works", "start_ms": 4650, "end_ms": 5000, "confidence": 0.96, "speaker": "2", "language": "en" },
+      { "text": " great", "start_ms": 5000, "end_ms": 5400, "confidence": 0.98, "speaker": "2", "language": "en" }
+    ]
+  }
+}

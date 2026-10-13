@@ -59,6 +59,8 @@ const UNIVERSAL_ROW = {
   attempts: 0,
   max_attempts: 3,
   format: "markdown",
+  label: "Speaker 1",
+  mapping_status: "unmapped",
   provider: "local",
   task: "summary",
   total: 1,
@@ -149,6 +151,42 @@ const invocations: Record<
     repo.replaceTranscriptSegments("meet_1", [
       { id: "seg_1", speaker: "A", startMs: 0, endMs: 1, text: "hi" },
     ]),
+  replaceTranscript: (repo) =>
+    repo.replaceTranscript("meet_1", {
+      segments: [
+        {
+          id: "seg_1",
+          speaker: "Speaker 1",
+          startMs: 0,
+          endMs: 1,
+          text: "hi",
+          words: [{ startMs: 0, endMs: 1, text: "hi", confidence: 0.9 }],
+        },
+      ],
+      speakers: [{ label: "Speaker 1", talkTimeMs: 1, wordCount: 1, segmentCount: 1 }],
+      asrRunId: "airun_1",
+    }),
+  listMeetingSpeakers: (repo) => repo.listMeetingSpeakers("meet_1"),
+  updateMeetingSpeaker: (repo) =>
+    repo.updateMeetingSpeaker("meet_1", "speaker_1", {
+      mappingStatus: "confirmed",
+      participantId: "participant_1",
+      profileId: "profile_1",
+    }),
+  mergeMeetingSpeakers: (repo) =>
+    repo.mergeMeetingSpeakers("meet_1", "meet_1", "speaker_2").catch((error: Error) => error),
+  setSpeakerSuggestions: (repo) =>
+    repo.setSpeakerSuggestions("meet_1", [
+      { speakerId: "speaker_1", suggestion: null, participantId: "participant_1" },
+    ]),
+  listSpeakerProfiles: (repo) => repo.listSpeakerProfiles(),
+  recordConfirmedSpeaker: (repo) =>
+    repo.recordConfirmedSpeaker({
+      meetingId: "meet_1",
+      speakerId: "speaker_1",
+      participant: { name: "Dana" },
+      aliases: ["דנה"],
+    }),
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),
@@ -190,7 +228,8 @@ const invocations: Record<
 const MEETINGS_TABLE = /\bmeetings\b/
 const CHILD_TABLES =
   /\b(transcript_segments|speakers|action_items|intelligence_runs|summaries|summary_sections|meeting_tags|meeting_participants|export_records|suggested_agent_runs|meeting_shares|meeting_contexts|media_assets|meeting_favorites|ai_runs)\b/
-const WORKSPACE_TABLES = /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets)\b/
+const WORKSPACE_TABLES =
+  /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets|speaker_profiles)\b/
 
 /** Value bound to the first placeholder matched by `pattern` in `statement`. */
 function boundValues(statement: Statement, pattern: RegExp): unknown[] {
@@ -394,6 +433,47 @@ describe("postgres meeting repository workspace scoping", () => {
     expect(carriesScope(update, scopes.member)).toBe(true)
   })
 
+  it("scopes M3 speaker statements: meeting lock first, (meeting, speaker) pairs, workspace profiles", async () => {
+    for (const scope of Object.values(scopes)) {
+      for (const method of [
+        "replaceTranscript",
+        "updateMeetingSpeaker",
+        "mergeMeetingSpeakers",
+        "setSpeakerSuggestions",
+        "recordConfirmedSpeaker",
+        "listMeetingSpeakers",
+      ] as const) {
+        const { client, statements } = recordingClient()
+
+        await invocations[method](createPostgresMeetingRepository(client, scope))
+
+        const label = `${method} [${scope.kind}]`
+        const firstSpeakerStatement = statements.findIndex((statement) =>
+          /\b(speakers|speaker_profiles|transcript_segments)\b/.test(statement.text)
+        )
+        const scopeCheck = statements.findIndex((statement) =>
+          /^select m\.id from meetings m where m\.id = \$1 and/.test(statement.text)
+        )
+
+        expect(scopeCheck, label).toBeGreaterThanOrEqual(0)
+        expect(carriesScope(statements[scopeCheck], scope), label).toBe(true)
+        expect(scopeCheck, label).toBeLessThan(firstSpeakerStatement)
+
+        for (const statement of statements) {
+          if (/^(update|delete from) speakers\b/.test(statement.text)) {
+            expect(statement.text, label).toMatch(/meeting_id = \$\d/)
+            expect(statement.values, label).toContain("meet_1")
+          }
+          if (/\bspeaker_profiles\b/.test(statement.text)) {
+            expect(carriesWorkspace(statement), label).toBe(true)
+          }
+          // Speaker mapping never creates participants for labels.
+          expect(statement.text, label).not.toMatch(/^insert into meeting_participants/)
+        }
+      }
+    }
+  })
+
   it("throws not-found (never writes) when a (meetingId, childId) pair does not match", async () => {
     const { client, statements } = recordingClient((text) =>
       text.startsWith("update meeting_participants") ? [] : undefined
@@ -434,6 +514,8 @@ describe("postgres meeting repository workspace scoping", () => {
           "updateJob",
           "createJob",
           "findMediaAssetBySourceFile",
+          // Workspace-level speaker memory: no meeting involved.
+          "listSpeakerProfiles",
         ].includes(method)
       ) {
         continue

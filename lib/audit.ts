@@ -43,6 +43,10 @@ export type AuditAction =
   | "invitation.revoked"
   | "invitation.accepted"
   | "meeting.visibility.changed"
+  | "meeting.speaker.mapped"
+  | "meeting.speaker.merged"
+  | "meeting.speaker.suggested"
+  | "asr.glossary.updated"
   | "auth.login.denied"
 
 export type RecordAuditLogInput = {

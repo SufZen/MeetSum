@@ -44,7 +44,7 @@ export function MeetingWorkspace({
   onVisibilityChanged,
   onToggleFavorite,
   onShowParticipants,
-  onAssignSpeaker,
+  onSpeakersChanged,
   onAddToRoom,
   onCopyText,
   locale,
@@ -71,7 +71,8 @@ export function MeetingWorkspace({
   onVisibilityChanged?: (visibility: MeetingVisibility) => void
   onToggleFavorite: () => void
   onShowParticipants: () => void
-  onAssignSpeaker: (speakerLabel: string, participantId: string) => void
+  /** A speaker was confirmed, rejected, renamed or merged. */
+  onSpeakersChanged: () => void
   onAddToRoom: () => void
   onCopyText: (text: string, label: string) => void
 }) {
@@ -151,10 +152,14 @@ export function MeetingWorkspace({
         <TabsContent value="transcript" className="mt-0 px-5 py-6 md:px-8">
           <div className="mx-auto max-w-5xl">
             <TranscriptTimeline
+              dictionary={dictionary}
+              meetingId={meeting.id}
+              meetingLanguage={meeting.language}
               segments={meeting.transcript}
+              speakers={meeting.speakers}
               participants={meeting.participantDetails}
               onEditSpeakers={onShowParticipants}
-              onAssignSpeaker={onAssignSpeaker}
+              onSpeakersChanged={onSpeakersChanged}
             />
           </div>
         </TabsContent>

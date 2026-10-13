@@ -1,0 +1,39 @@
+{
+  "_synthetic": true,
+  "provider": "runpod-ivrit",
+  "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+  "language": "he",
+  "durationMs": 3000,
+  "segments": [
+    {
+      "startMs": 0,
+      "endMs": 3000,
+      "text": "תודה רבה, נתראה בשבוע הבא.",
+      "speaker": "Speaker 1",
+      "turnIndex": 0,
+      "language": "he",
+      "words": []
+    }
+  ],
+  "speakers": [
+    {
+      "label": "Speaker 1",
+      "talkTimeMs": 3000,
+      "wordCount": 5,
+      "segmentCount": 1,
+      "firstStartMs": 0
+    }
+  ],
+  "diarization": "provider",
+  "cost": {
+    "usd": 0.00038,
+    "basis": "gpu_seconds",
+    "billedSeconds": 2,
+    "unitPrice": 0.00019
+  },
+  "timings": {
+    "totalMs": 2000
+  },
+  "glossaryReplacements": 0,
+  "warnings": []
+}

@@ -119,3 +119,66 @@ describe("meeting quality warnings", () => {
     )
   })
 })
+
+describe("speaker naming warning (M3 speakers)", () => {
+  function withSpeakers(speakers: NonNullable<MeetingRecord["speakers"]>): MeetingRecord {
+    return { ...baseMeeting, speakers }
+  }
+
+  function speaker(
+    label: string,
+    talkTimeMs: number,
+    extra: Partial<NonNullable<MeetingRecord["speakers"]>[number]> = {}
+  ): NonNullable<MeetingRecord["speakers"]>[number] {
+    return {
+      id: `sp_${label}`,
+      meetingId: baseMeeting.id,
+      label,
+      mappingStatus: "unmapped",
+      source: "asr",
+      talkTimeMs,
+      wordCount: 10,
+      segmentCount: 2,
+      ...extra,
+    }
+  }
+
+  const codes = (meeting: MeetingRecord) =>
+    deriveMeetingQualityWarnings(meeting).map((warning) => warning.code)
+
+  it("fires while a speaker with ≥10% talk time is unnamed and unconfirmed", () => {
+    expect(
+      codes(
+        withSpeakers([
+          speaker("Speaker 1", 80_000, { mappingStatus: "confirmed", displayName: "Dana" }),
+          speaker("Speaker 2", 20_000, { mappingStatus: "suggested" }),
+        ])
+      )
+    ).toContain("no_speaker_diarization")
+  })
+
+  it("ignores minor speakers and named or confirmed ones", () => {
+    expect(
+      codes(
+        withSpeakers([
+          speaker("Speaker 1", 95_000, { mappingStatus: "confirmed", displayName: "Dana" }),
+          speaker("Speaker 2", 5_000),
+        ])
+      )
+    ).not.toContain("no_speaker_diarization")
+    expect(
+      codes(
+        withSpeakers([
+          speaker("Speaker 1", 50_000, { displayName: "Dana" }),
+          speaker("Ran Levi", 50_000, { source: "meet" }),
+        ])
+      )
+    ).not.toContain("no_speaker_diarization")
+  })
+
+  it("fires for an undiarized single-speaker transcript", () => {
+    expect(codes(withSpeakers([speaker("Speaker 1", 60_000)]))).toContain(
+      "no_speaker_diarization"
+    )
+  })
+})

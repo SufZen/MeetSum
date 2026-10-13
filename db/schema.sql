@@ -219,7 +219,27 @@ create table if not exists speakers (
   id text primary key,
   meeting_id text not null references meetings(id),
   label text not null,
-  display_name text
+  display_name text,
+  workspace_id text references workspaces(id) on delete cascade,
+  source text not null default 'asr',
+  -- FKs to meeting_participants / speaker_profiles are added below, after
+  -- those tables are declared (020).
+  participant_id text,
+  profile_id text,
+  mapping_status text not null default 'unmapped',
+  suggestion jsonb,
+  talk_time_ms integer not null default 0,
+  word_count integer not null default 0,
+  segment_count integer not null default 0,
+  first_start_ms integer,
+  embedding real[],
+  embedding_model text,
+  confirmed_by_user_id text references users(id) on delete set null,
+  confirmed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint speakers_mapping_status_check
+    check (mapping_status in ('unmapped','suggested','confirmed','rejected'))
 );
 
 create table if not exists transcript_segments (
@@ -231,7 +251,11 @@ create table if not exists transcript_segments (
   text text not null,
   confidence numeric,
   language text,
-  metadata jsonb not null default '{}'::jsonb
+  metadata jsonb not null default '{}'::jsonb,
+  words jsonb,
+  turn_index integer,
+  source text not null default 'asr',
+  asr_run_id text
 );
 
 create table if not exists summaries (
@@ -287,6 +311,8 @@ create table if not exists ai_runs (
   started_at timestamptz,
   completed_at timestamptz,
   error text,
+  workspace_id text references workspaces(id) on delete cascade,
+  audio_duration_ms integer,
   created_at timestamptz not null default now()
 );
 
@@ -525,6 +551,34 @@ create table if not exists export_records (
   created_at timestamptz not null default now()
 );
 
+create table if not exists speaker_profiles (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  display_name text not null,
+  email text,
+  user_id text references users(id) on delete set null,
+  aliases text[] not null default '{}',
+  confirmed_count integer not null default 0,
+  last_meeting_id text references meetings(id) on delete set null,
+  last_confirmed_at timestamptz,
+  voice_embedding real[],
+  embedding_model text,
+  embedding_samples integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'speakers_participant_id_fkey') then
+    alter table speakers add constraint speakers_participant_id_fkey
+      foreign key (participant_id) references meeting_participants(id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'speakers_profile_fk') then
+    alter table speakers add constraint speakers_profile_fk
+      foreign key (profile_id) references speaker_profiles(id) on delete set null;
+  end if;
+end $$;
+
 alter table contexts
   add column if not exists color text,
   add column if not exists kind text not null default 'room';
@@ -608,6 +662,21 @@ create index if not exists meet_artifacts_drive_file_idx
 
 create index if not exists transcript_segments_meeting_start_idx
   on transcript_segments(meeting_id, start_ms);
+
+create index if not exists idx_transcript_segments_speaker
+  on transcript_segments(speaker_id);
+
+create unique index if not exists uq_speakers_meeting_label
+  on speakers(meeting_id, label);
+
+create unique index if not exists uq_speaker_profiles_email
+  on speaker_profiles(workspace_id, lower(email)) where email is not null;
+
+create unique index if not exists uq_speaker_profiles_name
+  on speaker_profiles(workspace_id, lower(display_name)) where email is null;
+
+create index if not exists idx_ai_runs_workspace_task
+  on ai_runs(workspace_id, task, started_at desc);
 
 create index if not exists meeting_participants_meeting_idx
   on meeting_participants(meeting_id);

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest"
 
+import { classifyHttpStatus, toAsrError, TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
+import { AsrError } from "@/lib/ai/asr/types"
 import { classifyWhisperError } from "@/lib/ai/providers"
 
 describe("classifyWhisperError", () => {
@@ -71,5 +73,34 @@ describe("classifyWhisperError", () => {
   it("handles non-Error values", () => {
     expect(classifyWhisperError("timeout string error")).toBe("timeout")
     expect(classifyWhisperError(42)).toBe("unknown")
+  })
+})
+
+describe("ASR error classification", () => {
+  it("maps HTTP statuses to kinds and retryability", () => {
+    expect(classifyHttpStatus(401)).toEqual({ kind: "auth", retryable: false })
+    expect(classifyHttpStatus(403)).toEqual({ kind: "auth", retryable: false })
+    expect(classifyHttpStatus(429)).toEqual({ kind: "rate_limit", retryable: true })
+    expect(classifyHttpStatus(504)).toEqual({ kind: "timeout", retryable: true })
+    expect(classifyHttpStatus(500)).toEqual({ kind: "server", retryable: true })
+    expect(classifyHttpStatus(413)).toEqual({ kind: "config", retryable: false, mediaSpecific: true })
+    expect(classifyHttpStatus(415)).toEqual({ kind: "config", retryable: false, mediaSpecific: true })
+    expect(classifyHttpStatus(404)).toEqual({ kind: "unknown", retryable: false })
+  })
+
+  it("normalizes thrown values into AsrErrors", () => {
+    expect(toAsrError(new DOMException("aborted", "AbortError"), "soniox")).toMatchObject({ kind: "timeout", retryable: true })
+    expect(toAsrError(new Error("connect ECONNREFUSED 10.0.0.1"), "local-whisper-chunked")).toMatchObject({
+      kind: "server",
+      retryable: true,
+      provider: "local-whisper-chunked",
+    })
+    expect(toAsrError(new Error("read ETIMEDOUT"), "x")).toMatchObject({ kind: "timeout" })
+    expect(toAsrError(new TranscriptionUnavailableError("none"), "x")).toMatchObject({ kind: "config", retryable: false })
+    expect(toAsrError("weird", "x")).toMatchObject({ kind: "unknown", retryable: true })
+
+    const original = new AsrError("bad", "bad_input", "runpod-ivrit", false)
+
+    expect(toAsrError(original, "other")).toBe(original)
   })
 })

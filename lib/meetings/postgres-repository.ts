@@ -21,12 +21,30 @@ import type {
   MeetingShare,
   MeetingVisibility,
   RepoScope,
+  ReplaceTranscriptInput,
+  SpeakerMappingStatus,
+  SpeakerProfile,
+  SpeakerSuggestion,
   SuggestedAgentRun,
+  MeetingSpeaker,
+  TranscriptSegment,
 } from "@/lib/meetings/repository"
 import {
   MeetingExternalIdConflictError,
   MeetingScopeError,
 } from "@/lib/meetings/repository"
+import {
+  computeTurnIndexes,
+  normalizeProfileName,
+  runningMeanEmbedding,
+  unionAliases,
+} from "@/lib/meetings/speakers/stats"
+import {
+  legacySegmentsToTranscript,
+  planTranscriptReplacement,
+  type ExistingSpeakerRow,
+} from "@/lib/meetings/speakers/transcript-plan"
+import { decodeWords, encodeWords } from "@/lib/meetings/transcript-words"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
@@ -56,12 +74,48 @@ type MeetingRow = {
 
 type TranscriptRow = {
   id: string
+  speaker_id?: string | null
   speaker_label: string | null
   start_ms: number
   end_ms: number
   text: string
   confidence: string | number | null
   language: string | null
+  words?: unknown
+  turn_index?: number | null
+  source?: string | null
+}
+
+type SpeakerRow = {
+  id: string
+  meeting_id: string
+  label: string
+  display_name: string | null
+  participant_name: string | null
+  participant_id: string | null
+  profile_id: string | null
+  mapping_status: SpeakerMappingStatus
+  suggestion: SpeakerSuggestion | null
+  source: string
+  talk_time_ms: number | string | null
+  word_count: number | string | null
+  segment_count: number | string | null
+  first_start_ms: number | null
+  confirmed_at: string | Date | null
+  embedding?: number[] | null
+  embedding_model?: string | null
+}
+
+type SpeakerProfileRow = {
+  id: string
+  workspace_id: string
+  display_name: string
+  email: string | null
+  aliases: string[] | null
+  confirmed_count: number | string
+  voice_embedding: number[] | null
+  embedding_model: string | null
+  embedding_samples: number | string | null
 }
 
 type SummaryRow = {
@@ -506,6 +560,99 @@ function mapAiRun(row: AiRunRow): AiRunRecord {
   }
 }
 
+function optionalNumber(value: number | string | null | undefined): number | undefined {
+  if (value === null || value === undefined) return undefined
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function mapSpeaker(row: SpeakerRow, includeEmbeddings = false): MeetingSpeaker {
+  const speaker: MeetingSpeaker = {
+    id: row.id,
+    meetingId: row.meeting_id,
+    label: row.label,
+    displayName: row.participant_name ?? row.display_name ?? undefined,
+    participantId: row.participant_id ?? undefined,
+    profileId: row.profile_id ?? undefined,
+    mappingStatus: row.mapping_status,
+    suggestion: row.suggestion ?? undefined,
+    source: row.source,
+    talkTimeMs: optionalNumber(row.talk_time_ms) ?? 0,
+    wordCount: optionalNumber(row.word_count) ?? 0,
+    segmentCount: optionalNumber(row.segment_count) ?? 0,
+    firstStartMs: row.first_start_ms ?? undefined,
+    confirmedAt: row.confirmed_at ? toIso(row.confirmed_at) : undefined,
+  }
+
+  if (includeEmbeddings && row.embedding?.length) {
+    speaker.embedding = row.embedding.map(Number)
+    speaker.embeddingModel = row.embedding_model ?? undefined
+  }
+  return speaker
+}
+
+function mapSpeakerProfile(row: SpeakerProfileRow): SpeakerProfile {
+  const profile: SpeakerProfile = {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    displayName: row.display_name,
+    email: row.email ?? undefined,
+    aliases: row.aliases ?? [],
+    confirmedCount: optionalNumber(row.confirmed_count) ?? 0,
+  }
+
+  if (row.voice_embedding?.length) {
+    profile.voiceEmbedding = row.voice_embedding.map(Number)
+    profile.embeddingModel = row.embedding_model ?? undefined
+  }
+  return profile
+}
+
+function mapTranscriptRow(segment: TranscriptRow): TranscriptSegment {
+  const mapped: TranscriptSegment = {
+    id: segment.id,
+    speaker: segment.speaker_label ?? "Speaker",
+    startMs: segment.start_ms,
+    endMs: segment.end_ms,
+    text: segment.text,
+    confidence: segment.confidence === null ? undefined : Number(segment.confidence),
+    language: segment.language ?? undefined,
+  }
+
+  if (segment.speaker_id) mapped.speakerId = segment.speaker_id
+  if (segment.words !== null && segment.words !== undefined) {
+    mapped.words = decodeWords(segment.words)
+  }
+  if (typeof segment.turn_index === "number") mapped.turnIndex = segment.turn_index
+  if (segment.source) mapped.source = segment.source
+  return mapped
+}
+
+/** Columns of `speakers s` joined to its participant `p` (name resolution). */
+function speakerColumns(includeEmbeddings: boolean) {
+  return `
+    s.id, s.meeting_id, s.label, s.display_name, p.name as participant_name,
+    s.participant_id, s.profile_id, s.mapping_status, s.suggestion, s.source,
+    s.talk_time_ms, s.word_count, s.segment_count, s.first_start_ms, s.confirmed_at
+    ${includeEmbeddings ? ", s.embedding, s.embedding_model" : ""}
+  `
+}
+
+const SPEAKER_FROM = `
+  from speakers s
+  left join meeting_participants p
+    on p.id = s.participant_id and p.meeting_id = s.meeting_id
+`
+
+const SPEAKER_PROFILE_COLUMNS = `
+  id, workspace_id, display_name, email, aliases, confirmed_count,
+  voice_embedding, embedding_model, embedding_samples
+`
+
+/** Rows per multi-row segment insert. */
+const SEGMENT_INSERT_BATCH = 500
+
 function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord[] {
   const records = new Map<string, MeetConferenceRecord>()
 
@@ -813,19 +960,26 @@ export function createPostgresMeetingRepository(
       meetArtifactsResult,
       aiRunsResult,
       favoriteResult,
+      speakersResult,
     ] = await Promise.all([
       client.query(
         `
           select
             ts.id,
-            coalesce(s.display_name, s.label) as speaker_label,
+            ts.speaker_id,
+            coalesce(p.name, s.display_name, s.label) as speaker_label,
             ts.start_ms,
             ts.end_ms,
             ts.text,
             ts.confidence,
-            ts.language
+            ts.language,
+            ts.words,
+            ts.turn_index,
+            ts.source
           from transcript_segments ts
           left join speakers s on s.id = ts.speaker_id
+          left join meeting_participants p
+            on p.id = s.participant_id and p.meeting_id = ts.meeting_id
           where ts.meeting_id = $1
           order by ts.start_ms asc
         `,
@@ -962,20 +1116,21 @@ export function createPostgresMeetingRepository(
             [favoriteUserId, base.id]
           )
         : Promise.resolve({ rows: [] as unknown[] }),
+      client.query(
+        `
+          select ${speakerColumns(false)}
+          ${SPEAKER_FROM}
+          where s.meeting_id = $1
+          order by s.first_start_ms asc nulls last, s.label asc
+        `,
+        [base.id]
+      ),
     ])
 
-    const transcript = (transcriptResult.rows as TranscriptRow[]).map(
-      (segment) => ({
-        id: segment.id,
-        speaker: segment.speaker_label ?? "Speaker",
-        startMs: segment.start_ms,
-        endMs: segment.end_ms,
-        text: segment.text,
-        confidence:
-          segment.confidence === null ? undefined : Number(segment.confidence),
-        language: segment.language ?? undefined,
-      })
-    )
+    const transcript = (transcriptResult.rows as TranscriptRow[]).map(mapTranscriptRow)
+    const speakers = (speakersResult.rows as SpeakerRow[])
+      .filter((row) => typeof row.id === "string" && typeof row.label === "string")
+      .map((row) => mapSpeaker(row))
 
     const latestSummary = summaryResult.rows[0] as SummaryRow | undefined
     let decisions: string[] = []
@@ -1029,6 +1184,7 @@ export function createPostgresMeetingRepository(
         meetArtifactsResult.rows as MeetArtifactRow[]
       ),
       aiRuns: (aiRunsResult.rows as AiRunRow[]).map(mapAiRun),
+      ...(speakers.length ? { speakers } : {}),
       participantDetails:
         participantDetails.length > 0
           ? participantDetails
@@ -1186,6 +1342,192 @@ export function createPostgresMeetingRepository(
 
     if (!row) throw new Error(`Participant not found: ${participantId}`)
     return mapParticipant(row)
+  }
+
+  /** Scoped meeting check that also serializes transcript writes (row lock). */
+  async function lockMeetingInScope(db: Queryable, meetingId: string) {
+    const values: unknown[] = [meetingId]
+    const result = await db.query(
+      `select m.id from meetings m where m.id = $1 and ${scoped("m", values)} for update of m`,
+      values
+    )
+
+    if (!result.rows.length) throw new Error(`Meeting not found: ${meetingId}`)
+  }
+
+  /** Speakers of a meeting (call only after the meeting scope check). */
+  async function selectSpeakers(
+    db: Queryable,
+    meetingId: string,
+    options: { ids?: string[]; includeEmbeddings?: boolean; forUpdate?: boolean } = {}
+  ): Promise<SpeakerRow[]> {
+    const values: unknown[] = [meetingId]
+    const idFilter = options.ids ? `and s.id = any(${pushValue(values, options.ids)}::text[])` : ""
+    const result = await db.query(
+      `
+        select ${speakerColumns(Boolean(options.includeEmbeddings))}
+        ${SPEAKER_FROM}
+        where s.meeting_id = $1 ${idFilter}
+        order by s.first_start_ms asc nulls last, s.label asc
+        ${options.forUpdate ? "for update of s" : ""}
+      `,
+      values
+    )
+
+    return result.rows as SpeakerRow[]
+  }
+
+  function existingSpeakerRows(rows: SpeakerRow[]): ExistingSpeakerRow[] {
+    return rows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      source: row.source,
+      mappingStatus: row.mapping_status,
+      resolvedName: row.participant_name ?? row.display_name ?? row.label,
+    }))
+  }
+
+  async function insertSegments(
+    db: Queryable,
+    meetingId: string,
+    segments: Array<TranscriptSegment & { speakerId: string; turnIndex: number; source: string }>,
+    asrRunId: string | undefined
+  ) {
+    for (let offset = 0; offset < segments.length; offset += SEGMENT_INSERT_BATCH) {
+      const batch = segments.slice(offset, offset + SEGMENT_INSERT_BATCH)
+
+      await db.query(
+        `
+          insert into transcript_segments (
+            id, meeting_id, speaker_id, start_ms, end_ms, text, confidence,
+            language, words, turn_index, source, asr_run_id
+          )
+          select u.id, $1, u.speaker_id, u.start_ms, u.end_ms, u.text, u.confidence,
+                 u.language, u.words::jsonb, u.turn_index, u.source, $2
+          from unnest(
+            $3::text[], $4::text[], $5::int[], $6::int[], $7::text[],
+            $8::numeric[], $9::text[], $10::text[], $11::int[], $12::text[]
+          ) as u(
+            id, speaker_id, start_ms, end_ms, text, confidence,
+            language, words, turn_index, source
+          )
+        `,
+        [
+          meetingId,
+          asrRunId ?? null,
+          batch.map((segment) => segment.id),
+          batch.map((segment) => segment.speakerId),
+          batch.map((segment) => Math.round(segment.startMs)),
+          batch.map((segment) => Math.round(segment.endMs)),
+          batch.map((segment) => segment.text),
+          batch.map((segment) => segment.confidence ?? null),
+          batch.map((segment) => segment.language ?? null),
+          batch.map((segment) =>
+            segment.words ? JSON.stringify(encodeWords(segment.words, segment.language)) : null
+          ),
+          batch.map((segment) => segment.turnIndex),
+          batch.map((segment) => segment.source),
+        ]
+      )
+    }
+  }
+
+  /**
+   * One transaction: lock the meeting, plan speakers by label, delete the old
+   * segments, upsert speakers (stats; mapping kept or reset), delete speakers
+   * left without segments, insert the new segments. Never touches
+   * meeting_participants.
+   */
+  async function writeTranscript(
+    meetingId: string,
+    input: ReplaceTranscriptInput,
+    preserveDiarizedMappings = false
+  ) {
+    return withTransaction(client, async (tx) => {
+      await lockMeetingInScope(tx, meetingId)
+
+      const existing = await selectSpeakers(tx, meetingId, { forUpdate: true })
+      const plan = planTranscriptReplacement({
+        existing: existingSpeakerRows(existing),
+        segments: input.segments,
+        speakers: input.speakers,
+        createId,
+        preserveDiarizedMappings,
+      })
+
+      await tx.query(`delete from transcript_segments where meeting_id = $1`, [meetingId])
+      if (plan.deleteIds.length) {
+        await tx.query(`delete from speakers where meeting_id = $1 and id = any($2::text[])`, [
+          meetingId,
+          plan.deleteIds,
+        ])
+      }
+
+      for (const upsert of plan.upserts) {
+        const stats = [
+          upsert.source,
+          upsert.talkTimeMs,
+          upsert.wordCount,
+          upsert.segmentCount,
+          upsert.firstStartMs ?? null,
+          upsert.embedding ?? null,
+          upsert.embeddingModel ?? null,
+        ]
+
+        if (upsert.isNew) {
+          await tx.query(
+            `
+              insert into speakers (
+                id, meeting_id, label, workspace_id, source, talk_time_ms,
+                word_count, segment_count, first_start_ms, embedding,
+                embedding_model, mapping_status
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::real[], $11, 'unmapped')
+            `,
+            [upsert.id, meetingId, upsert.label, workspaceId, ...stats]
+          )
+          continue
+        }
+
+        await tx.query(
+          `
+            update speakers
+            set workspace_id = $3,
+                source = $4,
+                talk_time_ms = $5,
+                word_count = $6,
+                segment_count = $7,
+                first_start_ms = $8,
+                embedding = coalesce($9::real[], embedding),
+                embedding_model = case when $9::real[] is null then embedding_model else $10 end,
+                ${
+                  upsert.resetMapping
+                    ? `mapping_status = 'unmapped', participant_id = null, profile_id = null,
+                       display_name = null, suggestion = null, confirmed_at = null,
+                       confirmed_by_user_id = null,`
+                    : ""
+                }
+                updated_at = now()
+            where id = $1 and meeting_id = $2
+          `,
+          [upsert.id, meetingId, workspaceId, ...stats]
+        )
+      }
+
+      await insertSegments(tx, meetingId, plan.segments, input.asrRunId)
+
+      return {
+        segments: plan.segments as TranscriptSegment[],
+        speakers: (await selectSpeakers(tx, meetingId)).map((row) => mapSpeaker(row)),
+      }
+    })
+  }
+
+  async function requireSpeakerRow(db: Queryable, meetingId: string, speakerId: string) {
+    const [row] = await selectSpeakers(db, meetingId, { ids: [speakerId] })
+
+    if (!row) throw new Error(`Speaker not found: ${speakerId}`)
+    return row
   }
 
   async function latestShare(meetingId: string, activeOnly: boolean) {
@@ -1430,72 +1772,346 @@ export function createPostgresMeetingRepository(
     },
 
     async replaceTranscriptSegments(meetingId, segments) {
-      await withTransaction(client, async (tx) => {
-        await assertMeetingInScope(tx, meetingId)
-        await tx.query(`delete from transcript_segments where meeting_id = $1`, [
-          meetingId,
-        ])
-        await tx.query(`delete from speakers where meeting_id = $1`, [meetingId])
+      // Legacy entry point: keeps speaker labels/sources of segments read
+      // back from the meeting, derives stats, never creates participants.
+      await assertMeetingInScope(client, meetingId)
 
-        const speakerIds = new Map<string, string>()
+      const existing = await selectSpeakers(client, meetingId)
 
-        for (const segment of segments) {
-          let speakerId = speakerIds.get(segment.speaker)
-
-          if (!speakerId) {
-            speakerId = createId("speaker")
-            speakerIds.set(segment.speaker, speakerId)
-            await tx.query(
-              `
-                insert into speakers (id, meeting_id, label, display_name)
-                values ($1, $2, $3, $3)
-              `,
-              [speakerId, meetingId, segment.speaker]
-            )
-          }
-
-          await tx.query(
-            `
-              insert into transcript_segments (
-                id, meeting_id, speaker_id, start_ms, end_ms, text, confidence, language
-              )
-              values ($1, $2, $3, $4, $5, $6, $7, $8)
-            `,
-            [
-              segment.id || createId("seg"),
-              meetingId,
-              speakerId,
-              segment.startMs,
-              segment.endMs,
-              segment.text,
-              segment.confidence ?? null,
-              segment.language ?? null,
-            ]
-          )
-        }
-
-        for (const speakerLabel of speakerIds.keys()) {
-          await tx.query(
-            `
-              insert into meeting_participants (
-                id, meeting_id, name, role, source, attendance_status,
-                speaker_label, confidence
-              )
-              values ($1, $2, $3, 'speaker', 'transcript', 'unknown', $3, 0.65)
-              on conflict (id) do update set
-                speaker_label = excluded.speaker_label,
-                updated_at = now()
-            `,
-            [
-              participantRowId(meetingId, speakerLabel),
-              meetingId,
-              speakerLabel,
-            ]
-          )
-        }
-      })
-
+      await writeTranscript(
+        meetingId,
+        legacySegmentsToTranscript(existingSpeakerRows(existing), segments),
+        true
+      )
       return segments
+    },
+
+    async replaceTranscript(meetingId, input) {
+      return writeTranscript(meetingId, input)
+    },
+
+    async listMeetingSpeakers(meetingId, options = {}) {
+      await assertMeetingInScope(client, meetingId)
+
+      return (
+        await selectSpeakers(client, meetingId, {
+          includeEmbeddings: options.includeEmbeddings,
+        })
+      ).map((row) => mapSpeaker(row, options.includeEmbeddings))
+    },
+
+    async updateMeetingSpeaker(meetingId, speakerId, patch) {
+      await assertMeetingInScope(client, meetingId)
+
+      const values: unknown[] = [speakerId, meetingId]
+      const sets: string[] = []
+      const guards: string[] = []
+
+      if (patch.displayName !== undefined) {
+        sets.push(`display_name = ${pushValue(values, patch.displayName)}`)
+      }
+      if (patch.participantId !== undefined) {
+        const placeholder = pushValue(values, patch.participantId)
+
+        sets.push(`participant_id = ${placeholder}`)
+        // The participant must belong to the same meeting (checked in-statement).
+        if (patch.participantId !== null) {
+          guards.push(
+            `exists (select 1 from meeting_participants mp where mp.id = ${placeholder} and mp.meeting_id = s.meeting_id)`
+          )
+        }
+      }
+      if (patch.profileId !== undefined) {
+        const placeholder = pushValue(values, patch.profileId)
+
+        sets.push(`profile_id = ${placeholder}`)
+        if (patch.profileId !== null) {
+          guards.push(
+            `exists (select 1 from speaker_profiles sp where sp.id = ${placeholder} and sp.workspace_id = ${pushValue(values, workspaceId)})`
+          )
+        }
+      }
+      if (patch.suggestion !== undefined) {
+        sets.push(
+          `suggestion = ${pushValue(
+            values,
+            patch.suggestion === null ? null : JSON.stringify(patch.suggestion)
+          )}::jsonb`
+        )
+      }
+      if (patch.mappingStatus !== undefined) {
+        const placeholder = pushValue(values, patch.mappingStatus)
+
+        sets.push(`mapping_status = ${placeholder}`)
+        sets.push(
+          `confirmed_at = case when ${placeholder} = 'confirmed' then now() else null end`
+        )
+      }
+      if (patch.confirmedByUserId !== undefined) {
+        sets.push(`confirmed_by_user_id = ${pushValue(values, patch.confirmedByUserId)}`)
+      }
+      sets.push("updated_at = now()")
+
+      const result = await client.query(
+        `
+          update speakers s
+          set ${sets.join(", ")}
+          where s.id = $1 and s.meeting_id = $2
+          ${guards.map((guard) => `and ${guard}`).join(" ")}
+          returning s.id
+        `,
+        values
+      )
+
+      if (!result.rows.length) throw new Error(`Speaker not found: ${speakerId}`)
+      return mapSpeaker(await requireSpeakerRow(client, meetingId, speakerId))
+    },
+
+    async mergeMeetingSpeakers(meetingId, sourceId, targetId) {
+      if (sourceId === targetId) throw new Error("Cannot merge a speaker into itself")
+
+      return withTransaction(client, async (tx) => {
+        await lockMeetingInScope(tx, meetingId)
+
+        const rows = await selectSpeakers(tx, meetingId, {
+          ids: [sourceId, targetId],
+          forUpdate: true,
+        })
+        const source = rows.find((row) => row.id === sourceId)
+        const target = rows.find((row) => row.id === targetId)
+
+        if (!source) throw new Error(`Speaker not found: ${sourceId}`)
+        if (!target) throw new Error(`Speaker not found: ${targetId}`)
+
+        // Only speaker_id and turn_index change: text and words are untouched.
+        await tx.query(
+          `update transcript_segments set speaker_id = $3 where meeting_id = $1 and speaker_id = $2`,
+          [meetingId, sourceId, targetId]
+        )
+        await tx.query(
+          `
+            update speakers
+            set talk_time_ms = talk_time_ms + $3,
+                word_count = word_count + $4,
+                segment_count = segment_count + $5,
+                first_start_ms = least(first_start_ms, $6),
+                updated_at = now()
+            where id = $2 and meeting_id = $1
+          `,
+          [
+            meetingId,
+            targetId,
+            optionalNumber(source.talk_time_ms) ?? 0,
+            optionalNumber(source.word_count) ?? 0,
+            optionalNumber(source.segment_count) ?? 0,
+            source.first_start_ms,
+          ]
+        )
+        await tx.query(`delete from speakers where id = $2 and meeting_id = $1`, [
+          meetingId,
+          sourceId,
+        ])
+
+        const segmentRows = (
+          await tx.query(
+            `
+              select id, speaker_id, start_ms
+              from transcript_segments
+              where meeting_id = $1
+              order by start_ms asc, id asc
+            `,
+            [meetingId]
+          )
+        ).rows as Array<{ id: string; speaker_id: string | null; start_ms: number }>
+        const turns = computeTurnIndexes(
+          segmentRows.map((row) => ({ startMs: row.start_ms, speakerId: row.speaker_id })),
+          (row) => row.speakerId ?? ""
+        )
+
+        if (segmentRows.length) {
+          await tx.query(
+            `
+              update transcript_segments ts
+              set turn_index = u.turn_index
+              from unnest($2::text[], $3::int[]) as u(id, turn_index)
+              where ts.id = u.id and ts.meeting_id = $1
+            `,
+            [meetingId, segmentRows.map((row) => row.id), turns]
+          )
+        }
+
+        return mapSpeaker(await requireSpeakerRow(tx, meetingId, targetId))
+      })
+    },
+
+    async setSpeakerSuggestions(meetingId, items) {
+      await assertMeetingInScope(client, meetingId)
+
+      for (const item of items) {
+        // Confirmed / rejected mappings are never overwritten automatically.
+        await client.query(
+          `
+            update speakers s
+            set suggestion = $3::jsonb,
+                mapping_status = coalesce($4, s.mapping_status),
+                participant_id = case when $5::boolean then $6 else s.participant_id end,
+                confirmed_at = case
+                  when coalesce($4, s.mapping_status) = 'confirmed' then now()
+                  else s.confirmed_at
+                end,
+                updated_at = now()
+            where s.id = $1 and s.meeting_id = $2
+              and s.mapping_status not in ('confirmed', 'rejected')
+              and (
+                $6::text is null or exists (
+                  select 1 from meeting_participants mp
+                  where mp.id = $6 and mp.meeting_id = s.meeting_id
+                )
+              )
+          `,
+          [
+            item.speakerId,
+            meetingId,
+            item.suggestion === null ? null : JSON.stringify(item.suggestion),
+            item.mappingStatus ?? null,
+            item.participantId !== undefined,
+            item.participantId ?? null,
+          ]
+        )
+      }
+
+      return (await selectSpeakers(client, meetingId)).map((row) => mapSpeaker(row))
+    },
+
+    async listSpeakerProfiles() {
+      const result = await client.query(
+        `
+          select ${SPEAKER_PROFILE_COLUMNS}
+          from speaker_profiles
+          where workspace_id = $1
+          order by confirmed_count desc, display_name asc
+        `,
+        [workspaceId]
+      )
+
+      return (result.rows as SpeakerProfileRow[]).map(mapSpeakerProfile)
+    },
+
+    async recordConfirmedSpeaker(input) {
+      return withTransaction(client, async (tx) => {
+        await assertMeetingInScope(tx, input.meetingId)
+
+        const speakerResult = await tx.query(
+          `select id, embedding, embedding_model from speakers where id = $1 and meeting_id = $2`,
+          [input.speakerId, input.meetingId]
+        )
+        const speaker = speakerResult.rows[0] as
+          | { id: string; embedding: number[] | null; embedding_model: string | null }
+          | undefined
+
+        if (!speaker) throw new Error(`Speaker not found: ${input.speakerId}`)
+
+        const name = input.participant.name.normalize("NFC").trim().replace(/\s+/gu, " ")
+        const email = input.participant.email?.trim().toLowerCase() || undefined
+        const existingResult = email
+          ? await tx.query(
+              `
+                select ${SPEAKER_PROFILE_COLUMNS}
+                from speaker_profiles
+                where workspace_id = $1 and lower(email) = $2
+                limit 1
+                for update
+              `,
+              [workspaceId, email]
+            )
+          : await tx.query(
+              `
+                select ${SPEAKER_PROFILE_COLUMNS}
+                from speaker_profiles
+                where workspace_id = $1 and email is null and lower(display_name) = $2
+                limit 1
+                for update
+              `,
+              [workspaceId, normalizeProfileName(name)]
+            )
+        const existing = existingResult.rows[0] as SpeakerProfileRow | undefined
+        const embedding = input.embedding ?? speaker.embedding?.map(Number) ?? undefined
+        const embeddingModel = input.embedding
+          ? input.embeddingModel
+          : (speaker.embedding_model ?? undefined)
+        let voiceEmbedding = existing?.voice_embedding?.map(Number) ?? null
+        let profileModel = existing?.embedding_model ?? null
+        let samples = optionalNumber(existing?.embedding_samples) ?? 0
+
+        if (embedding?.length) {
+          const sameModel =
+            voiceEmbedding !== null && profileModel === (embeddingModel ?? null)
+
+          voiceEmbedding = sameModel
+            ? runningMeanEmbedding(voiceEmbedding as number[], samples, embedding)
+            : [...embedding]
+          profileModel = embeddingModel ?? null
+          samples = sameModel ? samples + 1 : 1
+        }
+
+        const profileResult = existing
+          ? await tx.query(
+              `
+                update speaker_profiles
+                set display_name = $3,
+                    aliases = $4::text[],
+                    confirmed_count = confirmed_count + 1,
+                    last_meeting_id = $5,
+                    last_confirmed_at = now(),
+                    voice_embedding = $6::real[],
+                    embedding_model = $7,
+                    embedding_samples = $8,
+                    updated_at = now()
+                where id = $1 and workspace_id = $2
+                returning ${SPEAKER_PROFILE_COLUMNS}
+              `,
+              [
+                existing.id,
+                workspaceId,
+                name,
+                unionAliases(existing.aliases ?? [], input.aliases),
+                input.meetingId,
+                voiceEmbedding,
+                profileModel,
+                samples,
+              ]
+            )
+          : await tx.query(
+              `
+                insert into speaker_profiles (
+                  id, workspace_id, display_name, email, aliases, confirmed_count,
+                  last_meeting_id, last_confirmed_at, voice_embedding,
+                  embedding_model, embedding_samples
+                )
+                values ($1, $2, $3, $4, $5::text[], 1, $6, now(), $7::real[], $8, $9)
+                returning ${SPEAKER_PROFILE_COLUMNS}
+              `,
+              [
+                createId("speaker_profile"),
+                workspaceId,
+                name,
+                email ?? null,
+                unionAliases(input.aliases),
+                input.meetingId,
+                voiceEmbedding,
+                profileModel,
+                samples,
+              ]
+            )
+        const profile = mapSpeakerProfile(profileResult.rows[0] as SpeakerProfileRow)
+
+        await tx.query(
+          `update speakers set profile_id = $1, updated_at = now() where id = $2 and meeting_id = $3`,
+          [profile.id, input.speakerId, input.meetingId]
+        )
+
+        return profile
+      })
     },
 
     async upsertMeetingIntelligence(
@@ -2234,15 +2850,27 @@ export function createPostgresMeetingRepository(
         { speakerLabel },
         meetingId
       )
-
-      await client.query(
+      const speakerResult = await client.query(
         `
-          update speakers
-          set display_name = $3
-          where meeting_id = $1 and label = $2
+          select s.id
+          ${SPEAKER_FROM}
+          where s.meeting_id = $1
+            and (s.label = $2 or coalesce(p.name, s.display_name, s.label) = $2)
+          order by (s.label = $2) desc
+          limit 1
         `,
-        [meetingId, speakerLabel, participant.name]
+        [meetingId, speakerLabel]
       )
+      const speaker = speakerResult.rows[0] as { id: string } | undefined
+
+      // The name reaches segments through the speaker → participant join;
+      // segment text and words are never rewritten.
+      if (speaker) {
+        await this.updateMeetingSpeaker(meetingId, speaker.id, {
+          participantId,
+          mappingStatus: "confirmed",
+        })
+      }
 
       return participant
     },

@@ -1,0 +1,54 @@
+# Hebrew ASR evaluation — Pending real clips/keys
+
+> **Pending real clips/keys.** No real recordings or provider keys were used. Re-run with
+> `npm run asr:evaluate -- --output-md docs/parity/asr-eval.md` once the clip set in
+> `.secrets/asr-eval/manifest.json` and the RunPod/Soniox keys are available.
+>
+> **SYNTHETIC run.** The numbers below come from recorded synthetic fixtures
+> (`--replay tests/fixtures/asr/eval`) and only prove that the harness works.
+> They say nothing about real accuracy, cost or speed.
+
+| Field | Value |
+| --- | --- |
+| Generated | 2026-10-13T01:23:28.141Z |
+| Git SHA | `f7897e8a087460fb339d583faee2e39fe63c585b` |
+| Manifest | `tests/fixtures/asr/eval/manifest.json` |
+| Manifest SHA-256 | `c04e1eb1fa2806fcdbadbe32755d2a3f23147dfd78af6842dc7e0181c5f48401` |
+| Mode | replay (synthetic) |
+| DER collar | 250 ms |
+| Samples | 3 |
+| Tags | 2-speakers ×2, hebrew ×2, latin-terms ×1, meeting ×1, mixed ×1, short ×1 |
+
+## Aggregate
+
+WER/CER are word/character-weighted, DER is reference-speech-weighted, cost per hour is total cost over total audio hours.
+
+| Provider | Samples | Errors | WER | CER | Latin WER | Term recall | DER | RTF | Cost / audio h |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| runpod-ivrit | 3 | 0 | 8.1% | 5.3% | 14.3% | 66.7% | 0.0% | 0.540 | $0.342 |
+| soniox | 3 | 1 | 28.1% | 17.2% | 71.4% | 33.3% | 17.8% | 0.826 | $0.100 |
+
+## Per sample
+
+| Sample | Tags | Provider | Model | Duration | WER | CER | Latin WER | Term recall | DER | Speakers | RTF | Cost / audio h | Error |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| he-intro-01 | hebrew, meeting, 2-speakers | runpod-ivrit | ivrit-ai/whisper-large-v3-turbo-ct2 | 0:11 | 7.1% | 1.3% | — | — | 0.0% | 2 (provider) | 0.455 | $0.311 |  |
+| he-intro-01 | hebrew, meeting, 2-speakers | soniox | stt-async-v3 | 0:11 | 7.1% | 1.3% | — | — | 38.4% | 2 (provider) | 0.818 | $0.100 |  |
+| mixed-tech-01 | mixed, latin-terms, 2-speakers | runpod-ivrit | ivrit-ai/whisper-large-v3-turbo-ct2 | 0:12 | 11.1% | 10.2% | 14.3% | 66.7% | 0.0% | 2 (provider) | 0.500 | $0.342 |  |
+| mixed-tech-01 | mixed, latin-terms, 2-speakers | soniox | stt-async-v3 | 0:12 | 44.4% | 30.7% | 71.4% | 33.3% | 0.0% | 2 (provider) | 0.833 | $0.100 |  |
+| he-short-01 | hebrew, short | runpod-ivrit | ivrit-ai/whisper-large-v3-turbo-ct2 | 0:03 | 0.0% | 0.0% | — | — | — | 1 (provider) | 0.667 | $0.456 |  |
+| he-short-01 | hebrew, short | soniox | — | — | — | — | — | — | — | — | — | — | timeout: Soniox transcription timed out |
+
+## Provider settings
+
+| Provider | Settings |
+| --- | --- |
+| runpod-ivrit | `model=ivrit-ai/whisper-large-v3-turbo-ct2` |
+| soniox | `model=stt-async-v3` |
+
+## Method
+
+- Text normalization: NFKC, niqqud removed, geresh/gershayim/quotes inside words dropped, maqaf/hyphen/slash split words, other punctuation removed, lowercase.
+- Latin WER counts only tokens with Latin letters; term recall counts glossary-term occurrences in the reference reproduced in canonical form.
+- DER: 10 ms frames, 250 ms collar around reference boundaries, overlap counted per reference speaker, optimal (Hungarian) speaker mapping.
+- RTF = processing time / audio duration. This report never contains transcript text.

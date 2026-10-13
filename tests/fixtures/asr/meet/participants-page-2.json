@@ -1,0 +1,21 @@
+{
+  "_synthetic": true,
+  "participants": [
+    {
+      "name": "conferenceRecords/rec-1/participants/p-guest",
+      "earliestStartTime": "2026-10-01T09:01:00Z",
+      "latestEndTime": "2026-10-01T09:20:00Z",
+      "anonymousUser": { "displayName": "Guest Maya" }
+    },
+    {
+      "name": "conferenceRecords/rec-1/participants/p-phone",
+      "earliestStartTime": "2026-10-01T09:02:00Z",
+      "latestEndTime": "2026-10-01T09:10:00Z",
+      "phoneUser": { "displayName": "+972-5x-xxx-1234" }
+    },
+    {
+      "name": "conferenceRecords/rec-1/participants/p-unknown",
+      "earliestStartTime": "2026-10-01T09:03:00Z"
+    }
+  ]
+}

@@ -29,6 +29,7 @@ import {
 } from "@/components/meeting-inbox-panel"
 import { MeetingRightRail } from "@/components/meeting-right-rail"
 import { MeetingWorkspace } from "@/components/meeting-workspace"
+import { localizeSpeakerLabel } from "@/components/speaker-display"
 import { OperationalPage } from "@/components/operational-pages"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
@@ -747,33 +748,10 @@ export function CommandCenterShell({
     toast.success("Participant updated")
   }
 
-  async function assignSpeaker(speakerLabel: string, participantId: string) {
-    if (!selectedMeeting) return
-
-    const response = await fetch(
-      `/api/meetings/${selectedMeeting.id}/speakers/assign`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ speakerLabel, participantId }),
-      }
-    )
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to assign speaker")
-      return
-    }
-
-    setParticipants((current) =>
-      current.map((participant) =>
-        participant.id === participantId
-          ? { ...participant, speakerLabel }
-          : participant
-      )
-    )
-    await refreshMeeting(selectedMeeting.id)
-    toast.success("Speaker mapped to participant")
+  async function handleSpeakersChanged() {
+    // Speaker mapping only changes speaker rows; reload the meeting so the
+    // transcript shows the resolved names.
+    await refreshMeeting(selectedMeeting?.id)
   }
 
   function openTagsDialog() {
@@ -1133,7 +1111,7 @@ export function CommandCenterShell({
         }
         onToggleFavorite={toggleFavorite}
         onShowParticipants={openParticipantsDialog}
-        onAssignSpeaker={assignSpeaker}
+        onSpeakersChanged={handleSpeakersChanged}
         onAddToRoom={addToDefaultRoom}
         onCopyText={copyText}
       />
@@ -1370,23 +1348,30 @@ export function CommandCenterShell({
                           }
                         />
                       </label>
-                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                        Speaker
-                        <input
-                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
-                          placeholder="Speaker"
-                          value={participant.speakerLabel ?? ""}
-                          onChange={(event) =>
-                            setParticipants((current) =>
-                              current.map((item) =>
-                                item.id === participant.id
-                                  ? { ...item, speakerLabel: event.target.value }
-                                  : item
-                              )
+                      <div className="grid gap-1 text-xs font-medium text-muted-foreground">
+                        {dictionary.speakersTitle}
+                        <span className="flex min-h-9 items-center rounded-md border border-dashed border-line px-3 text-sm text-foreground">
+                          {(() => {
+                            const mapped = (selectedMeeting?.speakers ?? []).filter(
+                              (speaker) =>
+                                speaker.participantId === participant.id &&
+                                speaker.mappingStatus === "confirmed"
                             )
-                          }
-                        />
-                      </label>
+
+                            return mapped.length ? (
+                              <bdi>
+                                {mapped
+                                  .map((speaker) =>
+                                    localizeSpeakerLabel(speaker.label, dictionary.speakersGenericLabel)
+                                  )
+                                  .join(", ")}
+                              </bdi>
+                            ) : (
+                              "—"
+                            )
+                          })()}
+                        </span>
+                      </div>
                       <Button
                         variant="outline"
                         className="self-end"

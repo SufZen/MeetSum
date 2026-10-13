@@ -9,6 +9,7 @@ import { promisify } from "node:util"
 
 import { google } from "googleapis"
 
+import { FFMPEG_INPUT_PROTOCOLS } from "@/lib/ai/asr/audio"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
 import {
@@ -434,6 +435,7 @@ async function extractAudio(inputPath: string, outputPath: string) {
     "ffmpeg",
     [
       "-y",
+      ...FFMPEG_INPUT_PROTOCOLS,
       "-i",
       inputPath,
       "-vn",

@@ -1,0 +1,7 @@
+{
+  "_synthetic": true,
+  "error": {
+    "kind": "timeout",
+    "message": "Soniox transcription timed out"
+  }
+}

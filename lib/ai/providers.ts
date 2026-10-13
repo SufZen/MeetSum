@@ -5,33 +5,19 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 
-import {
-  fetch as undiciFetch,
-  Agent as UndiciAgent,
-  FormData as UndiciFormData,
-} from "undici"
-
+import { FFMPEG_INPUT_PROTOCOLS } from "@/lib/ai/asr/audio"
+import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
+import { TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
+import { transcribeWithRouter, type AsrRouterOptions } from "@/lib/ai/asr/router"
+import type { AsrGlossary, AsrResult } from "@/lib/ai/asr/types"
 import {
   buildMeetingIntelligence,
   cleanupTranscriptSegments,
   type SmartTask,
 } from "@/lib/intelligence"
 
-// Long-running local ASR can hold a connection open for many minutes while the
-// model transcribes, sending zero bytes until the final JSON. Two things break
-// that otherwise:
-//   1. Node's built-in fetch (undici) defaults headersTimeout/bodyTimeout to
-//      300s, aborting real transcriptions with a generic "fetch failed" long
-//      before our own AbortController fires. We disable both here; the
-//      AbortController (LOCAL_TRANSCRIPTION_TIMEOUT_MS) remains the real cap.
-//   2. A silent, idle TCP connection is reset by stateful firewalls/NAT after
-//      ~5 minutes (observed: ECONNRESET at ~300s). TCP keepalive probes keep
-//      the socket non-idle so the connection survives a long transcription.
-const longAsrDispatcher = new UndiciAgent({
-  headersTimeout: 0,
-  bodyTimeout: 0,
-  connect: { keepAlive: true, keepAliveInitialDelay: 30_000 },
-})
+export { TranscriptionUnavailableError }
+
 import type {
   MeetingRecord,
   TranscriptSegment,
@@ -231,16 +217,6 @@ export function getSummaryRunMetadata(provider: SummaryProvider): SummaryRunMeta
   }
 }
 
-function shouldPreferLocalHebrewAsr(meeting: MeetingRecord) {
-  const language = meeting.language.toLowerCase()
-
-  return language === "he" || language === "heb" || language === "iw" || language === "mixed"
-}
-
-function inferSpeaker(participant: string | undefined, index: number) {
-  return participant || `Speaker ${index + 1}`
-}
-
 export type GeminiProviderMode = "gemini-developer-api" | "vertex-ai"
 
 export function getGeminiProviderMode(): GeminiProviderMode {
@@ -301,7 +277,8 @@ function normalizeGeminiSegments(
     .filter((segment) => segment.text?.trim())
     .map((segment, index) => ({
       id: `seg_${crypto.randomUUID()}`,
-      speaker: segment.speaker?.trim() || inferSpeaker(meeting.participants[index], index),
+      // No index-based guessing: a segment without a speaker stays unattributed.
+      speaker: segment.speaker?.trim() ?? "",
       startMs: Math.max(0, Number(segment.startMs ?? index * 5000)),
       endMs: Math.max(
         Number(segment.startMs ?? index * 5000) + 1000,
@@ -315,86 +292,6 @@ function normalizeGeminiSegments(
     }))
 
   return cleanupTranscriptSegments(normalized)
-}
-
-type LocalWhisperSegment = {
-  id?: number | string
-  start?: number
-  end?: number
-  startMs?: number
-  endMs?: number
-  text?: string
-  language?: string
-  confidence?: number
-  speaker?: string
-}
-
-type LocalWhisperResponse = {
-  text?: string
-  language?: string
-  segments?: LocalWhisperSegment[]
-}
-
-function normalizeConfidence(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(1, Math.max(0, value))
-    : fallback
-}
-
-export function normalizeLocalWhisperResponse(
-  raw: string | LocalWhisperResponse,
-  meeting: MeetingRecord
-): TranscriptSegment[] {
-  const parsed =
-    typeof raw === "string"
-      ? raw.trim().startsWith("{")
-        ? (JSON.parse(raw) as LocalWhisperResponse)
-        : ({ text: raw } satisfies LocalWhisperResponse)
-      : raw
-  const responseLanguage = parsed.language ?? meeting.language
-  const segments = Array.isArray(parsed.segments) ? parsed.segments : []
-
-  if (segments.length) {
-    return cleanupTranscriptSegments(
-      segments
-        .filter((segment) => segment.text?.trim())
-        .map((segment, index) => {
-          const startMs =
-            typeof segment.startMs === "number"
-              ? segment.startMs
-              : Math.round(Number(segment.start ?? index * 5) * 1000)
-          const endMs =
-            typeof segment.endMs === "number"
-              ? segment.endMs
-              : Math.round(Number(segment.end ?? index * 5 + 5) * 1000)
-
-          return {
-            id: `seg_${crypto.randomUUID()}`,
-            speaker: segment.speaker?.trim() || inferSpeaker(undefined, index),
-            startMs: Math.max(0, startMs),
-            endMs: Math.max(startMs + 1000, endMs),
-            text: segment.text?.trim() ?? "",
-            confidence: normalizeConfidence(segment.confidence, 0.72),
-            language: segment.language ?? responseLanguage,
-          }
-        })
-    )
-  }
-
-  const text = parsed.text?.trim()
-  if (!text) return []
-
-  return cleanupTranscriptSegments([
-    {
-      id: `seg_${crypto.randomUUID()}`,
-      speaker: inferSpeaker(undefined, 0),
-      startMs: 0,
-      endMs: 5000,
-      text,
-      confidence: 0.72,
-      language: responseLanguage,
-    },
-  ])
 }
 
 function getAudioPrompt(meeting: MeetingRecord, compactTimeline = false) {
@@ -470,6 +367,7 @@ async function extractAudioForGemini(inputPath: string, outputPath: string) {
     "ffmpeg",
     [
       "-y",
+      ...FFMPEG_INPUT_PROTOCOLS,
       "-i",
       inputPath,
       "-vn",
@@ -493,6 +391,7 @@ async function compressMediaForInlineGemini(inputPath: string, outputPath: strin
     "ffmpeg",
     [
       "-y",
+      ...FFMPEG_INPUT_PROTOCOLS,
       "-i",
       inputPath,
       "-vn",
@@ -546,17 +445,6 @@ async function waitForGeminiFile(
   throw new Error(`Timed out waiting for Gemini file processing: ${name}`)
 }
 
-/**
- * Thrown when no transcription provider can produce a real transcript, so the
- * job fails honestly instead of persisting fabricated placeholder text.
- */
-export class TranscriptionUnavailableError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "TranscriptionUnavailableError"
-  }
-}
-
 export class HeuristicFallbackProvider
   implements TranscriptionProvider, SummaryProvider
 {
@@ -582,240 +470,6 @@ export class HeuristicFallbackProvider
 
   async summarize(meeting: MeetingRecord) {
     return buildMeetingIntelligence(meeting)
-  }
-}
-
-export class LocalWhisperTranscriptionProvider implements TranscriptionProvider {
-  readonly id = "local-whisper"
-  readonly model: string
-  private readonly fallback = new HeuristicFallbackProvider()
-  private lastDiagnostic: WhisperDiagnostic | undefined
-
-  constructor(
-    private readonly config = getLocalWhisperProviderConfig(),
-    private readonly options: {
-      fetch?: typeof fetch
-      downloadMeetingObjectToFile?: typeof downloadMeetingObjectToFile
-    } = {}
-  ) {
-    this.model = config.model
-  }
-
-  getLastDiagnostic() {
-    return this.lastDiagnostic
-  }
-
-  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
-    const startTime = Date.now()
-
-    if (!this.config.baseUrl) {
-      this.lastDiagnostic = {
-        success: false,
-        error: "LOCAL_TRANSCRIPTION_URL is required for local Whisper",
-        errorCategory: "config",
-        elapsedMs: 0,
-      }
-      throw new Error("LOCAL_TRANSCRIPTION_URL is required for local Whisper")
-    }
-
-    if (!asset?.storageKey) {
-      this.lastDiagnostic = {
-        success: false,
-        error: "No media asset found",
-        errorCategory: "no_media",
-        elapsedMs: 0,
-      }
-      return this.fallback.transcribe(meeting)
-    }
-
-    let tempDir: string | undefined
-
-    try {
-      tempDir = await mkdtemp(path.join(tmpdir(), "meetsum-whisper-"))
-      const inputPath = path.join(
-        tempDir,
-        safeTempFilename(asset.filename, `${meeting.id}.media`)
-      )
-      await (this.options.downloadMeetingObjectToFile ?? downloadMeetingObjectToFile)(
-        asset.storageKey,
-        inputPath
-      )
-
-      const bytes = await readFile(inputPath)
-      const fileSizeBytes = bytes.length
-      console.log(
-        `[LocalWhisper] Starting transcription for ${meeting.id}`,
-        `file=${asset.filename} size=${(fileSizeBytes / 1024 / 1024).toFixed(1)}MB`,
-        `model=${this.config.model} lang=${this.config.language || meeting.language}`,
-        `timeout=${this.config.timeoutMs}ms`
-      )
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
-
-      try {
-        const transcribeUrl = `${this.config.baseUrl}/v1/audio/transcriptions`
-        let response: Response
-
-        if (this.options.fetch) {
-          // Test-injected fetch: use the global FormData/Blob.
-          const formData = new FormData()
-          formData.set(
-            "file",
-            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
-            asset.filename
-          )
-          formData.set("model", this.config.model)
-          formData.set("language", this.config.language || meeting.language)
-          formData.set("response_format", "verbose_json")
-          response = await this.options.fetch(transcribeUrl, {
-            method: "POST",
-            body: formData,
-            signal: controller.signal,
-          })
-        } else {
-          // Real path: build the multipart with undici's OWN FormData/File so
-          // undici's fetch serializes it. A global FormData is not recognized by
-          // the installed undici and serializes to an empty body (HTTP 422).
-          const form = new UndiciFormData()
-          form.set(
-            "file",
-            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
-            asset.filename ?? `${meeting.id}.media`
-          )
-          form.set("model", this.config.model)
-          form.set("language", this.config.language || meeting.language)
-          form.set("response_format", "verbose_json")
-          response = (await undiciFetch(transcribeUrl, {
-            method: "POST",
-            body: form,
-            signal: controller.signal,
-            dispatcher: longAsrDispatcher,
-          })) as unknown as Response
-        }
-
-        const elapsedMs = Date.now() - startTime
-
-        if (!response.ok) {
-          const body = await response.text().catch(() => "")
-          const error = `Local Whisper transcription failed with ${response.status}: ${body}`
-          console.error(`[LocalWhisper] Failed after ${elapsedMs}ms:`, error)
-          this.lastDiagnostic = {
-            success: false,
-            error,
-            errorCategory: response.status >= 500 ? "server_error" : "client_error",
-            httpStatus: response.status,
-            elapsedMs,
-            fileSizeBytes,
-          }
-          throw new Error(error)
-        }
-
-        const contentType = response.headers.get("content-type") ?? ""
-        const raw = contentType.includes("application/json")
-          ? ((await response.json()) as LocalWhisperResponse)
-          : await response.text()
-        const segments = normalizeLocalWhisperResponse(raw, meeting)
-
-        console.log(
-          `[LocalWhisper] Completed in ${elapsedMs}ms:`,
-          `segments=${segments.length}`,
-          `meeting=${meeting.id}`
-        )
-
-        this.lastDiagnostic = {
-          success: segments.length > 0,
-          elapsedMs,
-          segmentCount: segments.length,
-          fileSizeBytes,
-        }
-
-        return segments.length ? segments : this.fallback.transcribe(meeting)
-      } finally {
-        clearTimeout(timeout)
-      }
-    } catch (error) {
-      const elapsedMs = Date.now() - startTime
-
-      if (!this.lastDiagnostic || this.lastDiagnostic.elapsedMs === 0) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.lastDiagnostic = {
-          success: false,
-          error: message,
-          errorCategory: classifyWhisperError(error),
-          elapsedMs,
-        }
-      }
-
-      throw error
-    } finally {
-      if (typeof tempDir === "string") {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
-      }
-    }
-  }
-}
-
-export class AutoTranscriptionProvider implements TranscriptionProvider {
-  readonly id = "auto"
-  readonly model: string
-  private lastRun: TranscriptionRunMetadata
-
-  constructor(
-    private readonly primary: TranscriptionProvider,
-    private readonly fallback: TranscriptionProvider
-  ) {
-    this.model = primary.model
-    this.lastRun = {
-      provider: primary.id,
-      model: primary.model,
-    }
-  }
-
-  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    if (!shouldPreferLocalHebrewAsr(meeting)) {
-      const segments = await this.fallback.transcribe(meeting)
-      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
-      this.lastRun = {
-        ...fallbackRun,
-        fallbackUsed: false,
-      }
-      return segments
-    }
-
-    const startTime = Date.now()
-    try {
-      const segments = await this.primary.transcribe(meeting)
-      this.lastRun = getTranscriptionRunMetadata(this.primary)
-      return segments
-    } catch (error) {
-      const elapsedMs = Date.now() - startTime
-      const errorCategory = classifyWhisperError(error)
-      const fallbackReason = error instanceof Error ? error.message : String(error)
-      console.error(
-        `[AutoTranscriptionProvider] Primary provider '${this.primary.id}' failed after ${elapsedMs}ms`,
-        `category=${errorCategory}`,
-        `falling back to '${this.fallback.id}':`,
-        error
-      )
-      
-      const segments = await this.fallback.transcribe(meeting)
-      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
-      this.lastRun = {
-        ...fallbackRun,
-        fallbackUsed: true,
-        attemptedProvider: this.primary.id,
-        fallbackReason,
-        fallbackCategory: errorCategory,
-        fallbackElapsedMs: elapsedMs,
-      }
-      return segments
-    }
-  }
-
-  getLastRun() {
-    return this.lastRun
   }
 }
 
@@ -990,10 +644,22 @@ export class GeminiSummaryProvider implements SummaryProvider {
   }
 }
 
+export type GeminiUsageMetadata = {
+  promptTokenCount?: number
+  candidatesTokenCount?: number
+  totalTokenCount?: number
+}
+
 export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   readonly id = "gemini"
   readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash"
   private readonly fallback = new HeuristicFallbackProvider()
+  private lastUsage: GeminiUsageMetadata | undefined
+
+  /** Token usage of the last successful Gemini call (for cost estimates). */
+  getLastUsage(): GeminiUsageMetadata | undefined {
+    return this.lastUsage
+  }
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
     const asset = meeting.mediaAssets?.find((item) => item.storageKey)
@@ -1133,6 +799,14 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
         },
       })
 
+      this.lastUsage = response.usageMetadata
+        ? {
+            promptTokenCount: response.usageMetadata.promptTokenCount,
+            candidatesTokenCount: response.usageMetadata.candidatesTokenCount,
+            totalTokenCount: response.usageMetadata.totalTokenCount,
+          }
+        : undefined
+
       const segments = normalizeGeminiSegments(
         parseGeminiTranscriptSegments(response.text ?? "{}"),
         meeting
@@ -1150,24 +824,92 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   }
 }
 
-export function createTranscriptionProvider(): TranscriptionProvider {
-  const mode = getTranscriptionProviderMode()
-  const geminiProvider = isGeminiConfigured()
-    ? new GeminiAudioTranscriptionProvider()
-    : new HeuristicFallbackProvider()
+/** Router result → transcript segments (words, turn index, source `asr`). */
+export function asrResultToTranscriptSegments(result: AsrResult): TranscriptSegment[] {
+  return result.segments.map((segment) => ({
+    id: `seg_${crypto.randomUUID()}`,
+    speaker: segment.speaker,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    text: segment.text,
+    confidence: segment.confidence,
+    language: segment.language ?? result.language,
+    turnIndex: segment.turnIndex,
+    source: "asr",
+    words: segment.words.map((word) => ({
+      startMs: word.startMs,
+      endMs: word.endMs,
+      text: word.text,
+      ...(word.confidence !== undefined ? { confidence: word.confidence } : {}),
+      ...(word.language && word.language !== segment.language ? { language: word.language } : {}),
+    })),
+  }))
+}
 
-  if (mode === "local-whisper" && isLocalWhisperConfigured()) {
-    return new LocalWhisperTranscriptionProvider()
+/**
+ * @deprecated Adapter exposing the M3 ASR router through the legacy
+ * TranscriptionProvider interface. New code calls `transcribeWithRouter`
+ * (lib/ai/asr) directly and persists words/speakers.
+ */
+export class AsrRouterTranscriptionProvider implements TranscriptionProvider {
+  readonly id = "asr-router"
+  readonly model = "asr-router"
+  private lastRun: TranscriptionRunMetadata = { provider: "asr-router", model: "asr-router" }
+  private readonly fallback = new HeuristicFallbackProvider()
+
+  constructor(private readonly options: AsrRouterOptions & { glossary?: AsrGlossary } = {}) {}
+
+  getLastRun() {
+    return this.lastRun
   }
 
-  if (mode === "auto" && isLocalWhisperConfigured()) {
-    return new AutoTranscriptionProvider(
-      new LocalWhisperTranscriptionProvider(),
-      geminiProvider
+  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
+    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
+
+    if (!asset?.storageKey) return this.fallback.transcribe(meeting)
+
+    const result = await transcribeWithRouter(
+      {
+        meetingId: meeting.id,
+        workspaceId: meeting.workspaceId,
+        language: meeting.language,
+        media: {
+          kind: "object",
+          storageKey: asset.storageKey,
+          contentType: asset.contentType,
+          filename: asset.filename,
+          sizeBytes: asset.sizeBytes,
+        },
+        glossary: this.options.glossary ?? DEFAULT_ASR_GLOSSARY,
+        diarize: true,
+      },
+      this.options
     )
-  }
+    const failed = result.attempts.find((attempt) => !attempt.ok)
 
-  return geminiProvider
+    this.lastRun = {
+      provider: result.provider,
+      model: result.model,
+      ...(result.fallbackUsed
+        ? {
+            fallbackUsed: true,
+            attemptedProvider: failed?.provider,
+            fallbackReason: failed?.error,
+            fallbackElapsedMs: failed?.elapsedMs,
+          }
+        : {}),
+    }
+
+    return asrResultToTranscriptSegments(result)
+  }
+}
+
+/**
+ * @deprecated Use `transcribeWithRouter` from lib/ai/asr. Kept as a thin
+ * adapter over the ASR router for callers not yet migrated.
+ */
+export function createTranscriptionProvider(): TranscriptionProvider {
+  return new AsrRouterTranscriptionProvider()
 }
 
 export function createSummaryProvider(): SummaryProvider {

@@ -3,6 +3,7 @@ import type {
   MeetingQualityWarning,
   MeetingRecord,
 } from "@/lib/meetings/repository"
+import { isGenericSpeakerName } from "@/lib/meetings/speakers/names"
 
 function averageTranscriptConfidence(meeting: MeetingRecord) {
   const values = (meeting.transcript ?? [])
@@ -35,7 +36,25 @@ function hasOnlySmartNotesSource(meeting: MeetingRecord) {
   )
 }
 
+/** Speakers holding at least this share of talk time must be named. */
+const GENERIC_SPEAKER_MIN_SHARE = 0.1
+
 function hasGenericSpeakers(meeting: MeetingRecord) {
+  const speakers = meeting.speakers ?? []
+
+  // M3: any speaker with ≥10% of talk time that is neither confirmed nor
+  // named (participant / display name / a real Meet name as label).
+  if (speakers.length) {
+    const totalTalk = speakers.reduce((sum, speaker) => sum + Math.max(0, speaker.talkTimeMs), 0)
+
+    return speakers.some((speaker) => {
+      const share = totalTalk > 0 ? speaker.talkTimeMs / totalTalk : 1 / speakers.length
+      const named = Boolean(speaker.displayName) || !isGenericSpeakerName(speaker.label)
+
+      return share >= GENERIC_SPEAKER_MIN_SHARE && speaker.mappingStatus !== "confirmed" && !named
+    })
+  }
+
   const transcript = meeting.transcript ?? []
 
   if (transcript.length < 2) return false

@@ -1,0 +1,29 @@
+{
+  "_synthetic": true,
+  "transcriptEntries": [
+    {
+      "name": "conferenceRecords/rec-1/transcripts/tr-1/entries/e-1",
+      "participant": "conferenceRecords/rec-1/participants/p-dana",
+      "text": "שלום, אני דנה מהשיווק.",
+      "languageCode": "he-IL",
+      "startTime": "2026-10-01T09:00:03Z",
+      "endTime": "2026-10-01T09:00:07Z"
+    },
+    {
+      "name": "conferenceRecords/rec-1/transcripts/tr-1/entries/e-2",
+      "participant": "conferenceRecords/rec-1/participants/p-ran",
+      "text": "Great, let's start with the Supabase migration.",
+      "languageCode": "en-US",
+      "startTime": "2026-10-01T09:00:08Z",
+      "endTime": "2026-10-01T09:00:12Z"
+    },
+    {
+      "name": "conferenceRecords/rec-1/transcripts/tr-1/entries/e-3",
+      "participant": "conferenceRecords/rec-1/participants/p-unknown",
+      "text": "אני מצטרף באיחור.",
+      "languageCode": "he-IL",
+      "startTime": "2026-10-01T09:00:13Z",
+      "endTime": "2026-10-01T09:00:15Z"
+    }
+  ]
+}

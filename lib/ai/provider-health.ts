@@ -6,6 +6,7 @@ import {
   type GeminiProviderMode,
   type TranscriptionProviderMode,
 } from "@/lib/ai/providers"
+import { getAsrChainConfig, type AsrChainConfig } from "@/lib/ai/asr/router"
 
 
 export type ProviderHealthStatus = {
@@ -16,6 +17,8 @@ export type ProviderHealthStatus = {
     transcriptionMode: TranscriptionProviderMode
     localWhisperConfigured: boolean
   }
+  /** M3 ASR router: effective chains and configured providers. */
+  asr: AsrChainConfig
   configWarnings: string[]
 }
 
@@ -49,7 +52,24 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
 
   // Validate transcription provider
   if (transcriptionMode === "local-whisper" && !localWhisperConfigured) {
-    warnings.push("Local Whisper selected but WHISPER_API_URL is not configured")
+    warnings.push("Local Whisper selected but LOCAL_TRANSCRIPTION_URL is not configured")
+  }
+
+  const asr = getAsrChainConfig()
+
+  if (!asr.chain.length) {
+    warnings.push(
+      "ASR: no transcription provider configured (RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, SONIOX_API_KEY or LOCAL_TRANSCRIPTION_URL)"
+    )
+  }
+  if (
+    asr.providers.some((provider) => provider.id === "runpod-ivrit" && provider.configured) &&
+    !process.env.S3_PUBLIC_ENDPOINT?.trim() &&
+    process.env.MEETSUM_ASR_MEDIA_HANDOFF?.trim() !== "blob"
+  ) {
+    warnings.push(
+      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod receives inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)"
+    )
   }
 
   // GOOGLE_GEMINI_SUMMARY_MODEL is canonical (used by providers/processor);
@@ -67,6 +87,7 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
       transcriptionMode,
       localWhisperConfigured,
     },
+    asr,
     configWarnings: warnings,
   }
 }
