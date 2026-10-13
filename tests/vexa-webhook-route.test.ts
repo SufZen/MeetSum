@@ -172,6 +172,45 @@ describe("POST /api/integrations/vexa/webhook", () => {
     expect(store.events.filter((event) => event.applied)).toHaveLength(1)
   })
 
+  it("a delivery whose apply throws is not deduped: Vexa's retry is applied", async () => {
+    const session = await seed("ws_1")
+    const transition = vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("db down"))
+
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    expect((await send("status-joining")).status).toBe(500)
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("requested")
+
+    const retry = await send("status-joining")
+
+    expect(retry).toEqual({ status: 200, body: { ok: true, applied: true } })
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("joining")
+    expect(store.events.filter((event) => event.vexaEventId === "evt_status_joining")).toHaveLength(1)
+    transition.mockRestore()
+  })
+
+  it("legitimate repeats without event ids (awaiting → needs_help → awaiting) all apply", async () => {
+    const session = await seed("ws_1")
+    const status = (value: string) =>
+      JSON.stringify({ event_type: "meeting.status_change", data: { meeting: { id: 4242, status: value } } })
+    const results = []
+
+    for (const value of ["awaiting_admission", "needs_help", "awaiting_admission", "awaiting_admission"]) {
+      const response = await POST(signed(status(value)), route)
+
+      results.push(await response.json())
+    }
+
+    expect(results).toEqual([
+      { ok: true, applied: true },
+      { ok: true, applied: true },
+      { ok: true, applied: true },
+      // A repeat of the status the session already has changes nothing.
+      { ok: true, applied: false },
+    ])
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("awaiting_admission")
+  })
+
   it("enqueues finalize exactly once for the completed fixture", async () => {
     const session = await seed("ws_1")
 
@@ -179,11 +218,11 @@ describe("POST /api/integrations/vexa/webhook", () => {
       await send(name)
     }
 
-    // A re-delivery with a fresh event id is still the same (meeting, status) event.
+    // A re-delivery with a fresh event id changes nothing and finalizes nothing again.
     const replay = fixture("completed").replace("evt_completed", "evt_completed_again")
     const replayResponse = await POST(signed(replay), route)
 
-    expect(await replayResponse.json()).toEqual({ duplicate: true })
+    expect(await replayResponse.json()).toMatchObject({ applied: false })
 
     const finalizeCalls = enqueueBotJob.mock.calls.filter((call) => (call as unknown[])[0] === "bot.finalize")
 

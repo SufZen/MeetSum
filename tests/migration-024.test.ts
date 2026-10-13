@@ -46,7 +46,7 @@ describe("migration 024 (static)", () => {
 
     expect([...indexes.keys()].sort()).toEqual([
       "uq_bot_events_ws_event_id",
-      "uq_bot_events_ws_status",
+      "uq_bot_events_ws_transition",
       "uq_bot_sessions_calendar",
       "uq_bot_sessions_ws_live_target",
       "uq_bot_sessions_ws_vexa_meeting",
@@ -59,8 +59,8 @@ describe("migration 024 (static)", () => {
     expect(indexes.get("uq_bot_sessions_ws_live_target")).toBe(
       `bot_sessions(workspace_id, platform, native_meeting_id) where status in ${LIVE}`
     )
-    expect(indexes.get("uq_bot_events_ws_status")).toBe(
-      "bot_events(workspace_id, vexa_meeting_id, event_type, coalesce(vexa_status, '')) where vexa_meeting_id is not null and workspace_id is not null and source = 'webhook'"
+    expect(indexes.get("uq_bot_events_ws_transition")).toBe(
+      "bot_events(workspace_id, vexa_meeting_id, event_type, coalesce(vexa_status, ''), coalesce(prev_status, '')) where vexa_meeting_id is not null and workspace_id is not null and source = 'webhook'"
     )
     expect(indexes.get("uq_bot_events_ws_event_id")).toBe(
       "bot_events(workspace_id, vexa_event_id) where vexa_event_id is not null and workspace_id is not null"
@@ -73,6 +73,7 @@ describe("migration 024 (static)", () => {
     expect(migration).toContain("drop index if exists uq_bot_sessions_live_target;")
     expect(migration).toContain("drop index if exists uq_bot_events_status;")
     expect(migration).toContain("drop index if exists uq_bot_events_event_id;")
+    expect(migration).toContain("drop index if exists uq_bot_events_ws_status;")
   })
 
   it("keeps the open-session and webhook lookup indexes", () => {

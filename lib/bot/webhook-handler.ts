@@ -14,9 +14,12 @@ import { verifyVexaSignature } from "@/lib/bot/webhook-verify"
  * The workspace is resolved ONLY from the stored bot_session
  * (`store.getForWebhook`); nothing in the payload can address a workspace.
  * Unknown sessions get a 2xx no-op that looks the same whether or not the
- * meeting exists anywhere. Deliveries are idempotent per
- * (workspace, vexa_meeting_id, event type, status) and per event id. No Vexa
- * call happens inside the request.
+ * meeting exists anywhere. Deliveries are idempotent per event id and per
+ * (workspace, vexa_meeting_id, event type, status, previous status) — the
+ * previous status is Vexa's when the envelope has it, else the session's at
+ * receipt — so awaiting_admission → needs_help → awaiting_admission are three
+ * events. An event whose apply fails is deleted again so Vexa's retry is
+ * reprocessed. No Vexa call happens inside the request.
  */
 
 export const VEXA_WEBHOOK_MAX_BYTES = 256 * 1024
@@ -75,6 +78,8 @@ export type ParsedVexaWebhook = {
   platform?: BotPlatform
   nativeMeetingId?: string
   status?: string
+  /** Vexa's status before this change, when the envelope carries it. */
+  previousStatus?: string
   reason?: string
   provenance?: VexaServiceProvenance
 }
@@ -169,6 +174,15 @@ export function parseVexaWebhook(body: unknown): ParsedVexaWebhook | undefined {
     nativeMeetingId: first(meeting.native_meeting_id, data.native_meeting_id, root.native_meeting_id)
       ?.slice(0, 300),
     status: status?.toLowerCase().slice(0, 50),
+    previousStatus: first(
+      data.old_status,
+      data.previous_status,
+      data.from_status,
+      root.old_status,
+      root.previous_status
+    )
+      ?.toLowerCase()
+      .slice(0, 50),
     reason: first(
       meetingData.reason,
       meeting.reason,
@@ -266,6 +280,7 @@ export async function processVexaWebhook(
     vexaEventId: parsed.eventId,
     eventType: parsed.eventType,
     vexaStatus: parsed.status ?? null,
+    prevStatus: parsed.previousStatus ?? session.status,
     applied: false,
     payload,
     receivedAt: now.toISOString(),
@@ -274,18 +289,30 @@ export async function processVexaWebhook(
   if (recorded.duplicate) return { status: 200, body: { duplicate: true } }
   if (!parsed.status) return { status: 200, body: { ok: true, applied: false } }
 
-  const outcome = await applyVexaSnapshot(
-    store,
-    session,
-    {
-      id: parsed.vexaMeetingId,
-      status: parsed.status,
-      reason: parsed.reason,
-      serviceProvenance: parsed.provenance,
-    },
-    "webhook",
-    { event: { eventId: recorded.event?.id }, at: now }
-  )
+  let outcome: Awaited<ReturnType<typeof applyVexaSnapshot>>
+
+  try {
+    outcome = await applyVexaSnapshot(
+      store,
+      session,
+      {
+        id: parsed.vexaMeetingId,
+        status: parsed.status,
+        reason: parsed.reason,
+        serviceProvenance: parsed.provenance,
+      },
+      "webhook",
+      { event: { eventId: recorded.event?.id }, at: now }
+    )
+  } catch (error) {
+    // Un-record the delivery so Vexa's retry (after our 500) is not deduped.
+    if (recorded.event?.id) {
+      await store
+        .deleteEvent(recorded.event.id, { workspaceId: session.workspaceId })
+        .catch((cleanup: unknown) => console.error("[bot] webhook event cleanup failed", redactBotError(cleanup)))
+    }
+    throw error
+  }
 
   if (outcome.sideEffects.length) {
     // The event is recorded either way; reconcile recovers a failed enqueue.

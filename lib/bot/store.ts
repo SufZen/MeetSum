@@ -40,6 +40,8 @@ export type BotEvent = {
   vexaEventId: string | null
   eventType: string
   vexaStatus: string | null
+  /** Status before this event (Vexa's, else the session's at receipt); part of the webhook dedupe key. */
+  prevStatus: string | null
   applied: boolean
   /** Redacted (no URL queries, no *secret* / *token* keys). */
   payload: Record<string, unknown>
@@ -55,6 +57,7 @@ export type BotEventInput = {
   vexaEventId?: string | null
   eventType: string
   vexaStatus?: string | null
+  prevStatus?: string | null
   applied?: boolean
   payload?: Record<string, unknown>
   receivedAt?: string
@@ -247,6 +250,11 @@ export interface BotSessionStore {
   countCreatedSince(workspaceId: string, since: Date): Promise<number>
   /** Idempotent on the workspace-scoped bot_events unique indexes. */
   recordEvent(input: BotEventInput): Promise<{ duplicate: boolean; event?: BotEvent }>
+  /**
+   * Removes a recorded event whose apply failed, so the provider's retry is
+   * not deduped and gets reprocessed. Workspace-scoped.
+   */
+  deleteEvent(id: string, scope: BotWorkspaceScope): Promise<void>
   /** SYSTEM (retention): empties payloads received before `before`. */
   pruneEventPayloads(before: Date): Promise<number>
   withTransaction<T>(fn: (tx: BotStoreTx) => Promise<T>): Promise<T>

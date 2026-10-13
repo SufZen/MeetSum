@@ -862,14 +862,19 @@ create table if not exists bot_events (
   vexa_event_id text,
   event_type text not null,
   vexa_status text,
+  prev_status text,                                       -- status before the event (webhook dedupe key)
   applied boolean not null default false,
   payload jsonb not null default '{}'::jsonb,             -- redacted
   received_at timestamptz not null default now()
 );
+alter table bot_events add column if not exists prev_status text;
 drop index if exists uq_bot_events_status;
 drop index if exists uq_bot_events_event_id;
-create unique index if not exists uq_bot_events_ws_status
-  on bot_events(workspace_id, vexa_meeting_id, event_type, coalesce(vexa_status, ''))
+-- The previous status is part of the key: awaiting_admission → needs_help →
+-- awaiting_admission are three events, while a redelivery is one.
+drop index if exists uq_bot_events_ws_status;
+create unique index if not exists uq_bot_events_ws_transition
+  on bot_events(workspace_id, vexa_meeting_id, event_type, coalesce(vexa_status, ''), coalesce(prev_status, ''))
   where vexa_meeting_id is not null and workspace_id is not null and source = 'webhook';
 create unique index if not exists uq_bot_events_ws_event_id
   on bot_events(workspace_id, vexa_event_id)

@@ -145,6 +145,7 @@ function rowToBotEvent(row: Row): BotEvent {
     vexaEventId: text(row.vexa_event_id),
     eventType: String(row.event_type),
     vexaStatus: text(row.vexa_status),
+    prevStatus: text(row.prev_status),
     applied: row.applied === true,
     payload: payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {},
     receivedAt: timestamp(row.received_at) ?? new Date(0).toISOString(),
@@ -220,9 +221,9 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
     const result = await client.query(
       `insert into bot_events (
          id, bot_session_id, workspace_id, source, vexa_meeting_id, vexa_event_id,
-         event_type, vexa_status, applied, payload, received_at
+         event_type, vexa_status, applied, payload, received_at, prev_status
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, coalesce($11::timestamptz, now()))
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, coalesce($11::timestamptz, now()), $12)
        on conflict do nothing
        returning *`,
       [
@@ -237,6 +238,7 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
         input.applied ?? false,
         JSON.stringify(input.payload ?? {}),
         input.receivedAt ?? null,
+        input.prevStatus ?? null,
       ]
     )
     const row = (result.rows as Row[])[0]
@@ -550,6 +552,7 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
               vexaMeetingId: event?.vexaMeetingId ?? previous.vexaMeetingId,
               vexaEventId: event?.vexaEventId ?? null,
               vexaStatus: event?.vexaStatus ?? null,
+              prevStatus: previous.status,
               applied,
               payload: event?.payload ?? {},
               receivedAt: at,
@@ -592,6 +595,13 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
 
     async recordEvent(input) {
       return insertEvent(db, input)
+    },
+
+    async deleteEvent(id, scope) {
+      await db.query(`delete from bot_events where id = $1 and workspace_id = $2`, [
+        id,
+        requireWorkspace(scope?.workspaceId),
+      ])
     },
 
     async pruneEventPayloads(before) {

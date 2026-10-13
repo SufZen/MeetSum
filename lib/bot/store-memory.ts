@@ -119,6 +119,7 @@ export function createMemoryBotSessionStore(
   function insertEvent(input: BotEventInput): { duplicate: boolean; event?: BotEvent } {
     const workspaceId = requireWorkspace(input.workspaceId)
     const vexaStatus = input.vexaStatus ?? null
+    const prevStatus = input.prevStatus ?? null
     const duplicate = events.some(
       (event) =>
         event.workspaceId === workspaceId &&
@@ -128,7 +129,8 @@ export function createMemoryBotSessionStore(
             event.source === "webhook" &&
             event.vexaMeetingId === input.vexaMeetingId &&
             event.eventType === input.eventType &&
-            (event.vexaStatus ?? "") === (vexaStatus ?? "")))
+            (event.vexaStatus ?? "") === (vexaStatus ?? "") &&
+            (event.prevStatus ?? "") === (prevStatus ?? "")))
     )
 
     if (duplicate) return { duplicate: true }
@@ -142,6 +144,7 @@ export function createMemoryBotSessionStore(
       vexaEventId: input.vexaEventId ?? null,
       eventType: input.eventType,
       vexaStatus,
+      prevStatus,
       applied: input.applied ?? false,
       payload: structuredClone(input.payload ?? {}),
       receivedAt: input.receivedAt ?? now().toISOString(),
@@ -404,6 +407,7 @@ export function createMemoryBotSessionStore(
           vexaMeetingId: event?.vexaMeetingId ?? previous.vexaMeetingId,
           vexaEventId: event?.vexaEventId ?? null,
           vexaStatus: event?.vexaStatus ?? null,
+          prevStatus: previous.status,
           applied,
           payload: event?.payload ?? {},
           receivedAt: at,
@@ -429,6 +433,13 @@ export function createMemoryBotSessionStore(
 
     async recordEvent(input) {
       return insertEvent(input)
+    },
+
+    async deleteEvent(id, scope) {
+      const workspaceId = requireWorkspace(scope?.workspaceId)
+      const index = events.findIndex((event) => event.id === id && event.workspaceId === workspaceId)
+
+      if (index >= 0) events.splice(index, 1)
     },
 
     async pruneEventPayloads(before) {
