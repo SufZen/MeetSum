@@ -54,11 +54,14 @@ export type Permission =
   | "ops:read"
   | "owners:manage"
   | "workspace:delete"
+  | "comments:write"
 
 const VIEWER_PERMISSIONS = [
   "workspace:read",
   "meeting:read",
   "jobs:read",
+  // M5: viewers can comment (comments additionally need a user principal).
+  "comments:write",
 ] as const satisfies readonly Permission[]
 
 const MEMBER_PERMISSIONS = [

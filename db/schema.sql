@@ -152,6 +152,10 @@ create table if not exists meetings (
   -- M4 (021): media duration, else max(transcript_segments.end_ms).
   duration_ms integer,
   transcript_version integer not null default 0,
+  -- M5 (022): per-meeting summary template and where the title came from.
+  template_key text,
+  title_source text not null default 'source'
+    constraint meetings_title_source_check check (title_source in ('source','ai','user')),
   created_at timestamptz not null default now()
 );
 
@@ -296,6 +300,9 @@ create table if not exists summaries (
   language text not null default 'he',
   model_provider text,
   intelligence_run_id text,
+  -- M5 (022)
+  template_key text,
+  prompt_version text,
   created_at timestamptz not null default now()
 );
 
@@ -322,6 +329,19 @@ create table if not exists action_items (
   origin text not null default 'ai',
   original_title text,
   completed_at timestamptz,
+  -- M5 (022): workspace, owner linkage and parsed due date. workspace_id
+  -- stays nullable in 022; owner_participant_id's FK is added below, after
+  -- meeting_participants.
+  workspace_id text references workspaces(id) on delete cascade,
+  owner_text text,
+  owner_participant_id text,
+  owner_speaker_id text references speakers(id) on delete set null,
+  owner_user_id text references users(id) on delete set null,
+  due_on date,
+  due_text text,
+  due_source text,
+  source_segment_id text,
+  created_by_user_id text references users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -345,6 +365,14 @@ create table if not exists ai_runs (
   error text,
   workspace_id text references workspaces(id) on delete cascade,
   audio_duration_ms integer,
+  -- M5 (022): token usage, prompt/template provenance, batch pricing.
+  input_tokens integer,
+  output_tokens integer,
+  cache_read_tokens integer,
+  cache_write_tokens integer,
+  prompt_version text,
+  template_key text,
+  batch boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -556,8 +584,14 @@ create table if not exists meeting_shares (
   expires_at timestamptz,
   included_sections jsonb not null default '["summary","decisions","action_items","transcript","participants"]'::jsonb,
   created_by text,
+  -- M5 (022): a clip share never resolves as a meeting share. clip_id's FK
+  -- is added below, after meeting_clips.
+  scope text not null default 'meeting',
+  clip_id text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint meeting_shares_scope_check check (
+    (scope='meeting' and clip_id is null) or (scope='clip' and clip_id is not null))
 );
 
 create table if not exists meeting_participants (
@@ -608,6 +642,119 @@ do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'speakers_profile_fk') then
     alter table speakers add constraint speakers_profile_fk
       foreign key (profile_id) references speaker_profiles(id) on delete set null;
+  end if;
+end $$;
+
+-- M5 (022): intelligence parity.
+create table if not exists summary_templates (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  key text not null,                       -- slug; referenced as "custom:<key>"
+  name text not null,
+  description text,
+  language text,                           -- null = any
+  base_template text,                      -- built-in key it extends
+  prompt text not null,                    -- <= 4000 chars (app-validated)
+  sections jsonb not null default '[]'::jsonb, -- SectionSpec[] <= 12
+  created_by_user_id text references users(id) on delete set null,
+  archived_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, key)
+);
+
+create table if not exists meeting_clips (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  title text not null,
+  start_ms integer not null,
+  end_ms integer not null,
+  segment_ids text[] not null default '{}',
+  transcript_excerpt text,
+  render_status text not null default 'pending' check (render_status in ('pending','ready','failed')),
+  storage_key text,
+  render_error text,
+  created_by_user_id text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  check (end_ms > start_ms and start_ms >= 0)
+);
+
+create table if not exists comments (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  target_type text not null check (target_type in ('segment','summary_item','action_item','clip','chapter','meeting')),
+  target_id text not null,
+  parent_id text references comments(id) on delete cascade,
+  author_user_id text not null references users(id) on delete cascade,
+  body text not null,
+  mentions text[] not null default '{}',
+  anchor jsonb not null default '{}'::jsonb,   -- {startMs?, quote?}
+  resolved_at timestamptz,
+  resolved_by_user_id text references users(id) on delete set null,
+  edited_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists reactions (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  target_type text not null check (target_type in ('segment','summary_item','action_item','clip','chapter','comment')),
+  target_id text not null,
+  user_id text not null references users(id) on delete cascade,
+  emoji text not null,
+  created_at timestamptz not null default now(),
+  primary key (target_type, target_id, user_id, emoji)
+);
+
+create table if not exists notifications (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  kind text not null,                     -- mention|reply|task_assigned
+  payload jsonb not null default '{}'::jsonb,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists meeting_analytics (
+  meeting_id text primary key references meetings(id) on delete cascade,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  version integer not null,
+  transcript_hash text not null,
+  metrics jsonb not null,
+  sentiment jsonb,
+  sentiment_ai_run_id text,
+  computed_at timestamptz not null default now()
+);
+
+create table if not exists meeting_generated_docs (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  kind text not null check (kind in ('prep_brief','follow_up_email')),
+  variant text not null,                  -- e.g. 'he:formal'
+  input_hash text not null,
+  content jsonb not null,
+  source_meeting_ids text[] not null default '{}',
+  ai_run_id text,
+  created_by_user_id text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (meeting_id, kind, variant)
+);
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'action_items_owner_participant_id_fkey') then
+    alter table action_items add constraint action_items_owner_participant_id_fkey
+      foreign key (owner_participant_id) references meeting_participants(id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'meeting_shares_clip_id_fkey') then
+    alter table meeting_shares add constraint meeting_shares_clip_id_fkey
+      foreign key (clip_id) references meeting_clips(id) on delete cascade;
   end if;
 end $$;
 
@@ -679,6 +826,23 @@ create index if not exists idx_media_assets_meeting_kind
 
 create index if not exists idx_segment_revisions_segment
   on transcript_segment_revisions(segment_id, revision desc);
+
+create index if not exists idx_action_items_ws_status_due
+  on action_items(workspace_id, status, due_on);
+
+create index if not exists idx_action_items_owner_user
+  on action_items(owner_user_id, status) where owner_user_id is not null;
+
+create index if not exists idx_meeting_clips_meeting
+  on meeting_clips(meeting_id, start_ms) where deleted_at is null;
+
+create index if not exists idx_comments_meeting_target
+  on comments(meeting_id, target_type, target_id);
+
+create index if not exists idx_reactions_meeting on reactions(meeting_id);
+
+create index if not exists idx_notifications_user
+  on notifications(user_id, read_at, created_at desc);
 
 create index if not exists idx_google_identities_workspace
   on google_identities(workspace_id);

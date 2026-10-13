@@ -48,7 +48,10 @@ import {
   getSystemMeetingRepository,
   resolveMeetingWorkspaceId,
 } from "@/lib/meetings/store"
+import { analyzeMeetingJob } from "@/lib/analytics/job"
 import { recordAuditLog } from "@/lib/audit"
+import { renderClipJob } from "@/lib/clips/render"
+import { reanchorMeetingComments } from "@/lib/comments/reanchor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
 import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
@@ -891,6 +894,7 @@ async function processMediaJob(
     speakers,
     asrRunId,
   })
+  await reanchorMeetingComments(meeting.id)
 
   const suggestedSpeakers = await refreshSuggestionsSafely(scope, meeting.id, {
     loadMeetTimeline: meetTimelineLoader(scope, meeting, payload),
@@ -1003,6 +1007,7 @@ async function processIntelligenceOnlyJob(
       ),
       { preserveEdited: true }
     )
+    await reanchorMeetingComments(meeting.id)
   }
 
   const refreshed = await scope.repo.getMeeting(meeting.id)
@@ -1145,6 +1150,7 @@ async function processArtifactImportJob(
     segments: meetSegments,
     speakers: summarizeSpeakerStats(meetSegments, "meet"),
   })
+  await reanchorMeetingComments(meetingId)
   // Meet names only confirm through verified identities (meetSpeakers);
   // import never writes speaker profiles.
   await refreshSuggestionsSafely(scope, meetingId, {
@@ -1301,6 +1307,23 @@ async function dispatchJob(
   }
   if (job.name === "storage.delete") {
     return processStorageDeleteJob(job.data)
+  }
+  if (job.name === "meeting.analyze") {
+    return analyzeMeetingJob({
+      workspaceId: scope.workspaceId,
+      meetingId: requireMeetingId(job.data),
+      repo: scope.repo,
+    })
+  }
+  if (job.name === "clip.render") {
+    const clipId = typeof job.data.clipId === "string" ? job.data.clipId : ""
+
+    if (!clipId) throw toPermanentError(new Error("clipId is required"))
+    return renderClipJob({
+      workspaceId: scope.workspaceId,
+      clipId,
+      meetingId: job.data.meetingId,
+    })
   }
 
   return {}

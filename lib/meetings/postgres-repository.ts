@@ -41,6 +41,7 @@ import {
   MeetingExternalIdConflictError,
   MeetingScopeError,
   NothingToUndoError,
+  notImplementedM5,
   SegmentNotFoundError,
   TranscriptConflictError,
   TranscriptSpeakerNotFoundError,
@@ -3312,6 +3313,27 @@ export function createPostgresMeetingRepository(
 
       if (!row) throw new Error(`Action item not found: ${id}`)
       return mapActionItem(row)
+    },
+
+    // M5 Step 0: stubs that throw "not implemented (M5)".
+    async createActionItem() {
+      return notImplementedM5("createActionItem")
+    },
+
+    async deleteActionItem() {
+      return notImplementedM5("deleteActionItem")
+    },
+
+    async setMeetingTemplate() {
+      return notImplementedM5("setMeetingTemplate")
+    },
+
+    async applyAiTitle() {
+      return notImplementedM5("applyAiTitle")
+    },
+
+    async setMeetingTitle() {
+      return notImplementedM5("setMeetingTitle")
     },
 
     async createJob(input) {

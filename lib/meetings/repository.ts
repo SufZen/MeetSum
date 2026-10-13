@@ -54,6 +54,60 @@ export type ActionItem = {
   origin?: "ai" | "user"
   originalTitle?: string
   completedAt?: string
+  /** Owner as spoken/written (M5); `owner` stays the display name. */
+  ownerText?: string
+  ownerParticipantId?: string
+  ownerSpeakerId?: string
+  ownerUserId?: string
+  /** Calendar due date `YYYY-MM-DD` (M5); `dueDate` stays for compatibility. */
+  dueOn?: string
+  /** Raw due phrase, e.g. "עד יום ראשון" (M5). */
+  dueText?: string
+  dueSource?: ActionItemDueSource
+  sourceSegmentId?: string
+  meetingId?: string
+  workspaceId?: string
+}
+
+export type ActionItemDueSource = "parser" | "ai" | "user"
+
+/**
+ * Action-item edit (M5). Legacy callers send `owner`/`dueDate`; `null` clears
+ * an M5 field. Package B implements the M5 fields.
+ */
+export type ActionItemPatch = {
+  title?: string
+  status?: ActionItem["status"]
+  priority?: ActionItem["priority"]
+  owner?: string
+  dueDate?: string
+  ownerText?: string | null
+  ownerParticipantId?: string | null
+  ownerUserId?: string | null
+  dueOn?: string | null
+  dueText?: string | null
+}
+
+/** A user-created action item (M5). */
+export type CreateActionItemInput = {
+  title: string
+  ownerText?: string
+  ownerParticipantId?: string
+  ownerUserId?: string
+  dueOn?: string
+  dueText?: string
+  priority?: ActionItem["priority"]
+  sourceSegmentId?: string
+  sourceStartMs?: number
+}
+
+export type ActionItemActor = { userId?: string }
+
+export type MeetingTitleSource = "source" | "ai" | "user"
+
+/** Thrown by M5 Step 0 contract stubs until their package lands. */
+export function notImplementedM5(method: string): never {
+  throw new Error(`${method}: not implemented (M5)`)
 }
 
 export type TranscriptSegment = {
@@ -527,6 +581,10 @@ export type MeetingRecord = {
   transcriptEditedAt?: string
   /** Segments with `source='edited'` (M4). */
   editedSegmentCount?: number
+  /** `meetings.template_key`: per-meeting summary template (M5). */
+  templateKey?: string
+  /** Where the title came from (M5); AI titles never overwrite `user`. */
+  titleSource?: MeetingTitleSource
 }
 
 /**
@@ -763,10 +821,25 @@ export type MeetingRepository = {
     provider?: string,
     model?: string
   ) => Promise<MeetingIntelligence>
-  updateActionItem: (
-    id: string,
-    patch: Partial<Pick<ActionItem, "status" | "title" | "owner" | "dueDate" | "priority">>
+  updateActionItem: (id: string, patch: ActionItemPatch) => Promise<ActionItem>
+  /** M5: user-created item (origin `user`, `edited_by_user`). */
+  createActionItem: (
+    meetingId: string,
+    input: CreateActionItemInput,
+    actor: ActionItemActor
   ) => Promise<ActionItem>
+  /** M5: true when a visible item was deleted. */
+  deleteActionItem: (id: string) => Promise<boolean>
+  /** M5: per-meeting summary template; null clears it. */
+  setMeetingTemplate: (id: string, templateKey: string | null) => Promise<MeetingRecord>
+  /** M5: AI title; a no-op (false) when `title_source='user'`. */
+  applyAiTitle: (id: string, title: string) => Promise<boolean>
+  /** M5: sets the title and its source. */
+  setMeetingTitle: (
+    id: string,
+    title: string,
+    source: MeetingTitleSource
+  ) => Promise<MeetingRecord>
   createJob: (input: {
     id?: string
     name: string
@@ -2235,6 +2308,15 @@ export function createInMemoryMeetingRepository(
 
         if (index >= 0) {
           const current = actionItems[index]
+          // M5 Step 0: only the legacy fields are applied (Package B adds the rest).
+          const legacyPatch: Partial<ActionItem> = {}
+
+          if (patch.title !== undefined) legacyPatch.title = patch.title
+          if (patch.owner !== undefined) legacyPatch.owner = patch.owner
+          if (patch.status !== undefined) legacyPatch.status = patch.status
+          if (patch.dueDate !== undefined) legacyPatch.dueDate = patch.dueDate
+          if (patch.priority !== undefined) legacyPatch.priority = patch.priority
+
           const contentEdited =
             patch.title !== undefined ||
             patch.owner !== undefined ||
@@ -2242,7 +2324,7 @@ export function createInMemoryMeetingRepository(
             patch.priority !== undefined
           const updatedItem: ActionItem = {
             ...current,
-            ...patch,
+            ...legacyPatch,
             editedByUser: current.editedByUser === true || contentEdited,
             completedAt:
               patch.status === "done"
@@ -2273,6 +2355,27 @@ export function createInMemoryMeetingRepository(
       }
 
       throw new Error(`Action item not found: ${id}`)
+    },
+
+    // M5 Step 0: stubs that throw "not implemented (M5)".
+    async createActionItem() {
+      return notImplementedM5("createActionItem")
+    },
+
+    async deleteActionItem() {
+      return notImplementedM5("deleteActionItem")
+    },
+
+    async setMeetingTemplate() {
+      return notImplementedM5("setMeetingTemplate")
+    },
+
+    async applyAiTitle() {
+      return notImplementedM5("applyAiTitle")
+    },
+
+    async setMeetingTitle() {
+      return notImplementedM5("setMeetingTitle")
     },
 
     async createJob(input): Promise<JobRecord> {

@@ -99,7 +99,7 @@ describe("/api/me and workspace switching", () => {
       user: { id: viewer.id, email: "viewer@example.com" },
       workspaces: [{ id: workspace.id, name: "Acme", role: "viewer" }],
       activeWorkspaceId: workspace.id,
-      permissions: ["workspace:read", "meeting:read", "jobs:read"],
+      permissions: ["workspace:read", "meeting:read", "jobs:read", "comments:write"],
     })
   })
 

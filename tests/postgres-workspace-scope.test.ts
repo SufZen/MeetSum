@@ -221,6 +221,20 @@ const invocations: Record<
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),
+  // M5 Step 0: stubs that throw "not implemented (M5)" (no SQL yet).
+  createActionItem: (repo) =>
+    repo
+      .createActionItem("meet_1", { title: "Send the deck", dueText: "עד יום ראשון" }, {
+        userId: "user_me",
+      })
+      .catch((error: Error) => error),
+  deleteActionItem: (repo) => repo.deleteActionItem("act_1").catch((error: Error) => error),
+  setMeetingTemplate: (repo) =>
+    repo.setMeetingTemplate("meet_1", "hebrew_business").catch((error: Error) => error),
+  applyAiTitle: (repo) =>
+    repo.applyAiTitle("meet_1", "Budget sync").catch((error: Error) => error),
+  setMeetingTitle: (repo) =>
+    repo.setMeetingTitle("meet_1", "Budget sync", "user").catch((error: Error) => error),
   createJob: (repo) =>
     repo.createJob({ name: "media.ingest", meetingId: "meet_1", payload: {} }),
   updateJob: (repo) => repo.updateJob("job_1", { status: "active" }),

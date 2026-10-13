@@ -12,11 +12,17 @@ import type {
 } from "./types"
 
 export type {
+  Chapter,
   ContentLanguage,
+  IntelligenceGeneration,
   MeetingIntelligence,
   MeetingLanguageMetadata,
   MeetingTag,
   SmartTask,
+  SummaryItem,
+  SummaryItemKind,
+  SummaryItemRef,
+  TemplateSectionOutput,
 } from "./types"
 
 const HEBREW_SCRIPT = /[\u0590-\u05ff]/

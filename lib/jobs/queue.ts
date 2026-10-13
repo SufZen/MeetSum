@@ -22,6 +22,8 @@ export type MeetSumJobName =
   | "media.retention"
   | "media.prepare"
   | "storage.delete"
+  | "meeting.analyze"
+  | "clip.render"
 
 export type MeetSumJobPayload = {
   meetingId?: string
