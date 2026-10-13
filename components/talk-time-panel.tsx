@@ -13,7 +13,8 @@ import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 import { speakerColorVar } from "@/lib/player/speaker-colors"
 import { buildTalkTimeRows, type TimelineSegment } from "@/lib/player/speaker-timeline"
-import { formatClock, formatSpokenTime } from "@/lib/player/time-format"
+import { formatSpokenDuration } from "@/lib/meetings/duration"
+import { formatClock } from "@/lib/player/time-format"
 import { cn } from "@/lib/utils"
 
 export function TalkTimePanel({
@@ -63,7 +64,7 @@ export function TalkTimePanel({
                 </span>
                 <time
                   dir="ltr"
-                  aria-label={formatSpokenTime(row.talkTimeMs, locale)}
+                  aria-label={formatSpokenDuration(row.talkTimeMs, locale)}
                   className="w-14 shrink-0 text-end font-mono text-xs text-fg-3 tabular-nums"
                 >
                   {formatClock(row.talkTimeMs)}

@@ -53,7 +53,7 @@ import type {
 } from "@/lib/meetings/repository"
 import { buildActionItemMarkers } from "@/lib/player/citations"
 import { buildTranscriptIndex } from "@/lib/player/word-index"
-import { meetingDurationMs } from "@/lib/player/time-format"
+import { getMeetingDurationMs } from "@/lib/meetings/duration"
 
 type ReprocessMode = "full" | "summary" | "tasks" | "transcript-cleanup"
 type TabValue = "summary" | "transcript" | "ask" | "tasks" | "prep" | "followup"
@@ -244,7 +244,7 @@ export function MeetingWorkspace({
       mediaBaseUrl={`/api/meetings/${encodeURIComponent(meeting.id)}`}
       media={media}
       segments={segments}
-      durationMs={meetingDurationMs(meeting)}
+      durationMs={getMeetingDurationMs(meeting)}
       initialMs={initialMs}
       markers={markers}
       dictionary={dictionary}

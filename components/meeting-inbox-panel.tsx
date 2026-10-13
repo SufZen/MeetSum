@@ -14,7 +14,7 @@ import type {
   MeetingListItem,
   MeetingListSortMode,
 } from "@/lib/meetings/repository"
-import { formatDurationShort, meetingDurationMs } from "@/lib/player/time-format"
+import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
 
 const quickFilters = [
   ["all", "All Meetings"],
@@ -272,7 +272,7 @@ export function MeetingInboxPanel({
                         <span className="min-w-0 truncate">{source.label}</span>
                         <span>·</span>
                         <span className="shrink-0 [unicode-bidi:isolate]">
-                          {formatDurationShort(meetingDurationMs(meeting), locale)}
+                          {formatDurationLabel(getMeetingDurationMs(meeting), locale)}
                         </span>
                         <span>·</span>
                         <span className="min-w-0 truncate">

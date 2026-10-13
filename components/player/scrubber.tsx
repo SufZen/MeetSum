@@ -12,7 +12,8 @@ import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode
 
 import { usePlayerState } from "@/components/player/meeting-player-provider"
 import { sliderActionForKey } from "@/lib/player/keyboard"
-import { formatClock, formatSpokenTime } from "@/lib/player/time-format"
+import { formatSpokenDuration } from "@/lib/meetings/duration"
+import { formatClock } from "@/lib/player/time-format"
 import { formatMessage } from "@/lib/i18n/dictionaries"
 import { cn } from "@/lib/utils"
 
@@ -93,8 +94,8 @@ export function Scrubber({
   }
 
   const valueText = formatMessage(timeOfTemplate, {
-    current: formatSpokenTime(shownMs, locale),
-    total: formatSpokenTime(durationMs, locale),
+    current: formatSpokenDuration(shownMs, locale),
+    total: formatSpokenDuration(durationMs, locale),
   })
 
   return (

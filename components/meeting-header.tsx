@@ -44,7 +44,7 @@ import { Input } from "@/components/ui/input"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
-import { formatDurationShort, meetingDurationMs } from "@/lib/player/time-format"
+import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
 
 function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "google_meet") return "Google Meet"
@@ -96,7 +96,7 @@ export function MeetingHeader({
   const room = meeting.contexts?.[0]?.name ?? "No room"
   const participantCount =
     meeting.participantDetails?.length || meeting.participants.length || 0
-  const durationMs = meetingDurationMs(meeting)
+  const durationMs = getMeetingDurationMs(meeting)
   const titleDir = directionForLanguage(meeting.language) ?? "auto"
   const showMenu = Boolean(dictionary && ((canWrite && onRename) || (canManage && onDelete)))
   const trimmedTitle = titleDraft.trim()
@@ -166,7 +166,7 @@ export function MeetingHeader({
             </span>
             <span className="flex items-center gap-2">
               <ClockIcon aria-hidden="true" className="size-4" />
-              <span className="[unicode-bidi:isolate]">{formatDurationShort(durationMs, locale)}</span>
+              <span className="[unicode-bidi:isolate]">{formatDurationLabel(durationMs, locale)}</span>
             </span>
             <div className="group relative">
               <button

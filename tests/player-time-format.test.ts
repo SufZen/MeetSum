@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest"
 
+import * as duration from "@/lib/meetings/duration"
 import {
   formatClock,
-  formatDurationShort,
-  formatSpokenTime,
-  meetingDurationMs,
+  formatDurationLabel,
+  formatSpokenDuration,
+  getMeetingDurationMs,
 } from "@/lib/player/time-format"
 
 describe("formatClock", () => {
@@ -17,38 +18,19 @@ describe("formatClock", () => {
   })
 })
 
-describe("formatSpokenTime", () => {
-  it("speaks Hebrew with vav + maqaf before the last part", () => {
-    expect(formatSpokenTime(754_000, "he")).toBe("12 דקות ו־34 שניות")
-    expect(formatSpokenTime(3_661_000, "he")).toBe("1 שעה, 1 דקה ו־1 שנייה")
-    expect(formatSpokenTime(120_000, "he")).toBe("2 דקות")
-    expect(formatSpokenTime(0, "he")).toBe("0 שניות")
+describe("duration helpers come from lib/meetings/duration", () => {
+  it("re-exports Package B's implementations (no stand-ins)", () => {
+    expect(formatClock).toBe(duration.formatTimestamp)
+    expect(formatDurationLabel).toBe(duration.formatDurationLabel)
+    expect(formatSpokenDuration).toBe(duration.formatSpokenDuration)
+    expect(getMeetingDurationMs).toBe(duration.getMeetingDurationMs)
   })
 
-  it("speaks English", () => {
-    expect(formatSpokenTime(754_000, "en")).toBe("12 minutes 34 seconds")
-    expect(formatSpokenTime(3_601_000, "en")).toBe("1 hour 1 second")
-    expect(formatSpokenTime(0, "en")).toBe("0 seconds")
-  })
-})
-
-describe("durations", () => {
-  it("prefers the denormalized meeting duration", () => {
-    expect(meetingDurationMs({ durationMs: 90_000, transcript: [] })).toBe(90_000)
-    expect(
-      meetingDurationMs({
-        transcript: [{ id: "s", speaker: "A", startMs: 0, endMs: 61_000, text: "x" }],
-      })
-    ).toBe(61_000)
-    expect(meetingDurationMs({})).toBeUndefined()
-  })
-
-  it("formats compact labels per locale and never invents a number", () => {
-    expect(formatDurationShort(45 * 60_000, "en")).toBe("45m")
-    expect(formatDurationShort(62 * 60_000, "en")).toBe("1h 02m")
-    expect(formatDurationShort(45 * 60_000, "he")).toBe("45 דק׳")
-    expect(formatDurationShort(62 * 60_000, "he")).toBe("1 שע׳ 02 דק׳")
-    expect(formatDurationShort(undefined, "he")).toBe("—")
-    expect(formatDurationShort(0, "en")).toBe("—")
+  it("speaks and labels durations per locale", () => {
+    expect(formatSpokenDuration(754_000, "he")).toBe("12 דקות ו־34 שניות")
+    expect(formatSpokenDuration(754_000, "en")).toBe("12 minutes 34 seconds")
+    expect(formatDurationLabel(62 * 60_000, "he")).toBe("1 שע׳ 02 דק׳")
+    expect(formatDurationLabel(undefined, "en")).toBe("—")
+    expect(getMeetingDurationMs({ durationMs: 90_000, transcript: [] })).toBe(90_000)
   })
 })
