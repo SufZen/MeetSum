@@ -1441,7 +1441,12 @@ create index if not exists idx_segment_revisions_group on transcript_segment_rev
 update app_settings set value = '"he"'::jsonb where key = 'defaultLocale' and value #>> '{}' in ('pt','es','it');
 update workspace_settings set value = '"he"'::jsonb where key = 'defaultLocale' and value #>> '{}' in ('pt','es','it');
 
--- 031: the share_attempts notification kind
+-- 031: share-link verify throttle state and the share_attempts notification kind
+alter table meeting_shares
+  add column if not exists verify_failures integer not null default 0,
+  add column if not exists verify_window_started_at timestamptz,
+  add column if not exists verify_next_allowed_at timestamptz;
+
 do $$ begin
   alter table notifications drop constraint if exists notifications_kind_check;
   alter table notifications add constraint notifications_kind_check check (kind in

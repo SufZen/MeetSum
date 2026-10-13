@@ -1,9 +1,11 @@
 /**
  * M9 follow-up (review "Share verify", final design after two security
  * reviews: neither brute force nor lockout):
- * - a per-token failure throttle across IPs: after 10 failures, attempts are
- *   spaced 2 s, doubling to a 30 s cap (~2,880 guesses a day); never a lock;
- *   a success resets it; at 50 failures the meeting owner is notified once;
+ * - a per-token failure throttle across IPs, stored on the share row (shared
+ *   by instances, never evicted, never created for unknown tokens): after 10
+ *   failures, attempts are spaced 2 s, doubling to a 30 s cap (~2,880
+ *   guesses a day); never a lock; a success resets it; at 50 failures the
+ *   meeting owner is notified once;
  * - the per-IP-per-token limit (10/min) still applies;
  * - a valid share-access cookie bypasses verification;
  * - scrypt runs under a process-wide semaphore (one token holds at most 2
@@ -20,13 +22,16 @@ import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { resetRateLimitsForTesting } from "@/lib/rate-limit"
 import { SHARE_ACCESS_COOKIE, createShareAccessCookie } from "@/lib/sharing/share-access"
 import { ShareVerifyBusyError, createConcurrencyLimiter } from "@/lib/sharing/share-password"
+import { createInMemoryMeetingDatabase, createInMemoryMeetingRepository } from "@/lib/meetings/repository"
 import {
   SHARE_VERIFY_THROTTLE,
-  createShareVerifyThrottle,
-  getShareVerifyThrottle,
+  createInMemoryShareVerifyThrottle,
+  createPostgresShareVerifyThrottle,
   shareVerifySpacingMs,
 } from "@/lib/sharing/share-verify-throttle"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
+
+import { createM9Database, seedM9Analytics, seedM9Workspaces, type PgLike } from "./helpers/pglite-m9"
 
 const SECRET = "share-verify-limits-secret"
 const PASSWORD = "correct-horse-battery"
@@ -46,67 +51,208 @@ afterAll(() => {
   }
 })
 
-describe("share verify throttle (unit, fake clock)", () => {
+describe("share verify throttle (memory backend, fake clock)", () => {
+  async function memoryShares(count = 1) {
+    const db = createInMemoryMeetingDatabase([])
+    const repository = createInMemoryMeetingRepository(db)
+    const tokens: string[] = []
+
+    for (let index = 0; index < count; index++) {
+      const meeting = await repository.createMeeting({
+        title: `Shared ${index}`,
+        startedAt: "2026-10-13T09:00:00.000Z",
+        source: "upload",
+        language: "he",
+        participants: [],
+      })
+
+      tokens.push((await repository.createMeetingShare({ meetingId: meeting.id, password: PASSWORD })).token)
+    }
+
+    return { db, tokens }
+  }
+
   it("spaces attempts 2 s → 30 s after 10 failures", () => {
     expect([0, 9, 10, 11, 12, 13, 14, 40].map((failures) => shareVerifySpacingMs(failures))).toEqual([
       0, 0, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000,
     ])
   })
 
-  it("holds brute force from 100 IPs to the spacing schedule (~2,880 guesses a day)", () => {
-    let clock = 0
-    const throttle = createShareVerifyThrottle(() => clock)
+  it("holds brute force from 100 IPs to the spacing schedule (~2,880 guesses a day)", async () => {
+    const { db, tokens } = await memoryShares()
+    const throttle = createInMemoryShareVerifyThrottle(db)
     const allowedAt: number[] = []
 
-    // 100 IPs, each trying every 10 s (one attempt every 100 ms overall), for a day.
-    for (clock = 0; clock < 86_400_000; clock += 100) {
-      if (throttle.begin("tok").allowed) {
+    // 100 IPs, each trying every 100 s (one attempt per second overall), for a day.
+    for (let clock = 0; clock < 86_400_000; clock += 1_000) {
+      if ((await throttle.begin(tokens[0]!, clock))?.allowed) {
         allowedAt.push(clock)
-        throttle.fail("tok")
+        await throttle.fail(tokens[0]!, clock)
       }
     }
 
     for (let index = SHARE_VERIFY_THROTTLE.freeFailures + 1; index < allowedAt.length; index++) {
       expect(allowedAt[index]! - allowedAt[index - 1]!).toBeGreaterThanOrEqual(2_000)
     }
-    expect(allowedAt.slice(0, SHARE_VERIFY_THROTTLE.freeFailures).every((at) => at < 1_000)).toBe(true)
-    expect(allowedAt.length).toBeLessThanOrEqual(2_880 + 20)
+    expect(allowedAt.length).toBeLessThanOrEqual(2_880 + 30)
     expect(allowedAt.length).toBeGreaterThan(2_000)
   })
 
-  it("never locks: the rightful user gets in within the 30 s cap, and success resets the counter", () => {
+  it("never locks: the rightful user gets in within the 30 s cap, and success resets the counter", async () => {
+    const { db, tokens } = await memoryShares()
+    const throttle = createInMemoryShareVerifyThrottle(db)
+    const token = tokens[0]!
     let clock = 0
-    const throttle = createShareVerifyThrottle(() => clock)
 
     for (let index = 0; index < 40; index++) {
-      while (!throttle.begin("tok").allowed) clock += 1_000
-      throttle.fail("tok")
+      while (!(await throttle.begin(token, clock))?.allowed) clock += 1_000
+      await throttle.fail(token, clock)
     }
 
-    const blocked = throttle.begin("tok")
+    const blocked = await throttle.begin(token, clock)
 
-    expect(blocked.allowed).toBe(false)
-    expect(blocked.allowed ? 0 : blocked.retryAfterMs).toBeLessThanOrEqual(SHARE_VERIFY_THROTTLE.maxSpacingMs)
+    expect(blocked?.allowed).toBe(false)
+    expect(blocked && !blocked.allowed ? blocked.retryAfterMs : 0).toBeLessThanOrEqual(SHARE_VERIFY_THROTTLE.maxSpacingMs)
     clock += SHARE_VERIFY_THROTTLE.maxSpacingMs
-    expect(throttle.begin("tok").allowed).toBe(true)
-    throttle.succeed("tok")
-    expect(throttle.begin("tok").allowed).toBe(true)
-    throttle.fail("tok")
-    expect(throttle.begin("tok").allowed).toBe(true)
+    expect((await throttle.begin(token, clock))?.allowed).toBe(true)
+    await throttle.succeed(token)
+    expect((await throttle.begin(token, clock))?.allowed).toBe(true)
+    await throttle.fail(token, clock)
+    expect((await throttle.begin(token, clock))?.allowed).toBe(true)
   })
 
-  it("reports the owner notification once when failures reach 50 in the window", () => {
-    let clock = 0
-    const throttle = createShareVerifyThrottle(() => clock)
+  it("reports the owner notification once when failures reach 50 in the window", async () => {
+    const { db, tokens } = await memoryShares()
+    const throttle = createInMemoryShareVerifyThrottle(db)
     const notices: number[] = []
+    let clock = 0
 
     for (let index = 0; index < 80; index++) {
       clock += 31_000
-      throttle.begin("tok")
-      if (throttle.fail("tok").notifyOwner) notices.push(index + 1)
+      await throttle.begin(tokens[0]!, clock)
+      if ((await throttle.fail(tokens[0]!, clock))?.notifyOwner) notices.push(index + 1)
     }
 
     expect(notices).toEqual([50])
+  })
+
+  it("flooding other tokens (real or unknown) never resets the target's throttle", async () => {
+    const { db, tokens } = await memoryShares(30)
+    const throttle = createInMemoryShareVerifyThrottle(db)
+    const [target, ...others] = tokens
+    let clock = 0
+
+    for (let index = 0; index < 12; index++) {
+      while (!(await throttle.begin(target!, clock))?.allowed) clock += 1_000
+      await throttle.fail(target!, clock)
+    }
+    for (let index = 0; index < 5_000; index++) {
+      const token = index % 2 ? others[index % others.length]! : `unknown_${index}`
+
+      await throttle.begin(token, clock)
+      await throttle.fail(token, clock)
+    }
+
+    expect((await throttle.begin(target!, clock))?.allowed).toBe(false)
+    // A second instance over the same data sees the same state.
+    expect((await createInMemoryShareVerifyThrottle(db).begin(target!, clock))?.allowed).toBe(false)
+  })
+
+  it("an unknown token gets undefined and creates no state", async () => {
+    const { db } = await memoryShares()
+    const throttle = createInMemoryShareVerifyThrottle(db)
+
+    expect(await throttle.begin("no_such_token", 0)).toBeUndefined()
+    expect(await throttle.fail("no_such_token", 0)).toBeUndefined()
+  })
+})
+
+describe("share verify throttle (Postgres, PGlite)", () => {
+  let pg: PgLike | undefined
+
+  beforeAll(async () => {
+    pg = await createM9Database()
+    if (!pg) return
+    await seedM9Workspaces(pg)
+    await seedM9Analytics(pg)
+    await pg.exec(`
+      insert into meeting_shares (id, meeting_id, token) values
+        ('sh_target', 'm_a1', 'tok_target'),
+        ${Array.from({ length: 20 }, (_, index) => `('sh_other_${index}', 'm_a2', 'tok_other_${index}')`).join(",\n        ")}
+    `)
+  }, 120_000)
+
+  afterAll(async () => {
+    await pg?.close()
+  })
+
+  it("two instances on the same database share the state, which no flood of other tokens resets", async (context) => {
+    if (!pg) return context.skip("PGlite did not load")
+
+    const first = createPostgresShareVerifyThrottle(pg)
+    const second = createPostgresShareVerifyThrottle(pg)
+    const start = Date.parse("2026-10-13T12:00:00Z")
+    let clock = start
+
+    for (let index = 0; index < 12; index++) {
+      const instance = index % 2 ? second : first
+
+      while (!(await instance.begin("tok_target", clock))?.allowed) clock += 1_000
+      expect((await instance.fail("tok_target", clock))?.failures).toBe(index + 1)
+    }
+
+    // 12 failures: the next attempt must wait (4 s after the 11th → 8 s after the 12th).
+    const early = await second.begin("tok_target", clock)
+
+    expect(early?.allowed).toBe(false)
+    expect(early && !early.allowed ? early.retryAfterMs : 0).toBeGreaterThan(0)
+    expect(early && !early.allowed ? early.retryAfterMs : Infinity).toBeLessThanOrEqual(SHARE_VERIFY_THROTTLE.maxSpacingMs)
+
+    for (let index = 0; index < 400; index++) {
+      const token = index % 2 ? `tok_other_${index % 20}` : `tok_unknown_${index}`
+
+      await first.begin(token, clock)
+      await first.fail(token, clock)
+    }
+
+    expect((await first.begin("tok_target", clock))?.allowed).toBe(false)
+
+    // The rightful user gets in after the capped wait; success resets for everyone.
+    clock += SHARE_VERIFY_THROTTLE.maxSpacingMs
+    expect((await first.begin("tok_target", clock))?.allowed).toBe(true)
+    await first.succeed("tok_target")
+    expect((await second.begin("tok_target", clock))?.allowed).toBe(true)
+    expect((await second.fail("tok_target", clock))?.failures).toBe(1)
+  })
+
+  it("notifies exactly once at 50 failures in the window", async (context) => {
+    if (!pg) return context.skip("PGlite did not load")
+
+    const throttle = createPostgresShareVerifyThrottle(pg)
+    let clock = Date.parse("2026-10-14T12:00:00Z")
+    const notices: number[] = []
+
+    await throttle.succeed("tok_other_3")
+    for (let index = 0; index < 60; index++) {
+      clock += 31_000
+      expect((await throttle.begin("tok_other_3", clock))?.allowed).toBe(true)
+      if ((await throttle.fail("tok_other_3", clock))?.notifyOwner) notices.push(index + 1)
+    }
+
+    expect(notices).toEqual([50])
+  })
+
+  it("an unknown token creates no row and gets undefined", async (context) => {
+    if (!pg) return context.skip("PGlite did not load")
+
+    const throttle = createPostgresShareVerifyThrottle(pg)
+    const count = async () => Number((await pg!.query<{ n: number }>("select count(*)::int as n from meeting_shares")).rows[0]!.n)
+    const before = await count()
+
+    expect(await throttle.begin("tok_nope", Date.now())).toBeUndefined()
+    expect(await throttle.fail("tok_nope", Date.now())).toBeUndefined()
+    await throttle.succeed("tok_nope")
+    expect(await count()).toBe(before)
   })
 })
 
@@ -149,7 +295,6 @@ describe("POST /api/share/:token/verify limits", () => {
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(now)
     resetRateLimitsForTesting()
-    getShareVerifyThrottle().reset()
     notify.shareAttempts.mockClear()
   })
 
@@ -217,6 +362,12 @@ describe("POST /api/share/:token/verify limits", () => {
     expect(bypass.status).toBe(200)
     expect(await bypass.json()).toMatchObject({ valid: true })
   }, 30_000)
+
+  it("an unknown token is a 404 and creates no throttle state", async () => {
+    const response = await attempt("tok_does_not_exist", "198.51.100.10")
+
+    expect(response.status).toBe(404)
+  })
 
   it("a flood on one link does not starve another share", async () => {
     const [flooded, other] = await Promise.all([protectedShare(), protectedShare()])

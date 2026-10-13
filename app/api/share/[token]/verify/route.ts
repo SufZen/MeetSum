@@ -13,7 +13,7 @@ import {
   verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
 import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
-import { getShareVerifyThrottle } from "@/lib/sharing/share-verify-throttle"
+import { getShareVerifyThrottle } from "@/lib/meetings/store"
 import { notifyShareAttempts } from "@/lib/notifications/notify"
 
 /** Password attempts per IP per share token. */
@@ -117,8 +117,10 @@ export const POST = withPublicRoute<{ token: string }>(
     if (password) {
       // Per-token failure spacing across every IP (never a lock): after 10
       // failures attempts are spaced 2 s → 30 s; an early attempt gets 429.
-      const decision = throttle.begin(token)
+      const decision = await throttle.begin(token)
 
+      // The share vanished between the lookup and here: the same 404.
+      if (!decision) return jsonError("Share link not found or expired", 404)
       if (!decision.allowed) {
         const retryAfter = String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000)))
 
@@ -139,18 +141,18 @@ export const POST = withPublicRoute<{ token: string }>(
       }
 
       if (isValid) {
-        throttle.succeed(token)
+        await throttle.succeed(token)
       } else {
-        const { failures, notifyOwner } = throttle.fail(token)
+        const failed = await throttle.fail(token)
 
-        if (notifyOwner && result.meeting.workspaceId) {
+        if (failed?.notifyOwner && result.meeting.workspaceId) {
           // Once per streak: the owner learns the link is being guessed (no password data).
           await notifyShareAttempts({
             workspaceId: result.meeting.workspaceId,
             meetingId: result.meeting.id,
             ownerUserId: result.meeting.ownerUserId,
             shareId: share.id,
-            failures,
+            failures: failed.failures,
           }).catch(() => undefined)
         }
       }

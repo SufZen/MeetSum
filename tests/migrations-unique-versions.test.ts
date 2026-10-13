@@ -76,7 +76,7 @@ describe("migration versions (M6 Step 0)", () => {
     expect(names).toContain("028_integration_token_generation.sql")
     expect(names).toContain("029_integration_refresh_lease.sql")
     expect(names).toContain("030_i18n_notifications_onboarding.sql")
-    expect(names).toContain("031_share_attempts_notification.sql")
+    expect(names).toContain("031_share_verify_throttle.sql")
   })
 
   it("never reuses a version number", () => {
