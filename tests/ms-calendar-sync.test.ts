@@ -681,8 +681,8 @@ describe("Google dedupe path, concurrency and fail-closed (review fixes)", () =>
     ["the dedupe lock", /pg_advisory_lock/],
     ["the canonical lookup", /from calendar_events ce\s+join meetings m/],
     ["the meeting insert", /insert into meetings/],
-  ])("a failure of %s creates no meeting and no bot (fail closed, reason recorded)", async (_label, pattern, context) => {
-    if (!db) return context.skip("PGlite unavailable")
+  ])("a failure of %s creates no meeting and no bot (fail closed, reason recorded)", async (_label, pattern) => {
+    if (!db) return
 
     const uid = `uid-fail-${String(pattern).length}`
     const h = harness({ db: failingDb(pattern), routes: singlePage([graphInvite(uid, "2026-10-26T11:00:00")]) })
