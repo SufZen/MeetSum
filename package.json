@@ -28,6 +28,8 @@
     "backup:full": "sh scripts/backup-full.sh",
     "backup:restore": "sh scripts/restore-full.sh",
     "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
+    "vexa:configure": "tsx scripts/vexa-configure.ts",
+    "bot:simulate": "tsx scripts/bot-simulate.ts",
     "llm:evaluate": "tsx scripts/evaluate-hebrew-summaries.ts",
     "search:backfill": "tsx scripts/search-backfill.ts",
     "search:vector-setup": "tsx scripts/search-vector-setup.ts",

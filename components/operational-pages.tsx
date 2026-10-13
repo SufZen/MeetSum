@@ -41,6 +41,11 @@ import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
+// Only Settings → Live meeting uses it; loaded when that section opens (M7).
+const BotRulesSettings = dynamic(
+  () => import("@/components/bot/bot-rules-settings").then((mod) => mod.BotRulesSettings),
+  { loading: () => <div aria-busy="true" className="ms-card h-48 animate-pulse bg-surface-2" /> }
+)
 // Only the AI settings section uses it; loaded when that section opens.
 const AsrGlossaryEditor = dynamic(
   () => import("@/components/asr-glossary-editor").then((mod) => mod.AsrGlossaryEditor),
@@ -1146,7 +1151,7 @@ export function OperationalPage({
             <OpsCard
               icon={RadioTowerIcon}
               title="Live meeting capture"
-              description="V1 uses native Google Meet recordings, transcripts, and smart notes. MeetSum imports artifacts after the meeting and does not join as a bot yet."
+              description="Native Google Meet recordings, transcripts, and smart notes are imported after the meeting. The MeetSum bot can also join and record online meetings."
               status={
                 meetArtifacts?.setup?.authorized
                   ? "Artifacts authorized"
@@ -2245,7 +2250,7 @@ export function OperationalPage({
             <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
               <p>For Google Meet, enable native recording/transcript/smart notes, then import artifacts after the meeting.</p>
               <p>For Zoom, Teams, or in-person sessions, upload the recording or use the PWA recorder.</p>
-              <p>MeetSum does not join meetings as a bot in V0.1.0.</p>
+              <p>The MeetSum bot can join Meet, Zoom or Teams calls when sent from the Record menu or by auto-join rules.</p>
             </div>
           </OpsCard>
           <OpsCard
@@ -2300,7 +2305,7 @@ export function OperationalPage({
               "Gmail context is connected conceptually but should remain secondary until Calendar and Drive are fully reliable.",
               "Notion and DOCX exports are prepared but not active; PDF and Markdown are first-class.",
               "Vertex AI is prepared as the stable credential path, but production still uses the AI Studio Gemini key until smoke-tested.",
-              "Visible meeting bot and packaged desktop-recorder release polish remain deferred until consent, code-signing, installer, and Meet Media API requirements are proven; the local desktop companion and desktop imports are available through the repo, UI, and API.",
+              "Packaged desktop-recorder release polish remains deferred until code-signing and installer requirements are proven; the local desktop companion and desktop imports are available through the repo, UI, and API.",
             ]}
           />
         </div>
@@ -2467,18 +2472,10 @@ export function OperationalPage({
             <OpsCard
               icon={RadioTowerIcon}
               title="Live meeting capture"
-              description="V0.1.0 stays Google-artifacts-first. Bot capture remains deferred until consent and Meet Media API constraints are proven."
+              description="Google Meet artifacts are imported after meetings. The MeetSum bot can join Meet, Zoom and Teams calls and record them (configure it below)."
               status="Google first"
             >
               <div className="grid gap-3">
-                <SettingRow
-                  title="Online meeting capture"
-                  description="MeetSum imports native recordings/transcripts after meetings instead of joining as a bot."
-                >
-                  <Badge className="rounded-md bg-brand-soft text-brand-text">
-                    artifacts first
-                  </Badge>
-                </SettingRow>
                 <SettingRow
                   title="Meeting content language"
                   description="Autodetect is recommended for mixed Hebrew/English/Portuguese/Spanish/Italian calls."
@@ -2504,6 +2501,7 @@ export function OperationalPage({
               </div>
             </OpsCard>
           ) : null}
+          {settingsSection === "Live meeting" ? <BotRulesSettings dictionary={t} /> : null}
           {settingsSection === "Developer/API" ? (
             <OpsCard
               icon={KeyRoundIcon}

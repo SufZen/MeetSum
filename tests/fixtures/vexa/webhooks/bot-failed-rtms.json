@@ -1,0 +1,16 @@
+{
+  "_synthetic": true,
+  "event_type": "bot.failed",
+  "event_id": "evt_failed_rtms",
+  "data": {
+    "meeting": {
+      "id": 4343,
+      "platform": "zoom",
+      "native_meeting_id": "81234567890",
+      "status": "failed",
+      "data": {
+        "reason": "zoom_requires_rtms"
+      }
+    }
+  }
+}

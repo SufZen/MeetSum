@@ -36,6 +36,9 @@ const CREDENTIAL_ENV = [
   "RUNPOD_ASR_ENDPOINT_ID",
   "SONIOX_API_KEY",
   "LOCAL_TRANSCRIPTION_URL",
+  "LOCAL_TRANSCRIPTION_API_KEY",
+  "MODAL_ASR_URL",
+  "MODAL_ASR_TOKEN",
   "GOOGLE_GEMINI_API_KEY",
   "GOOGLE_GENAI_USE_VERTEXAI",
   "GOOGLE_CLOUD_PROJECT",
@@ -90,7 +93,7 @@ describe("ASR providers never reach the network without credentials", () => {
     const factories = await loadFactories()
     const ids = factories.map(({ create }) => create({ env: {} }).id).sort()
 
-    expect(ids).toEqual(["gemini-legacy", "local-whisper-chunked", "runpod-ivrit", "soniox"].sort())
+    expect(ids).toEqual(["gemini-legacy", "local-whisper-chunked", "modal-worker", "runpod-ivrit", "soniox"].sort())
 
     const modulesWithFactory = new Set(factories.map((entry) => entry.module))
     const providerModules = readdirSync(PROVIDERS_DIR).filter(

@@ -4,6 +4,9 @@ import {
   SlidersHorizontalIcon,
 } from "lucide-react"
 
+import { BotStatusPill } from "@/components/bot/bot-status-pill"
+import { botPillFor, pickInboxPill, type BotPill } from "@/components/bot/bot-ui-state"
+import type { BotSessionsMap } from "@/components/bot/use-bot-sessions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,6 +52,7 @@ function sourceMeta(meeting: MeetingListItem) {
   if (source === "upload") return { label: "Upload", dot: "bg-info", icon: "U" }
   if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-brand", icon: "R" }
   if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-fg-3", icon: "D" }
+  if (source === "meeting_bot") return { label: "MeetSum bot", dot: "bg-brand", icon: "B" }
   return { label: source.replaceAll("_", " "), dot: "bg-warn", icon: "A" }
 }
 
@@ -123,6 +127,7 @@ export function MeetingInboxPanel({
   onPreviousPage,
   onNextPage,
   onSelectMeeting,
+  botSessions,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
@@ -146,6 +151,8 @@ export function MeetingInboxPanel({
   onPreviousPage: () => void
   onNextPage: () => void
   onSelectMeeting: (meetingId: string) => void
+  /** M7: newest bot session per meeting (empty when the bot is disabled). */
+  botSessions?: BotSessionsMap
 }) {
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     hour: "numeric",
@@ -238,7 +245,16 @@ export function MeetingInboxPanel({
             const source = sourceMeta(meeting)
             const selected = selectedMeetingId === meeting.id
             const started = new Date(meeting.startedAt)
-            const pill = statusPill(meeting.status)
+            const meetingPill = statusPill(meeting.status)
+            const botSession = botSessions?.[meeting.id]
+            const botPill = botSession ? botPillFor(botSession.status, botSession.statusReason) : null
+            // One pill per row: live > review > failed > processing.
+            const pill = pickInboxPill<
+              { status: BotPill["status"]; bot?: BotPill; label?: string }
+            >(
+              botPill ? { status: botPill.status, bot: botPill } : null,
+              meetingPill ? { status: meetingPill.status, label: meetingPill.label } : null
+            )
 
             return (
               <div key={meeting.id} className="grid gap-2">
@@ -283,7 +299,11 @@ export function MeetingInboxPanel({
                         </span>
                       </div>
                       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
-                        {pill ? <StatusPill status={pill.status}>{pill.label}</StatusPill> : null}
+                        {pill?.bot ? (
+                          <BotStatusPill pill={pill.bot} dictionary={dictionary} />
+                        ) : pill?.label ? (
+                          <StatusPill status={pill.status}>{pill.label}</StatusPill>
+                        ) : null}
                         {(meeting.tags?.slice(0, 2) ?? []).map((tag) => (
                           <Badge
                             key={tag}

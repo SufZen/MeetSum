@@ -1,0 +1,14 @@
+{
+  "_synthetic": true,
+  "event_type": "meeting.status_change",
+  "event_id": "evt_status_joining",
+  "data": {
+    "meeting": {
+      "id": 4242,
+      "platform": "google_meet",
+      "native_meeting_id": "abc-defg-hij",
+      "status": "joining",
+      "constructed_meeting_url": "https://meet.google.com/abc-defg-hij?authuser=0&token=leak"
+    }
+  }
+}

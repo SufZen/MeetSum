@@ -32,6 +32,7 @@ export type EvalEnv = Record<string, string | undefined>
 
 export const DEFAULT_EVAL_PROVIDERS: AsrProviderId[] = [
   "runpod-ivrit",
+  "modal-worker",
   "soniox",
   "local-whisper-chunked",
 ]
@@ -61,8 +62,13 @@ const PROVIDER_SETTING_KEYS: Record<string, string[]> = {
     "RUNPOD_ASR_MODEL_MULTILINGUAL",
     "RUNPOD_ASR_ENGINE",
   ],
+  "modal-worker": ["MODAL_ASR_MODEL", "MODAL_ASR_MODEL_MULTILINGUAL"],
   soniox: ["SONIOX_MODEL"],
-  "local-whisper-chunked": ["LOCAL_TRANSCRIPTION_MODEL", "LOCAL_TRANSCRIPTION_CHUNK_MS"],
+  "local-whisper-chunked": [
+    "LOCAL_TRANSCRIPTION_MODEL",
+    "LOCAL_TRANSCRIPTION_CHUNK_MS",
+    "LOCAL_TRANSCRIPTION_SEND_HOTWORDS",
+  ],
   "gemini-legacy": ["GOOGLE_GEMINI_AUDIO_MODEL"],
 }
 const COMMON_SETTING_KEYS = ["MEETSUM_ASR_HOTWORDS_MAX_CHARS", "MEETSUM_ASR_USE_INITIAL_PROMPT"]

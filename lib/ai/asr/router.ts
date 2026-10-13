@@ -12,6 +12,7 @@ import { redactAsrErrorMessage, toAsrError, TranscriptionUnavailableError } from
 import type { FetchFn } from "./http"
 import { createGeminiLegacyProvider } from "./providers/gemini-legacy"
 import { createLocalWhisperChunkedProvider } from "./providers/local-whisper-chunked"
+import { createModalWorkerProvider } from "./providers/modal-worker"
 import { createRunpodIvritProvider } from "./providers/runpod-ivrit"
 import type { AsrProviderDeps } from "./providers/shared"
 import { createSonioxProvider } from "./providers/soniox"
@@ -46,12 +47,13 @@ export type AsrRouterStatus = {
   providers: AsrHealth[]
 }
 
-/** The four built-in providers wired to `env` / `fetch`. */
+/** The built-in providers wired to `env` / `fetch`. */
 export function createDefaultAsrProviders(options: { env?: AsrEnv; fetch?: FetchFn; deps?: AsrProviderDeps } = {}): AsrProvider[] {
   const deps: AsrProviderDeps = { ...options.deps, env: options.env ?? options.deps?.env, fetch: options.fetch ?? options.deps?.fetch }
 
   return [
     createRunpodIvritProvider(deps),
+    createModalWorkerProvider(deps),
     createSonioxProvider(deps),
     createLocalWhisperChunkedProvider(deps),
     createGeminiLegacyProvider({ env: deps.env }),
@@ -176,7 +178,8 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
 
   if (!chain.length) {
     throw new TranscriptionUnavailableError(
-      "No ASR provider is configured. Set RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, SONIOX_API_KEY " +
+      "No ASR provider is configured. Set RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, " +
+        "MODAL_ASR_URL + MODAL_ASR_TOKEN, SONIOX_API_KEY " +
         "or LOCAL_TRANSCRIPTION_URL (Gemini needs MEETSUM_ASR_ALLOW_GEMINI=true)."
     )
   }
