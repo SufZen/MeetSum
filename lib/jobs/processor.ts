@@ -37,6 +37,7 @@ import type {
   MeetingRepository,
   MeetingVisibility,
   TranscriptSegment,
+  TranscriptSpeakerInput,
 } from "@/lib/meetings/repository"
 import { summarizeSpeakerStats } from "@/lib/meetings/speakers/stats"
 import { refreshSpeakerSuggestions } from "@/lib/meetings/speakers/suggest"
@@ -560,6 +561,36 @@ function toTranscriptSegments(result: AsrRouterResult): TranscriptSegment[] {
   })
 }
 
+/**
+ * Cleaned ASR transcript plus the speaker rows to persist. Cleanup can drop
+ * filler/duplicate segments, so speaker stats are derived from the cleaned
+ * transcript (embeddings carried over from the provider by label) and turn
+ * indexes are left for the transcript plan to recompute.
+ */
+export function buildAsrTranscript(result: AsrRouterResult): {
+  transcript: TranscriptSegment[]
+  speakers: TranscriptSpeakerInput[]
+} {
+  const transcript = cleanupTranscriptSegments(toTranscriptSegments(result), {
+    rewriteTerms: false,
+  }).map((segment) => {
+    const rest = { ...segment }
+
+    delete rest.turnIndex
+    return rest
+  })
+  const provided = new Map(result.speakers.map((speaker) => [speaker.label, speaker]))
+  const speakers = summarizeSpeakerStats(transcript, "asr").map((stats) => {
+    const given = provided.get(stats.label)
+
+    return given?.embedding
+      ? { ...stats, embedding: given.embedding, embeddingModel: given.embeddingModel }
+      : stats
+  })
+
+  return { transcript, speakers }
+}
+
 /** Segment confidence weighted by word count (segments without one skipped). */
 export function wordWeightedConfidence(segments: readonly TranscriptSegment[]) {
   let total = 0
@@ -697,9 +728,7 @@ async function processMediaJob(
     inputAsset,
   })
 
-  const transcript = cleanupTranscriptSegments(toTranscriptSegments(result), {
-    rewriteTerms: false,
-  })
+  const { transcript, speakers } = buildAsrTranscript(result)
   const wordCount = transcript.reduce(
     (sum, segment) => sum + (segment.words?.length ?? 0),
     0
@@ -723,7 +752,8 @@ async function processMediaJob(
     rtf: result.durationMs > 0 ? Number((elapsedMs / result.durationMs).toFixed(4)) : null,
     billedSeconds: result.cost.billedSeconds,
     costBasis: result.cost.basis,
-    warnings: result.warnings,
+    // Warnings can carry provider text (e.g. diarization_failed: ...).
+    warnings: result.warnings.map(redactAsrErrorMessage),
     ...inputAsset,
     confidence,
   }
@@ -766,16 +796,7 @@ async function processMediaJob(
   })
   await scope.repo.replaceTranscript(meeting.id, {
     segments: transcript,
-    speakers: result.speakers.map((speaker) => ({
-      label: speaker.label,
-      source: "asr",
-      talkTimeMs: speaker.talkTimeMs,
-      wordCount: speaker.wordCount,
-      segmentCount: speaker.segmentCount,
-      firstStartMs: speaker.firstStartMs,
-      embedding: speaker.embedding,
-      embeddingModel: speaker.embeddingModel,
-    })),
+    speakers,
     asrRunId,
   })
 

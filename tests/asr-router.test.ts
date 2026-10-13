@@ -239,6 +239,67 @@ describe("transcribeWithRouter", () => {
     expect(soniox.transcribe).not.toHaveBeenCalled()
   })
 
+  it("falls through an empty transcript of real-length audio to the next provider", async () => {
+    const empty: AsrResult = { ...result("runpod-ivrit"), durationMs: 60_000, segments: [], speakers: [] }
+    const runpod = fakeProvider("runpod-ivrit", [empty])
+    const soniox = fakeProvider("soniox", [result("soniox")])
+    const routed = await transcribeWithRouter(request(), { env: {}, providers: [runpod.provider, soniox.provider], breaker })
+
+    expect(routed.provider).toBe("soniox")
+    expect(routed.fallbackUsed).toBe(true)
+    expect(routed.attempts).toEqual([
+      expect.objectContaining({ provider: "runpod-ivrit", ok: false, kind: "no_speech" }),
+      expect.objectContaining({ provider: "soniox", ok: true }),
+    ])
+    expect((await breaker.status("runpod-ivrit")).failures).toBe(0)
+  })
+
+  it("returns an empty result only when the last provider is empty too", async () => {
+    const empty = (id: AsrProviderId): AsrResult => ({ ...result(id), durationMs: 60_000, segments: [], speakers: [] })
+    const runpod = fakeProvider("runpod-ivrit", [empty("runpod-ivrit")])
+    const soniox = fakeProvider("soniox", [empty("soniox")])
+    const routed = await transcribeWithRouter(request(), { env: {}, providers: [runpod.provider, soniox.provider], breaker })
+
+    expect(routed.provider).toBe("soniox")
+    expect(routed.segments).toEqual([])
+    expect(routed.attempts).toEqual([
+      expect.objectContaining({ provider: "runpod-ivrit", ok: false, kind: "no_speech" }),
+      expect.objectContaining({ provider: "soniox", ok: true }),
+    ])
+  })
+
+  it("returns the earlier empty result when every later provider fails", async () => {
+    const empty: AsrResult = { ...result("runpod-ivrit"), durationMs: 60_000, segments: [], speakers: [] }
+    const runpod = fakeProvider("runpod-ivrit", [empty])
+    const soniox = fakeProvider("soniox", [serverError("soniox")])
+    const routed = await transcribeWithRouter(request(), { env: {}, providers: [runpod.provider, soniox.provider], breaker })
+
+    expect(routed.provider).toBe("runpod-ivrit")
+    expect(routed.segments).toEqual([])
+    expect(routed.fallbackUsed).toBe(false)
+  })
+
+  it("keeps a short empty clip as the final answer without trying other providers", async () => {
+    const empty: AsrResult = { ...result("runpod-ivrit"), durationMs: 3000, segments: [], speakers: [] }
+    const runpod = fakeProvider("runpod-ivrit", [empty])
+    const soniox = fakeProvider("soniox", [result("soniox")])
+    const routed = await transcribeWithRouter(request(), { env: {}, providers: [runpod.provider, soniox.provider], breaker })
+
+    expect(routed.segments).toEqual([])
+    expect(soniox.transcribe).not.toHaveBeenCalled()
+  })
+
+  it("continues past a provider payload limit (HTTP 413) without opening its breaker", async () => {
+    const { markMediaSpecific } = await import("@/lib/ai/asr/errors")
+    const tooLarge = markMediaSpecific(new AsrError("HTTP 413", "config", "runpod-ivrit", false, 413))
+    const runpod = fakeProvider("runpod-ivrit", [tooLarge])
+    const soniox = fakeProvider("soniox", [result("soniox")])
+    const routed = await transcribeWithRouter(request(), { env: {}, providers: [runpod.provider, soniox.provider], breaker })
+
+    expect(routed.provider).toBe("soniox")
+    expect((await breaker.status("runpod-ivrit")).open).toBe(false)
+  })
+
   it("skips unconfigured providers and throws TranscriptionUnavailableError on an empty chain", async () => {
     const runpod = fakeProvider("runpod-ivrit", [result("runpod-ivrit")], false)
     const soniox = fakeProvider("soniox", [result("soniox")])
@@ -352,6 +413,23 @@ describe("circuit breaker", () => {
     expect((await broken.status("soniox")).open).toBe(true)
   })
 
+  it("redacts presigned URLs and keys before storing lastError", async () => {
+    const store = new MemoryBreakerStore()
+    const redacting = createCircuitBreaker({ store, threshold: 3 })
+    const leaky = "RunPod job failed: could not fetch https://media.example.com/asr-handoff/h1.ogg?X-Amz-Signature=secret123 api_key=sk-live-abc"
+
+    await redacting.recordFailure("runpod-ivrit", new AsrError(leaky, "server", "runpod-ivrit", true))
+    await redacting.recordFailure("soniox", new AsrError(`Soniox: ${leaky}`, "auth", "soniox", false))
+
+    for (const id of ["runpod-ivrit", "soniox"] as const) {
+      const stored = JSON.stringify(await store.get(id))
+
+      expect(stored).toContain("https://media.example.com/asr-handoff/h1.ogg?[redacted]")
+      expect(stored).not.toContain("secret123")
+      expect(stored).not.toContain("sk-live-abc")
+    }
+  })
+
   it("ignores media-specific errors", async () => {
     const { markMediaSpecific } = await import("@/lib/ai/asr/errors")
 
@@ -383,6 +461,35 @@ describe("router status", () => {
       expect.objectContaining({ provider: "soniox", configured: true, healthy: false, lastError: expect.stringContaining("Timed out") }),
       expect.objectContaining({ provider: "local-whisper-chunked", configured: false, healthy: null }),
     ])
+  })
+
+  it("redacts breaker and health lastError in the status payload", async () => {
+    const runpod = fakeProvider("runpod-ivrit", [result("runpod-ivrit")])
+    const soniox = fakeProvider("soniox", [result("soniox")])
+    const leakyStore = new MemoryBreakerStore()
+
+    await leakyStore.set(
+      "runpod-ivrit",
+      { failures: 1, lastError: "fetch https://s3.example.com/x.ogg?X-Amz-Signature=topsecret" },
+      60_000
+    )
+    soniox.provider.healthCheck = async () => ({
+      provider: "soniox",
+      configured: true,
+      healthy: false,
+      lastError: "Soniox: https://api.example.com/v1?token=leaky",
+    })
+
+    const status = await getAsrRouterStatus({
+      env: {},
+      providers: [runpod.provider, soniox.provider],
+      breaker: createCircuitBreaker({ store: leakyStore }),
+    })
+    const payload = JSON.stringify(status)
+
+    expect(payload).not.toContain("topsecret")
+    expect(payload).not.toContain("leaky")
+    expect(payload).toContain("?[redacted]")
   })
 
   it("exposes a synchronous configuration view", () => {

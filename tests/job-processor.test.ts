@@ -739,6 +739,74 @@ describe("processJob ASR router (M3)", () => {
     expect(stored?.status).toBe("completed")
   })
 
+  it("derives speaker rows and turns from the cleaned transcript, keeping embeddings", async () => {
+    const { meeting } = await seedWithAsset()
+    const base = routerResult()
+    const replaceTranscript = vi.spyOn(mocks.repository, "replaceTranscript")
+
+    mocks.transcribe.mockResolvedValue(
+      routerResult({
+        segments: [
+          base.segments[0],
+          // Punctuation-only: cleanup drops it, so Speaker 3 must vanish.
+          {
+            startMs: 2_100,
+            endMs: 2_400,
+            text: "…",
+            speaker: "Speaker 3",
+            turnIndex: 1,
+            words: [{ startMs: 2_100, endMs: 2_400, text: "…" }],
+          },
+          { ...base.segments[1], turnIndex: 2 },
+        ],
+        speakers: [
+          { ...base.speakers[0], talkTimeMs: 99_999, embedding: [0.1, 0.2], embeddingModel: "pyannote/test" },
+          { label: "Speaker 3", talkTimeMs: 300, wordCount: 1, segmentCount: 1, firstStartMs: 2_100 },
+          base.speakers[1],
+        ],
+      })
+    )
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    const input = replaceTranscript.mock.calls[0][1]
+
+    expect(input.speakers?.map((speaker) => speaker.label)).toEqual(["Speaker 1", "Speaker 2"])
+    expect(input.speakers?.[0]).toMatchObject({
+      source: "asr",
+      talkTimeMs: 2_000,
+      wordCount: 3,
+      segmentCount: 1,
+      embedding: [0.1, 0.2],
+      embeddingModel: "pyannote/test",
+    })
+    expect(input.segments.every((segment) => segment.turnIndex === undefined)).toBe(true)
+
+    const stored = await mocks.repository.getMeeting(meeting.id)
+
+    expect(stored?.transcript?.map((segment) => segment.turnIndex)).toEqual([0, 1])
+  })
+
+  it("redacts provider warnings before storing them in ai_runs metadata", async () => {
+    const { meeting } = await seedWithAsset()
+
+    mocks.transcribe.mockResolvedValue(
+      routerResult({
+        warnings: ["diarization_failed: GET https://s3.example.com/asr-handoff/h1.ogg?X-Amz-Signature=sig123 failed"],
+      })
+    )
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    const [run] = aiRunInserts().filter((values) => values[3] === "audio.transcribe")
+    const metadata = run[5] as string
+
+    expect(metadata).not.toContain("sig123")
+    expect(JSON.parse(metadata).warnings).toEqual([
+      "diarization_failed: GET https://s3.example.com/asr-handoff/h1.ogg?[redacted] failed",
+    ])
+  })
+
   it("records a failed ai_run per failed attempt and the fallback on success", async () => {
     const { meeting } = await seedWithAsset()
 

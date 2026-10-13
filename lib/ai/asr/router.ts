@@ -138,6 +138,9 @@ export function getEffectiveAsrChain(language: string, options: AsrRouterOptions
   return resolveProviders(resolveAsrChain(language, env), providers, env).map((provider) => provider.id)
 }
 
+/** Empty transcripts of audio longer than this fall through to the next provider. */
+export const EMPTY_RESULT_FALLBACK_MIN_MS = 5000
+
 function emptyResult(provider: AsrProvider, req: AsrRequest, warning: string): AsrResult {
   return {
     provider: provider.id,
@@ -157,8 +160,11 @@ function emptyResult(provider: AsrProvider, req: AsrRequest, warning: string): A
 /**
  * Transcribes through the configured provider chain. Unconfigured providers
  * are skipped, circuit-open providers too. `bad_input` stops the chain
- * (the media is the problem); `no_speech` yields an empty result; any
- * other failure moves on to the next provider. When everything fails an
+ * (the media is the problem); `no_speech` yields an empty result. An empty
+ * transcript of audio longer than {@link EMPTY_RESULT_FALLBACK_MIN_MS} is
+ * recorded as a failed `no_speech` attempt and the next provider tries;
+ * it is returned only when no later provider does better. Any other
+ * failure moves on to the next provider. When everything fails an
  * {@link AsrChainError} is thrown, retryable if any failure was.
  */
 export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptions = {}): Promise<AsrRouterResult> {
@@ -178,6 +184,8 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
   const attempts: AsrAttempt[] = []
   const skipped: string[] = []
   let anyRetryable = false
+  /** First empty transcript of real-length audio, returned if nothing better comes. */
+  let emptyFallback: { result: AsrResult; index: number } | undefined
 
   for (const [index, provider] of chain.entries()) {
     if (req.signal?.aborted) {
@@ -198,6 +206,22 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
       const result = await provider.transcribe(req)
 
       await breaker.recordSuccess(provider.id)
+
+      if (!result.segments.length && result.durationMs > EMPTY_RESULT_FALLBACK_MIN_MS && index < chain.length - 1) {
+        // Several seconds of audio and no words: a provider miss (VAD, wrong
+        // language) is likelier than silence, so let the next provider try.
+        attempts.push({
+          provider: provider.id,
+          ok: false,
+          kind: "no_speech",
+          error: `No segments for ${Math.round(result.durationMs / 1000)}s of audio`,
+          elapsedMs: now() - started,
+          cost: result.cost,
+        })
+        emptyFallback ??= { result, index }
+        continue
+      }
+
       attempts.push({ provider: provider.id, ok: true, elapsedMs: now() - started, cost: result.cost })
 
       return {
@@ -236,6 +260,15 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
       }
 
       anyRetryable ||= asrError.retryable
+    }
+  }
+
+  if (emptyFallback) {
+    return {
+      ...emptyFallback.result,
+      warnings: [...emptyFallback.result.warnings, ...skipped],
+      attempts,
+      fallbackUsed: emptyFallback.index > 0,
     }
   }
 
@@ -287,7 +320,10 @@ export async function getAsrRouterStatus(opts: AsrRouterOptions = {}): Promise<A
           ...result,
           configured,
           ...("openUntil" in state && state.openUntil ? { breakerOpenUntil: new Date(state.openUntil).toISOString() } : {}),
-          ...(!result.lastError && "lastError" in state && state.lastError ? { lastError: state.lastError } : {}),
+          ...(result.lastError ? { lastError: redactAsrErrorMessage(result.lastError) } : {}),
+          ...(!result.lastError && "lastError" in state && state.lastError
+            ? { lastError: redactAsrErrorMessage(state.lastError) }
+            : {}),
         }
       })
   )
