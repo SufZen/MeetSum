@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // First-load JS per app route, gzipped (M9 Step 0, docs/parity/m9.md
 // "Bundle budget"; owner: Package D). Run after `next build`.
 //

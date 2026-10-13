@@ -1,5 +1,6 @@
 "use client"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import * as React from "react"
 import useEmblaCarousel, {
   type UseEmblaCarouselType,
@@ -178,6 +179,7 @@ function CarouselPrevious({
   size = "icon-sm",
   ...props
 }: React.ComponentProps<typeof Button>) {
+  const i18n = useOptionalI18n()
   const { orientation, scrollPrev, canScrollPrev } = useCarousel()
 
   return (
@@ -197,7 +199,7 @@ function CarouselPrevious({
       {...props}
     >
       <ChevronLeftIcon className="rtl:rotate-180" />
-      <span className="sr-only">Previous slide</span>
+      <span className="sr-only">{i18n?.t("shellPreviousSlide")}</span>
     </Button>
   )
 }
@@ -208,6 +210,7 @@ function CarouselNext({
   size = "icon-sm",
   ...props
 }: React.ComponentProps<typeof Button>) {
+  const i18n = useOptionalI18n()
   const { orientation, scrollNext, canScrollNext } = useCarousel()
 
   return (
@@ -227,7 +230,7 @@ function CarouselNext({
       {...props}
     >
       <ChevronRightIcon className="rtl:rotate-180" />
-      <span className="sr-only">Next slide</span>
+      <span className="sr-only">{i18n?.t("shellNextSlide")}</span>
     </Button>
   )
 }

@@ -25,8 +25,8 @@ describe("manifest", () => {
       scope: "/",
       display: "standalone",
     })
-    expect(value.theme_color).toMatch(/^#[0-9a-f]{6}$/)
-    expect(value.background_color).toMatch(/^#[0-9a-f]{6}$/)
+    expect(value.theme_color).toBe("rgb(0, 128, 115)")
+    expect(value.background_color).toBe("rgb(246, 250, 251)")
   })
 
   it("lists 192, 512 and maskable 512 icons that exist", () => {

@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { useWorkspace } from "@/components/workspace-context"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { fillMessage } from "@/lib/i18n/messages"
 
 export type SyncTarget = "calendar" | "gmail"
 
@@ -136,7 +137,7 @@ export function TopCommandBar({
 
   return (
     <header className="sticky top-0 z-30 flex min-h-14 flex-col gap-2 border-b border-line bg-surface px-4 py-2 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] lg:max-w-[390px]">
+      <div className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-3 lg:max-w-96">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
           value={query}
@@ -254,10 +255,10 @@ export function TopCommandBar({
           size="icon"
           className="hidden rounded-full border border-line bg-surface text-ai-text sm:inline-flex"
           disabled
-          title="Provider details live in Google Workspace"
+          title={dictionary.shellAiStatusHint}
         >
           <CitedMark className="size-5" />
-          <span className="sr-only">AI status</span>
+          <span className="sr-only">{dictionary.shellAiStatus}</span>
         </Button>
         <PendingUploadsIndicator />
         <NotificationBell locale={locale} />
@@ -273,18 +274,18 @@ export function TopCommandBar({
           ) : (
             <MoonIcon aria-hidden="true" className="size-5" />
           )}
-          <span className="sr-only">Toggle dark mode</span>
+          <span className="sr-only">{dictionary.shellToggleDarkMode}</span>
         </Button>
         {aiStatus ? (
           <span
             role="status"
             title={`${aiStatus.label}: ${aiStatus.detail}`}
-            className={`size-2.5 rounded-full ${
-              aiStatus.configured ? "bg-emerald-500" : "bg-amber-500"
-            }`}
+            className={`size-2.5 rounded-full ${aiStatus.configured ? "bg-ok" : "bg-warn"}`}
           >
             <span className="sr-only">
-              {aiStatus.label} {aiStatus.configured ? "configured" : "not configured"}
+              {fillMessage(aiStatus.configured ? dictionary.shellAiConfigured : dictionary.shellAiNotConfigured, {
+                label: aiStatus.label,
+              })}
             </span>
           </span>
         ) : null}

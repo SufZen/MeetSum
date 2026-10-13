@@ -1,5 +1,6 @@
 "use client"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import * as React from "react"
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 
@@ -41,7 +42,7 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
-  closeLabel = "Close",
+  closeLabel,
   ...props
 }: SheetPrimitive.Popup.Props & {
   side?: "top" | "right" | "bottom" | "left"
@@ -49,6 +50,8 @@ function SheetContent({
   /** Accessible name of the close button (pass a localized string). */
   closeLabel?: string
 }) {
+  const i18n = useOptionalI18n()
+  const closeText = i18n?.t("shellClose") ?? ""
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -75,7 +78,7 @@ function SheetContent({
           >
             <XIcon
             />
-            <span className="sr-only">{closeLabel}</span>
+            <span className="sr-only">{closeLabel ?? closeText}</span>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Popup>

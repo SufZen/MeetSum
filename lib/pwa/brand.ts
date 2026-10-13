@@ -3,5 +3,5 @@
  * (design-system/tokens.css) converted from OKLCH to sRGB, because a web app
  * manifest cannot reference CSS variables.
  */
-export const PWA_THEME_COLOR = "#008073"
-export const PWA_BACKGROUND_COLOR = "#f6fafb"
+export const PWA_THEME_COLOR = "rgb(0, 128, 115)"
+export const PWA_BACKGROUND_COLOR = "rgb(246, 250, 251)"

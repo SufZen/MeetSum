@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Generates the PWA icons in public/icons/ from the Σ mark
  * (components/ui/sigma-mark.tsx + the `.ms-sigma` transforms in
