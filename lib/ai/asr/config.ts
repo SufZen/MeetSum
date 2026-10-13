@@ -4,6 +4,7 @@ export type AsrEnv = Record<string, string | undefined>
 
 export const ASR_PROVIDER_IDS: readonly AsrProviderId[] = [
   "runpod-ivrit",
+  "modal-worker",
   "soniox",
   "local-whisper-chunked",
   "gemini-legacy",
@@ -11,6 +12,7 @@ export const ASR_PROVIDER_IDS: readonly AsrProviderId[] = [
 
 export const DEFAULT_ASR_CHAIN: readonly AsrProviderId[] = [
   "runpod-ivrit",
+  "modal-worker",
   "soniox",
   "local-whisper-chunked",
 ]
@@ -18,6 +20,7 @@ export const DEFAULT_ASR_CHAIN: readonly AsrProviderId[] = [
 export const DEFAULT_ASR_CHAIN_NON_HE: readonly AsrProviderId[] = [
   "soniox",
   "runpod-ivrit",
+  "modal-worker",
   "local-whisper-chunked",
 ]
 

@@ -87,10 +87,10 @@ beforeEach(() => {
 
 describe("resolveAsrChain", () => {
   it("defaults: Hebrew-first chain and Soniox-first for other languages", () => {
-    expect(resolveAsrChain("he", {})).toEqual(["runpod-ivrit", "soniox", "local-whisper-chunked"])
-    expect(resolveAsrChain("mixed", {})).toEqual(["runpod-ivrit", "soniox", "local-whisper-chunked"])
-    expect(resolveAsrChain("iw", {})).toEqual(["runpod-ivrit", "soniox", "local-whisper-chunked"])
-    expect(resolveAsrChain("en", {})).toEqual(["soniox", "runpod-ivrit", "local-whisper-chunked"])
+    expect(resolveAsrChain("he", {})).toEqual(["runpod-ivrit", "modal-worker", "soniox", "local-whisper-chunked"])
+    expect(resolveAsrChain("mixed", {})).toEqual(["runpod-ivrit", "modal-worker", "soniox", "local-whisper-chunked"])
+    expect(resolveAsrChain("iw", {})).toEqual(["runpod-ivrit", "modal-worker", "soniox", "local-whisper-chunked"])
+    expect(resolveAsrChain("en", {})).toEqual(["soniox", "runpod-ivrit", "modal-worker", "local-whisper-chunked"])
   })
 
   it("honors explicit chains and only keeps Gemini when allowed", () => {
@@ -106,12 +106,14 @@ describe("resolveAsrChain", () => {
     expect(resolveAsrChain("he", { MEETSUM_TRANSCRIPTION_PROVIDER: "local-whisper" })).toEqual(["local-whisper-chunked"])
     expect(resolveAsrChain("he", { MEETSUM_TRANSCRIPTION_PROVIDER: "gemini" })).toEqual([
       "runpod-ivrit",
+      "modal-worker",
       "soniox",
       "local-whisper-chunked",
       "gemini-legacy",
     ])
     expect(resolveAsrChain("he", { MEETSUM_TRANSCRIPTION_PROVIDER: "auto" })).toEqual([
       "runpod-ivrit",
+      "modal-worker",
       "soniox",
       "local-whisper-chunked",
     ])

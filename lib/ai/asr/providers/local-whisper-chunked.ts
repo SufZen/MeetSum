@@ -1,9 +1,9 @@
 import path from "node:path"
 
 import { cutAudioChunk, detectSilences, planChunks, type Chunk } from "../audio"
-import { envNumber, envText, isHebrewLanguage, providerLanguage, type AsrEnv } from "../config"
+import { envFlag, envNumber, envText, isHebrewLanguage, providerLanguage, type AsrEnv } from "../config"
 import { throwForResponse, toAsrError } from "../errors"
-import { buildHotwords, buildInitialPrompt, hotwordsMaxChars } from "../glossary"
+import { buildHotwords, buildInitialPrompt, hotwordsMaxChars, WHISPER_PROMPT_MAX_TOKENS } from "../glossary"
 import { guardedFetch, postMultipart, readJson, timeoutSignal, type FetchFn } from "../http"
 import { finalizeResult, synthesizeWords } from "../segmentation"
 import {
@@ -21,6 +21,12 @@ import { prepareAudio, readAudio, type AsrProviderDeps } from "./shared"
  * (docs/runbooks/laptop-hebrew-asr/app.py). Long audio is cut at silences
  * into ≤ 10 min chunks transcribed sequentially (one retry each) and
  * re-offset. No diarization: everything is Speaker 1 with a warning.
+ *
+ * Any hosted OpenAI-compatible Whisper works through this slot too (e.g.
+ * Groq: LOCAL_TRANSCRIPTION_URL=https://api.groq.com/openai,
+ * LOCAL_TRANSCRIPTION_MODEL=whisper-large-v3-turbo,
+ * LOCAL_TRANSCRIPTION_API_KEY=…, LOCAL_TRANSCRIPTION_SEND_HOTWORDS=false).
+ * The key is sent as a bearer token and never logged.
  */
 
 const PROVIDER = "local-whisper-chunked" as const
@@ -33,11 +39,17 @@ export type LocalChunkedConfig = {
   timeoutMs: number
   chunkMs: number
   searchMs: number
+  /** Bearer token for hosted OpenAI-compatible servers (Groq, OpenAI). */
+  apiKey?: string
+  /** Send the non-OpenAI `hotwords` field (faster-whisper servers only). */
+  sendHotwords: boolean
 }
 
 export function getLocalChunkedConfig(env: AsrEnv = process.env): LocalChunkedConfig {
   return {
     baseUrl: (envText(env, "LOCAL_TRANSCRIPTION_URL") ?? "").replace(/\/+$/, ""),
+    apiKey: envText(env, "LOCAL_TRANSCRIPTION_API_KEY"),
+    sendHotwords: envFlag(env, "LOCAL_TRANSCRIPTION_SEND_HOTWORDS", true),
     model: envText(env, "LOCAL_TRANSCRIPTION_MODEL") ?? DEFAULT_MODEL,
     language: envText(env, "LOCAL_TRANSCRIPTION_LANGUAGE"),
     timeoutMs: envNumber(env, "LOCAL_TRANSCRIPTION_TIMEOUT_MS", 900_000),
@@ -127,6 +139,8 @@ export function createLocalWhisperChunkedProvider(deps: AsrProviderDeps = {}): A
   const env = deps.env ?? process.env
   const config = getLocalChunkedConfig(env)
   const now = deps.now ?? Date.now
+  const authHeaders = (): Record<string, string> | undefined =>
+    config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : undefined
 
   async function transcribeChunk(
     file: string,
@@ -141,7 +155,7 @@ export function createLocalWhisperChunkedProvider(deps: AsrProviderDeps = {}): A
       const response = await postMultipart(
         `${config.baseUrl}/v1/audio/transcriptions`,
         [["file", { blob: new Blob([new Uint8Array(bytes)], { type: "audio/ogg" }), filename: path.basename(file) }], ...fields],
-        { fetch: deps.fetch, signal }
+        { fetch: deps.fetch, headers: authHeaders(), signal }
       )
 
       if (!response.ok) await throwForResponse(response, PROVIDER, `Local Whisper chunk ${chunk.startMs}ms`)
@@ -168,7 +182,9 @@ export function createLocalWhisperChunkedProvider(deps: AsrProviderDeps = {}): A
 
       try {
         const fetchFn: FetchFn = deps.fetch ?? globalThis.fetch
-        const response = await guardedFetch(fetchFn, PROVIDER, `${config.baseUrl}/v1/models`)
+        const response = await guardedFetch(fetchFn, PROVIDER, `${config.baseUrl}/v1/models`, {
+          headers: authHeaders(),
+        })
 
         return response.ok
           ? { provider: PROVIDER, configured: true, healthy: true, detail: { model: config.model } }
@@ -200,8 +216,9 @@ export function createLocalWhisperChunkedProvider(deps: AsrProviderDeps = {}): A
         const chunks = planChunks(audio.durationMs, silences, { maxMs: config.chunkMs, searchMs: config.searchMs })
         const planMs = now() - planStarted
         const language = config.language ?? providerLanguage(req.language)
-        const hotwords = buildHotwords(req.glossary, { maxChars: hotwordsMaxChars(env) })
-        const prompt = buildInitialPrompt(req.glossary, env)
+        // `hotwords` is a faster-whisper extension; OpenAI/Groq reject or ignore it.
+        const hotwords = config.sendHotwords ? buildHotwords(req.glossary, { maxChars: hotwordsMaxChars(env) }) : ""
+        const prompt = buildInitialPrompt(req.glossary, env, { maxTokens: WHISPER_PROMPT_MAX_TOKENS })
         const fields: Array<[string, string]> = [
           ["model", config.model],
           ["language", language],
