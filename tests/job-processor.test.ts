@@ -137,6 +137,7 @@ vi.mock("@/lib/integrations/realizeos", () => ({
 const { processJob } = await import("@/lib/jobs/processor")
 const { TranscriptionUnavailableError } = await import("@/lib/ai/providers")
 const { AsrChainError, AsrError } = await import("@/lib/ai/asr")
+const { TransientSummaryError } = await import("@/lib/intelligence/pipeline")
 
 type RouterResult = Awaited<ReturnType<typeof import("@/lib/ai/asr").transcribeWithRouter>>
 
@@ -1011,6 +1012,28 @@ describe("processJob ASR router (M3)", () => {
     expect(replaceSegments).not.toHaveBeenCalled()
     expect(replaceTranscript).not.toHaveBeenCalled()
     expect((await mocks.repository.getMeeting(meeting.id))?.transcript).toEqual(before)
+  })
+
+  it("retries a transient summary failure and keeps the existing summary", async () => {
+    const { meeting } = await seedWithAsset()
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+    const before = (await mocks.repository.getMeeting(meeting.id))?.intelligence
+    const upsert = vi.spyOn(mocks.repository, "upsertMeetingIntelligence")
+
+    mocks.summarize.mockRejectedValueOnce(new TransientSummaryError("rate_limit"))
+
+    const error = await processJob(
+      await makeJob("meeting.summarize", { meetingId: meeting.id, mode: "summary" }, { attempts: 3 })
+    ).catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(TransientSummaryError)
+    expect(error).not.toBeInstanceOf(UnrecoverableError)
+    expect(upsert).not.toHaveBeenCalled()
+    const after = await mocks.repository.getMeeting(meeting.id)
+
+    expect(after?.intelligence).toEqual(before)
+    expect(after?.status).not.toBe("failed")
   })
 })
 

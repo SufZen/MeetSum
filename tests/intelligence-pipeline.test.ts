@@ -14,7 +14,7 @@ vi.mock("@/lib/tasks/enrich", () => ({
 
 const { LlmError, setLlmProvidersForTesting } = await import("@/lib/ai/llm")
 const { DEFAULT_APP_SETTINGS } = await import("@/lib/settings/app-settings")
-const { runIntelligencePipeline } = await import("@/lib/intelligence/pipeline")
+const { runIntelligencePipeline, TransientSummaryError } = await import("@/lib/intelligence/pipeline")
 
 import type { LlmProvider, LlmStructuredRequest } from "@/lib/ai/llm"
 import type { MeetingRecord } from "@/lib/meetings/repository"
@@ -317,6 +317,46 @@ describe("fallbacks and routing", () => {
     const { run } = await runIntelligencePipeline(empty, { settings })
 
     expect(run).toMatchObject({ provider: "heuristic", fallbackReason: "Meeting has no transcript" })
+  })
+})
+
+describe("transient provider failures", () => {
+  const withLlmSummary = (provider: string): MeetingRecord => ({
+    ...meeting(),
+    intelligence: {
+      overview: "סיכום קודם מה-LLM",
+      generation: { provider, model: "gemini-3.8-flash", promptVersion: "m5.1" },
+    } as unknown as MeetingRecord["intelligence"],
+  })
+  const failing = (kind: "rate_limit" | "timeout" | "server" | "invalid_output") =>
+    provider("gemini", (req) =>
+      req.task === "title_tags_type" ? outputFixture.title : new LlmError("boom", kind, "gemini", kind !== "invalid_output")
+    )
+
+  it.each(["rate_limit", "timeout", "server"] as const)(
+    "throws a retryable error instead of overwriting an LLM summary with the heuristic (%s)",
+    async (kind) => {
+      setLlmProvidersForTesting({ gemini: failing(kind), anthropic: provider("anthropic", () => null, false) })
+
+      const error = await runIntelligencePipeline(withLlmSummary("gemini"), { settings }).catch((caught) => caught)
+
+      expect(error).toBeInstanceOf(TransientSummaryError)
+      expect(error).toMatchObject({ retryable: true, kind })
+      expect(String(error.message)).not.toContain("boom")
+    }
+  )
+
+  it("keeps the heuristic fallback for first-time processing and for a prior heuristic summary", async () => {
+    setLlmProvidersForTesting({ gemini: failing("server"), anthropic: provider("anthropic", () => null, false) })
+
+    expect((await runIntelligencePipeline(meeting(), { settings })).run.provider).toBe("heuristic")
+    expect((await runIntelligencePipeline(withLlmSummary("heuristic"), { settings })).run.provider).toBe("heuristic")
+  })
+
+  it("keeps the heuristic fallback for non-transient failures", async () => {
+    setLlmProvidersForTesting({ gemini: failing("invalid_output"), anthropic: provider("anthropic", () => null, false) })
+
+    expect((await runIntelligencePipeline(withLlmSummary("gemini"), { settings })).run.provider).toBe("heuristic")
   })
 })
 

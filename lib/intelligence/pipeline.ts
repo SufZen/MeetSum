@@ -11,6 +11,7 @@
 import {
   generateStructured,
   LlmError,
+  type LlmErrorKind,
   type LlmProviderId,
   type LlmResult,
   type LlmUsage,
@@ -110,6 +111,47 @@ export type IntelligenceRunMetadata = {
 export type IntelligencePipelineResult = {
   intelligence: MeetingIntelligence
   run: IntelligenceRunMetadata
+}
+
+const TRANSIENT_LLM_KINDS: ReadonlySet<LlmErrorKind> = new Set<LlmErrorKind>(["rate_limit", "timeout", "server"])
+
+/**
+ * A transient provider failure (rate limit, timeout, 5xx) while the meeting
+ * already has an LLM summary: the job is retried (BullMQ) instead of
+ * replacing that summary with the heuristic one.
+ */
+export class TransientSummaryError extends Error {
+  readonly retryable = true
+
+  constructor(readonly kind: LlmErrorKind) {
+    super(`Summary provider temporarily unavailable (${kind}); keeping the existing summary`)
+    this.name = "TransientSummaryError"
+  }
+}
+
+const MAX_FALLBACK_REASON_CHARS = 200
+
+/** Single-line, control-free, capped (it lands in logs and ai_runs). */
+export function sanitizeFallbackReason(reason: string): string {
+  const clean = reason.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim()
+
+  return clean.length > MAX_FALLBACK_REASON_CHARS ? `${clean.slice(0, MAX_FALLBACK_REASON_CHARS - 1)}…` : clean
+}
+
+/**
+ * Why the heuristic summary was used: error kind and provider only. Error
+ * messages are never included (parse and provider errors can carry model
+ * output or transcript text).
+ */
+function fallbackReasonOf(error: unknown): string {
+  if (error instanceof LlmError) return sanitizeFallbackReason(`${error.kind} (${error.provider})`)
+  return sanitizeFallbackReason(error instanceof Error ? error.name || "Error" : "unknown error")
+}
+
+function hasLlmSummary(meeting: MeetingRecord): boolean {
+  const provider = meeting.intelligence?.generation?.provider
+
+  return Boolean(provider && provider !== "heuristic")
 }
 
 const HEURISTIC_MODEL = "heuristic-v1"
@@ -240,7 +282,7 @@ function heuristicResult(
       provider: "heuristic",
       model: HEURISTIC_MODEL,
       fallbackUsed: true,
-      fallbackReason: options.reason,
+      fallbackReason: sanitizeFallbackReason(options.reason),
       costUsd: options.costUsd ?? null,
       usage: options.usage ?? ZERO_USAGE,
       aiRunIds: options.aiRunIds ?? [],
@@ -618,8 +660,14 @@ export async function runIntelligencePipeline(
       }
     }
   } catch (error) {
-    const reason =
-      error instanceof LlmError ? `${error.kind}: ${error.message}` : error instanceof Error ? error.message : String(error)
+    // A transient failure must not replace an existing LLM summary with the
+    // heuristic one: let the job retry. First-time processing still falls
+    // back to the heuristic summary.
+    if (error instanceof LlmError && TRANSIENT_LLM_KINDS.has(error.kind) && hasLlmSummary(meeting)) {
+      throw new TransientSummaryError(error.kind)
+    }
+
+    const reason = fallbackReasonOf(error)
 
     return heuristicResult(meeting, {
       language,
