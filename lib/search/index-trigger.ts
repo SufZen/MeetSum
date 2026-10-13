@@ -6,8 +6,11 @@
  *
  * Marks `meetings.search_requested_at` and enqueues a debounced
  * `meeting.index` job with one BullMQ id per meeting, so a burst of edits
- * collapses into one run. It never throws: a failure is logged and the
- * index sweeper (`search.index.sweep`) catches up on stale meetings.
+ * collapses into one run. The job is removed from Redis once finished
+ * (lib/jobs/queue.ts defaults), so the next edit enqueues a new run; an
+ * edit made while a run is active is caught by the sweeper, because the
+ * run records its start as `search_indexed_at`. It never throws: a failure
+ * is logged and the index sweeper (`search.index.sweep`) catches up.
  *
  * Only the Postgres storage keeps a search index; with in-memory storage
  * (demo, tests) search runs on the fly and this is a no-op.
@@ -27,6 +30,10 @@ export type ReindexReason =
   | "participants"
   | "tags"
   | "contexts"
+  /** Index sweeper, backfill script and admin re-index (Package A). */
+  | "sweep"
+  | "backfill"
+  | "admin"
 
 export type RequestMeetingReindexInput = {
   workspaceId: string
@@ -57,6 +64,24 @@ function describeFailure(error: unknown): string {
   return error instanceof Error ? error.name || "Error" : "unknown error"
 }
 
+/**
+ * Enqueues the deduplicated `meeting.index` job of a meeting (no
+ * `search_requested_at` mark). Throws when the queue is unavailable.
+ */
+export async function enqueueMeetingIndexJob(
+  input: { workspaceId: string; meetingId: string; reason: ReindexReason },
+  options: { delay?: number } = {}
+): Promise<void> {
+  await enqueueMeetSumJob(
+    "meeting.index",
+    { meetingId: input.meetingId, workspaceId: input.workspaceId, reason: input.reason },
+    {
+      jobId: meetingIndexJobId(input.meetingId),
+      ...(options.delay !== undefined ? { delay: options.delay } : {}),
+    }
+  )
+}
+
 export async function requestMeetingReindex({
   workspaceId,
   meetingId,
@@ -78,11 +103,7 @@ export async function requestMeetingReindex({
   }
 
   try {
-    await enqueueMeetSumJob(
-      "meeting.index",
-      { meetingId, workspaceId, reason },
-      { jobId: meetingIndexJobId(meetingId), delay: indexDebounceMs() }
-    )
+    await enqueueMeetingIndexJob({ workspaceId, meetingId, reason }, { delay: indexDebounceMs() })
   } catch (error) {
     console.warn("[search] reindex enqueue failed", reason, describeFailure(error))
   }

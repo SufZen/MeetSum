@@ -84,6 +84,9 @@ export type EnqueueJobOptions = {
   attempts?: number
   /** Milliseconds before the job becomes runnable (M6 re-index debounce). */
   delay?: number
+  /** BullMQ retention of finished jobs (default: keep the last 250 / 500). */
+  removeOnComplete?: boolean | number
+  removeOnFail?: boolean | number
 }
 
 /** `media.prepare-<assetId>` (spec `media.prepare:<id>`; BullMQ forbids `:`). */
@@ -91,9 +94,19 @@ export function mediaPrepareJobId(assetId: string) {
   return `media.prepare-${assetId.replace(/:/g, "_")}`
 }
 
+/** `search.index.sweep-<workspaceId>`: at most one pending sweep per workspace (M6). */
+export function searchIndexSweepJobId(workspaceId: string) {
+  return `search.index.sweep-${workspaceId.replace(/:/g, "_")}`
+}
+
 /**
  * Defaults per job name (M4): `media.prepare` is idempotent per asset and
  * tried twice; `storage.delete` retries five times with exponential backoff.
+ *
+ * M6: `meeting.index` (one id per meeting, debounced) and
+ * `search.index.sweep` (one id per workspace) are removed from Redis once
+ * finished. A retained finished job keeps its id, so it would swallow every
+ * later add with the same id and the meeting would never be re-indexed.
  */
 export function defaultJobOptions(
   name: MeetSumJobName,
@@ -108,6 +121,17 @@ export function defaultJobOptions(
     }
   }
   if (name === "storage.delete") return { attempts: 5 }
+  if (name === "meeting.index") return { removeOnComplete: true, removeOnFail: true }
+  if (name === "search.index.sweep") {
+    return {
+      attempts: 1,
+      removeOnComplete: true,
+      removeOnFail: true,
+      ...(typeof payload.workspaceId === "string" && payload.workspaceId
+        ? { jobId: searchIndexSweepJobId(payload.workspaceId) }
+        : {}),
+    }
+  }
 
   return {}
 }
@@ -215,7 +239,7 @@ async function enqueueJob(
 
   if (!workspaceId) throw new JobWorkspaceRequiredError(name)
 
-  const { jobId, attempts: attemptsOverride, delay } = {
+  const { jobId, attempts: attemptsOverride, delay, removeOnComplete, removeOnFail } = {
     ...defaultJobOptions(name, payload),
     ...options,
   }
@@ -244,8 +268,8 @@ async function enqueueJob(
         attempts,
         ...(delay !== undefined && Number.isFinite(delay) && delay > 0 ? { delay } : {}),
         backoff: { type: "exponential", delay: 3000 },
-        removeOnComplete: 250,
-        removeOnFail: 500,
+        removeOnComplete: removeOnComplete ?? 250,
+        removeOnFail: removeOnFail ?? 500,
       })
     )
   } catch (error) {
