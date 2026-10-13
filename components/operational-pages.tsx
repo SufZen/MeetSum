@@ -27,7 +27,6 @@ import {
   ProviderWarning,
   type ProviderStatusView,
 } from "@/components/provider-health-panel"
-import { CompactSearchBox } from "@/components/search/compact-search-box"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
@@ -56,6 +55,11 @@ const AsrGlossaryEditor = dynamic(
 const LlmSettings = dynamic(
   () => import("@/components/intelligence/llm-settings").then((mod) => mod.LlmSettings),
   { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
+// M6: the memory panel's search box (and the search URL helpers) load with the panel.
+const CompactSearchBox = dynamic(
+  () => import("@/components/search/compact-search-box").then((mod) => mod.CompactSearchBox),
+  { loading: () => <div aria-busy="true" className="h-10 animate-pulse rounded-md bg-surface-2" /> }
 )
 const TemplatesSettings = dynamic(
   () => import("@/components/intelligence/template-editor").then((mod) => mod.TemplatesSettings),

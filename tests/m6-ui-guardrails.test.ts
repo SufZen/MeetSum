@@ -52,6 +52,20 @@ describe("M6 UI guardrails", () => {
     }
   })
 
+  it("keeps M6 code out of the main shell chunk (memory search box loaded on demand)", () => {
+    const pages = readFileSync("components/operational-pages.tsx", "utf8")
+
+    expect(pages).not.toMatch(/from "@\/components\/search\/compact-search-box"/)
+    expect(pages).toContain('import("@/components/search/compact-search-box")')
+
+    for (const file of ["components/command-center-shell.tsx", "components/top-command-bar.tsx", "components/command-palette.tsx"]) {
+      const source = readFileSync(file, "utf8")
+
+      expect(source, file).not.toMatch(/from "@\/components\/(search|ask)\//)
+      expect(source, file).not.toMatch(/from "@\/lib\/client\/(search-url|answer-segments|sse)"/)
+    }
+  })
+
   it("keeps the meeting workspace on the code-split Ask panel", () => {
     const source = readFileSync("components/meeting-workspace.tsx", "utf8")
 
