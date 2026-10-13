@@ -10,6 +10,7 @@ import {
   createShareAccessCookie,
   getShareAccessCookiePath,
 } from "@/lib/sharing/share-access"
+import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
 
 /** Password attempts per IP per share token. */
 const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
@@ -117,6 +118,20 @@ export const POST = withPublicRoute<{ token: string }>(
       path: cookie.path,
       maxAge: cookie.maxAge,
     })
+    // Same proof for the share's media routes (M4): the page cookie's path
+    // is not sent to /api/share/<token>/media. Appended raw: ResponseCookies
+    // keys by name and would replace the page cookie.
+    response.headers.append(
+      "set-cookie",
+      [
+        `${cookie.name}=${cookie.value}`,
+        `Path=${getShareMediaCookiePath(token)}`,
+        `Max-Age=${cookie.maxAge}`,
+        "HttpOnly",
+        "SameSite=Lax",
+        ...(process.env.NODE_ENV === "production" ? ["Secure"] : []),
+      ].join("; ")
+    )
 
     return response
   }

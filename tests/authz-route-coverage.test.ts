@@ -134,6 +134,10 @@ describe("API route authz coverage", () => {
       "asr/glossary GET": "workspace:read",
       "asr/glossary PUT": "settings:write",
       "asr/status GET": "ops:read",
+      // M4 media proxy (viewers can play).
+      "meetings/[id]/media GET": "meeting:read",
+      "meetings/[id]/media HEAD": "meeting:read",
+      "meetings/[id]/media/peaks GET": "meeting:read",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -152,6 +156,27 @@ describe("API route authz coverage", () => {
     const notion = routes.find((route) => route.route === "meetings/[id]/export/notion")
     expect(notion?.source).toMatch(/can\(ctx\.role, "integrations:manage"\)/)
     expect(notion?.source).not.toMatch(/process\.env\.NOTION_TOKEN/)
+  })
+
+  it("gates the public share media routes and never presigns media (M4)", () => {
+    for (const route of ["share/[token]/media", "share/[token]/media/peaks"]) {
+      const source = routes.find((candidate) => candidate.route === route)?.source ?? ""
+
+      expect(source, route).toMatch(/authorizeShareMediaRequest\(request, token\)/)
+    }
+    for (const route of [
+      "meetings/[id]/media",
+      "meetings/[id]/media/peaks",
+      "share/[token]/media",
+      "share/[token]/media/peaks",
+    ]) {
+      const source = routes.find((candidate) => candidate.route === route)?.source
+
+      expect(source, route).toBeDefined()
+      expect(source).not.toMatch(/Presigned|S3_PUBLIC_ENDPOINT|getSignedUrl/)
+      expect(source).toMatch(/export const runtime = "nodejs"/)
+      expect(source).toMatch(/export const dynamic = "force-dynamic"/)
+    }
   })
 
   it("passes a workspace to every recordAuditLog call", () => {

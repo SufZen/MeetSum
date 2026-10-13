@@ -6,6 +6,11 @@ import {
   parsePeaksFile,
   type PeaksFile,
 } from "@/lib/media/peaks"
+import {
+  buildPeaksFile,
+  computeSamplesPerPeak,
+  PeaksAccumulator,
+} from "@/lib/media/peaks-accumulator"
 
 describe("downsamplePeaks", () => {
   it("max-pools into the target number of buckets", () => {
@@ -100,5 +105,88 @@ describe("parsePeaksFile", () => {
     expect(parsePeaksFile({ ...file, peaks: [1, 256] })).toBeNull()
     expect(parsePeaksFile({ ...file, peaks: [1, "2"] })).toBeNull()
     expect(parsePeaksFile({ ...file, peaks: undefined })).toBeNull()
+  })
+})
+
+/** s16le bytes for the given samples. */
+function pcm(samples: number[]): Uint8Array {
+  const buffer = Buffer.alloc(samples.length * 2)
+
+  samples.forEach((sample, index) => buffer.writeInt16LE(sample, index * 2))
+  return new Uint8Array(buffer)
+}
+
+describe("PeaksAccumulator", () => {
+  it("takes the absolute maximum per bucket scaled to 0..255", () => {
+    const accumulator = new PeaksAccumulator({ samplesPerPeak: 2 })
+
+    accumulator.push(pcm([0, 32767, -16384, 100, -32768, 0, 5]))
+
+    expect(accumulator.finish()).toEqual({
+      peaks: [255, Math.round((16384 / 32767) * 255), 255, 0],
+      totalSamples: 7,
+    })
+  })
+
+  it("handles samples split across odd chunk boundaries", () => {
+    const samples = [1000, -2000, 3000, -32768, 12345, -1, 0, 32767, -500]
+    const bytes = pcm(samples)
+    const whole = new PeaksAccumulator({ samplesPerPeak: 3 })
+    const split = new PeaksAccumulator({ samplesPerPeak: 3 })
+
+    whole.push(bytes)
+    // Odd-sized slices, then the remainder.
+    let offset = 0
+    for (const size of [1, 3, 1, 5, 2, 7]) {
+      split.push(bytes.subarray(offset, offset + size))
+      offset += size
+    }
+    split.push(bytes.subarray(offset))
+
+    expect(split.finish()).toEqual(whole.finish())
+  })
+
+  it("ignores a dangling final byte and empty chunks", () => {
+    const accumulator = new PeaksAccumulator({ samplesPerPeak: 400 })
+
+    accumulator.push(new Uint8Array(0))
+    accumulator.push(new Uint8Array([0x10]))
+
+    expect(accumulator.finish()).toEqual({ peaks: [], totalSamples: 0 })
+  })
+
+  it("rejects a non-positive bucket size", () => {
+    expect(() => new PeaksAccumulator({ samplesPerPeak: 0 })).toThrow()
+  })
+})
+
+describe("computeSamplesPerPeak / buildPeaksFile", () => {
+  it("caps the number of peaks at 20k with a floor of 400 samples per peak", () => {
+    expect(computeSamplesPerPeak(8000)).toBe(400)
+    expect(computeSamplesPerPeak(0)).toBe(400)
+    // 2 h at 8 kHz = 57.6M samples -> 2880 samples per peak -> 20k peaks.
+    expect(computeSamplesPerPeak(57_600_000)).toBe(2880)
+    expect(Math.ceil(57_600_000 / computeSamplesPerPeak(57_600_000))).toBeLessThanOrEqual(20_000)
+    expect(computeSamplesPerPeak(57_600_001)).toBe(2881)
+    expect(computeSamplesPerPeak(1_000_000, 100)).toBe(10_000)
+  })
+
+  it("builds a v1 file whose max is the largest peak", () => {
+    const built = buildPeaksFile({
+      peaks: [3, 200, 7],
+      sampleRate: 8000,
+      samplesPerPeak: 400,
+      durationMs: 150.4,
+    })
+
+    expect(built).toEqual({
+      v: 1,
+      durationMs: 150,
+      sampleRate: 8000,
+      samplesPerPeak: 400,
+      max: 200,
+      peaks: [3, 200, 7],
+    })
+    expect(parsePeaksFile(JSON.stringify(built))).toEqual(built)
   })
 })

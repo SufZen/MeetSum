@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
-  deleteMeetingObject: vi.fn(),
+  deleteMeetingObjects: vi.fn(),
 }))
 
 vi.mock("@/lib/db/client", () => ({
@@ -10,7 +10,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 
 vi.mock("@/lib/storage/object-storage", () => ({
-  deleteMeetingObject: mocks.deleteMeetingObject,
+  deleteMeetingObjects: mocks.deleteMeetingObjects,
 }))
 
 const { deleteMediaAsset, listMediaAssets, MediaAssetNotFoundError } = await import(
@@ -42,6 +42,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv("MEETSUM_STORAGE", "postgres")
   mocks.query.mockResolvedValue({ rows: [] })
+  mocks.deleteMeetingObjects.mockImplementation(async (keys: string[]) => ({
+    deleted: keys,
+    failed: [],
+  }))
 })
 
 afterEach(() => {
@@ -76,7 +80,7 @@ describe("storage media assets honour meeting visibility", () => {
     const [sql, values] = mocks.query.mock.calls[0]
     expect(sql).toMatch(/m\.owner_user_id = \$4/)
     expect(values).toEqual(["asset_private", "ws_1", "ws_1", "usr_admin", "admin@w1.test"])
-    expect(mocks.deleteMeetingObject).not.toHaveBeenCalled()
+    expect(mocks.deleteMeetingObjects).not.toHaveBeenCalled()
     expect(mocks.query).toHaveBeenCalledTimes(1)
   })
 
@@ -87,10 +91,48 @@ describe("storage media assets honour meeting visibility", () => {
       id: "asset_1",
       sizeBytes: 100,
     })
-    expect(mocks.deleteMeetingObject).toHaveBeenCalledWith("meetings/meet_1/a.m4a")
-    expect(mocks.query.mock.calls[1]).toEqual([
+    expect(mocks.deleteMeetingObjects).toHaveBeenCalledWith(["meetings/meet_1/a.m4a"])
+    expect(mocks.query.mock.calls[2]).toEqual([
       "delete from media_assets where id = $1 and workspace_id = $2",
       ["asset_1", "ws_1"],
     ])
+  })
+
+  it("also deletes derived playback objects and the peaks object (M4)", async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{ ...assetRow, kind: "original", peaks_storage_key: "meetings/meet_1/derived/asset_1.peaks.v1.json" }],
+      })
+      .mockResolvedValueOnce({ rows: [{ storage_key: "meetings/meet_1/derived/p.m4a" }] })
+
+    await expect(deleteMediaAsset(ADMIN_W1, "asset_1")).resolves.toMatchObject({ kind: "original" })
+    expect(mocks.query.mock.calls[1][0]).toMatch(/derived_from_asset_id = \$1 and workspace_id = \$2/)
+    expect(mocks.deleteMeetingObjects).toHaveBeenCalledWith([
+      "meetings/meet_1/derived/p.m4a",
+      "meetings/meet_1/derived/asset_1.peaks.v1.json",
+      "meetings/meet_1/a.m4a",
+    ])
+  })
+
+  it("keeps the rows when an object cannot be deleted", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [assetRow] })
+    mocks.deleteMeetingObjects.mockResolvedValueOnce({
+      deleted: [],
+      failed: [{ key: "meetings/meet_1/a.m4a", error: "AccessDenied" }],
+    })
+
+    await expect(deleteMediaAsset(ADMIN_W1, "asset_1")).rejects.toThrow(/1 stored object/)
+    expect(mocks.query).toHaveBeenCalledTimes(2)
+  })
+
+  it("lists the asset kind for the storage admin", async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ ...assetRow, kind: "playback", derived_from_asset_id: "asset_0", duration_ms: 5000 }],
+    })
+
+    const [asset] = await listMediaAssets(ADMIN_W1)
+
+    expect(asset).toMatchObject({ kind: "playback", derivedFromAssetId: "asset_0", durationMs: 5000 })
+    expect(mocks.query.mock.calls[0][0]).toMatch(/a\.kind/)
   })
 })

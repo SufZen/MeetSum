@@ -170,4 +170,39 @@ describe("applyMediaRetention", () => {
       "asset_video",
     ])
   })
+
+  it("only plans originals and deletes their renditions and peaks too (M4)", async () => {
+    const rows = [
+      {
+        ...candidateRows()[0],
+        peaks_storage_key: "meetings/meet_1/derived/asset_old.peaks.v1.json",
+        derived_keys: ["meetings/meet_1/derived/play.m4a"],
+        derived_bytes: "250",
+      },
+    ]
+    const db = database(rows)
+    const deleteObject = vi.fn()
+
+    const plan = await planMediaRetention({ workspaceId: "ws_1", db, now })
+
+    expect(db.query.mock.calls[0][0]).toMatch(/a\.kind = 'original'/)
+    expect(db.query.mock.calls[0][0]).toMatch(/d\.derived_from_asset_id = a\.id/)
+    expect(plan.totalBytes).toBe(1250)
+
+    const result = await applyMediaRetention({
+      workspaceId: "ws_1",
+      execute: true,
+      db,
+      now,
+      deleteObject,
+      audit: vi.fn(async () => undefined),
+    })
+
+    expect(deleteObject.mock.calls.map(([key]) => key)).toEqual([
+      "meetings/meet_1/derived/play.m4a",
+      "meetings/meet_1/derived/asset_old.peaks.v1.json",
+      "meetings/meet_1/old.m4a",
+    ])
+    expect(result).toMatchObject({ deleted: 1, deletedBytes: 1250 })
+  })
 })

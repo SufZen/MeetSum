@@ -21,6 +21,11 @@ export type RetentionCandidate = {
   contentType: string
   sizeBytes: number
   createdAt: string
+  /** M4: waveform peaks object of the original. */
+  peaksStorageKey?: string
+  /** M4: objects of derived playback renditions (rows cascade). */
+  derivedStorageKeys: string[]
+  derivedBytes: number
 }
 
 export type MediaRetentionPlan = {
@@ -61,6 +66,9 @@ type CandidateRow = {
   content_type: string
   size_bytes: string | number
   created_at: string | Date
+  peaks_storage_key?: string | null
+  derived_keys?: string[] | null
+  derived_bytes?: string | number | null
 }
 
 function toIso(value: string | Date) {
@@ -98,12 +106,23 @@ export async function planMediaRetention(
   const result = await db.query(
     `
       select a.id, a.meeting_id, a.storage_key, a.content_type, a.size_bytes,
-             a.created_at
+             a.created_at, a.peaks_storage_key,
+             coalesce(
+               (select array_agg(d.storage_key) from media_assets d
+                where d.derived_from_asset_id = a.id and d.workspace_id = $1),
+               '{}'
+             ) as derived_keys,
+             coalesce(
+               (select sum(d.size_bytes) from media_assets d
+                where d.derived_from_asset_id = a.id and d.workspace_id = $1),
+               0
+             ) as derived_bytes
       from media_assets a
       join meetings m on m.id = a.meeting_id
       where m.workspace_id = $1
         and a.workspace_id = $1
         and m.status = 'completed'
+        and a.kind = 'original'
         and a.created_at < $2
       order by a.created_at asc
       limit $3
@@ -117,6 +136,9 @@ export async function planMediaRetention(
     contentType: row.content_type,
     sizeBytes: Number(row.size_bytes) || 0,
     createdAt: toIso(row.created_at),
+    peaksStorageKey: row.peaks_storage_key ?? undefined,
+    derivedStorageKeys: (row.derived_keys ?? []).filter(Boolean),
+    derivedBytes: Number(row.derived_bytes) || 0,
   }))
 
   return {
@@ -124,14 +146,18 @@ export async function planMediaRetention(
     retentionDays,
     cutoff,
     candidates,
-    totalBytes: candidates.reduce((sum, item) => sum + item.sizeBytes, 0),
+    totalBytes: candidates.reduce(
+      (sum, item) => sum + item.sizeBytes + item.derivedBytes,
+      0
+    ),
   }
 }
 
 /**
- * Plans and (with `execute`) applies retention for one workspace. Each object
- * is deleted before its row so a storage failure leaves the row for the next
- * run; the run is audited as `media.retention.deleted`.
+ * Plans and (with `execute`) applies retention for one workspace. Each
+ * original's objects (file, peaks, derived playback renditions) are deleted
+ * before its row (derived rows cascade), so a storage failure leaves the row
+ * for the next run; the run is audited as `media.retention.deleted`.
  */
 export async function applyMediaRetention(
   options: { workspaceId: string; execute?: boolean } & RetentionDeps
@@ -156,13 +182,19 @@ export async function applyMediaRetention(
 
   for (const candidate of plan.candidates) {
     try {
-      await deleteObject(candidate.storageKey)
+      for (const key of [
+        ...candidate.derivedStorageKeys,
+        ...(candidate.peaksStorageKey ? [candidate.peaksStorageKey] : []),
+        candidate.storageKey,
+      ]) {
+        await deleteObject(key)
+      }
       await db.query(
         `delete from media_assets where id = $1 and workspace_id = $2`,
         [candidate.id, plan.workspaceId]
       )
       result.deleted += 1
-      result.deletedBytes += candidate.sizeBytes
+      result.deletedBytes += candidate.sizeBytes + candidate.derivedBytes
       deletedIds.push(candidate.id)
     } catch (error) {
       result.errors.push(

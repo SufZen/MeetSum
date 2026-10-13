@@ -48,6 +48,11 @@ import {
   getSystemMeetingRepository,
   resolveMeetingWorkspaceId,
 } from "@/lib/meetings/store"
+import { recordAuditLog } from "@/lib/audit"
+import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
+import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
+import { deleteMeetingObjects } from "@/lib/storage/object-storage"
 import { applyMediaRetention } from "@/lib/storage/retention"
 import {
   deliverWebhookEvent,
@@ -326,21 +331,27 @@ async function recordAiRun(options: {
   }
 }
 
+/** Captured/uploaded media; derived playback renditions never feed ASR (M4). */
+function isOriginalAsset(asset: MediaAsset) {
+  return (asset.kind ?? "original") === "original"
+}
+
 function newestAssetWithStorage(assets: MediaAsset[]) {
   return assets
-    .filter((asset) => asset.storageKey)
+    .filter((asset) => asset.storageKey && isOriginalAsset(asset))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
 }
 
 /**
  * Picks the recording a job should process: the explicit `assetId` (unknown
  * → permanent failure), then a matching `storageKey`, then the newest asset.
+ * Only `original` assets are candidates.
  */
 export function selectMediaAsset(
   meeting: MeetingRecord,
   payload: MeetSumJobPayload
 ): MediaAsset | undefined {
-  const assets = meeting.mediaAssets ?? []
+  const assets = (meeting.mediaAssets ?? []).filter(isOriginalAsset)
 
   if (typeof payload.assetId === "string" && payload.assetId) {
     const asset = assets.find((candidate) => candidate.id === payload.assetId)
@@ -652,6 +663,86 @@ async function refreshSuggestionsSafely(
   }
 }
 
+/**
+ * Queues playback/peaks/duration preparation for the processed original
+ * (M4). Best effort: preparation is never part of meeting processing, so an
+ * enqueue failure only logs. `MEETSUM_MEDIA_PREPARE=false` disables it.
+ */
+async function enqueueMediaPrepare(scope: JobScope, meetingId: string, asset: MediaAsset) {
+  if ((process.env.MEETSUM_MEDIA_PREPARE ?? "true").trim().toLowerCase() === "false") return
+  if (asset.preparedAt && !asset.prepareError) return
+
+  try {
+    await enqueueMeetSumJob("media.prepare", {
+      meetingId,
+      workspaceId: scope.workspaceId,
+      assetId: asset.id,
+    })
+  } catch (error) {
+    console.warn("media.prepare enqueue failed", errorMessage(error))
+  }
+}
+
+async function processMediaPrepareJob(scope: JobScope, job: MeetSumJob) {
+  const meetingId = requireMeetingId(job.data)
+  const assetId = typeof job.data.assetId === "string" ? job.data.assetId : ""
+
+  if (!assetId) throw toPermanentError(new Error("assetId is required"))
+
+  try {
+    return await prepareMediaAsset({
+      meetingId,
+      assetId,
+      repo: scope.repo,
+      force: job.data.force === true,
+    })
+  } catch (error) {
+    const permanent =
+      error instanceof MediaPreparePermanentError || error instanceof UnrecoverableError
+    const isFinal = permanent || job.attemptsMade + 1 >= (job.opts?.attempts ?? 1)
+
+    if (isFinal) {
+      const message = redactAsrErrorMessage(errorMessage(error)).slice(0, 500)
+
+      if (!(error instanceof MediaPreparePermanentError)) {
+        await scope.repo
+          .updateMediaAssetPreparation(assetId, { prepareError: message })
+          .catch(() => undefined)
+      }
+      await recordAuditLog({
+        workspaceId: scope.workspaceId,
+        action: "media.prepare.failed",
+        actor: "system:worker",
+        targetType: "media_asset",
+        targetId: assetId,
+        metadata: { meetingId, attempts: job.attemptsMade + 1, error: message },
+      }).catch(() => undefined)
+    }
+
+    throw permanent ? toPermanentError(error) : error
+  }
+}
+
+/**
+ * Deletes objects left behind by a meeting delete (M4). Retries (5 attempts,
+ * exponential backoff) re-send every key: deleting a missing key succeeds.
+ */
+async function processStorageDeleteJob(payload: MeetSumJobPayload) {
+  const keys = Array.isArray(payload.keys)
+    ? payload.keys.filter((key): key is string => typeof key === "string" && key.length > 0)
+    : undefined
+
+  if (!keys) throw toPermanentError(new Error("keys must be an array of object keys"))
+
+  const result = await deleteMeetingObjects(keys)
+
+  if (result.failed.length) {
+    throw new Error(`${result.failed.length} of ${keys.length} object(s) could not be deleted`)
+  }
+
+  return { deleted: result.deleted.length }
+}
+
 async function processMediaJob(
   scope: JobScope,
   payload: MeetSumJobPayload,
@@ -665,6 +756,7 @@ async function processMediaJob(
     jobRecordId
   )
 
+  await enqueueMediaPrepare(scope, meeting.id, asset)
   await scope.repo.updateMeetingStatus(meeting.id, "transcribing")
   await setStage(scope, jobRecordId, { stage: "audio.transcribe", assetId: asset.id })
 
@@ -850,6 +942,33 @@ async function processMediaJob(
   }
 }
 
+/**
+ * Transcript cleanup that never touches manually edited segments (M4):
+ * segments with word timings keep their text (the ASR glossary already
+ * handled terms); only fillers/echoes are dropped from unedited runs.
+ */
+function cleanupKeepingEdits(transcript: TranscriptSegment[]): TranscriptSegment[] {
+  const rewriteTerms = !transcript.some((segment) => segment.words?.length)
+  const result: TranscriptSegment[] = []
+  let run: TranscriptSegment[] = []
+  const flush = () => {
+    if (run.length) result.push(...cleanupTranscriptSegments(run, { rewriteTerms }))
+    run = []
+  }
+
+  for (const segment of transcript) {
+    if (segment.source === "edited") {
+      flush()
+      result.push(segment)
+    } else {
+      run.push(segment)
+    }
+  }
+  flush()
+
+  return result
+}
+
 async function processIntelligenceOnlyJob(
   scope: JobScope,
   payload: MeetSumJobPayload,
@@ -861,17 +980,29 @@ async function processIntelligenceOnlyJob(
   await setStage(scope, jobRecordId, { stage: "summary.generate", mode: payload.mode })
 
   const transcript = meeting.transcript ?? []
-  // Segments with word timings keep their text (the ASR glossary already
-  // handled terms); only fillers/echoes are dropped.
-  const cleanedTranscript = cleanupTranscriptSegments(transcript, {
-    rewriteTerms: !transcript.some((segment) => segment.words?.length),
-  })
+  const cleanedTranscript = cleanupKeepingEdits(transcript)
   const changed =
     cleanedTranscript.length !== transcript.length ||
     cleanedTranscript.some((segment, index) => segment.text !== transcript[index]?.text)
 
   if (cleanedTranscript.length && changed) {
-    await scope.repo.replaceTranscriptSegments(meeting.id, cleanedTranscript)
+    // Same transcript re-written: manual edits survive (M4).
+    const speakers = await scope.repo.listMeetingSpeakers(meeting.id)
+
+    await scope.repo.replaceTranscript(
+      meeting.id,
+      legacySegmentsToTranscript(
+        speakers.map((speaker) => ({
+          id: speaker.id,
+          label: speaker.label,
+          source: speaker.source,
+          mappingStatus: speaker.mappingStatus,
+          resolvedName: speaker.displayName ?? speaker.label,
+        })),
+        cleanedTranscript
+      ),
+      { preserveEdited: true }
+    )
   }
 
   const refreshed = await scope.repo.getMeeting(meeting.id)
@@ -1164,6 +1295,12 @@ async function dispatchJob(
   }
   if (job.name === "media.retention") {
     return applyMediaRetention({ workspaceId: scope.workspaceId, execute: true })
+  }
+  if (job.name === "media.prepare") {
+    return processMediaPrepareJob(scope, job)
+  }
+  if (job.name === "storage.delete") {
+    return processStorageDeleteJob(job.data)
   }
 
   return {}

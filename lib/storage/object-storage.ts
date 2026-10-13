@@ -1,9 +1,11 @@
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
-  DeleteObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
@@ -301,16 +303,168 @@ export type DeleteMeetingObjectsResult = {
   failed: Array<{ key: string; error: string }>
 }
 
+/** S3 DeleteObjects accepts at most 1000 keys per request. */
+export const DELETE_OBJECTS_BATCH = 1000
+
+type DeleteObjectsSender = (input: {
+  Bucket: string
+  Delete: { Objects: Array<{ Key: string }>; Quiet?: boolean }
+}) => Promise<{
+  Deleted?: Array<{ Key?: string }>
+  Errors?: Array<{ Key?: string; Code?: string; Message?: string }>
+}>
+
 /**
- * Deletes many objects (M4: meeting delete, derived renditions, peaks).
- * Step 0 stub; Package A implements DeleteObjects batches of 1000 where a
- * missing key counts as deleted.
+ * Deletes many objects (M4: meeting delete, derived renditions, peaks) with
+ * DeleteObjects batches of 1000. A missing key counts as deleted; a failed
+ * batch request marks its keys failed without stopping the other batches.
  */
 export async function deleteMeetingObjects(
-  keys: readonly string[]
+  keys: readonly string[],
+  deps: { send?: DeleteObjectsSender; bucket?: string } = {}
 ): Promise<DeleteMeetingObjectsResult> {
-  void keys
-  throw new Error("deleteMeetingObjects: not implemented (M4)")
+  const unique = [...new Set(keys.filter((key) => typeof key === "string" && key))]
+  const result: DeleteMeetingObjectsResult = { deleted: [], failed: [] }
+
+  if (!unique.length) return result
+
+  const bucket = deps.bucket ?? getMeetingMediaBucket()
+  const send: DeleteObjectsSender =
+    deps.send ?? ((input) => getS3Client().send(new DeleteObjectsCommand(input)))
+
+  for (let offset = 0; offset < unique.length; offset += DELETE_OBJECTS_BATCH) {
+    const batch = unique.slice(offset, offset + DELETE_OBJECTS_BATCH)
+
+    try {
+      const response = await send({
+        Bucket: bucket,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      })
+      const errors = new Map<string, string>()
+
+      for (const error of response.Errors ?? []) {
+        if (!error.Key || error.Code === "NoSuchKey") continue
+        errors.set(error.Key, error.Code ?? error.Message ?? "DeleteObjects error")
+      }
+
+      for (const key of batch) {
+        const error = errors.get(key)
+
+        if (error) result.failed.push({ key, error })
+        else result.deleted.push(key)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+
+      for (const key of batch) result.failed.push({ key, error: message })
+    }
+  }
+
+  return result
+}
+
+export type ObjectRange = {
+  /** Web stream of the object bytes (cancel it to release the socket). */
+  body: ReadableStream<Uint8Array>
+  contentLength?: number
+  contentRange?: string
+  contentType?: string
+}
+
+/**
+ * Streams (part of) an object: `start`/`end` are inclusive byte offsets
+ * (S3 `Range: bytes=start-end`). Aborting `signal` aborts the S3 request.
+ * Errors keep the SDK names (`NoSuchKey`, `InvalidRange`) for the caller.
+ */
+export async function getMeetingObjectRange(
+  key: string,
+  options: { start?: number; end?: number; signal?: AbortSignal } = {}
+): Promise<ObjectRange> {
+  const range =
+    options.start !== undefined
+      ? `bytes=${options.start}-${options.end !== undefined ? options.end : ""}`
+      : undefined
+  const result = await getS3Client().send(
+    new GetObjectCommand({
+      Bucket: getMeetingMediaBucket(),
+      Key: key,
+      ...(range ? { Range: range } : {}),
+    }),
+    options.signal ? { abortSignal: options.signal } : {}
+  )
+
+  if (!result.Body) {
+    throw new Error(`Object body is empty: ${key}`)
+  }
+
+  return {
+    body: result.Body.transformToWebStream() as ReadableStream<Uint8Array>,
+    contentLength: result.ContentLength,
+    contentRange: result.ContentRange,
+    contentType: result.ContentType,
+  }
+}
+
+/** Size/type of an object, or undefined when it does not exist. */
+export async function headMeetingObject(
+  key: string
+): Promise<{ sizeBytes: number; contentType?: string; lastModified?: Date } | undefined> {
+  try {
+    const result = await getS3Client().send(
+      new HeadObjectCommand({ Bucket: getMeetingMediaBucket(), Key: key })
+    )
+
+    return {
+      sizeBytes: result.ContentLength ?? 0,
+      contentType: result.ContentType,
+      lastModified: result.LastModified,
+    }
+  } catch (error) {
+    const name = (error as { name?: string })?.name
+    const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
+      ?.httpStatusCode
+
+    if (name === "NotFound" || name === "NoSuchKey" || status === 404) return undefined
+    throw error
+  }
+}
+
+/**
+ * Streams a local file into object storage under `keyPrefix` (decorated
+ * key, like uploads) with a SHA-256 checksum, e.g. a playback rendition.
+ */
+export async function storeMeetingObjectFile(options: {
+  keyPrefix: string
+  filename: string
+  path: string
+  contentType: string
+}): Promise<StoredObject & { checksumSha256: string }> {
+  return storeMeetingObjectStream({
+    keyPrefix: options.keyPrefix,
+    filename: options.filename,
+    contentType: options.contentType,
+    body: createReadStream(options.path),
+    maxBytes: Number.MAX_SAFE_INTEGER,
+  })
+}
+
+/** Writes a small JSON document to an exact key (e.g. waveform peaks). */
+export async function putMeetingObjectJson(key: string, value: unknown): Promise<StoredObject> {
+  const bucket = getMeetingMediaBucket()
+  const body = Buffer.from(JSON.stringify(value), "utf8")
+
+  await ensureBucket(bucket)
+  await getS3Client().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentLength: body.length,
+      ContentType: "application/json",
+    })
+  )
+
+  return { bucket, key, contentType: "application/json", sizeBytes: body.length }
 }
 
 /**
