@@ -1,9 +1,6 @@
 {
   "components/command-center-shell.tsx": 1,
-  "components/drive-recording-picker-drawer.tsx": 1,
   "components/meeting-inbox-panel.tsx": 1,
-  "components/operational-pages.tsx": 2,
-  "components/player/speaker-timeline-bar.tsx": 1,
   "components/share/share-meeting-dialog.tsx": 1,
   "components/top-command-bar.tsx": 1
 }
