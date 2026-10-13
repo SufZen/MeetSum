@@ -4,8 +4,47 @@ import {
   buildInvitationEmail,
   type InvitationEmailLocale,
 } from "@/lib/email/templates/invitation"
-import type { WorkspaceStore } from "@/lib/workspaces/store"
-import type { Invitation, Workspace } from "@/lib/workspaces/types"
+import { WorkspaceStoreError, type WorkspaceStore } from "@/lib/workspaces/store"
+import type { Invitation, Membership, Workspace, WorkspaceUser } from "@/lib/workspaces/types"
+
+/**
+ * M9 (Package C): accepts a pending invitation by id for the signed-in user,
+ * from the bell or `POST /api/me/invitations/[id]/accept`. The session email
+ * must equal the invitation email (checked before anything changes); the
+ * token is then rotated and the M2 accept transaction runs unchanged.
+ * Idempotent for the user who already accepted it.
+ */
+export async function acceptInvitationById(
+  store: WorkspaceStore,
+  input: { workspaceId: string; invitationId: string; user: Pick<WorkspaceUser, "id" | "email"> },
+  now: number = Date.now()
+): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }> {
+  const invitation = await store.getInvitation(input.workspaceId, input.invitationId)
+  const workspace = invitation ? await store.getWorkspace(invitation.workspaceId) : undefined
+
+  if (!invitation || !workspace) throw new WorkspaceStoreError("not_found", "Invitation not found")
+
+  if (invitation.status === "accepted" && invitation.acceptedByUserId === input.user.id) {
+    const membership = await store.getMembership(invitation.workspaceId, input.user.id)
+
+    if (membership) return { membership, workspace, invitation }
+  }
+
+  if (invitation.status !== "pending" || Date.parse(invitation.expiresAt) <= now) {
+    throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
+  }
+  if (input.user.email.trim().toLowerCase() !== invitation.email.trim().toLowerCase()) {
+    throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
+  }
+
+  const { token } = await store.rotateInvitationToken(
+    invitation.workspaceId,
+    invitation.id,
+    Math.max(1 / 60, (Date.parse(invitation.expiresAt) - now) / 3_600_000)
+  )
+
+  return store.acceptInvitation({ token, user: input.user })
+}
 
 /** Public origin used in invitation links. */
 export function resolveAppOrigin(
