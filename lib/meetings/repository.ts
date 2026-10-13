@@ -2485,7 +2485,7 @@ export function createInMemoryMeetingRepository(
         input.dueOn && isDateOnly(input.dueOn)
           ? input.dueOn
           : dueText
-            ? parseDueDate(dueText, { anchor: meeting.startedAt, timeZone: getTaskTimeZone() })?.date
+            ? parseDueDate(dueText, { anchor: meeting.startedAt, timeZone: getTaskTimeZone(), strict: true })?.date
             : undefined
       const ownerText = input.ownerText?.trim() || undefined
       const item: ActionItem = {

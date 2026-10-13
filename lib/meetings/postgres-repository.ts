@@ -3541,6 +3541,7 @@ export function createPostgresMeetingRepository(
           ? (parseDueDate(dueText, {
               anchor: toIso(meetingRow.started_at),
               timeZone: getTaskTimeZone(),
+              strict: true,
             })?.date ?? null)
           : null
       const result = await client.query(

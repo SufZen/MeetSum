@@ -66,7 +66,8 @@ export function resolveDuePatch(
     if (!isDateOnly(patch.dueOn)) throw new Error(`Invalid dueOn: ${patch.dueOn}`)
     dueOn = patch.dueOn
   } else if (patch.dueOn === undefined && dueText) {
-    dueOn = parseDueDate(dueText, { anchor, timeZone })?.date ?? null
+    // User input: strict, so junk around a date is not silently accepted.
+    dueOn = parseDueDate(dueText, { anchor, timeZone, strict: true })?.date ?? null
   } else if (patch.dueOn === undefined && patch.dueText === undefined && patch.dueDate) {
     const parsed = new Date(patch.dueDate)
 

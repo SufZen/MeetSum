@@ -25,7 +25,7 @@ const CHIPS: Array<[keyof TasksMessages, string]> = [
 ]
 
 export function chipDate(phrase: string, now: Date = new Date()): string | undefined {
-  return parseDueDate(phrase, { anchor: now.toISOString() })?.date
+  return parseDueDate(phrase, { anchor: now.toISOString(), strict: true })?.date
 }
 
 export function DueDateField({
@@ -47,7 +47,7 @@ export function DueDateField({
   const id = useId()
   const [phrase, setPhrase] = useState(dueText ?? "")
   const preview = useMemo(
-    () => (phrase.trim() ? parseDueDate(phrase, { anchor: meetingStartedAt }) : null),
+    () => (phrase.trim() ? parseDueDate(phrase, { anchor: meetingStartedAt, strict: true }) : null),
     [phrase, meetingStartedAt]
   )
 

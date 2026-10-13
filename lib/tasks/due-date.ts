@@ -22,6 +22,11 @@ export type DueDateParseOptions = {
   workweekEnd?: number
   /** Numeric date order for non-Hebrew text; default `DMY`. Hebrew is always DMY. */
   dateOrder?: "DMY" | "MDY"
+  /**
+   * User-typed input: reject the phrase when tokens other than filler words
+   * remain around the matched date ("e148 מחר"). AI free text stays lenient.
+   */
+  strict?: boolean
 }
 
 export type DueDateParseResult = {
@@ -1049,6 +1054,7 @@ export function parseDueDate(text: string, opts: DueDateParseOptions): DueDatePa
     const hit = rule(normalized, ctx)
 
     if (hit) {
+      if (opts.strict && hasLeftoverTokens(normalized, hit.matched)) return null
       return {
         date: formatCivil(fromDays(hit.days)),
         confidence: hit.confidence,
@@ -1059,6 +1065,23 @@ export function parseDueDate(text: string, opts: DueDateParseOptions): DueDatePa
   }
 
   return null
+}
+
+/** Words that may surround a due date in user input without changing it. */
+const DUE_FILLER_WORDS = new Set([
+  "by", "until", "till", "til", "due", "on", "at", "the", "before", "no", "later", "than", "in", "of",
+  "עד", "ב", "ל", "של", "את", "ה", "לא", "יאוחר", "מ", "עוד", "יום",
+])
+
+function hasLeftoverTokens(normalized: string, matched: string): boolean {
+  const index = matched ? normalized.indexOf(matched) : -1
+  const rest = index >= 0 ? normalized.slice(0, index) + " " + normalized.slice(index + matched.length) : normalized
+
+  return rest
+    .split(/\s+/)
+    .map((token) => token.replace(/^["'.-]+|["'.-]+$/g, ""))
+    .filter(Boolean)
+    .some((token) => !DUE_FILLER_WORDS.has(token))
 }
 
 function clampWeekday(value: number | undefined, fallback: number): number {
