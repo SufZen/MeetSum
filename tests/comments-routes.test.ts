@@ -153,12 +153,17 @@ describe("comment routes", () => {
 
   it("renders hostile bodies as escaped text with mention chips", () => {
     const html = renderToStaticMarkup(
-      createElement(CommentBody, { body: '<img src=x onerror="alert(1)"> @[דנה](user:user_dana)' })
+      createElement(CommentBody, {
+        body: '<img src=x onerror="alert(1)"> @[The CEO](user:user_dana)',
+        directory: { user_dana: { name: "דנה" } },
+      })
     )
 
     expect(html).not.toContain("<img")
     expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;")
     expect(html).toMatch(/<bdi[^>]*>@דנה<\/bdi>/)
     expect(html).not.toContain("user:user_dana")
+    // The chip shows the member directory name, not the author-supplied text.
+    expect(html).not.toContain("The CEO")
   })
 })

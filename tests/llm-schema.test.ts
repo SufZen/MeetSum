@@ -105,7 +105,10 @@ describe("structured output errors never carry model or transcript text", () => 
       { schema: { name: "s", zod: schema }, validate: (value) => [`unknown meeting id ${value.title}`] },
       "gemini",
       async () => ({ text: JSON.stringify({ title: SECRET }), usage })
-    ).catch((error) => error as Error)
+    ).then(
+      () => new Error("expected a rejection"),
+      (error: Error) => error
+    )
 
     expect(semantic.message).not.toContain(SECRET)
     expect(semantic.message).toContain("1 rule violation")

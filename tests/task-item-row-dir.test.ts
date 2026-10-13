@@ -28,7 +28,7 @@ describe("TaskItemRow direction", () => {
         onPatch: async () => {},
       })
     )
-    const title = /<button[^>]*>(?:(?!<\/button>).)*Send the Supabase migration plan/s.exec(html)?.[0] ?? ""
+    const title = /<button[^>]*>(?:(?!<\/button>)[\s\S])*Send the Supabase migration plan/.exec(html)?.[0] ?? ""
     const quote = /<blockquote[^>]*>/.exec(html)?.[0] ?? ""
 
     expect(title).toMatch(/^<button[^>]*dir="auto"/)
