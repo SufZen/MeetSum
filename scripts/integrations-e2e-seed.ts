@@ -157,11 +157,16 @@ async function seed() {
   const meetings = seededMeetings()
 
   // Integration rows reference meetings and workspaces; clear them first.
-  for (const table of ["integration_deliveries", "integration_links", "integration_rules", "integration_connections", "meeting_integration_prefs", "email_recap_unsubscribes"]) {
+  for (const table of ["integration_deliveries", "integration_links", "integration_rules", "meeting_integration_prefs", "email_recap_unsubscribes"]) {
     await pool.query(`delete from ${table} where workspace_id like 'e2e\\_m8\\_%'`)
   }
-  await pool.query("delete from meetings where id like 'e2e\\_m8\\_%'")
-  await pool.query("delete from calendar_events where id like 'e2e\\_m8\\_%'")
+  // An Outlook sync creates meetings and calendar_events whose ids lack the e2e
+  // prefix. Deleting the connection cascades to those calendar_events, which the
+  // meetings still reference (meetings_calendar_event_id_fkey), so clear by
+  // workspace: meetings first, then calendar_events, then the connections.
+  await pool.query("delete from meetings where workspace_id like 'e2e\\_m8\\_%' or id like 'e2e\\_m8\\_%'")
+  await pool.query("delete from calendar_events where workspace_id like 'e2e\\_m8\\_%' or id like 'e2e\\_m8\\_%'")
+  await pool.query("delete from integration_connections where workspace_id like 'e2e\\_m8\\_%'")
 
   for (const user of Object.values(USERS)) {
     await pool.query("insert into users (id, email) values ($1, $2) on conflict do nothing", [user.id, user.email])
@@ -227,7 +232,7 @@ async function seed() {
       await pool.query(
         // due_on (date-only) is what the recap shows; due_date stays for M2 views.
         `insert into action_items (id, meeting_id, title, owner, status, due_date, due_on, priority, workspace_id)
-         values ($1, $2, $3, $4, 'open', $5, $5::date, $6, $7) on conflict (id) do nothing`,
+         values ($1, $2, $3, $4, 'open', $5::text::timestamptz, $5::text::date, $6, $7) on conflict (id) do nothing`,
         [action.id, item.id, action.title, action.owner ?? null, action.dueDate ?? null, action.priority ?? "normal", item.workspaceId]
       )
     }
@@ -267,13 +272,16 @@ async function deliver(workspaceId: string, visibility: MeetingVisibility | unde
   } catch {
     // Same as the processor: webhook delivery never fails the run.
   }
+  // wait: the script exits right after, so a fire-and-forget enqueue never lands.
   await enqueueIntegrationEvent({
     workspaceId,
     eventName,
     eventId: `evt_${randomUUID()}`,
     meetingId: String(data.meetingId ?? ""),
     ...(typeof data.actionItemId === "string" ? { actionItemId: data.actionItemId } : {}),
-  }).catch(() => {})
+  }, undefined, { wait: true }).catch((error: unknown) => {
+    console.warn(`Integration enqueue failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
 }
 
 async function complete(meetingId: string) {
