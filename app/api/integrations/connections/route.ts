@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
+import { visibleConnections } from "@/lib/integrations/core/connection-access"
+import { isFakeMode } from "@/lib/integrations/core/http"
+import { getIntegrationStore } from "@/lib/integrations/core/store"
 
 /**
- * /api/integrations/connections (M8, owner: Package A). Workspace connections (label, status) plus my personal ones; admins also see others' personal connections (label and status only).
- *
- * Step 0 stub: answers 501 behind its final guard (docs/parity/m8.md,
- * "Route to permission map").
+ * GET /api/integrations/connections (M8 A2). Workspace connections (label,
+ * status, non-secret config) plus my personal ones; admins also see
+ * others' personal connections (label and status only). Never a token.
  */
-function notImplemented() {
-  return NextResponse.json({ error: "not_implemented" }, { status: 501 })
-}
+export const GET = withAuthz("integrations:connect", async (_request, ctx) => {
+  const store = await getIntegrationStore()
+  const rows = await store.listConnections(ctx.workspace.id)
 
-export const GET = withAuthz("integrations:connect", async () => notImplemented())
+  return NextResponse.json({ connections: visibleConnections(rows, ctx), fake: isFakeMode() })
+})

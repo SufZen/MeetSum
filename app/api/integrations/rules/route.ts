@@ -1,18 +1,38 @@
 import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
+import { actorUserId, apiError, auditActor, limitFor, readJsonBody } from "@/lib/integrations/core/api"
+import { createRule, toRuleDTO } from "@/lib/integrations/core/rules"
+import { getIntegrationStore } from "@/lib/integrations/core/store"
 
 /**
- * /api/integrations/rules (M8, owner: Package A). Integration rules (admins only, workspace scope).
- *
- * Step 0 stub: answers 501 behind its final guard (docs/parity/m8.md,
- * "Route to permission map").
+ * /api/integrations/rules (M8 A3). Integration rules, admins only,
+ * workspace scope. POST upserts the singleton email rule. Caps → 409.
  */
-function notImplemented() {
-  return NextResponse.json({ error: "not_implemented" }, { status: 501 })
-}
+export const GET = withAuthz("integrations:manage", async (_request, ctx) => {
+  const store = await getIntegrationStore()
 
-export const GET = withAuthz("integrations:manage", async () => notImplemented())
+  return NextResponse.json({ rules: (await store.listRules(ctx.workspace.id)).map(toRuleDTO) })
+})
 
-/** `integrationsWrite` rate limit; DB caps answer 409. */
-export const POST = withAuthz("integrations:manage", async () => notImplemented())
+export const POST = withAuthz("integrations:manage", async (request, ctx) => {
+  const limited = limitFor(request, ctx, "integrationsWrite")
+
+  if (limited) return limited
+
+  const result = await createRule(await getIntegrationStore(), {
+    workspaceId: ctx.workspace.id,
+    userId: actorUserId(ctx),
+    actor: auditActor(ctx),
+    body: await readJsonBody(request),
+  })
+
+  if (!result.ok) {
+    const { status, code, ok: _ok, ...extra } = result
+
+    void _ok
+    return apiError(code, status, extra)
+  }
+
+  return NextResponse.json({ rule: result.rule }, { status: 201 })
+})

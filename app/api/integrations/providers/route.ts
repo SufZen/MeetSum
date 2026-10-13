@@ -1,15 +1,27 @@
 import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
+import { isFakeMode } from "@/lib/integrations/core/http"
+import { listProviders } from "@/lib/integrations/core/registry"
+import type { ProviderInfo } from "@/lib/integrations/core/types"
 
 /**
- * /api/integrations/providers (M8, owner: Package A). Providers for the settings page: `[{id, scope, configured, fake}]`, never client ids.
- *
- * Step 0 stub: answers 501 behind its final guard (docs/parity/m8.md,
- * "Route to permission map").
+ * GET /api/integrations/providers (M8 A1) → `[{id, scope, configured, fake}]`
+ * for the UI. Never includes client ids or secrets.
  */
-function notImplemented() {
-  return NextResponse.json({ error: "not_implemented" }, { status: 501 })
-}
+export const GET = withAuthz("workspace:read", async () => {
+  const fake = isFakeMode()
+  const providers: ProviderInfo[] = listProviders().map((provider) => {
+    let configured = false
 
-export const GET = withAuthz("workspace:read", async () => notImplemented())
+    try {
+      configured = provider.configured()
+    } catch {
+      configured = false
+    }
+
+    return { id: provider.id, scope: provider.scope, configured, fake }
+  })
+
+  return NextResponse.json({ providers })
+})

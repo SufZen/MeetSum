@@ -109,7 +109,7 @@ export function createEmailRecapProvider(deps: EmailRecapDeps = {}): Integration
         workspaceName,
         ...(recipient.isMember && input.recap.links.meeting ? { appUrl: absolute(input.recap.links.meeting, env()) } : {}),
         ...(!recipient.isMember && input.content.link === "existing_share" && input.recap.links.share ? { shareUrl: input.recap.links.share } : {}),
-        unsubscribeUrl: unsubscribeUrl(signUnsubscribeToken({ workspaceId: input.workspaceId, email: recipient.email }, env()), env()),
+        unsubscribeUrl: unsubscribeUrl(signUnsubscribeToken({ workspaceId: input.workspaceId, email: recipient.email }, env()), env(), locale),
         timeZone: getTaskTimeZone(env()),
       })
 

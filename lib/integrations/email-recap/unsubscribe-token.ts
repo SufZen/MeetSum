@@ -64,8 +64,13 @@ export function verifyUnsubscribeToken(token: string | null | undefined, env: No
 }
 
 /** Absolute `${APP}/api/email/unsubscribe?t=…` (List-Unsubscribe needs an absolute URL). */
-export function unsubscribeUrl(token: string, env: NodeJS.ProcessEnv = process.env): string {
+export function unsubscribeUrl(token: string, env: NodeJS.ProcessEnv = process.env, locale?: "he" | "en"): string {
   const origin = (env.NEXT_PUBLIC_APP_URL?.trim() || env.MEETSUM_OAUTH_REDIRECT_BASE?.trim() || "http://localhost:3000").replace(/\/+$/, "")
 
-  return `${origin}/api/email/unsubscribe?t=${encodeURIComponent(token)}`
+  return `${origin}/api/email/unsubscribe?t=${encodeURIComponent(token)}${locale ? `&l=${locale}` : ""}`
+}
+
+/** Locale hint of an unsubscribe link (unsigned; only picks the page language). */
+export function unsubscribeLocale(value: string | null | undefined): "he" | "en" {
+  return value === "he" ? "he" : "en"
 }

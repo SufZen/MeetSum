@@ -32,7 +32,9 @@ const ENV = {
   MEETSUM_OAUTH_REDIRECT_BASE: "https://meetsum.example.com",
 } as NodeJS.ProcessEnv
 
-function fakeProvider(id: "slack" | "microsoft", pkce: boolean, exchange = vi.fn()): IntegrationProvider {
+type ExchangeFn = (code: string, params: { redirectUri: string; codeVerifier?: string }) => Promise<OAuthExchangeResult>
+
+function fakeProvider(id: "slack" | "microsoft", pkce: boolean, exchange: ExchangeFn = vi.fn<ExchangeFn>()): IntegrationProvider {
   return {
     id,
     scope: id === "slack" ? "workspace" : "user",
@@ -86,7 +88,7 @@ describe("OAuth state", () => {
 
 describe("startOAuth / completeOAuth", () => {
   let store: IntegrationStore
-  let exchange: ReturnType<typeof vi.fn>
+  let exchange: ReturnType<typeof vi.fn<ExchangeFn>>
   let providers: Record<string, IntegrationProvider>
   const exchanged: OAuthExchangeResult = {
     accessToken: "xoxb-fixture",
@@ -96,7 +98,7 @@ describe("startOAuth / completeOAuth", () => {
 
   beforeEach(() => {
     store = createMemoryIntegrationStore()
-    exchange = vi.fn(async () => exchanged)
+    exchange = vi.fn<ExchangeFn>(async () => exchanged)
     providers = { slack: fakeProvider("slack", false, exchange), microsoft: fakeProvider("microsoft", true, exchange) }
   })
 
