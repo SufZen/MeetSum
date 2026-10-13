@@ -1,0 +1,105 @@
+# MeetSum side of the M7 meeting bot (Vexa sidecar). See docs/runbooks/vexa.md.
+#
+# Use together with the production file and the `vexa` profile:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.vexa.yml --profile vexa up -d
+#
+# Vexa itself runs as its OWN compose project (`-p vexa`) from the upstream
+# checkout pinned in deploy/vexa/vexa.lock (v0.12.28), started by
+# deploy/vexa/bootstrap.sh with deploy/vexa/compose.override.yml. Upstream
+# services are deliberately not re-declared here: they drift every release.
+# Vexa keeps its own Postgres database and Valkey (Redis) inside that project;
+# MeetSum's Postgres and Redis are never shared with it.
+#
+# This file only:
+#   - prepares MeetSum's MinIO for Vexa recordings (`vexa-minio-init`: a
+#     dedicated bucket, a bucket-only user and policy, and a 7-day expiry rule
+#     as a safety net; MeetSum copies recordings out through the Vexa API and
+#     Vexa artifacts are purged after 72 hours);
+#   - attaches app, worker and minio to the internal `meetsum-vexa` network so
+#     the app reaches the Vexa gateway (VEXA_API_URL=http://vexa-gateway:8000)
+#     and Vexa's meeting-api reaches MinIO as `meetsum-minio:9000`.
+#
+# No ports are published and nothing here is routed through Traefik. Images
+# are pinned by tag AND digest; never `:latest`. Existing compose files are
+# not edited. `app`, `worker` and `minio` are merge-only overrides (networks
+# only), so they keep running without the profile; every service this file
+# adds carries the `vexa` profile.
+
+services:
+  vexa-minio-init:
+    profiles: ["vexa"]
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      VEXA_MINIO_ACCESS_KEY: ${VEXA_MINIO_ACCESS_KEY:?VEXA_MINIO_ACCESS_KEY is required}
+      VEXA_MINIO_SECRET_KEY: ${VEXA_MINIO_SECRET_KEY:?VEXA_MINIO_SECRET_KEY is required}
+      VEXA_MINIO_BUCKET: ${VEXA_MINIO_BUCKET:-vexa-recordings}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        mc alias set meetsum http://meetsum-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "meetsum/$$VEXA_MINIO_BUCKET"
+        cat > /tmp/vexa-policy.json <<POLICY
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"],
+              "Resource": ["arn:aws:s3:::$$VEXA_MINIO_BUCKET"]
+            },
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+              "Resource": ["arn:aws:s3:::$$VEXA_MINIO_BUCKET/*"]
+            }
+          ]
+        }
+        POLICY
+        mc admin policy create meetsum vexa-recordings-rw /tmp/vexa-policy.json 2>/dev/null \
+          || mc admin policy update meetsum vexa-recordings-rw /tmp/vexa-policy.json 2>/dev/null \
+          || true
+        mc admin user add meetsum "$$VEXA_MINIO_ACCESS_KEY" "$$VEXA_MINIO_SECRET_KEY"
+        mc admin policy attach meetsum vexa-recordings-rw --user "$$VEXA_MINIO_ACCESS_KEY" 2>/dev/null || true
+        mc ilm rule ls "meetsum/$$VEXA_MINIO_BUCKET" 2>/dev/null | grep -q "7 day" \
+          || mc ilm rule add --expire-days 7 "meetsum/$$VEXA_MINIO_BUCKET"
+        echo "vexa-minio-init: bucket $$VEXA_MINIO_BUCKET ready"
+    networks:
+      - default
+    mem_limit: 128m
+    cpus: 0.25
+
+  # Merge-only overrides: join the internal Vexa network. Nothing else changes.
+  app:
+    networks:
+      meetsum-vexa:
+        aliases:
+          - meetsum-app
+
+  worker:
+    networks:
+      # The worker has no networks in docker-compose.prod.yml; naming one here
+      # would drop the implicit default network, so keep it explicitly.
+      default: {}
+      meetsum-vexa:
+        aliases:
+          - meetsum-worker
+
+  minio:
+    networks:
+      meetsum-vexa:
+        aliases:
+          - meetsum-minio
+
+networks:
+  # Created by deploy/vexa/bootstrap.sh (`docker network create --internal meetsum-vexa`);
+  # Vexa's gateway and meeting-api join it from deploy/vexa/compose.override.yml.
+  meetsum-vexa:
+    external: true

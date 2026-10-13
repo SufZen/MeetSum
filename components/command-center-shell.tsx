@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  type CSSProperties,
   type ChangeEvent,
   useCallback,
   useEffect,
@@ -13,6 +14,17 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+import { botApi } from "@/components/bot/bot-api"
+import {
+  BotSessionsProvider,
+  type BotSessionsContextValue,
+} from "@/components/bot/bot-sessions-context"
+import { RecorderDock } from "@/components/bot/recorder-dock"
+import { dockEntriesFrom, type DockStopAction } from "@/components/bot/recorder-dock-state"
+import { StopBotDialog } from "@/components/bot/stop-bot-dialog"
+import { useBotSessions } from "@/components/bot/use-bot-sessions"
+import { useBrowserRecorder } from "@/components/bot/use-browser-recorder"
+import { useWorkspace } from "@/components/workspace-context"
 import {
   DriveRecordingPickerDrawer,
   type DriveImportResult,
@@ -69,6 +81,11 @@ const panelLoading = () => (
 const AdminPanel = dynamic(
   () => import("@/components/admin/admin-panel").then((mod) => mod.AdminPanel),
   { loading: panelLoading }
+)
+// The join dialog (and A's link parser) load only when it first opens.
+const JoinMeetingDialog = dynamic(
+  () => import("@/components/bot/join-meeting-dialog").then((mod) => mod.JoinMeetingDialog),
+  { ssr: false }
 )
 const OperationalPage = dynamic(
   () => import("@/components/operational-pages").then((mod) => mod.OperationalPage),
@@ -173,6 +190,20 @@ export function CommandCenterShell({
   const [suggestingAgents, setSuggestingAgents] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
+  // M7 meeting bot + recorder dock.
+  const { activeWorkspace } = useWorkspace()
+  const botSessions = useBotSessions(activeWorkspace?.id)
+  const [joinOpen, setJoinOpen] = useState(false)
+  const [joinDialogReady, setJoinDialogReady] = useState(false)
+  const [desktopOpen, setDesktopOpen] = useState(false)
+  const [stopTarget, setStopTarget] = useState<{ meetingId: string; title: string | null } | null>(
+    null
+  )
+  const [stopBusy, setStopBusy] = useState(false)
+  const [dockHeight, setDockHeight] = useState(0)
+  const browserRecorder = useBrowserRecorder({
+    onRecordingReady: (file, meta) => handleBrowserRecording(file, meta.meetingId),
+  })
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [shareLink, setShareLink] = useState("")
@@ -710,6 +741,21 @@ export function CommandCenterShell({
       })
     )
     event.target.value = ""
+  }
+
+  function handleBrowserRecording(file: File, meetingId: string | null) {
+    const target =
+      (meetingId ? meetingRecords.find((meeting) => meeting.id === meetingId) : undefined) ??
+      selectedMeeting ??
+      undefined
+
+    toast.info("Recording saved. Uploading audio...")
+    startTransition(() =>
+      void uploadFile(file, target).catch((error) => {
+        setAskAnswer(error.message)
+        toast.error(error.message)
+      })
+    )
   }
 
   function handleRecordingReady(file: File) {
@@ -1395,7 +1441,57 @@ export function CommandCenterShell({
   // row a full viewport tall (inbox + meeting) and scroll down to the rail,
   // instead of letting the implicit row halve the meeting column.
   const defaultMeetingsViewClass =
-    "grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:grid-cols-[330px_minmax(0,1fr)] lg:grid-rows-[100%] lg:auto-rows-max lg:overflow-y-auto ms-scrollbar 2xl:grid-cols-[330px_minmax(0,1fr)_270px] 2xl:overflow-hidden"
+    "grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem-var(--ms-dock-h,0px))] lg:min-h-0 lg:grid-cols-[330px_minmax(0,1fr)] lg:grid-rows-[100%] lg:auto-rows-max lg:overflow-y-auto ms-scrollbar 2xl:grid-cols-[330px_minmax(0,1fr)_270px] 2xl:overflow-hidden"
+
+  const botEnabled = botSessions.enabled === true
+  const meetingTitles = useMemo(
+    () => Object.fromEntries(meetingRecords.map((meeting) => [meeting.id, meeting.title])),
+    [meetingRecords]
+  )
+  const browserRecording =
+    browserRecorder.state === "recording" && browserRecorder.startedAt
+      ? {
+          startedAt: browserRecorder.startedAt,
+          meetingId: browserRecorder.meetingId,
+          title: browserRecorder.meetingId ? (meetingTitles[browserRecorder.meetingId] ?? null) : null,
+        }
+      : null
+  const dockEntries = dockEntriesFrom({
+    sessions: botEnabled ? botSessions.byMeetingId : {},
+    titles: meetingTitles,
+    browser: browserRecording,
+  })
+  const botContext: BotSessionsContextValue = {
+    enabled: botEnabled,
+    byMeetingId: botSessions.byMeetingId,
+    refresh: botSessions.refresh,
+    onRecordFromBrowser: (meetingId) => void browserRecorder.start({ meetingId }),
+    onImportDesktop: () => setDesktopOpen(true),
+    onRequestStop: (session, title) =>
+      session.meetingId && setStopTarget({ meetingId: session.meetingId, title }),
+  }
+
+  function handleDockStop(action: DockStopAction) {
+    if (action.kind === "browser") {
+      browserRecorder.stop()
+      return
+    }
+    setStopTarget({ meetingId: action.meetingId, title: action.title })
+  }
+
+  async function confirmStopBot() {
+    if (!stopTarget) return
+    setStopBusy(true)
+    const result = await botApi.stop(stopTarget.meetingId)
+
+    setStopBusy(false)
+    setStopTarget(null)
+    if (!result.ok) {
+      toast.error(dictionary[result.error])
+      return
+    }
+    await botSessions.refresh()
+  }
 
   const defaultMeetingsView = (
     <div className={defaultMeetingsViewClass}>
@@ -1431,6 +1527,7 @@ export function CommandCenterShell({
           if (meetingPage.hasMore) setPageOffset((current) => current + pageSize)
         }}
         onSelectMeeting={selectMeeting}
+        botSessions={botEnabled ? botSessions.byMeetingId : undefined}
       />
       <MeetingWorkspace
         dictionary={dictionary}
@@ -1500,7 +1597,11 @@ export function CommandCenterShell({
   )
 
   return (
-    <main className="ms-page min-h-svh lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden">
+    <BotSessionsProvider value={botContext}>
+    <main
+      className="ms-page min-h-svh pb-(--ms-dock-h) lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden lg:pb-0"
+      style={{ "--ms-dock-h": `${dockHeight}px` } as CSSProperties}
+    >
       <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
           dictionary={dictionary}
@@ -1532,6 +1633,40 @@ export function CommandCenterShell({
             onToggleDarkMode={toggleDarkMode}
             aiStatus={aiStatus}
             onInvite={() => setActivePanel("admin")}
+            recorder={browserRecorder}
+            recordingMeetingId={selectedMeeting?.id ?? null}
+            desktopOpen={desktopOpen}
+            onDesktopOpenChange={setDesktopOpen}
+            onSendBot={
+              botEnabled
+                ? () => {
+                    setJoinDialogReady(true)
+                    setJoinOpen(true)
+                  }
+                : undefined
+            }
+          />
+          {joinDialogReady ? (
+            <JoinMeetingDialog
+              dictionary={dictionary}
+              open={joinOpen}
+              onOpenChange={setJoinOpen}
+              onJoined={(response) => {
+                void refreshMeetings(response.meeting.id)
+                selectMeeting(response.meeting.id)
+                void botSessions.refresh()
+              }}
+            />
+          ) : null}
+          <StopBotDialog
+            dictionary={dictionary}
+            open={Boolean(stopTarget)}
+            onOpenChange={(open) => {
+              if (!open) setStopTarget(null)
+            }}
+            title={stopTarget?.title ?? null}
+            busy={stopBusy}
+            onConfirm={() => void confirmStopBot()}
           />
           <DriveRecordingPickerDrawer
             dictionary={dictionary}
@@ -1824,6 +1959,17 @@ export function CommandCenterShell({
               )}
         </section>
       </div>
+      <RecorderDock
+        entries={dockEntries}
+        dictionary={dictionary}
+        onOpenMeeting={(meetingId) => {
+          setActivePanel("meetings")
+          selectMeeting(meetingId)
+        }}
+        onStop={handleDockStop}
+        onHeightChange={setDockHeight}
+      />
     </main>
+    </BotSessionsProvider>
   )
 }

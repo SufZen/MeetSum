@@ -13,6 +13,7 @@ import {
   UsersIcon,
 } from "lucide-react"
 
+import { BotStatusStrip } from "@/components/bot/bot-status-strip"
 import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
 import { directionForLanguage } from "@/components/speaker-display"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +35,7 @@ function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "pwa_recorder") return "Recorder"
   if (source === "desktop_recorder") return "Desktop recorder"
   if (source === "upload") return "Upload"
+  if (source === "meeting_bot") return "MeetSum bot"
   return source.replaceAll("_", " ")
 }
 
@@ -222,6 +224,16 @@ export function MeetingHeader({
               Add to room
             </Button>
           </div>
+          {dictionary ? (
+            <BotStatusStrip
+              meetingId={meeting.id}
+              meetingTitle={meeting.title}
+              meetingLanguage={meeting.language}
+              locale={locale}
+              dictionary={dictionary}
+              canWrite={canWrite}
+            />
+          ) : null}
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" className="h-8" onClick={onShare}>

@@ -1,0 +1,44 @@
+# OPTIONAL hardening for the Vexa runtime (docs/runbooks/vexa.md "Docker socket").
+#
+# The runtime spawns one bot container per meeting through the Docker API, and
+# a raw /var/run/docker.sock mount is root-equivalent on the host. This file
+# puts tecnativa/docker-socket-proxy in front of it with only the containers,
+# images and networks APIs enabled, and points the runtime at it.
+#
+# NOT verified against the v0.12.28 runtime (deploy/vexa/VERIFIED.md): the
+# runtime must honour DOCKER_HOST. Enable with VEXA_SOCKET_PROXY=1 in vexa.env
+# (bootstrap.sh then adds `-f deploy/vexa/compose.socket-proxy.yml`); if bots
+# fail to spawn, remove it and run Vexa on a dedicated or isolated host.
+
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      POST: 1
+      INFO: 1
+      PING: 1
+      VERSION: 1
+      EXEC: 0
+      VOLUMES: 0
+      SWARM: 0
+      SYSTEM: 0
+      AUTH: 0
+      SECRETS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [vexa]
+    mem_limit: 64m
+    cpus: 0.1
+
+  runtime:
+    environment:
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    volumes: !override
+      - /dev/null:/var/lib/vexa/host-claude-credentials:ro
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started

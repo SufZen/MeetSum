@@ -1,0 +1,24 @@
+# Vexa pin for the M7 meeting bot. Shell-sourceable (KEY=value); read by
+# deploy/vexa/bootstrap.sh, which re-resolves and rewrites the *_DIGEST lines
+# after pulling. Bump all of it together (docs/runbooks/vexa.md "Upgrade").
+VEXA_REPO=https://github.com/Vexa-ai/vexa.git
+VEXA_GIT_REF=v0.12.28
+# Commit the annotated tag v0.12.28 points to (tag object 6655035c1b1409ad6fc9119adee593b15e7373be).
+VEXA_GIT_SHA=f1a62fbbdfd2c98cb162582d82c31fe8102acc89
+VEXA_VERSION=0.12.28
+# Upstream compose file inside the checkout.
+VEXA_COMPOSE_FILE=deploy/compose/docker-compose.yml
+# Published release images (IMAGE_TAG=v0.12.28), resolved 2026-10-13 from Docker Hub.
+VEXA_IMAGE_TAG=v0.12.28
+GATEWAY_IMAGE=vexaai/v012-gateway:v0.12.28@sha256:2e76319812f28adbb6bc328ac0a7484d3826924a9d38a9dd9599dd190fbb0f19
+MEETING_API_IMAGE=vexaai/v012-meeting-api:v0.12.28@sha256:cca46266feedcff29c3478472fd40133ba51f3c49a489a290040a56f1f0f3dca
+ADMIN_API_IMAGE=vexaai/v012-admin-api:v0.12.28@sha256:4c702354384eafe3a933cd537a106b7c15067cfd368a5f6da1a6e675e7e03e04
+RUNTIME_IMAGE=vexaai/v012-runtime:v0.12.28@sha256:a1f6448fbb380b9433364e8b572ec25a12aa4f274bf403f1d83a89cbf5812f2d
+# The meeting bot the runtime spawns per meeting. Upstream's install path is the
+# published release image; set VEXA_BUILD_BOT=1 in vexa.env to build it from the
+# checkout instead (`make -C deploy/compose bot`, tagged vexa/vexa-bot:<sha>).
+BROWSER_IMAGE=vexaai/vexa-bot:v0.12.28@sha256:e2398bfac7fa8671c209e996bc6451598b58438c851956ec050a0300f5a5354b
+POSTGRES_IMAGE=postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+REDIS_IMAGE=valkey/valkey:8-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+STORAGE_IMAGE=versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499
+SOCKET_PROXY_IMAGE=tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459

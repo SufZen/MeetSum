@@ -1,13 +1,13 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { MicIcon, SquareIcon } from "lucide-react"
 
+import { formatDockElapsed } from "@/components/bot/recorder-dock-state"
+import { type BrowserRecorder, useBrowserRecorder } from "@/components/bot/use-browser-recorder"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/meeting-atoms"
-
-type RecorderState = "idle" | "recording" | "blocked" | "unsupported"
 
 type MeetingRecorderLabels = {
   ready: string
@@ -27,98 +27,54 @@ const defaultLabels: MeetingRecorderLabels = {
   unsupported: "Recorder unsupported",
 }
 
+/**
+ * Browser recorder control. The MediaRecorder logic lives in
+ * `useBrowserRecorder` (M7); pass the shell's `recorder` so the recording
+ * keeps running (and shows in the recorder dock) when this control unmounts.
+ * Without it the control owns a recorder, as before.
+ */
 export function MeetingRecorder({
   labels = defaultLabels,
   onRecordingReady,
+  recorder: sharedRecorder,
+  meetingId,
 }: {
   labels?: MeetingRecorderLabels
   onRecordingReady?: (file: File) => void
+  recorder?: BrowserRecorder
+  meetingId?: string | null
 }) {
-  const mediaRecorder = useRef<MediaRecorder | null>(null)
-  const chunks = useRef<BlobPart[]>([])
-  const [state, setState] = useState<RecorderState>("idle")
-  const [seconds, setSeconds] = useState(0)
+  const ownRecorder = useBrowserRecorder({
+    onRecordingReady: sharedRecorder ? undefined : (file) => onRecordingReady?.(file),
+  })
+  const recorder = sharedRecorder ?? ownRecorder
+  const { state, startedAt } = recorder
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (state !== "recording") return
+
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [state])
 
   const label = useMemo(() => {
     if (state === "recording") {
-      return `${labels.recording} ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+      return `${labels.recording} ${formatDockElapsed(startedAt ? now - startedAt : 0)}`
     }
-
-    if (state === "blocked") {
-      return labels.blocked
-    }
-
-    if (state === "unsupported") {
-      return labels.unsupported
-    }
+    if (state === "blocked") return labels.blocked
+    if (state === "unsupported") return labels.unsupported
 
     return labels.ready
-  }, [labels, seconds, state])
-
-  async function startRecording() {
-    if (
-      !("MediaRecorder" in window) ||
-      !navigator.mediaDevices?.getUserMedia ||
-      !window.isSecureContext
-    ) {
-      setState("unsupported")
-      return
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/mp4")
-          ? "audio/mp4"
-          : ""
-      mediaRecorder.current = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined
-      )
-      chunks.current = []
-      mediaRecorder.current.addEventListener("dataavailable", (event) => {
-        if (event.data.size > 0) {
-          chunks.current.push(event.data)
-        }
-      })
-      mediaRecorder.current.start(1000)
-      setState("recording")
-      setSeconds(0)
-
-      const intervalId = window.setInterval(() => {
-        setSeconds((current) => current + 1)
-      }, 1000)
-
-      mediaRecorder.current.addEventListener("stop", () => {
-        window.clearInterval(intervalId)
-        stream.getTracks().forEach((track) => track.stop())
-        const blob = new Blob(chunks.current, {
-          type: mediaRecorder.current?.mimeType || "audio/webm",
-        })
-
-        if (blob.size > 0) {
-          onRecordingReady?.(
-            new File([blob], `meetsum-recording-${Date.now()}.webm`, {
-              type: blob.type,
-            })
-          )
-        }
-        setState("idle")
-      })
-    } catch {
-      setState("blocked")
-    }
-  }
-
-  function stopRecording() {
-    mediaRecorder.current?.stop()
-  }
+  }, [labels, now, startedAt, state])
 
   return (
     <div className="flex items-center gap-3 rounded-md border border-line bg-surface p-3">
       {state === "recording" ? (
-        <StatusPill status="live">{label}</StatusPill>
+        <StatusPill status="live">
+          <span className="[unicode-bidi:isolate]">{label}</span>
+        </StatusPill>
       ) : (
         <Badge variant="secondary">{label}</Badge>
       )}
@@ -127,13 +83,17 @@ export function MeetingRecorder({
           size="sm"
           variant="record"
           className="border-live bg-live-soft text-live-text"
-          onClick={stopRecording}
+          onClick={recorder.stop}
         >
           <SquareIcon data-icon="inline-start" />
           {labels.stop}
         </Button>
       ) : (
-        <Button size="sm" variant="record" onClick={startRecording}>
+        <Button
+          size="sm"
+          variant="record"
+          onClick={() => void recorder.start({ meetingId: meetingId ?? null })}
+        >
           <MicIcon data-icon="inline-start" />
           {labels.record}
         </Button>
