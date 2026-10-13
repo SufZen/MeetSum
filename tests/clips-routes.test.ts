@@ -22,6 +22,7 @@ import { DELETE as deleteClip, GET as getClip, PATCH as patchClip } from "@/app/
 import { GET as listClips, POST as createClip } from "@/app/api/meetings/[id]/clips/route"
 import { createCollabMemoryDb, setCollabBackendForTesting, type CollabMemoryDb } from "@/lib/clips/db"
 import { createInMemoryMeetingDatabase, type InMemoryMeetingDatabase } from "@/lib/meetings/repository"
+import { resetRateLimitsForTesting } from "@/lib/rate-limit"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
 
 /**
@@ -43,6 +44,7 @@ describe("clip routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    resetRateLimitsForTesting()
     settings.publicSharingEnabled = true
     collab = createCollabMemoryDb()
     setCollabBackendForTesting({ kind: "memory", db: collab })
@@ -101,6 +103,43 @@ describe("clip routes", () => {
 
     expect((await create("m_a", { startMs: 0, endMs: 4000 })).status).toBe(201)
     expect(collab.clips.size).toBe(1)
+  })
+
+  it("caps clip creation at 20 per user per hour (429)", async () => {
+    await as("member")
+
+    for (let index = 0; index < 20; index += 1) {
+      expect((await create("m_a", { startMs: 0, endMs: 4000 })).status).toBe(201)
+    }
+
+    const blocked = await create("m_a", { startMs: 0, endMs: 4000 })
+
+    expect(blocked.status).toBe(429)
+    expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0)
+    expect(collab.clips.size).toBe(20)
+  })
+
+  it("caps live clips per meeting at 200 (429)", async () => {
+    await as("member")
+    for (let index = 0; index < 200; index += 1) {
+      collab.clips.set(`clip_seed_${index}`, {
+        id: `clip_seed_${index}`,
+        workspaceId: "ws_a",
+        meetingId: "m_a",
+        title: "seed",
+        startMs: 0,
+        endMs: 4000,
+        segmentIds: [],
+        renderStatus: "pending",
+        createdAt: "2026-10-01T00:00:00Z",
+        updatedAt: "2026-10-01T00:00:00Z",
+      })
+    }
+
+    const blocked = await create("m_a", { startMs: 0, endMs: 4000 })
+
+    expect(blocked.status).toBe(429)
+    expect(await blocked.json()).toEqual({ error: "clip_limit_reached" })
   })
 
   it("rejects bad ranges with their code", async () => {

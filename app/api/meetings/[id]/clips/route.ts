@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server"
 
-import { auditActor, meetingNotFound } from "@/app/api/_lib/meeting-access"
+import { auditActor, meetingNotFound, principalKey } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { ClipValidationError } from "@/lib/clips/range"
 import { canManageClip, clipStoreContext } from "@/lib/clips/route-context"
-import { ClipNotFoundError, createClip, listClips } from "@/lib/clips/store"
+import { ClipLimitError, ClipNotFoundError, createClip, listClips } from "@/lib/clips/store"
 import { toClipWire, type CreateClipInput } from "@/lib/clips/types"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { rateLimitRequest, type RateLimitConfig } from "@/lib/rate-limit"
+
+const CLIP_CREATE_LIMIT: RateLimitConfig = { maxRequests: 20, windowMs: 3_600_000 }
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -69,6 +72,15 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
 
   if (!input) return jsonError("Provide {startMs, endMs} or {segmentIds}", 400)
 
+  // 20 clip creations per user (or API key) per hour, per instance.
+  const limited = rateLimitRequest(
+    request,
+    CLIP_CREATE_LIMIT,
+    `clips_create:${ctx.workspace.id}:${principalKey(ctx)}`
+  )
+
+  if (limited.blocked) return limited.blocked
+
   try {
     const clip = await createClip(clipStoreContext(ctx), id, input)
 
@@ -97,6 +109,9 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     )
   } catch (error) {
     if (error instanceof ClipNotFoundError) return meetingNotFound()
+    if (error instanceof ClipLimitError) {
+      return NextResponse.json({ error: "clip_limit_reached" }, { status: 429 })
+    }
     if (error instanceof ClipValidationError) {
       return NextResponse.json({ error: error.code }, { status: 400 })
     }

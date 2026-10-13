@@ -44,6 +44,17 @@ export class ClipNotFoundError extends Error {
 }
 
 /** A clip of a private meeting cannot be shared. */
+/** Live clips per meeting. */
+export const MAX_CLIPS_PER_MEETING = 200
+
+/** The meeting already has MAX_CLIPS_PER_MEETING live clips (route → 429). */
+export class ClipLimitError extends Error {
+  constructor() {
+    super("clip_limit_reached")
+    this.name = "ClipLimitError"
+  }
+}
+
 export class ClipShareError extends Error {
   constructor(readonly code: "meeting_private") {
     super(code)
@@ -148,6 +159,12 @@ export async function createClip(
   const backend = await backendOf()
 
   if (backend.kind === "memory") {
+    const live = [...backend.db.clips.values()].filter(
+      (clip) => clip.meetingId === meetingId && clip.workspaceId === ctx.scope.workspaceId && !clip.deletedAt
+    ).length
+
+    if (live >= MAX_CLIPS_PER_MEETING) throw new ClipLimitError()
+
     const now = nowIso()
     const clip: StoredClip = {
       id,
@@ -166,6 +183,15 @@ export async function createClip(
 
     backend.db.clips.set(id, clip)
     return publicClip(clip)
+  }
+
+  const count = await backend.client.query(
+    `select count(*)::int as live from meeting_clips where meeting_id = $1 and workspace_id = $2 and deleted_at is null`,
+    [meetingId, ctx.scope.workspaceId]
+  )
+
+  if (Number((count.rows[0] as { live?: number } | undefined)?.live ?? 0) >= MAX_CLIPS_PER_MEETING) {
+    throw new ClipLimitError()
   }
 
   const values: unknown[] = [
