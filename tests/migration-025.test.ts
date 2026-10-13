@@ -29,6 +29,23 @@ describe("migration 025 (static)", () => {
     }
   })
 
+  it("catches insufficient_privilege around create extension vector and continues lexical-only", () => {
+    for (const [name, text] of [
+      ["025", flat],
+      ["schema.sql", readFileSync("db/schema.sql", "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").toLowerCase()],
+    ] as const) {
+      const create = text.indexOf("create extension if not exists vector")
+      const handler = text.indexOf("exception when insufficient_privilege then raise notice", create)
+      const blockStart = text.lastIndexOf("begin", create)
+
+      expect(create, name).toBeGreaterThan(-1)
+      expect(blockStart, name).toBeGreaterThan(text.indexOf("from pg_available_extensions where name = 'vector'"))
+      expect(handler, name).toBeGreaterThan(create)
+      // The handler returns (lexical only) before any vector DDL runs.
+      expect(text.indexOf("return;", handler), name).toBeLessThan(text.indexOf("create table if not exists meeting_chunk_embeddings", create))
+    }
+  })
+
   it("adds the meeting index-state columns used by the indexer and sweeper", () => {
     for (const column of [
       "meeting_type",

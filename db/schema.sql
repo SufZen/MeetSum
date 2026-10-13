@@ -1122,7 +1122,14 @@ begin
     raise notice 'MeetSum M6: pgvector % is older than 0.8 (needed for filtered HNSW); lexical only. ALTER EXTENSION vector UPDATE, then npm run search:vector-setup.', coalesce(inst, avail);
     return;
   end if;
-  create extension if not exists vector;
+  -- A role without CREATE privilege on the database must not abort the
+  -- migration: stay lexical-only (NOTICE) and let an admin install vector.
+  begin
+    create extension if not exists vector;
+  exception when insufficient_privilege then
+    raise notice 'MeetSum M6: no privilege to create the vector extension; search runs lexical (FTS + trigram). Ask a superuser to install the vector extension, then npm run search:vector-setup.';
+    return;
+  end;
   execute $ddl$
     create table if not exists meeting_chunk_embeddings (
       workspace_id text not null references workspaces(id) on delete cascade,
