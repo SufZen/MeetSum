@@ -112,6 +112,10 @@ for (const surface of SURFACES) {
             colorScheme: theme,
             locale: locale === "he" ? "he-IL" : "en-US",
             extraHTTPHeaders: { "accept-language": locale === "he" ? "he-IL,he" : "en-US,en" },
+            // Screenshots need no service worker; blocking it rules out a
+            // registration reload mid-capture (the registrar itself no longer
+            // reloads on the first claim, M9 follow-up item 7).
+            serviceWorkers: "block",
           })
 
           await context.addInitScript((value) => {
@@ -129,7 +133,14 @@ for (const surface of SURFACES) {
 
           await page.goto(surface.path(locale))
           await page.waitForLoadState("load")
-          await surface.ready?.(page)
+          try {
+            await surface.ready?.(page)
+          } catch (error) {
+            // One retry after a late navigation (redirect or reload) replaced the page.
+            await page.waitForLoadState("load")
+            if (!surface.ready) throw error
+            await surface.ready(page)
+          }
 
           const dir = path.join(OUT, surface.id)
           const file = path.join(dir, `${locale}-${theme}-${viewport.width}.png`)

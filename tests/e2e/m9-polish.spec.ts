@@ -39,11 +39,13 @@ test.beforeAll(() => {
 
 test.describe("17.1 locale resolution and RTL", () => {
   test("a cold / follows Accept-Language; legacy prefixes redirect", async ({ browser }) => {
-    for (const [language, locale, dir] of [
-      ["he-IL,he;q=0.9", "he", "rtl"],
-      ["en-US,en;q=0.9", "en", "ltr"],
+    for (const [language, browserLocale, locale, dir] of [
+      ["he-IL,he;q=0.9", "he-IL", "he", "rtl"],
+      ["en-US,en;q=0.9", "en-US", "en", "ltr"],
     ] as const) {
-      const context = await browser.newContext({ extraHTTPHeaders: { "accept-language": language } })
+      // The context locale matches the header under test (navigator.language
+      // and the browser's own Accept-Language must agree with it).
+      const context = await browser.newContext({ locale: browserLocale, extraHTTPHeaders: { "accept-language": language } })
       const page = await context.newPage()
 
       await page.goto("/")
@@ -148,7 +150,11 @@ test.describe("17.5 Hebrew PDF (Package B)", () => {
   test("the download keeps the Hebrew name and embeds Plex Sans Hebrew", async ({ page, context }) => {
     await signIn(context, "owner", "he")
 
-    const response = await page.request.get(`/api/meetings/${encodeURIComponent(env.E2E_M9_HEBREW_MEETING_ID ?? "")}/export/pdf`)
+    // The export route is POST (lib/client/download-export.ts).
+    const response = await page.request.post(
+      `/api/meetings/${encodeURIComponent(env.E2E_M9_HEBREW_MEETING_ID ?? "")}/export/pdf?locale=he`,
+      { headers: ORIGIN }
+    )
 
     expect(response.status()).toBe(200)
     expect(response.headers()["content-disposition"]).toMatch(/filename\*=UTF-8''[^;]*%D7%/)
@@ -167,7 +173,7 @@ test.describe("17.6 share with a password (Package B)", () => {
 
     test.skip(!token || !password, "Run npm run m9:e2e-seed")
 
-    const visitor = await browser.newContext({ extraHTTPHeaders: { "accept-language": "he-IL" } })
+    const visitor = await browser.newContext({ locale: "he-IL", extraHTTPHeaders: { "accept-language": "he-IL" } })
     const share = await visitor.newPage()
 
     await share.goto(`/share/${token}`)
@@ -194,7 +200,7 @@ test.describe("17.6 share with a password (Package B)", () => {
 
     expect(cleared.status()).toBe(200)
 
-    const fresh = await browser.newContext()
+    const fresh = await browser.newContext({ locale: "he-IL", extraHTTPHeaders: { "accept-language": "he-IL" } })
     const reopened = await fresh.newPage()
 
     await reopened.goto(`/share/${token}`)
