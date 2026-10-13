@@ -224,8 +224,16 @@ export function MeetingPlayerProvider({
     speakerNameRef.current = speakerName
   }, [segments, speakerName])
 
+  // The segment index as React state: `setSegments` (in the effect below)
+  // replaces it and emits, so `resolve` — and every citation chip that
+  // memoises on it — re-renders once segments are indexed, not only after a
+  // later re-render such as opening the Transcript tab. Playback ticks keep
+  // the same index object, so they never re-render consumers.
+  const segmentIndex = useSyncExternalStore(store.subscribe, store.index, store.index)
+
   // Index the transcript whenever it changes.
   useEffect(() => {
+    segmentsRef.current = segments
     store.setSegments(segments)
     if (!hasMedia && store.getState().durationMs <= 0) {
       store.patch({ durationMs: knownDurationMs ?? lastEndMs(segments) })
@@ -438,10 +446,8 @@ export function MeetingPlayerProvider({
 
   const resolve = useCallback(
     (source: { segmentId?: string; startMs?: number }) =>
-      resolveCitation(segmentsRef.current, store.index(), source),
-    // `segments` is a dependency so consumers re-resolve after a transcript load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [store, segments]
+      resolveCitation(segmentsRef.current, segmentIndex, source),
+    [segmentIndex]
   )
 
   const speakerNameAt = useCallback((segmentIndex: number) => {
