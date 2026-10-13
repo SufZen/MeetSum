@@ -4,9 +4,6 @@
  * API"; enforced by the check.mjs `locale-format` rule). Every formatter takes
  * an explicit time zone (the `Fmt` type requires it), Western digits and the
  * Gregorian calendar; Hebrew uses a 24-hour clock.
- *
- * Step 0 ships the real, minimal implementation; Package A completes the
- * Hebrew phrasing (relative "אתמול ב־14:30", month abbreviations, DST tests).
  */
 
 export type FmtLocale = "he" | "en"
@@ -48,34 +45,98 @@ export function formatDate(value: DateInput, fmt: Fmt, style: DateStyle = "date"
 
   if (Number.isNaN(date.getTime())) return ""
 
-  return new Intl.DateTimeFormat(fmt.locale, { ...baseDateOptions(fmt), ...DATE_STYLES[style] }).format(date)
+  const options = DATE_STYLES[style]
+  // Hebrew pads the 24-hour clock ("09:00"); English uses "9:00 AM".
+  const hour = options.hour && fmt.locale === "en" ? { hour: "numeric" as const } : {}
+
+  return new Intl.DateTimeFormat(fmt.locale, { ...baseDateOptions(fmt), ...options, ...hour }).format(date)
+}
+
+type ZonedDay = { y: number; m: number; d: number }
+
+function zonedDay(date: Date, timeZone: string): ZonedDay {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    numberingSystem: "latn",
+    calendar: "gregory",
+  }).formatToParts(date)
+  const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
+
+  return { y: pick("year"), m: pick("month"), d: pick("day") }
+}
+
+/** Whole calendar days from `a` to `b` in `timeZone` (DST-safe: compares dates, not hours). */
+function calendarDayDiff(a: Date, b: Date, timeZone: string): number {
+  const da = zonedDay(a, timeZone)
+  const db = zonedDay(b, timeZone)
+
+  return Math.round((Date.UTC(db.y, db.m - 1, db.d) - Date.UTC(da.y, da.m - 1, da.d)) / 86_400_000)
+}
+
+function heCount(n: number, one: string, two: string, many: string): string {
+  if (n === 1) return one
+  if (n === 2) return two
+  return `${n} ${many}`
+}
+
+function relativeUnit(n: number, unit: "minute" | "hour", past: boolean, fmt: Fmt): string {
+  if (fmt.locale === "he") {
+    const phrase =
+      unit === "minute" ? heCount(n, "דקה", "שתי דקות", "דקות") : heCount(n, "שעה", "שעתיים", "שעות")
+
+    return past ? `לפני ${phrase}` : `בעוד ${phrase}`
+  }
+
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto", numberingSystem: "latn" } as Intl.RelativeTimeFormatOptions)
+
+  return rtf.format(past ? -n : n, unit)
+}
+
+function dayAtTime(day: string, date: Date, fmt: Fmt): string {
+  const time = formatDate(date, fmt, "time")
+
+  return fmt.locale === "he" ? `${day} ב־${time}` : `${day} at ${time}`
 }
 
 /**
  * Relative time against an explicit `now` (hydration-safe: render the
  * absolute value on the server and switch after mount via `useNow`).
+ * he: "עכשיו", "לפני דקה", "לפני 5 דקות", "לפני שעתיים", "אתמול ב־14:30",
+ * "יום שלישי ב־09:00" (under 7 days), else "13 באוק׳ 2026".
+ * en: "now", "5 minutes ago", "2 hours ago", "Yesterday at 2:30 PM",
+ * "Tuesday at 9:00 AM", else "Oct 13, 2026". Calendar days are counted in
+ * `fmt.timeZone`.
  */
 export function formatRelative(value: DateInput, now: Date, fmt: Fmt): string {
   const date = toDate(value)
 
   if (Number.isNaN(date.getTime())) return ""
 
-  const seconds = Math.round((date.getTime() - now.getTime()) / 1000)
+  const seconds = Math.round((now.getTime() - date.getTime()) / 1000)
+  const past = seconds >= 0
   const abs = Math.abs(seconds)
-  const rtf = new Intl.RelativeTimeFormat(fmt.locale, { numeric: "auto", numberingSystem: "latn" } as Intl.RelativeTimeFormatOptions)
 
-  if (abs < 45) return rtf.format(0, "second")
-  if (abs < 45 * 60) return rtf.format(Math.round(seconds / 60), "minute")
-  if (abs < 22 * 3600) return rtf.format(Math.round(seconds / 3600), "hour")
-  if (abs < 7 * 86400) return rtf.format(Math.round(seconds / 86400), "day")
+  if (abs < 45) return fmt.locale === "he" ? "עכשיו" : "now"
+  if (abs < 45 * 60) return relativeUnit(Math.max(1, Math.round(abs / 60)), "minute", past, fmt)
+
+  const dayDiff = calendarDayDiff(date, now, fmt.timeZone)
+
+  if (dayDiff === 0 || (!past && abs < 22 * 3600)) {
+    return relativeUnit(Math.max(1, Math.round(abs / 3600)), "hour", past, fmt)
+  }
+
+  if (past && dayDiff === 1) return dayAtTime(fmt.locale === "he" ? "אתמול" : "Yesterday", date, fmt)
+
+  if (past && dayDiff > 1 && dayDiff < 7) {
+    const weekday = new Intl.DateTimeFormat(fmt.locale, { ...baseDateOptions(fmt), weekday: "long" }).format(date)
+
+    return dayAtTime(weekday, date, fmt)
+  }
 
   return formatDate(date, fmt, "date")
-}
-
-function heUnit(n: number, one: string, two: string, many: string): string {
-  if (n === 1) return one
-  if (n === 2) return two
-  return `${n} ${many}`
 }
 
 export function formatDuration(ms: number, fmt: Fmt, style: DurationStyle = "long"): string {
@@ -90,7 +151,7 @@ export function formatDuration(ms: number, fmt: Fmt, style: DurationStyle = "lon
 
   if (fmt.locale === "he") {
     if (hours === 0 && minutes === 0) {
-      return style === "short" ? `${seconds} ש׳` : heUnit(seconds, "שנייה", "שתי שניות", "שניות")
+      return style === "short" ? `${seconds} ש׳` : heCount(seconds, "שנייה", "שתי שניות", "שניות")
     }
 
     if (style === "short") {
@@ -98,8 +159,8 @@ export function formatDuration(ms: number, fmt: Fmt, style: DurationStyle = "lon
     }
 
     const parts = [
-      hours ? heUnit(hours, "שעה", "שעתיים", "שעות") : "",
-      minutes ? heUnit(minutes, "דקה", "שתי דקות", "דקות") : "",
+      hours ? heCount(hours, "שעה", "שעתיים", "שעות") : "",
+      minutes ? heCount(minutes, "דקה", "שתי דקות", "דקות") : "",
     ].filter(Boolean)
 
     return parts.length === 2 ? `${parts[0]} ו־${parts[1]}` : parts[0]!
