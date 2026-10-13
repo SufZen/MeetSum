@@ -1,21 +1,25 @@
+import { formatDate } from "@/lib/i18n/format"
 import { firstStrongDirection, isRtlLanguage, LRI, PDI } from "@/lib/integrations/bidi"
 import { getExportsMessages, type ExportsMessages } from "@/lib/i18n/m8/exports"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 
 /**
- * Meeting exports: Markdown, PDF and DOCX (M8 C3, owner: Package C).
+ * Meeting exports: Markdown, PDF and DOCX (M8 C3; owner since M9: Package B).
  *
  * - Headings and labels are localized (`he`/`en`, lib/i18n/m8/exports.ts);
- *   dates use `Intl` in `getTaskTimeZone()`.
+ *   dates go through lib/i18n/format.ts in `getTaskTimeZone()`.
  * - DOCX writes real RTL: a Hebrew paragraph gets `bidirectional` (`<w:bidi/>`)
  *   and `alignment: start`; every Hebrew run gets `rightToLeft` (`<w:rtl/>`),
  *   a complex-script font and `he-IL`. Latin words inside Hebrew text become
  *   their own LTR runs (mixed he/en). Timecodes and emails are separate LTR
  *   runs isolated with U+2066…U+2069. Transcript direction follows each
  *   segment's language.
- * - The PDF stays English (Hebrew shaping is M9).
+ * - The PDF is Hebrew-capable since M9: pdfkit + bidi-js with embedded IBM
+ *   Plex fonts (lib/pdf/meeting-pdf.ts, re-exported here).
  */
+
+export { renderMeetingPdf, renderMeetingPdfDetailed, type MeetingPdfOptions } from "@/lib/pdf/meeting-pdf"
 
 export type ExportLocale = "he" | "en"
 
@@ -76,15 +80,7 @@ function formatMs(ms: number) {
 }
 
 function formatMeetingDate(startedAt: string, locale: ExportLocale, env: NodeJS.ProcessEnv): string {
-  const date = new Date(startedAt)
-
-  if (Number.isNaN(date.getTime())) return startedAt
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: getTaskTimeZone(env),
-  }).format(date)
+  return formatDate(startedAt, { locale, timeZone: getTaskTimeZone(env) }, "dateTime") || startedAt
 }
 
 function participantNames(meeting: MeetingRecord): string[] {
@@ -203,93 +199,6 @@ export function renderMeetingMarkdown(meeting: MeetingRecord, options: MeetingEx
 /** LTR isolate for a timecode, date or email inside RTL text. */
 function isolate(token: string): string {
   return `${LRI}${token}${PDI}`
-}
-
-function escapePdfText(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)")
-}
-
-export function renderMeetingPdf(meeting: MeetingRecord): Buffer {
-  // English only until Hebrew shaping lands (M9): the built-in Helvetica
-  // font cannot draw Hebrew headings.
-  const allLines = renderMeetingMarkdown(meeting, { locale: "en" })
-    .replace(/^#+\s*/gm, "")
-    .split(/\r?\n/)
-    .flatMap((line) => {
-      if (line.length <= 92) return [line]
-
-      const chunks: string[] = []
-      for (let index = 0; index < line.length; index += 92) {
-        chunks.push(line.slice(index, index + 92))
-      }
-      return chunks
-    })
-
-  const linesPerPage = 52
-  const pages: string[][] = []
-  for (let i = 0; i < allLines.length; i += linesPerPage) {
-    pages.push(allLines.slice(i, i + linesPerPage))
-  }
-  if (!pages.length) pages.push([" "])
-
-  // Build PDF objects: catalog, pages, font, then per-page (page + stream)
-  const objects: string[] = []
-
-  // 1: Catalog → references Pages (object 2)
-  objects.push("<< /Type /Catalog /Pages 2 0 R >>")
-
-  // 2: Pages → will be filled after we know page refs
-  const pageRefs = pages.map((_, i) => `${3 + i * 2} 0 R`).join(" ")
-  objects.push(
-    `<< /Type /Pages /Kids [${pageRefs}] /Count ${pages.length} >>`
-  )
-
-  // Per page: page object + content stream
-  for (const [pageIndex, pageLines] of pages.entries()) {
-    const fontObjIndex = 3 + pages.length * 2
-    const streamObjIndex = 3 + pageIndex * 2 + 1
-
-    const content = [
-      "BT",
-      `/F1 10 Tf`,
-      "50 790 Td",
-      "14 TL",
-      ...pageLines.map((line) => `(${escapePdfText(line || " ")}) Tj T*`),
-      "ET",
-    ].join("\n")
-
-    // Page object
-    objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 ${fontObjIndex} 0 R >> >> /Contents ${streamObjIndex} 0 R >>`
-    )
-    // Content stream
-    objects.push(
-      `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`
-    )
-  }
-
-  // Font object (last)
-  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-
-  const parts = ["%PDF-1.4\n"]
-  const offsets = [0]
-
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(parts.join("")))
-    parts.push(`${index + 1} 0 obj\n${object}\nendobj\n`)
-  }
-
-  const xrefOffset = Buffer.byteLength(parts.join(""))
-  parts.push(`xref\n0 ${objects.length + 1}\n`)
-  parts.push("0000000000 65535 f \n")
-  for (const offset of offsets.slice(1)) {
-    parts.push(`${offset.toString().padStart(10, "0")} 00000 n \n`)
-  }
-  parts.push(
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`
-  )
-
-  return Buffer.from(parts.join(""), "utf8")
 }
 
 // ---------------------------------------------------------------------------

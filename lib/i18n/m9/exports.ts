@@ -20,6 +20,7 @@ export const m9ExportsMessages = {
     pdfPageOf: "Page {page} of {total}",
     pdfTranscriptTruncated: "The transcript was shortened to {count} segments.",
     pdfUnsupportedGlyphs: "Some characters could not be displayed ({count}).",
+    pdfSubject: "Meeting summary and transcript",
   },
   he: {
     pdfOverview: "סקירה",
@@ -38,5 +39,6 @@ export const m9ExportsMessages = {
     pdfPageOf: "עמוד {page} מתוך {total}",
     pdfTranscriptTruncated: "התמליל קוצר ל־{count} קטעים.",
     pdfUnsupportedGlyphs: "חלק מהתווים לא הוצגו ({count}).",
+    pdfSubject: "סיכום ותמליל של הפגישה",
   },
 }

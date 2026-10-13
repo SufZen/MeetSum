@@ -15,7 +15,7 @@ import bidiFactory from "bidi-js"
  *    keeps its logical code-unit order (niqqud stays on its letter), and
  *    characters at odd levels are mirrored (brackets).
  * 4. Visual runs (same font) get x offsets from the line's left edge; an RTL
- *    paragraph is right-aligned in the box.
+ *    paragraph is aligned to the end of the box (its reading start).
  *
  * Bidi control characters (LRM, RLM, isolates, WJ) steer the algorithm but are
  * never drawn.
