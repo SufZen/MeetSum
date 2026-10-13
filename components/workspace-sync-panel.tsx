@@ -9,6 +9,8 @@ import {
 import Link from "next/link"
 
 import { useI18n } from "@/components/i18n-provider"
+import { StatusMessageText } from "@/components/status-message-text"
+import type { StatusMessage } from "@/lib/ops/status-messages"
 import { JOB_STATUS_KEYS } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,6 +21,7 @@ export type WorkspaceStatusView = {
     strategy: "user-oauth" | "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
     configured: boolean
     detail: string
+    detailMessage?: StatusMessage
     serviceAccountEmail?: string
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
@@ -103,8 +106,12 @@ export function WorkspaceSyncPanel({
       <div className="rounded-lg border border-line bg-surface-2 p-3 text-xs leading-5 text-muted-foreground">
         <div>
           {t("opsSyncAuth")}{" "}
-          <span dir="auto" className="font-medium text-foreground">
-            {status?.google.detail ?? t("opsSyncCheckingCredentials")}
+          <span className="font-medium text-foreground">
+            {status ? (
+              <StatusMessageText message={status.google.detailMessage} fallback={status.google.detail} />
+            ) : (
+              t("opsSyncCheckingCredentials")
+            )}
           </span>
         </div>
         {status?.google.serviceAccountEmail && (

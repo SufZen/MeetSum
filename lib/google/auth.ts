@@ -4,6 +4,7 @@ import { google } from "googleapis"
 
 import { getGoogleWorkspaceOAuthRefreshToken } from "@/lib/google/oauth-tokens"
 import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
+import { statusMessage, type StatusMessage } from "@/lib/ops/status-messages"
 
 export type WorkspaceAuthStrategy =
   | "user-oauth"
@@ -17,7 +18,9 @@ export type WorkspaceAuthStatus = {
   serviceAccountEmail?: string
   strategy: WorkspaceAuthStrategy
   configured: boolean
+  /** English, for API compatibility; the UI shows `detailMessage`. */
   detail: string
+  detailMessage: StatusMessage
 }
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -100,6 +103,15 @@ export function getWorkspaceAuthStatus(
         : strategy === "keyless-iam-signjwt"
           ? "Using IAM Credentials signJwt with Application Default Credentials"
           : "Using service-account private-key credentials",
+    detailMessage: statusMessage(
+      !configured
+        ? "workspace_auth_missing"
+        : strategy === "user-oauth"
+          ? "workspace_auth_user_oauth"
+          : strategy === "keyless-iam-signjwt"
+            ? "workspace_auth_keyless"
+            : "workspace_auth_private_key"
+    ),
   }
 }
 

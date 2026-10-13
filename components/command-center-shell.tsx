@@ -39,6 +39,7 @@ import {
 import { MeetingWorkspace, type MeetingPermissions } from "@/components/meeting-workspace"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
+import { providerLabelString, statusMessageString } from "@/components/status-message-text"
 import { OfflineBanner } from "@/components/pwa/offline-banner"
 import { UploadQueueProvider } from "@/components/pwa/upload-queue-provider"
 import { usePromptDialog } from "@/components/ui/prompt-dialog"
@@ -56,7 +57,7 @@ import {
 } from "@/lib/client/polling"
 import { withoutParams } from "@/lib/client/shell-navigation"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
-import { fillMessage, pluralMessage } from "@/lib/i18n/messages"
+import { fillMessage, pluralMessage, translate } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { selectRecentRooms } from "@/lib/rooms"
 import type {
@@ -484,8 +485,12 @@ export function CommandCenterShell({
   const aiStatus: AiProviderStatus | undefined = geminiProvider
     ? {
         configured: geminiProvider.configured,
-        label: geminiProvider.label,
-        detail: geminiProvider.detail,
+        label: providerLabelString((key, values) => translate(dictionary, key, values), geminiProvider),
+        detail: statusMessageString(
+          (key, values) => translate(dictionary, key, values),
+          geminiProvider.detailMessage,
+          geminiProvider.detail
+        ),
       }
     : undefined
 

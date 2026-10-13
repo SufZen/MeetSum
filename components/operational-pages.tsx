@@ -23,6 +23,7 @@ import { JobActivityCenter } from "@/components/job-activity-center"
 import { NotificationPreferences } from "@/components/notifications/notification-preferences"
 import { PersonalPreferences } from "@/components/settings/personal-preferences"
 import { SettingsNav, useSettingsSection } from "@/components/settings/settings-nav"
+import { StatusMessageText, providerLabelString } from "@/components/status-message-text"
 import { JobRecoveryPanel } from "@/components/job-recovery-panel"
 import {
   ProviderHealthPanel,
@@ -1497,10 +1498,12 @@ export function OperationalPage({
                     {providers.map((provider) => (
                       <div key={provider.id} className="grid gap-1 text-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-medium text-foreground">{provider.label}</span>
-                          <span className="text-muted-foreground">{provider.detail}</span>
+                          <span className="font-medium text-foreground">{providerLabelString(t, provider)}</span>
+                          <span className="text-muted-foreground">
+                            <StatusMessageText message={provider.detailMessage} fallback={provider.detail} />
+                          </span>
                         </div>
-                        <ProviderWarning warning={provider.warning} />
+                        <ProviderWarning warning={provider.warning} messages={provider.warningMessages} />
                       </div>
                     ))}
                   </div>

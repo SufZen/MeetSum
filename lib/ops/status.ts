@@ -12,15 +12,23 @@ import { getAnthropicModels, getGeminiModels, getGeminiTier } from "@/lib/ai/llm
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
 import { getWorkspaceGoogleSubject } from "@/lib/google/workspace-subject"
+import { statusMessage, type StatusMessage, type StatusMessageCode } from "@/lib/ops/status-messages"
 
 export type ProviderStatus = {
   id: string
+  /** English name, for API compatibility; the UI translates `labelId`. */
   label: string
+  /** Key into PROVIDER_LABEL_KEYS (lib/ops/status-messages); else `label` is a proper noun. */
+  labelId: string
   configured: boolean
+  /** English, for API compatibility; the UI shows `detailMessage`. */
   detail: string
+  detailMessage: StatusMessage
   mode?: string
   /** Visible configuration/privacy warning (e.g. Gemini free tier). */
   warning?: string
+  /** The warning as codes (the UI translates them). */
+  warningMessages?: StatusMessage[]
 }
 
 export type WorkspaceStatus = {
@@ -39,6 +47,7 @@ export type WorkspaceStatus = {
       | "missing"
     configured: boolean
     detail: string
+    detailMessage: StatusMessage
     serviceAccountEmail?: string
   }
   sync: Array<{
@@ -75,46 +84,68 @@ export function getProviderStatus(): ProviderStatus[] {
   const geminiTier = getGeminiTier()
   const geminiFreeWarning = llm.warnings?.find((warning) => warning.startsWith("GEMINI_TIER=free"))
 
+  const optional = (configuredCode: StatusMessageCode, ok: boolean, env: string) =>
+    ok ? statusMessage(configuredCode) : statusMessage("optional_missing_env", { env })
+  const anthropicConfigured = llm.providers.some((provider) => provider.id === "anthropic" && provider.configured)
+  const llmRoutes = (llm.routes.summary ?? []).map((route) => `${route.provider}:${route.model}`).join(" → ")
+  const llmWarningMessages = (llm.warningCodes ?? []).map((code) => statusMessage(code))
+
   return [
     {
       id: "asr-router",
       label: "Hebrew ASR chain",
+      labelId: "asr-router",
       configured: asr.chain.length > 0,
       mode: asr.chain.join(" → ") || "none",
       detail: asr.chain.length
         ? `Hebrew: ${asr.chain.join(" → ")}; other languages: ${asr.nonHebrewChain.join(" → ") || "none"}`
         : "No ASR provider configured (RunPod, Modal, Soniox or local Whisper)",
+      detailMessage: asr.chain.length
+        ? statusMessage("asr_chain", {
+            chain: asr.chain.join(" → "),
+            otherChain: asr.nonHebrewChain.join(" → ") || "—",
+          })
+        : statusMessage("asr_none"),
     },
     {
       id: "runpod-ivrit",
       label: "RunPod Hebrew ASR (ivrit-ai)",
+      labelId: "runpod-ivrit",
       configured: Boolean(runpod?.configured),
       mode: runpod?.model,
       detail: runpod?.configured
         ? "Serverless GPU transcription + diarization configured"
         : "Missing RUNPOD_API_KEY / RUNPOD_ASR_ENDPOINT_ID",
+      detailMessage: runpod?.configured
+        ? statusMessage("runpod_configured")
+        : statusMessage("missing_env", { env: "RUNPOD_API_KEY / RUNPOD_ASR_ENDPOINT_ID" }),
     },
     {
       id: "modal-worker",
       label: "Modal Hebrew ASR (asr-worker)",
+      labelId: "modal-worker",
       configured: Boolean(modal?.configured),
       mode: modal?.model,
       detail: modal?.configured
         ? "Serverless GPU transcription + diarization on Modal configured"
         : "Optional; missing MODAL_ASR_URL / MODAL_ASR_TOKEN",
+      detailMessage: optional("modal_configured", Boolean(modal?.configured), "MODAL_ASR_URL / MODAL_ASR_TOKEN"),
     },
     {
       id: "soniox",
       label: "Soniox",
+      labelId: "soniox",
       configured: Boolean(soniox?.configured),
       mode: soniox?.model,
       detail: soniox?.configured
         ? "Async transcription + diarization configured"
         : "Optional; missing SONIOX_API_KEY",
+      detailMessage: optional("soniox_configured", Boolean(soniox?.configured), "SONIOX_API_KEY"),
     },
     {
       id: "gemini",
       label: geminiMode === "vertex-ai" ? "Gemini on Vertex AI" : "Gemini",
+      labelId: geminiMode === "vertex-ai" ? "gemini-vertex" : "gemini",
       configured: geminiConfigured,
       mode: geminiMode,
       detail: geminiConfigured
@@ -122,58 +153,97 @@ export function getProviderStatus(): ProviderStatus[] {
         : geminiMode === "vertex-ai"
           ? "Missing Vertex project/location or GOOGLE_APPLICATION_CREDENTIALS"
           : "Missing GOOGLE_GEMINI_API_KEY",
-      ...(geminiConfigured && geminiFreeWarning ? { warning: geminiFreeWarning } : {}),
+      detailMessage: geminiConfigured
+        ? statusMessage("gemini_configured", {
+            summary: geminiModels.summary,
+            fast: geminiModels.fast,
+            mode: geminiMode,
+            tier: geminiTier,
+          })
+        : geminiMode === "vertex-ai"
+          ? statusMessage("gemini_vertex_missing", {
+              env: "GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION / GOOGLE_APPLICATION_CREDENTIALS",
+            })
+          : statusMessage("missing_env", { env: "GOOGLE_GEMINI_API_KEY" }),
+      ...(geminiConfigured && geminiFreeWarning
+        ? { warning: geminiFreeWarning, warningMessages: [statusMessage("llm_warning_gemini_free_tier")] }
+        : {}),
     },
     {
       id: "anthropic",
       label: "Claude (Anthropic)",
-      configured: llm.providers.some((provider) => provider.id === "anthropic" && provider.configured),
+      labelId: "anthropic",
+      configured: anthropicConfigured,
       mode: anthropicModels.summary,
-      detail: llm.providers.some((provider) => provider.id === "anthropic" && provider.configured)
+      detail: anthropicConfigured
         ? `Optional LLM (summary ${anthropicModels.summary}, fast ${anthropicModels.fast}); fallback after Gemini under auto`
         : "Optional; missing ANTHROPIC_API_KEY",
+      detailMessage: anthropicConfigured
+        ? statusMessage("anthropic_configured", { summary: anthropicModels.summary, fast: anthropicModels.fast })
+        : statusMessage("optional_missing_env", { env: "ANTHROPIC_API_KEY" }),
     },
     {
       id: "llm-router",
       label: "LLM routing",
+      labelId: "llm-router",
       configured: !llm.heuristicOnly,
       mode: llm.preference,
       detail: llm.heuristicOnly
         ? "No LLM provider configured: summaries use the heuristic fallback"
-        : `Summary: ${(llm.routes.summary ?? []).map((route) => `${route.provider}:${route.model}`).join(" → ")}`,
-      ...(llm.warnings?.length ? { warning: llm.warnings.join(" ") } : {}),
+        : `Summary: ${llmRoutes}`,
+      detailMessage: llm.heuristicOnly
+        ? statusMessage("llm_heuristic_only")
+        : statusMessage("llm_routes", { routes: llmRoutes }),
+      ...(llm.warnings?.length ? { warning: llm.warnings.join(" "), warningMessages: llmWarningMessages } : {}),
     },
     {
       id: "local-whisper",
       label: "Local Hebrew ASR",
+      labelId: "local-whisper",
       configured: localWhisperConfigured,
       mode: localWhisperConfig.model,
       detail: localWhisperConfigured
         ? `Optional transcription provider configured at ${localWhisperConfig.baseUrl} (${transcriptionMode})`
         : "Optional ivrit-ai faster-whisper server not configured",
+      detailMessage: localWhisperConfigured
+        ? statusMessage("local_whisper_configured", {
+            url: String(localWhisperConfig.baseUrl ?? ""),
+            mode: transcriptionMode,
+          })
+        : statusMessage("local_whisper_missing"),
     },
     {
       id: "workspace",
       label: "Google Workspace",
+      labelId: "workspace",
       configured: workspaceAuth.configured,
       mode: workspaceAuth.strategy,
       detail: workspaceAuth.detail,
+      detailMessage: workspaceAuth.detailMessage,
     },
     {
       id: "realizeos",
       label: "RealizeOS",
+      labelId: "realizeos",
       configured: Boolean(process.env.REALIZEOS_API_URL),
       detail: process.env.REALIZEOS_API_URL
         ? "Outbound context endpoint configured"
         : "Missing REALIZEOS_API_URL",
+      detailMessage: process.env.REALIZEOS_API_URL
+        ? statusMessage("realizeos_configured")
+        : statusMessage("missing_env", { env: "REALIZEOS_API_URL" }),
     },
     {
       id: "local-gemma",
       label: "Local Gemma",
+      labelId: "local-gemma",
       configured: Boolean(process.env.LOCAL_GEMMA_URL),
       detail: process.env.LOCAL_GEMMA_URL
         ? "Local model URL configured"
         : "Optional local model not configured",
+      detailMessage: process.env.LOCAL_GEMMA_URL
+        ? statusMessage("local_gemma_configured")
+        : statusMessage("local_gemma_missing"),
     },
   ]
 }
@@ -296,6 +366,10 @@ export async function getWorkspaceStatus(options: {
         authStatus.strategy === "user-oauth" && !userOAuth.connected
           ? "Google Workspace OAuth is not connected. Sign in again to grant Workspace permissions."
           : authStatus.detail,
+      detailMessage:
+        authStatus.strategy === "user-oauth" && !userOAuth.connected
+          ? statusMessage("workspace_oauth_disconnected")
+          : authStatus.detailMessage,
       serviceAccountEmail: authStatus.serviceAccountEmail,
     },
     sync,
