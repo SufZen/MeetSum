@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
@@ -9,6 +12,7 @@ import {
   resetMemoryTemplates,
   saveCustomTemplate,
   TemplateKeyConflictError,
+  TemplateKeyImmutableError,
   TemplateNotFoundError,
   TemplateValidationError,
   type SaveCustomTemplateInput,
@@ -98,6 +102,28 @@ describe("in-memory template store", () => {
     await expect(saveCustomTemplate("ws_b", valid, {})).resolves.toMatchObject({ workspaceId: "ws_b" })
   })
 
+  it("keeps the key immutable after create", async () => {
+    const created = await saveCustomTemplate("ws_a", valid, {})
+
+    await expect(
+      saveCustomTemplate("ws_a", { ...valid, id: created.id, key: "deal-review-2" }, {})
+    ).rejects.toBeInstanceOf(TemplateKeyImmutableError)
+    expect(await loadCustomTemplate("ws_a", "deal-review")).toMatchObject({ id: created.id })
+    expect(await loadCustomTemplate("ws_a", "deal-review-2")).toBeUndefined()
+  })
+
+  it("allows reusing the key of an archived template", async () => {
+    const first = await saveCustomTemplate("ws_a", valid, {})
+
+    await archiveCustomTemplate("ws_a", first.id)
+
+    const second = await saveCustomTemplate("ws_a", { ...valid, name: "גרסה חדשה" }, {})
+
+    expect(second.id).not.toBe(first.id)
+    expect(await loadCustomTemplate("ws_a", "deal-review")).toMatchObject({ id: second.id })
+    await expect(saveCustomTemplate("ws_a", valid, {})).rejects.toBeInstanceOf(TemplateKeyConflictError)
+  })
+
   it("validates on save and 404s unknown ids", async () => {
     await expect(saveCustomTemplate("ws_a", { ...valid, key: "!" }, {})).rejects.toBeInstanceOf(TemplateValidationError)
     await expect(saveCustomTemplate("ws_a", { ...valid, id: "tpl_missing" }, {})).rejects.toBeInstanceOf(
@@ -136,6 +162,42 @@ describe("postgres stores", () => {
     await expect(saveCustomTemplate("ws_a", valid, {}, { client: failing.client })).rejects.toBeInstanceOf(
       TemplateKeyConflictError
     )
+  })
+
+  it("never updates the key in Postgres and refuses a changed key", async () => {
+    const row = {
+      id: "tpl_1",
+      workspace_id: "ws_a",
+      key: "deal-review",
+      name: "x",
+      prompt: "p",
+      sections: [],
+      created_at: "2026-10-01T00:00:00Z",
+      updated_at: "2026-10-01T00:00:00Z",
+    }
+    const { client, calls } = recorder([row])
+
+    await saveCustomTemplate("ws_a", { ...valid, id: "tpl_1", name: "עסקאות" }, {}, { client })
+    const update = calls.find((call) => /^update summary_templates/.test(call.text.trim()))!
+
+    expect(update.text).not.toMatch(/set key =|, key =/)
+    await expect(
+      saveCustomTemplate("ws_a", { ...valid, id: "tpl_1", key: "renamed" }, {}, { client })
+    ).rejects.toBeInstanceOf(TemplateKeyImmutableError)
+  })
+
+  it("migration 022 and schema.sql enforce key uniqueness among non-archived templates only (idempotent)", () => {
+    for (const file of ["db/migrations/022_intelligence_parity.sql", "db/schema.sql"]) {
+      const sql = readFileSync(path.join(process.cwd(), file), "utf8").replace(/\s+/g, " ")
+
+      expect(sql, file).toContain(
+        "create unique index if not exists summary_templates_workspace_key_active on summary_templates (workspace_id, key) where archived_at is null"
+      )
+      expect(sql, file).toContain(
+        "alter table summary_templates drop constraint if exists summary_templates_workspace_id_key_key"
+      )
+      expect(sql, file).not.toMatch(/archived_at timestamptz, created_at timestamptz not null default now\(\), updated_at timestamptz not null default now\(\), unique \(workspace_id, key\)/)
+    }
   })
 
   it("scopes analytics and generated docs through the meeting visibility predicate", async () => {

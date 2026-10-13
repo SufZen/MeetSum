@@ -32,9 +32,15 @@ create table if not exists summary_templates (
   created_by_user_id text references users(id) on delete set null,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (workspace_id, key)
+  updated_at timestamptz not null default now()
 );
+
+-- Keys are unique among non-archived templates only, so an archived key
+-- can be reused (keys are immutable after create). Idempotent: drops the
+-- earlier full unique constraint where this migration already ran.
+alter table summary_templates drop constraint if exists summary_templates_workspace_id_key_key;
+create unique index if not exists summary_templates_workspace_key_active
+  on summary_templates (workspace_id, key) where archived_at is null;
 
 alter table action_items
   add column if not exists workspace_id text references workspaces(id) on delete cascade,

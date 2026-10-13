@@ -180,6 +180,8 @@ export function TemplateEditor({ templateId, onSaved, onCancel, dictionary: t, l
           <Input
             dir="ltr"
             value={draft.key}
+            // The key is immutable once saved (meetings reference custom:<key>).
+            readOnly={Boolean(templateId)}
             onChange={(event) => set("key", event.target.value.toLowerCase())}
             aria-invalid={Boolean(errors.key)}
             aria-describedby="template-key-hint"

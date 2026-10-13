@@ -141,6 +141,20 @@ describe("/api/templates", () => {
     expect((await archiveTemplate(new Request(URL, { method: "DELETE" }), routeParams({ id: "tpl_nope" }))).status).toBe(404)
     expect(recordAuditLog).toHaveBeenCalledTimes(1)
   })
+
+  it("answers 409 when a PATCH changes the key", async () => {
+    await as("owner")
+
+    const created = await createTemplate(jsonRequest(URL, "POST", template), routeParams({}))
+    const { template: saved } = (await created.json()) as { template: { id: string; key: string } }
+    const renamed = await patchTemplate(jsonRequest(URL, "PATCH", { key: "another-key" }), routeParams({ id: saved.id }))
+
+    expect(renamed.status).toBe(409)
+    expect(await renamed.json()).toEqual({ error: "template_key_immutable" })
+    expect(
+      (await patchTemplate(jsonRequest(URL, "PATCH", { key: saved.key, name: "x" }), routeParams({ id: saved.id }))).status
+    ).toBe(200)
+  })
 })
 
 describe("PATCH /api/meetings/:id/template", () => {

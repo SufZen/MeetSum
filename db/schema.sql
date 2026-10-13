@@ -659,9 +659,14 @@ create table if not exists summary_templates (
   created_by_user_id text references users(id) on delete set null,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (workspace_id, key)
+  updated_at timestamptz not null default now()
 );
+
+-- Keys are unique among non-archived templates only (immutable after
+-- create; an archived key can be reused). Idempotent.
+alter table summary_templates drop constraint if exists summary_templates_workspace_id_key_key;
+create unique index if not exists summary_templates_workspace_key_active
+  on summary_templates (workspace_id, key) where archived_at is null;
 
 create table if not exists meeting_clips (
   id text primary key,

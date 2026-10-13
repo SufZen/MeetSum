@@ -10,6 +10,7 @@ import {
   parseTemplateInput,
   saveCustomTemplate,
   TemplateKeyConflictError,
+  TemplateKeyImmutableError,
   TemplateNotFoundError,
 } from "@/lib/ai/templates/store"
 
@@ -61,6 +62,9 @@ export const PATCH = withAuthz<{ id: string }>("settings:write", async (request,
   } catch (error) {
     if (error instanceof TemplateKeyConflictError) {
       return NextResponse.json({ error: "template_key_exists" }, { status: 409 })
+    }
+    if (error instanceof TemplateKeyImmutableError) {
+      return NextResponse.json({ error: "template_key_immutable" }, { status: 409 })
     }
     if (error instanceof TemplateNotFoundError) return templateNotFound()
 

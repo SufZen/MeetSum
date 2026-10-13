@@ -79,6 +79,17 @@ export class TemplateKeyConflictError extends Error {
   }
 }
 
+/**
+ * The key of a saved template never changes: meetings reference it as
+ * `custom:<key>` (route → 409).
+ */
+export class TemplateKeyImmutableError extends Error {
+  constructor(key: string) {
+    super(`Template key cannot be changed: ${key}`)
+    this.name = "TemplateKeyImmutableError"
+  }
+}
+
 /** No such template in the workspace (route → 404). */
 export class TemplateNotFoundError extends Error {
   constructor(id: string) {
@@ -334,22 +345,24 @@ export async function saveCustomTemplate(
   const now = new Date().toISOString()
 
   if (!client) {
-    const conflict = [...memoryTemplates.values()].find(
-      (template) => template.workspaceId === workspaceId && template.key === value.key && template.id !== input.id
-    )
-
-    if (conflict) throw new TemplateKeyConflictError(value.key)
-
     if (input.id) {
       const existing = memoryTemplates.get(input.id)
 
       if (!existing || existing.workspaceId !== workspaceId) throw new TemplateNotFoundError(input.id)
+      if (existing.key !== value.key) throw new TemplateKeyImmutableError(existing.key)
 
-      const updated: CustomTemplateRecord = { ...existing, ...value, updatedAt: now }
+      const updated: CustomTemplateRecord = { ...existing, ...value, key: existing.key, updatedAt: now }
 
       memoryTemplates.set(updated.id, structuredClone(updated))
       return updated
     }
+
+    // Keys are unique among non-archived templates (an archived key is reusable).
+    const conflict = [...memoryTemplates.values()].find(
+      (template) => template.workspaceId === workspaceId && template.key === value.key && !template.archivedAt
+    )
+
+    if (conflict) throw new TemplateKeyConflictError(value.key)
 
     const created: CustomTemplateRecord = {
       id: `tpl_${crypto.randomUUID()}`,
@@ -365,7 +378,6 @@ export async function saveCustomTemplate(
   }
 
   const fields = [
-    value.key,
     value.name,
     value.description ?? null,
     value.language ?? null,
@@ -376,10 +388,21 @@ export async function saveCustomTemplate(
 
   try {
     if (input.id) {
+      // The key is immutable: it is never updated, and a different key is
+      // refused (409) instead of silently ignored.
+      const current = await client.query(
+        "select key from summary_templates where workspace_id = $1 and id = $2",
+        [workspaceId, input.id]
+      )
+      const currentKey = (current.rows[0] as { key: string } | undefined)?.key
+
+      if (currentKey === undefined) throw new TemplateNotFoundError(input.id)
+      if (currentKey !== value.key) throw new TemplateKeyImmutableError(currentKey)
+
       const result = await client.query(
         `update summary_templates
-            set key = $3, name = $4, description = $5, language = $6, base_template = $7,
-                prompt = $8, sections = $9::jsonb, updated_at = now()
+            set name = $3, description = $4, language = $5, base_template = $6,
+                prompt = $7, sections = $8::jsonb, updated_at = now()
           where workspace_id = $1 and id = $2
           returning *`,
         [workspaceId, input.id, ...fields]
@@ -390,12 +413,13 @@ export async function saveCustomTemplate(
       return fromRow(row)
     }
 
+    // Unique among non-archived templates (partial index, migration 022).
     const result = await client.query(
       `insert into summary_templates
          (id, workspace_id, key, name, description, language, base_template, prompt, sections, created_by_user_id)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
        returning *`,
-      [`tpl_${crypto.randomUUID()}`, workspaceId, ...fields, actor.userId ?? null]
+      [`tpl_${crypto.randomUUID()}`, workspaceId, value.key, ...fields, actor.userId ?? null]
     )
 
     return fromRow(result.rows[0] as TemplateRow)
