@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { z } from "zod"
 
 import { stripNulls, toProviderSchema, zodToProviderSchema } from "@/lib/ai/llm/schema"
-import { parseStructured } from "@/lib/ai/llm/structured"
+import { completeWithRepair, parseStructured } from "@/lib/ai/llm/structured"
+import { LlmError } from "@/lib/ai/llm/types"
 
 describe("provider JSON schema", () => {
   const schema = z.object({
@@ -66,10 +67,47 @@ describe("provider JSON schema", () => {
       JSON.stringify({ title: "x", items: [] })
     )
 
-    expect(result).toEqual({ ok: false, errors: ["semantic"] })
+    expect(result).toMatchObject({ ok: false, errors: ["semantic"] })
     expect(parseStructured({ schema: { name: "s", zod: schema } }, "{\"items\": []}")).toMatchObject({
       ok: false,
       errors: [expect.stringContaining("title")],
     })
+  })
+})
+
+describe("structured output errors never carry model or transcript text", () => {
+  const schema = z.object({ title: z.string() })
+  const SECRET = "מחיר רצפה סודי 4.2M"
+  const usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }
+
+  it("reports the JSON parse error name and position only", () => {
+    const result = parseStructured({ schema: { name: "s", zod: schema } }, `{"title": "${SECRET}" oops}`)
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.logSummary).toMatch(/^invalid JSON \(SyntaxError at position \d+\)$/)
+    expect(result.errors.join(" ")).not.toContain(SECRET)
+  })
+
+  it("throws an LlmError whose message has no model text after a failed repair", async () => {
+    const parseFailure = completeWithRepair({ schema: { name: "s", zod: schema } }, "gemini", async () => ({
+      text: `Sure! ${SECRET} {"title": `,
+      usage,
+    }))
+
+    await expect(parseFailure).rejects.toBeInstanceOf(LlmError)
+    const parseError = (await parseFailure.catch((error) => error)) as Error
+
+    expect(parseError.message).not.toContain(SECRET)
+    expect(parseError.message).toMatch(/SyntaxError/)
+
+    const semantic = await completeWithRepair(
+      { schema: { name: "s", zod: schema }, validate: (value) => [`unknown meeting id ${value.title}`] },
+      "gemini",
+      async () => ({ text: JSON.stringify({ title: SECRET }), usage })
+    ).catch((error) => error as Error)
+
+    expect(semantic.message).not.toContain(SECRET)
+    expect(semantic.message).toContain("1 rule violation")
   })
 })

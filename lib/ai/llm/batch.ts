@@ -128,7 +128,7 @@ export async function runMessageBatch<T>(
             usage,
             costUsd: estimateCostUsd(model, usage, { batch: true, cacheTtl: getCacheTtl() }),
           }
-        : { customId: line.custom_id, ok: false, error: parsed.errors.join("; ") }
+        : { customId: line.custom_id, ok: false, error: parsed.logSummary }
     )
   }
 

@@ -353,6 +353,24 @@ describe("transient provider failures", () => {
     expect((await runIntelligencePipeline(withLlmSummary("heuristic"), { settings })).run.provider).toBe("heuristic")
   })
 
+  it("never puts error messages (model or transcript text) in fallbackReason", async () => {
+    const leaky = "אשלח את הצעת המחיר ללקוח עד יום ראשון"
+
+    setLlmProvidersForTesting({
+      gemini: provider("gemini", (req) =>
+        req.task === "title_tags_type"
+          ? outputFixture.title
+          : new LlmError(`Invalid structured output: "${leaky}"\nline 2`, "invalid_output", "gemini", false)
+      ),
+      anthropic: provider("anthropic", () => null, false),
+    })
+
+    const { run } = await runIntelligencePipeline(meeting(), { settings })
+
+    expect(run.fallbackReason).toBe("invalid_output (gemini)")
+    expect(run.fallbackReason).not.toContain(leaky)
+  })
+
   it("keeps the heuristic fallback for non-transient failures", async () => {
     setLlmProvidersForTesting({ gemini: failing("invalid_output"), anthropic: provider("anthropic", () => null, false) })
 
