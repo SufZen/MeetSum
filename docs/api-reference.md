@@ -112,7 +112,18 @@ Export as PDF. **Rate limit:** 20 req/min.
 Export as DOCX (Word). Returns `.docx` file download. **Rate limit:** 20 req/min.
 
 ### `POST /api/meetings/:id/export/notion`
-Create a page for the meeting in a Notion database. Body: `{ databaseId, token }` — `token` is the caller's Notion integration token and is **required** (there is no server-wide `NOTION_TOKEN` fallback). Requires `meeting:write` and `integrations:manage` (role admin or owner; API keys need the `admin` scope); a private meeting must also be visible to the caller (else 404). **Rate limit:** 20 req/min.
+Create (or update in place) the meeting's page in a Notion database through the workspace's **Notion OAuth connection** (Settings → Integrations; an admin connects it). Body: `{ databaseId? }`; without it the connection's default database is used. **No token goes in the body**: a body with `token` is refused (400 `token_not_accepted`), and there is no server-wide `NOTION_TOKEN` fallback. Requires `meeting:write`; the meeting must be visible (else 404) and a private meeting also needs `canManageMeeting`. Optional `Idempotency-Key` header (a replayed key returns the same page).
+
+The same checks as `POST /api/meetings/:id/integrations/send` apply:
+- no active Notion connection → 409 `notion_not_connected`;
+- `allowManualSend: false` on the connection → 403 `manual_send_disabled`;
+- a private meeting needs its owner's per-meeting opt-in → 403 `private_meeting_not_opted_in`;
+- a client-supplied `databaseId` is checked with Notion first → 400 `invalid_destination`.
+
+Response: `{ deliveryId, pageId, url, updated }`. Re-exporting updates the tracked page (old blocks are archived). Notion's error text is never reflected (`notion_not_found`, `notion_rate_limited` with `Retry-After`, …). **Rate limit:** 20 req/min.
+
+### `POST /api/meetings/:id/export/google-docs`
+Create (or update in place) a Google Doc of the recap in the requester's own Drive, with RTL Hebrew paragraphs. Body: `{ includeTranscript? }`; `?new=1` forces a new document. Requires `meeting:read` and a visible meeting (else 404). Auth, in order: the requester's personal Google Drive connection (OAuth with PKCE, `drive.file` only), then service-account domain-wide delegation when `MEETSUM_GOOGLE_DOCS_DWD=true` and the requester's domain matches the workspace subject's; otherwise 409 `google_docs_not_connected` with a `connectUrl`. A private meeting needs its owner's per-meeting opt-in (403 `private_meeting_not_opted_in`), and a connection with `allowManualSend: false` is refused (403 `manual_send_disabled`). Response: `{ documentId, url, updated }`. Google's error text is never reflected. **Rate limit:** 20 req/min.
 
 ---
 
@@ -205,8 +216,10 @@ List webhook subscriptions. **Rate limit:** 30 req/min.
 Create webhook subscription. **Rate limit:** 30 req/min.
 
 ```json
-{ "url": "https://example.com/webhook", "events": ["meeting.completed"], "secret": "optional, >= 16 chars" }
+{ "url": "https://example.com/webhook", "events": ["meeting.completed"], "secret": "optional, >= 16 chars", "payloadVersion": 2 }
 ```
+
+`payloadVersion` is `1` or `2` (default `2`; see [Payload versions](#payload-versions)). Existing v1 subscriptions keep their frozen v1 payloads until they are upgraded. The settings UI creates v2 subscriptions and lists events from `GET /api/webhooks/catalog`.
 
 The URL must be `https` (plain `http` only outside production or for allowlisted hosts) and must not resolve to a private, loopback, link-local or otherwise reserved address; `MEETSUM_WEBHOOK_ALLOWED_HOSTS` (hosts, `*.suffix`, CIDRs) allowlists internal receivers. Without `secret`, a `whsec_…` secret is generated. The response contains `secret` **once**; it is stored encrypted and never returned again.
 
@@ -218,10 +231,13 @@ Deliveries are signed with that secret (`x-meetsum-signature`, HMAC-SHA256 hex o
 { "meetingId": "meet_…", "workspace_id": "ws_…", "visibility": "private" }
 ```
 
-Only non-content identifiers are kept (`actionItemId`, `jobId`, `jobName`, `attempts`, `permanent`, `mode` where the event has them); `title`, `tags`, action item text/owner/priority and error text are omitted. `workspace` and `link` meetings receive the full payload. A meeting whose visibility cannot be read is treated as private.
+Only non-content identifiers are kept (`actionItemId`, `clipId`, `suggestionId`, `jobId`, `jobName`, `attempts`, `permanent`, `mode` where the event has them; one list for v1 and v2); `title`, `tags`, action item text/owner/priority and error text are omitted. `workspace` and `link` meetings receive the full payload. A meeting whose visibility cannot be read is treated as private.
 
 ### `PATCH /api/webhooks/subscriptions/:id`
-Update subscription. Body: `{ url?, enabled?, events?, rotateSecret? }`. With `rotateSecret: true` the response includes the new `secret` once.
+Update subscription. Body: `{ url?, enabled?, events?, rotateSecret?, payloadVersion? }`. With `rotateSecret: true` the response includes the new `secret` once. `payloadVersion: 2` upgrades a v1 subscription (one-way).
+
+### `GET /api/webhooks/catalog`
+The event catalog `{ version, events: [{ name, versions, description, example, schemaUrl }] }` (`webhooks:manage`).
 
 ### `DELETE /api/webhooks/subscriptions/:id`
 Delete a subscription and its delivery history.

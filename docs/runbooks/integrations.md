@@ -104,7 +104,8 @@ May be the existing Teams capture app; the app-only `OnlineMeetingRecording.Read
   - `crm.objects.contacts.write`
   - `crm.objects.deals.read`
 - **Optional scopes** (`HUBSPOT_OPTIONAL_SCOPES`): `crm.objects.owners.read` (task owner mapping by email).
-- **Re-verify against current HubSpot docs** which scopes cover writing meetings, notes and tasks and their associations (Package B records the result here before merge).
+- **Exact scope string** MeetSum requests (`HUBSPOT_SCOPES` in `lib/integrations/hubspot/oauth.ts`): `scope=oauth crm.objects.contacts.read crm.objects.contacts.write crm.objects.deals.read` and `optional_scope=crm.objects.owners.read`. Select exactly these in the app's Auth settings (required vs optional must match, or HubSpot rejects the install).
+- **Verified by Package B (2026-10-13):** the HubSpot Meetings, Notes and Tasks v3 object guides list only `crm.objects.contacts.read`/`.write` for creating engagements and their associations, so no separate meetings, notes or tasks scope is requested; deals are only read (picker and association). Re-check on the first live run: a 403 `MISSING_SCOPES` on a meeting, note or task write means HubSpot changed this, and the scope it names must be added here and in `HUBSPOT_SCOPES`.
 - **Env:** `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`, `HUBSPOT_OPTIONAL_SCOPES`.
 - Screenshot placeholder: `docs/runbooks/img/hubspot-scopes.png`.
 
@@ -221,7 +222,7 @@ Run each one in a test workspace with a Hebrew sample meeting (a summary, two ac
 
 1. Connect; share the target database with the integration during consent.
 2. Pick it as the default database; Send to → Notion from the sample meeting.
-3. In Notion: Hebrew paragraphs start on the right; timecodes sit at the end of transcript lines. Record the result in the Notion provider's code comment.
+3. **RTL check (required on the first live run; Notion has no paragraph direction, so this is empirical).** Open the page in the Notion web app, the desktop app and the mobile app. Pass when every Hebrew heading, paragraph, bullet and to-do starts on the right (MeetSum starts each RTL line with Hebrew or an RLM), English names and dates inside a Hebrew line stay in order, transcript timecodes sit at the end of the line, and an English meeting stays left-to-right. Record pass/fail, the date and the Notion API version (`2022-06-28`) in `docs/parity/STATUS.md` and in the comment at the top of `lib/integrations/notion/blocks.ts`. On a fail, keep Notion rules off for Hebrew meetings and file an issue with screenshots.
 4. Send again: the same page is updated (old blocks archived), not a new page.
 5. Disconnect; remove the integration in Notion → Settings → Connections (Notion has no revoke API).
 

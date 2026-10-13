@@ -73,6 +73,7 @@ import {
   processWebhookDeliveryJob,
 } from "@/lib/webhooks/delivery"
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
+import { PRIVATE_PAYLOAD_KEYS } from "@/lib/platform/event-schemas"
 
 export type MeetSumJob = Job<MeetSumJobPayload, unknown, MeetSumJobName>
 
@@ -217,19 +218,12 @@ async function setStage(
 }
 
 /**
- * Event fields that never reveal meeting content, kept for private meetings.
+ * Event fields that never reveal meeting content, kept for private meetings
+ * (the webhook catalog's `PRIVATE_PAYLOAD_KEYS`, one list for v1 and v2).
  * Everything else (title, tags, action item text/owner, error text) is
  * dropped: an admin registering a webhook must not read private meetings.
  */
-const PRIVATE_EVENT_FIELDS = new Set([
-  "meetingId",
-  "actionItemId",
-  "jobId",
-  "jobName",
-  "attempts",
-  "permanent",
-  "mode",
-])
+const PRIVATE_EVENT_FIELDS = new Set<string>(PRIVATE_PAYLOAD_KEYS)
 
 /**
  * Webhook payload for a meeting event: full data for workspace/link
