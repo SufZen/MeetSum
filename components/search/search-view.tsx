@@ -140,7 +140,7 @@ export function SearchView({
             </Button>
           </form>
 
-          <SearchFilters state={state} facets={facets} onChange={navigate} dictionary={t} />
+          <SearchFilters state={state} facets={facets} onChange={navigate} locale={locale} dictionary={t} />
 
           <SearchResultsArea
             locale={locale}

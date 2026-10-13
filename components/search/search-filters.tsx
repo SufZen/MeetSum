@@ -23,6 +23,7 @@ import {
   type SearchUrlState,
 } from "@/lib/client/search-url"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import { meetingTypeLabel } from "@/lib/search/meeting-type-labels"
 import type { SearchFacets, TextLanguage } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
 
@@ -206,11 +207,13 @@ export function SearchFilters({
   state,
   facets,
   onChange,
+  locale,
   dictionary: t,
 }: {
   state: SearchUrlState
   facets: SearchFacets
   onChange: (next: SearchUrlState) => void
+  locale: string
   dictionary: Dictionary
 }) {
   const people: Option[] = facets.people.map((person) => ({
@@ -220,7 +223,7 @@ export function SearchFilters({
   }))
   const rooms: Option[] = facets.rooms.map((room) => ({ value: room.id, label: room.name }))
   const tags: Option[] = facets.tags.map((tag) => ({ value: tag, label: tag }))
-  const types: Option[] = facets.meetingTypes.map((type) => ({ value: type, label: type }))
+  const types: Option[] = facets.meetingTypes.map((type) => ({ value: type, label: meetingTypeLabel(type, locale) }))
 
   return (
     <div role="group" aria-label={t.searchFilters} className="grid gap-2">

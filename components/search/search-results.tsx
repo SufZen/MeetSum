@@ -14,6 +14,7 @@ import { formatTimecode } from "@/components/ui/meeting-atoms"
 import { dirForLanguage, hitDir } from "@/lib/client/highlight"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import { buildSegmentLink } from "@/lib/player/deep-link"
+import { meetingTypeLabel } from "@/lib/search/meeting-type-labels"
 import type { ChunkKind, SearchHit, SearchMeetingGroup } from "@/lib/search/types"
 
 export const KIND_KEYS: Record<ChunkKind, keyof Dictionary> = {
@@ -104,7 +105,7 @@ export function MeetingResultCard({
   const titleDir = dirForLanguage(meeting.language)
   const meta = [
     ...meeting.rooms.map((room) => ({ key: `room-${room.id}`, label: room.name })),
-    ...(meeting.meetingType ? [{ key: "type", label: meeting.meetingType }] : []),
+    ...(meeting.meetingType ? [{ key: "type", label: meetingTypeLabel(meeting.meetingType, locale) }] : []),
     ...meeting.tags.slice(0, 4).map((tag) => ({ key: `tag-${tag}`, label: `#${tag}` })),
   ]
 
