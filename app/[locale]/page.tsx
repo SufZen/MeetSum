@@ -18,6 +18,11 @@ export default async function Page({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const [{ locale }, query] = await Promise.all([params, searchParams])
+
+  // Screenshot run only (M9 D3): `?__error=1` renders the error page.
+  if (process.env.NODE_ENV !== "production" && query.__error === "1") {
+    throw new Error("Development error trigger") // i18n-allow: developer-only trigger, never shown in production
+  }
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
     : DEFAULT_LOCALE
