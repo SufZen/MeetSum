@@ -17,6 +17,17 @@ describe("output language check", () => {
     expect(checkOutputLanguage(text, "he").passed).toBe(false)
   })
 
+  it("does not treat words with trailing sentence punctuation as tech tokens", () => {
+    // Every word ends a sentence: these must still count as English letters.
+    const text = "Agreed. Shipped. Done. Approved. Postponed. Cancelled. Escalated."
+
+    expect(hebrewRatio(text)).toBe(0)
+    expect(checkOutputLanguage(text, "he")).toMatchObject({ passed: false, checked: true })
+    expect(checkOutputLanguage("Budget approved... Timeline agreed.", "he").passed).toBe(false)
+    // Real tech tokens with dots are still stripped.
+    expect(checkOutputLanguage("עדכנו את v2.1 ואת node.js.", "he").passed).toBe(true)
+  })
+
   it("checks English output allows at most 10% Hebrew", () => {
     expect(checkOutputLanguage("The client, דנה, approved the quote of $1,200 for the pilot.", "en").passed).toBe(true)
     expect(checkOutputLanguage("סיכום הפגישה: הלקוח אישר את ההצעה.", "en").passed).toBe(false)

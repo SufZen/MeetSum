@@ -73,7 +73,13 @@ function glossaryTerms(extra: readonly string[]): Set<string> {
   return terms
 }
 
-function isTechToken(token: string, terms: Set<string>): boolean {
+function isTechToken(raw: string, terms: Set<string>): boolean {
+  // Trailing sentence punctuation ("Agreed.", "Done...") is not part of the
+  // word: only dots/dashes inside a token (v2.1, node.js) mark it technical.
+  const token = raw.replace(/[._-]+$/, "")
+
+  if (!token) return false
+
   return (
     terms.has(token.toLowerCase()) ||
     /[0-9._-]/.test(token) ||
