@@ -1,6 +1,7 @@
 import { createApiKeyHash } from "@/lib/auth/api-keys"
 import { getDatabasePool } from "@/lib/db/client"
 import {
+  WEBHOOK_EVENTS_V1,
   WEBHOOK_EVENTS_V2,
   webhookEventsFor,
   type WebhookEventV2,
@@ -33,9 +34,13 @@ import {
   guardedWebhookFetch,
 } from "@/lib/webhooks/url-guard"
 
-/** Every event of the catalog (v2 is a superset of v1). */
-export const WEBHOOK_EVENT_NAMES = WEBHOOK_EVENTS_V2
+/** The legacy (v1) event list, frozen: `WEBHOOK_EVENTS_V1`. */
+export const WEBHOOK_EVENT_NAMES = WEBHOOK_EVENTS_V1
 
+/** Every event of the catalog (v2 is a superset of v1). */
+export const WEBHOOK_CATALOG_EVENT_NAMES = WEBHOOK_EVENTS_V2
+
+/** Any catalog event; which ones a subscription may use depends on its version. */
 export type WebhookEventName = WebhookEventV2
 
 /** New subscriptions get the catalog version (M8 C4). */
