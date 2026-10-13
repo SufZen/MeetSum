@@ -370,3 +370,50 @@ export async function requestWorkspaceReindex(db: Queryable, workspaceId: string
 }
 
 export const ADMIN_REINDEX_SWEEP_LIMIT = MAX_SWEEP_LIMIT
+
+const EMPTY_STATUS = (activeKey: EmbeddingKey | null): IndexStatus => ({
+  counts: [],
+  total: 0,
+  activeKey: activeKey ? formatEmbeddingKey(activeKey) : null,
+  activeKeyCoverage: { meetings: 0, ready: 0 },
+})
+
+/** Admin status of a workspace; empty without Postgres (no persisted index). */
+export async function loadWorkspaceIndexStatus(
+  workspaceId: string,
+  activeKey: EmbeddingKey | null,
+  deps: { db?: Queryable } = {}
+): Promise<IndexStatus> {
+  if (!deps.db && process.env.MEETSUM_STORAGE !== "postgres") return EMPTY_STATUS(activeKey)
+
+  return getIndexStatus(deps.db ?? (await defaultDb()), workspaceId, activeKey)
+}
+
+/**
+ * Admin workspace re-index: marks every meeting as requested and queues a
+ * large sweep for the workspace (the periodic sweeper continues if the
+ * queue is unavailable). Without Postgres there is no index: nothing to do.
+ */
+export async function requestWorkspaceIndexing(
+  workspaceId: string,
+  deps: { db?: Queryable; enqueueSweep?: (workspaceId: string, limit: number) => Promise<unknown> } = {}
+): Promise<{ meetings: number; sweepQueued: boolean }> {
+  if (!deps.db && process.env.MEETSUM_STORAGE !== "postgres") return { meetings: 0, sweepQueued: false }
+
+  const meetings = await requestWorkspaceReindex(deps.db ?? (await defaultDb()), workspaceId)
+  const enqueueSweep =
+    deps.enqueueSweep ??
+    (async (id: string, limit: number) => {
+      const { enqueueMeetSumJob } = await import("@/lib/jobs/queue")
+
+      return enqueueMeetSumJob("search.index.sweep", { workspaceId: id, limit })
+    })
+
+  try {
+    await enqueueSweep(workspaceId, ADMIN_REINDEX_SWEEP_LIMIT)
+    return { meetings, sweepQueued: true }
+  } catch (error) {
+    console.warn("[search] admin sweep enqueue failed", error instanceof Error ? error.name : "unknown")
+    return { meetings, sweepQueued: false }
+  }
+}

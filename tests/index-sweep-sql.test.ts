@@ -5,6 +5,8 @@ import {
   getIndexStatus,
   indexSweepBatch,
   indexSweepEveryMs,
+  loadWorkspaceIndexStatus,
+  requestWorkspaceIndexing,
   requestWorkspaceReindex,
   selectStaleMeetings,
   sweepWorkspaceIndex,
@@ -136,6 +138,31 @@ describe("admin status SQL", () => {
 
     await expect(requestWorkspaceReindex(db, "ws_1")).resolves.toBe(12)
     expect(calls[0].text).toContain("update meetings set search_requested_at = now() where workspace_id = $1")
+  })
+
+  it("queues a large sweep for an admin workspace re-index and survives a queue outage", async () => {
+    const { db } = recorder([{ count: 4 }])
+    const enqueueSweep = vi.fn(async () => undefined)
+
+    await expect(requestWorkspaceIndexing("ws_1", { db, enqueueSweep })).resolves.toEqual({ meetings: 4, sweepQueued: true })
+    expect(enqueueSweep).toHaveBeenCalledWith("ws_1", 1_000)
+
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    enqueueSweep.mockRejectedValueOnce(new Error("queue_unavailable"))
+    await expect(requestWorkspaceIndexing("ws_1", { db, enqueueSweep })).resolves.toEqual({ meetings: 4, sweepQueued: false })
+    vi.restoreAllMocks()
+  })
+
+  it("returns an empty status and does nothing without Postgres", async () => {
+    vi.stubEnv("MEETSUM_STORAGE", "memory")
+
+    await expect(loadWorkspaceIndexStatus("ws_1", KEY)).resolves.toEqual({
+      counts: [],
+      total: 0,
+      activeKey: "gemini-embedding-001:1536",
+      activeKeyCoverage: { meetings: 0, ready: 0 },
+    })
+    await expect(requestWorkspaceIndexing("ws_1")).resolves.toEqual({ meetings: 0, sweepQueued: false })
   })
 })
 
