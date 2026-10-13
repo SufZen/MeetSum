@@ -28,6 +28,7 @@ import path from "node:path"
 import { createSessionCookie, getSessionSecret } from "@/lib/auth/session"
 import { getDatabasePool } from "@/lib/db/client"
 import { enqueueIntegrationEvent } from "@/lib/integrations/core/dispatch-hook"
+import { fakeSharedEvent } from "@/lib/integrations/microsoft/fake"
 import { platformEventData } from "@/lib/jobs/processor"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
 import { platformEventPayload } from "@/lib/platform/event-payloads"
@@ -176,7 +177,10 @@ async function seed() {
     await pool.query("update users set default_workspace_id = $2 where id = $1", [user.id, user.workspace])
   }
 
-  // A Google calendar row the fake Outlook event duplicates by iCalUID.
+  // A Google calendar row the fake Outlook event duplicates: same iCalUID,
+  // same start and same Teams link as `fakeSharedEvent()` (the dedupe needs all three).
+  const shared = fakeSharedEvent()
+
   await pool.query(
     "insert into workspace_accounts (id, domain, admin_email) values ($1, 'example.test', $2) on conflict do nothing",
     [`${PREFIX}wsacct`, USERS.w1Owner.email]
@@ -187,10 +191,19 @@ async function seed() {
   )
   await pool.query(
     `insert into calendar_events (id, google_identity_id, google_event_id, title, starts_at, ends_at, meet_link, raw, provider, workspace_id, ical_uid)
-     values ($1, $2, 'e2e-google-event-1', 'פגישה מתוזמנת מהיומן', now() + interval '1 day', now() + interval '1 day 30 minutes',
-             'https://meet.google.com/abc-defg-hij', $3::jsonb, 'google', $4, $5)
+     values ($1, $2, 'e2e-google-event-1', 'פגישה מתוזמנת מהיומן', $6::timestamptz, $7::timestamptz,
+             $8, $3::jsonb, 'google', $4, $5)
      on conflict (id) do nothing`,
-    [`${PREFIX}cal_google_1`, `${PREFIX}gid_member`, JSON.stringify({ iCalUID: E2E_M8_ICAL_UID }), W1, E2E_M8_ICAL_UID]
+    [
+      `${PREFIX}cal_google_1`,
+      `${PREFIX}gid_member`,
+      JSON.stringify(shared.googleRaw),
+      W1,
+      E2E_M8_ICAL_UID,
+      shared.start.toISOString(),
+      shared.end.toISOString(),
+      shared.joinUrl,
+    ]
   )
 
   await seedPgliteMeetings({ client: pool }, meetings)

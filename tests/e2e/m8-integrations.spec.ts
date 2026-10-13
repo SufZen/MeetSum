@@ -305,8 +305,12 @@ test.describe.serial("M8 integrations with fake providers", () => {
       .toBeGreaterThan(0)
 
     const response = await page.request.get("/api/meetings?limit=200")
-    const body = (await response.json()) as { meetings?: { id: string; title: string }[] }
-    const sameEvent = (body.meetings ?? []).filter((meeting) => meeting.title === "פגישה מתוזמנת מהיומן")
+    const body = (await response.json()) as { meetings?: { id: string; title: string; source: string }[] }
+    // ALL meetings for the shared event, whatever their title or source: the
+    // seeded Google meeting and (if the dedupe failed) an Outlook copy.
+    const sameEvent = (body.meetings ?? []).filter(
+      (meeting) => meeting.id === env.E2E_M8_CALENDAR_MEETING_ID || meeting.title === "פגישת לקוח (Outlook)"
+    )
 
     // The seeded Google row owns the iCalUID, so Outlook reuses that meeting.
     expect(sameEvent).toHaveLength(1)

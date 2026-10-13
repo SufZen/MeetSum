@@ -26,8 +26,9 @@ function tokenBody() {
   }
 }
 
-function inHours(hours: number): string {
-  return new Date(Date.now() + hours * 3_600_000).toISOString().replace("Z", "0000")
+/** Graph local dateTime (UTC) for an instant. */
+function graphDateTime(date: Date): string {
+  return date.toISOString().replace("Z", "0000")
 }
 
 /**
@@ -36,6 +37,32 @@ function inHours(hours: number): string {
  * a meeting on both calendars yields one meeting and one bot session.
  */
 export const FAKE_OUTLOOK_ICAL_UID = "e2e-m8-shared-event@meetsum.test"
+
+/** The Teams link both copies of the shared event carry (the dedupe requires the same bot target). */
+export const FAKE_SHARED_EVENT_JOIN_URL =
+  "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZmFrZW1lZXRpbmc%40thread.v2/0?context=%7b%22Tid%22%3a%2200000000-0000-4000-8000-00000000fa4e%22%7d"
+
+/**
+ * The shared event, identical for the e2e seed's Google row and this fake
+ * Outlook feed: same iCalUID, same start (tomorrow 09:00 UTC, stable within
+ * a day, so the seed and a later sync agree) and the same Teams link.
+ */
+export function fakeSharedEvent(now: Date = new Date()) {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 9, 0, 0))
+  const end = new Date(start.getTime() + 30 * 60_000)
+
+  return {
+    iCalUID: FAKE_OUTLOOK_ICAL_UID,
+    start,
+    end,
+    joinUrl: FAKE_SHARED_EVENT_JOIN_URL,
+    /** `calendar_events.raw` of the seeded Google row. */
+    googleRaw: {
+      iCalUID: FAKE_OUTLOOK_ICAL_UID,
+      conferenceData: { entryPoints: [{ entryPointType: "video", uri: FAKE_SHARED_EVENT_JOIN_URL }] },
+    },
+  }
+}
 
 export const microsoftFakeHandlers: FakeProviderHandlers = {
   "GET /organizations/oauth2/v2.0/authorize": (request) => {
@@ -49,30 +76,31 @@ export const microsoftFakeHandlers: FakeProviderHandlers = {
   "GET /v1.0/me": () => ({
     body: { id: FAKE_OID, mail: "member@fake.example", userPrincipalName: "member@fake.example", displayName: "Fake Member" },
   }),
-  "GET /v1.0/me/calendarView/delta": () => ({
-    body: {
-      "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=fake-delta",
-      value: [
-        {
-          id: "fake-outlook-event-1",
-          iCalUId: FAKE_OUTLOOK_ICAL_UID,
-          subject: "פגישת לקוח (Outlook)",
-          isCancelled: false,
-          isAllDay: false,
-          sensitivity: "normal",
-          start: { dateTime: inHours(2), timeZone: "UTC" },
-          end: { dateTime: inHours(3), timeZone: "UTC" },
-          organizer: { emailAddress: { name: "Fake Member", address: "member@fake.example" } },
-          attendees: [
-            { type: "required", status: { response: "none" }, emailAddress: { name: "Client", address: "client@customer.example" } },
-          ],
-          body: { contentType: "text", content: "" },
-          onlineMeeting: {
-            joinUrl:
-              "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZmFrZW1lZXRpbmc%40thread.v2/0?context=%7b%22Tid%22%3a%2200000000-0000-4000-8000-00000000fa4e%22%7d",
+  "GET /v1.0/me/calendarView/delta": () => {
+    const shared = fakeSharedEvent()
+
+    return {
+      body: {
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=fake-delta",
+        value: [
+          {
+            id: "fake-outlook-event-1",
+            iCalUId: FAKE_OUTLOOK_ICAL_UID,
+            subject: "פגישת לקוח (Outlook)",
+            isCancelled: false,
+            isAllDay: false,
+            sensitivity: "normal",
+            start: { dateTime: graphDateTime(shared.start), timeZone: "UTC" },
+            end: { dateTime: graphDateTime(shared.end), timeZone: "UTC" },
+            organizer: { emailAddress: { name: "Fake Member", address: "member@fake.example" } },
+            attendees: [
+              { type: "required", status: { response: "none" }, emailAddress: { name: "Client", address: "client@customer.example" } },
+            ],
+            body: { contentType: "text", content: "" },
+            onlineMeeting: { joinUrl: shared.joinUrl },
           },
-        },
-      ],
-    },
-  }),
+        ],
+      },
+    }
+  },
 }
