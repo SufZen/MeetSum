@@ -319,3 +319,146 @@ describe("runOutlookCalendarSync (PGlite)", () => {
     expect(holder.googleBotSync).toHaveLength(1)
   })
 })
+
+const TEAMS_REAL =
+  "https://teams.microsoft.com/l/meetup-join/19%3ameeting_UmVhbE1lZXRpbmdEYW5hMDAwMDAwMDAwMDAwMDAwMA%40thread.v2/0?context=%7b%22Tid%22%3a%2272f988bf-86f1-41af-91ab-2d7cd011db47%22%7d"
+const ZOOM_ATTACKER = "https://evil-corp.zoom.us/j/99988877766?pwd=attacker"
+
+function graphInvite(uid: string, start: string, overrides: Record<string, unknown> = {}) {
+  const end = new Date(Date.parse(`${start}Z`) + 3_600_000).toISOString().replace("Z", "")
+
+  return {
+    id: `ev-${uid}`,
+    iCalUId: uid,
+    subject: `Invite ${uid}`,
+    isCancelled: false,
+    isAllDay: false,
+    sensitivity: "normal",
+    start: { dateTime: start, timeZone: "UTC" },
+    end: { dateTime: end, timeZone: "UTC" },
+    organizer: { emailAddress: { name: "Dana", address: "dana@acme.co.il" } },
+    attendees: [{ type: "required", status: { response: "none" }, emailAddress: { address: "ceo@client.example" } }],
+    body: { contentType: "text", content: "" },
+    onlineMeeting: { joinUrl: TEAMS_REAL },
+    ...overrides,
+  }
+}
+
+function singlePage(events: unknown[]) {
+  return [{ match: START_URL, respond: json({ "@odata.deltaLink": DELTA_1, value: events }) }]
+}
+
+/** Dana's own Google calendar row + meeting (DWD subject). */
+async function seedDanaGoogleMeeting(uid: string, start: string, visibility: "private" | "workspace") {
+  await (db as PgLike).exec(`
+    insert into workspace_accounts (id, domain, admin_email) values ('wa_sec', 'acme.co.il', 'dana@acme.co.il') on conflict do nothing;
+    insert into google_identities (id, workspace_account_id, subject_email, workspace_id)
+      values ('gi_sec', 'wa_sec', 'dana-sec@acme.co.il', 'ws_1') on conflict do nothing;
+  `)
+  await (db as PgLike).query(
+    `insert into calendar_events (id, provider, google_identity_id, google_event_id, workspace_id, ical_uid, title, starts_at, organizer_email, raw)
+     values ($1, 'google', 'gi_sec', $1, 'ws_1', $2, 'Dana real meeting', $3, 'dana@acme.co.il', $4::jsonb)`,
+    [`ce_dana_${uid}`, uid, `${start}Z`, JSON.stringify({ conferenceData: { entryPoints: [{ entryPointType: "video", uri: TEAMS_REAL }] } })]
+  )
+  await (db as PgLike).query(
+    `insert into meetings (id, calendar_event_id, title, source, status, started_at, workspace_id, owner_user_id, visibility)
+     values ($1, $2, 'Dana real meeting', 'google_meet', 'scheduled', $3, 'ws_1', 'usr_dana', $4)`,
+    [`m_dana_${uid}`, `ce_dana_${uid}`, `${start}Z`, visibility]
+  )
+}
+
+async function meetingsForUid(uid: string) {
+  return rows<{ id: string; owner_user_id: string; visibility: string; title: string }>(
+    `select m.id, m.owner_user_id, m.visibility, m.title from meetings m join calendar_events ce on ce.id = m.calendar_event_id
+      where ce.workspace_id = 'ws_1' and ce.ical_uid = $1 order by m.id`,
+    [uid]
+  )
+}
+
+const attackerBody = { onlineMeeting: null, body: { contentType: "text", content: `Join ${ZOOM_ATTACKER}` } }
+
+describe("iCalUID dedupe safety (security review)", () => {
+  it("never adopts another user's PRIVATE meeting with the same iCalUID: both keep their own meeting", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    await seedDanaGoogleMeeting("uid-private", "2026-10-20T09:00:00", "private")
+
+    const h = harness({ routes: singlePage([graphInvite("uid-private", "2026-10-20T09:00:00")]) })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats.deduped).toBe(0)
+    expect(h.botSync).toHaveLength(1)
+    expect(await meetingsForUid("uid-private")).toEqual([
+      { id: "m_dana_uid-private", owner_user_id: "usr_dana", visibility: "private", title: "Dana real meeting" },
+      expect.objectContaining({ owner_user_id: "usr_yossi", id: expect.stringMatching(/^meet_outlook_/) }),
+    ])
+  })
+
+  it("dedupes two members' rows when the meeting is workspace-visible with the same organizer and link", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    await seedDanaGoogleMeeting("uid-visible", "2026-10-20T11:00:00", "workspace")
+
+    const h = harness({ routes: singlePage([graphInvite("uid-visible", "2026-10-20T11:00:00")]) })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats.deduped).toBe(1)
+    expect(h.botSync).toHaveLength(0)
+    expect((await meetingsForUid("uid-visible")).map((meeting) => meeting.id)).toEqual(["m_dana_uid-visible"])
+  })
+
+  it("does not dedupe a visible meeting when the organizer differs", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    await seedDanaGoogleMeeting("uid-other-org", "2026-10-20T15:00:00", "workspace")
+
+    const h = harness({
+      routes: singlePage([
+        graphInvite("uid-other-org", "2026-10-20T15:00:00", { organizer: { emailAddress: { address: "mallory@evil.example" } } }),
+      ]),
+    })
+
+    expect((await runOutlookCalendarSync(h.deps)).deduped).toBe(0)
+    expect(await meetingsForUid("uid-other-org")).toHaveLength(2)
+  })
+
+  it("a forged external invite (same iCalUID, start and organizer, another link) never suppresses or takes over the real meeting", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    await seedDanaGoogleMeeting("uid-forged", "2026-10-20T13:00:00", "workspace")
+
+    const h = harness({ routes: singlePage([graphInvite("uid-forged", "2026-10-20T13:00:00", attackerBody)]) })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats.deduped).toBe(0)
+    expect(h.botSync.map((call) => call.subject)).toEqual(["yossi@acme.co.il"])
+
+    const meetings = await meetingsForUid("uid-forged")
+
+    expect(meetings).toHaveLength(2)
+    expect(meetings[0]).toEqual({ id: "m_dana_uid-forged", owner_user_id: "usr_dana", visibility: "workspace", title: "Dana real meeting" })
+  })
+
+  it("a forged invite synced FIRST does not swallow the real Google meeting synced later", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    const h = harness({ routes: singlePage([graphInvite("uid-forged-first", "2026-10-21T09:00:00", attackerBody)]) })
+
+    await runOutlookCalendarSync(h.deps)
+
+    holder.googleEvents = [
+      googleEvent({
+        id: "google-real-forged-first",
+        iCalUID: "uid-forged-first",
+        start: { dateTime: "2026-10-21T09:00:00Z" },
+        end: { dateTime: "2026-10-21T10:00:00Z" },
+        conferenceData: { entryPoints: [{ entryPointType: "video", uri: TEAMS_REAL }] },
+      }),
+    ]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+
+    expect(holder.googleBotSync).toHaveLength(1)
+    expect(holder.googleBotSync[0]?.subject).toBe("dana@acme.co.il")
+    expect(await meetingsForUid("uid-forged-first")).toHaveLength(2)
+  })
+})

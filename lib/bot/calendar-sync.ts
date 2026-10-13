@@ -154,6 +154,7 @@ export async function listUpcomingCalendarEvents(
            on c.id = ce.integration_connection_id and c.workspace_id = ce.workspace_id
           and c.provider = 'microsoft' and c.status = 'active'
          join users u on u.id = c.user_id
+         join memberships mb on mb.user_id = c.user_id and mb.workspace_id = ce.workspace_id
          join meetings m on m.calendar_event_id = ce.id and m.workspace_id = ce.workspace_id
         where ce.provider = 'microsoft'
           and ce.workspace_id = $1

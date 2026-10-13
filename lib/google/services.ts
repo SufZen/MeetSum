@@ -1338,7 +1338,7 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 'google', $13, $14)
               on conflict (google_identity_id, google_event_id)
               do update set
-                workspace_id = excluded.workspace_id,
+                workspace_id = coalesce(calendar_events.workspace_id, excluded.workspace_id),
                 ical_uid = coalesce(excluded.ical_uid, calendar_events.ical_uid),
                 updated_at = now(),
                 calendar_id = excluded.calendar_id,
@@ -1414,6 +1414,9 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 icalUid: event.iCalUID,
                 startsAt,
                 calendarEventId,
+                organizerEmail: event.organizer?.email,
+                event: event as CalendarEventLike,
+                owner: { email: subject },
               }))
             ) {
               stats.skipped = (stats.skipped ?? 0) + 1

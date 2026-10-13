@@ -156,7 +156,8 @@ function shouldCreateMeeting(mapped: MappedOutlookEvent, deps: OutlookSyncDeps):
   return (mapped.event.attendees ?? []).some((attendee) => !attendee.resource && isOtherPerson(attendee.email, deps))
 }
 
-async function upsertCalendarRow(deps: OutlookSyncDeps, mapped: MappedOutlookEvent): Promise<string> {
+/** The row id, or undefined when the conflict row is not this workspace's (never adopted). */
+async function upsertCalendarRow(deps: OutlookSyncDeps, mapped: MappedOutlookEvent): Promise<string | undefined> {
   const id = outlookCalendarEventId(deps.connectionId, mapped.externalEventId)
   const result = await deps.db.query(
     `insert into calendar_events (
@@ -195,7 +196,7 @@ async function upsertCalendarRow(deps: OutlookSyncDeps, mapped: MappedOutlookEve
     ]
   )
 
-  return (result.rows[0] as { id?: string } | undefined)?.id ?? id
+  return (result.rows[0] as { id?: string } | undefined)?.id
 }
 
 function participantsOf(mapped: MappedOutlookEvent, deps: OutlookSyncDeps) {
@@ -319,6 +320,11 @@ async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: Outlo
 
   const calendarEventId = await upsertCalendarRow(deps, mapped)
 
+  if (!calendarEventId) {
+    stats.errors += 1
+    return
+  }
+
   if (mapped.status === "cancelled") {
     stats.cancelled += 1
     await cancelRow(deps, calendarEventId)
@@ -333,6 +339,9 @@ async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: Outlo
       icalUid: mapped.iCalUID,
       startsAt: mapped.startsAt,
       calendarEventId,
+      organizerEmail: mapped.organizerEmail,
+      event: mapped.event,
+      owner: { userId: deps.userId, email: deps.userEmail },
     })
 
     if (canonical) {
