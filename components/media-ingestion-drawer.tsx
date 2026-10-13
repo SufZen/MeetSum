@@ -55,7 +55,17 @@ export function MediaIngestionDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetTrigger render={<Button className="h-9" disabled={pending} />}>
+      {/* One primary action per view (Cadence §7): upload stays primary,
+          recording uses the live `record` treatment, desktop import is secondary. */}
+      <SheetTrigger
+        render={
+          <Button
+            className="h-9"
+            disabled={pending}
+            variant={mode === "record" ? "record" : mode === "desktop" ? "secondary" : "default"}
+          />
+        }
+      >
         <TriggerIcon data-icon="inline-start" />
         {triggerLabel}
       </SheetTrigger>
