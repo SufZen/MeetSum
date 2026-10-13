@@ -5,7 +5,9 @@
  * `[locale]` layout). Registers `/sw.js` only in production, on a secure
  * context, unless NEXT_PUBLIC_MEETSUM_PWA="false". A waiting worker
  * activates only after the user accepts the "update available" toast; the
- * page then reloads once on `controllerchange`.
+ * page then reloads once on `controllerchange`. The first install's
+ * `clients.claim()` also fires `controllerchange`; with no controller at
+ * mount that is not an update, so it never reloads.
  */
 import { useEffect } from "react"
 import { toast } from "sonner"
@@ -19,6 +21,20 @@ export function shouldRegisterServiceWorker(env: {
   hasServiceWorker: boolean
 }): boolean {
   return env.nodeEnv === "production" && env.pwaFlag !== "false" && env.isSecureContext && env.hasServiceWorker
+}
+
+/**
+ * `controllerchange` handler: reloads once, and only when the page was
+ * already controlled at mount (a real update), never for the first claim.
+ */
+export function createControllerChangeHandler(hadControllerAtMount: boolean, reload: () => void): () => void {
+  let reloading = false
+
+  return () => {
+    if (!hadControllerAtMount || reloading) return
+    reloading = true
+    reload()
+  }
 }
 
 /** Asks every service worker to delete its caches (logout). */
@@ -49,12 +65,9 @@ export function ServiceWorkerRegistrar() {
       return
     }
 
-    let reloading = false
-    const onControllerChange = () => {
-      if (reloading) return
-      reloading = true
+    const onControllerChange = createControllerChangeHandler(Boolean(navigator.serviceWorker.controller), () =>
       window.location.reload()
-    }
+    )
     const offerUpdate = (worker: ServiceWorker) => {
       toast(updateText, {
         duration: Infinity,
