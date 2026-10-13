@@ -88,3 +88,25 @@ export function getEmbeddingConfig(env: Env = process.env): EmbeddingConfig {
     pricePerMTok: Number.isFinite(price) && price >= 0 ? price : 0.15,
   }
 }
+
+export type QueryEmbeddingConfig = {
+  /** Overall budget of one query embedding (all attempts), ms. */
+  timeoutMs: number
+  /** Retries within that budget (0 or 1; never the ingest policy). */
+  maxRetries: number
+  /** After a failure, skip query embeddings for this key for this long, ms. */
+  cooldownMs: number
+}
+
+/**
+ * Query-time embedding budget (search, palette, Ask retrieval): a 429 or an
+ * outage must degrade to lexical quickly instead of riding the ingest retry
+ * policy for minutes.
+ */
+export function getQueryEmbeddingConfig(env: Env = process.env): QueryEmbeddingConfig {
+  return {
+    timeoutMs: intFrom(env.MEETSUM_QUERY_EMBEDDING_TIMEOUT_MS, 2_500, 50, 30_000),
+    maxRetries: intFrom(env.MEETSUM_QUERY_EMBEDDING_MAX_RETRIES, 0, 0, 1),
+    cooldownMs: intFrom(env.MEETSUM_QUERY_EMBEDDING_COOLDOWN_MS, 45_000, 0, 600_000),
+  }
+}
