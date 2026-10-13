@@ -1,20 +1,20 @@
-| M8 | Integrations | `parity/m8-integrations` | in progress (live runs need Slack/Graph/Notion/HubSpot apps) | — || M7 | Meeting bot (Vexa sidecar) | `parity/m7-bot` | merged (live run needs a Vexa host and a bot Google account) | #23 || M6 | Search & AskMeetSum | `parity/m6-search` | merged (hybrid/vector mode needs the pgvector image and a Gemini key) | #25 || M5 | Intelligence parity | `parity/m5-intelligence` | merged (live summary eval needs a Gemini key) | #24 || M4 | Player & transcript UX | `parity/m4-player` | merged | #21 || M3 | Hebrew ASR + diarization | `parity/m3-asr` | merged (live run needs RunPod/HF/Soniox or the free-tier Groq key, #22) | #20 || M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | merged | #19 || M2 | Multi-user workspaces | `parity/m2-workspaces` | merged | #18 || M1 | Pipeline correctness & security | `parity/m1-pipeline` | merged | #17 || M0 | Baseline & honesty | `parity/m0-baseline` | merged | #16 |# Fireflies parity — status
+# Fireflies parity — status
 
 Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked when the previous PR is not yet merged.
 
 ## Milestones
 | # | Milestone | Branch | State | PR |
 |---|---|---|---|---|
-| M0 | Baseline & honesty | `parity/m0-baseline` | PR open | #16 |
-| M1 | Pipeline correctness & security | `parity/m1-pipeline` | PR open (stacked on #16) | #17 |
-| M2 | Multi-user workspaces | `parity/m2-workspaces` | PR open (stacked on #17) | #18 |
-| M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | PR open (stacked on #18) | #19 |
-| M3 | Hebrew ASR + diarization | `parity/m3-asr` | PR open (stacked on #19; live run needs RunPod/HF/Soniox keys) | #20 |
-| M4 | Player & transcript UX | `parity/m4-player` | PR open (stacked on #20) | #21 |
-| M5 | Intelligence parity | `parity/m5-intelligence` | todo (Claude key) | — |
-| M6 | Search & AskMeetSum | `parity/m6-search` | Step 0 done (contracts frozen, stubs green; packages A–D next) ([m6.md](m6.md); migration 025, pgvector optional with lexical fallback, PG17 kept) | — |
-| M7 | Meeting bot (Vexa sidecar) | `parity/m7-bot` | todo (bot Google account) | — |
-| M8 | Integrations | `parity/m8-integrations` | todo (Slack/Graph/Notion/HubSpot apps) | — |
+| M0 | Baseline & honesty | `parity/m0-baseline` | merged | #16 |
+| M1 | Pipeline correctness & security | `parity/m1-pipeline` | merged | #17 |
+| M2 | Multi-user workspaces | `parity/m2-workspaces` | merged | #18 |
+| M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | merged | #19 |
+| M3 | Hebrew ASR + diarization | `parity/m3-asr` | merged (live run needs RunPod/HF/Soniox or the free-tier Groq key, #22) | #20 |
+| M4 | Player & transcript UX | `parity/m4-player` | merged | #21 |
+| M5 | Intelligence parity | `parity/m5-intelligence` | merged (live summary eval needs a Gemini key) | #24 |
+| M6 | Search & AskMeetSum | `parity/m6-search` | merged (hybrid/vector mode needs the pgvector image and a Gemini key) | #25 |
+| M7 | Meeting bot (Vexa sidecar) | `parity/m7-bot` | merged (live run needs a Vexa host and a bot Google account) | #23 |
+| M8 | Integrations | `parity/m8-integrations` | spec ready ([m8.md](m8.md); migration 027; packages A–D; live runs need Slack/Entra/Notion/HubSpot apps, see the runbook checklist) | — |
 | M9 | i18n/RTL & polish | `parity/m9-polish` | todo | — |
 | M10 | Hardening & final audit | `parity/m10-hardening` | todo | — |
 
@@ -54,3 +54,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 - 2026-10-13: M6 Step 0 done on `parity/m6-search`: migration 025 (applied on the embedded PG 18 without pgvector: lexical path, NOTICE, no vector objects), compose on `pgvector/pgvector:0.8.1-pg17`, M8/M9 specs renumbered to 026/027 with a duplicate-version test (024 reserved for M7), frozen contract types, A–D stubs, real `requestMeetingReindex` plus call sites, 501 route stubs behind `withAuthz` with authz coverage, full `.env.example` block. Typecheck, lint and tests green.
 - 2026-10-13: M6 review fixes (branch `m6-review-fixes`): new migration **026_ask_usage.sql** (durable Ask daily-cap counter), so M8 is renumbered to **027** and M9 to **028** (m8.md/m9.md updated; the migrations test asserts 001-026 contiguous).
 - 2026-10-13: M0–M7 merged to main (#16–#25, including the free-tier ASR PR #22). Production deploy stayed gated (`DEPLOY_ENABLED` unset). M8 started on `parity/m8-integrations`.
+- 2026-10-13: M8 spec refreshed against `main` (m8.md): migration 027 adds `integration_links` (re-export updates, no duplicates) and `meeting_integration_prefs` (owner opt-in for private meetings, per-meeting email recap); Outlook calendar dedupes with Google by iCalUID so one meeting gets one M7 bot session; webhook catalog v2 (new events, timestamped signature, v1 frozen); packages A core+Slack+email, B Microsoft+HubSpot, C Notion+Docs+DOCX+catalog, D settings UI+i18n+runbook+fake-provider e2e.
