@@ -100,6 +100,8 @@ export async function upsertConnectionFromOAuth(
       tokenType: exchange.tokenType,
       expiresAt: exchange.expiresAt ?? null,
       config: { ...existing.config, ...(exchange.config ?? {}) },
+      // A reconnect starts a new token generation (in-flight refreshes lose).
+      generation: existing.generation + 1,
       lastError: null,
       lastRefreshedAt: new Date().toISOString(),
     })
@@ -197,22 +199,33 @@ export async function disconnectConnection(
   store?: IntegrationStore
 ): Promise<DisconnectResult> {
   const db = store ?? (await getIntegrationStore())
+
+  // Under the row lock: an in-flight refresh either finished before (and its
+  // tokens are read and revoked here) or runs after and sees `revoked`.
+  const tokens = await db.withConnectionLock(row.workspaceId, row.id, async (current, update) => {
+    if (!current) return undefined
+
+    const sealed = tokenSetForRevoke(current)
+
+    await update({
+      status: "revoked",
+      revokedAt: new Date().toISOString(),
+      accessTokenEnc: null,
+      refreshTokenEnc: null,
+      expiresAt: null,
+      generation: current.generation + 1,
+    })
+    return sealed
+  })
+
+  // Best effort at the provider; the local revoke above already happened.
   const provider = getProvider(row.provider)
-  const tokens = tokenSetForRevoke(row)
 
   if (tokens && provider?.oauth?.revoke) {
     await provider.oauth.revoke(tokens).catch((error: unknown) => {
       integrationLog.warn(`${row.provider} revoke failed`, error)
     })
   }
-
-  await db.updateConnection(row.workspaceId, row.id, {
-    status: "revoked",
-    revokedAt: new Date().toISOString(),
-    accessTokenEnc: null,
-    refreshTokenEnc: null,
-    expiresAt: null,
-  })
 
   const disabled = await db.disableRulesForConnection(row.workspaceId, row.id, "connection_revoked")
   const cancelled = await db.cancelQueuedDeliveriesForConnection(row.workspaceId, row.id)

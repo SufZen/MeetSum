@@ -17,6 +17,7 @@ import {
   MAX_CONNECTIONS_PER_WORKSPACE,
   MAX_RULES_PER_EVENT,
   MAX_RULES_PER_WORKSPACE,
+  GENERATION_CONFIG_KEY,
   linkKeyParts,
   type ConnectionPatch,
   type DeliveryPatch,
@@ -63,6 +64,13 @@ function defined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T
 }
 
+function withoutGeneration(config: Record<string, unknown>): Record<string, unknown> {
+  const { [GENERATION_CONFIG_KEY]: _gen, ...rest } = config
+
+  void _gen
+  return rest
+}
+
 function toConnection(row: Row): StoredConnection {
   return defined({
     id: String(row.id),
@@ -77,7 +85,8 @@ function toConnection(row: Row): StoredConnection {
     refreshTokenEnc: str(row.refresh_token_enc),
     tokenType: str(row.token_type),
     expiresAt: iso(row.expires_at),
-    config: json<Record<string, unknown>>(row.config, {}),
+    config: withoutGeneration(json<Record<string, unknown>>(row.config, {})),
+    generation: Number(json<Record<string, unknown>>(row.config, {})[GENERATION_CONFIG_KEY] ?? 0) || 0,
     createdByUserId: str(row.created_by_user_id),
     lastUsedAt: iso(row.last_used_at),
     lastRefreshedAt: iso(row.last_refreshed_at),
@@ -178,12 +187,11 @@ function toState(row: Row): OAuthStateRow {
   })
 }
 
-const CONNECTION_COLUMNS: Record<keyof ConnectionPatch, { column: string; cast?: string }> = {
+const CONNECTION_COLUMNS: Record<Exclude<keyof ConnectionPatch, "config" | "generation">, { column: string; cast?: string }> = {
   status: { column: "status" },
   accountLabel: { column: "account_label" },
   scopes: { column: "scopes", cast: "text[]" },
   tokenType: { column: "token_type" },
-  config: { column: "config", cast: "jsonb" },
   lastUsedAt: { column: "last_used_at", cast: "timestamptz" },
   lastRefreshedAt: { column: "last_refreshed_at", cast: "timestamptz" },
   revokedAt: { column: "revoked_at", cast: "timestamptz" },
@@ -259,15 +267,43 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
     }
   }
 
-  async function updateConnectionWith(client: Queryable, workspaceId: string, id: string, patch: ConnectionPatch) {
+  async function updateConnectionWith(
+    client: Queryable,
+    workspaceId: string,
+    id: string,
+    patch: ConnectionPatch,
+    expectedGeneration?: number
+  ) {
     const values: unknown[] = [workspaceId, id]
-    const sets = setClause(patch, CONNECTION_COLUMNS, values)
+    const { config, generation, ...rest } = patch
+    const sets = setClause(rest, CONNECTION_COLUMNS, values)
 
+    if (config !== undefined || generation !== undefined) {
+      let base = "config"
+      let gen = `coalesce(config->'${GENERATION_CONFIG_KEY}', '0'::jsonb)`
+
+      if (config !== undefined) {
+        values.push(JSON.stringify(withoutGeneration(config)))
+        base = `$${values.length}::jsonb`
+      }
+      if (generation !== undefined) {
+        values.push(generation)
+        gen = `to_jsonb($${values.length}::int)`
+      }
+      sets.push(`config = ${base} || jsonb_build_object('${GENERATION_CONFIG_KEY}', ${gen})`)
+    }
     sets.push("updated_at = now()")
+
+    let condition = ""
+
+    if (expectedGeneration !== undefined) {
+      values.push(expectedGeneration)
+      condition = ` and status = 'active' and coalesce((config->>'${GENERATION_CONFIG_KEY}')::int, 0) = $${values.length}`
+    }
 
     const [row] = await rows(
       client,
-      `update integration_connections set ${sets.join(", ")} where workspace_id = $1 and id = $2 returning *`,
+      `update integration_connections set ${sets.join(", ")} where workspace_id = $1 and id = $2${condition} returning *`,
       values
     )
 
@@ -315,7 +351,7 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
           input.refreshTokenEnc ?? null,
           input.tokenType ?? null,
           input.expiresAt ?? null,
-          JSON.stringify(input.config ?? {}),
+          JSON.stringify({ ...withoutGeneration(input.config ?? {}), [GENERATION_CONFIG_KEY]: input.generation ?? 0 }),
           input.createdByUserId ?? null,
           input.lastUsedAt ?? null,
           input.lastRefreshedAt ?? null,
@@ -352,6 +388,10 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
       return updateConnectionWith(db, workspaceId, id, patch)
     },
 
+    async updateConnectionIfCurrent(workspaceId, id, generation, patch) {
+      return updateConnectionWith(db, workspaceId, id, patch, generation)
+    },
+
     async withConnectionLock(workspaceId, id, fn) {
       return transaction(async (client) => {
         const [row] = await rows(
@@ -360,7 +400,9 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
           [workspaceId, id]
         )
 
-        return fn(row ? toConnection(row) : undefined, (patch) => updateConnectionWith(client, workspaceId, id, patch))
+        return fn(row ? toConnection(row) : undefined, (patch, expectedGeneration) =>
+          updateConnectionWith(client, workspaceId, id, patch, expectedGeneration)
+        )
       })
     },
 

@@ -45,7 +45,15 @@ export type StoredConnection = {
   refreshTokenEnc?: string
   tokenType?: string
   expiresAt?: string
+  /** Non-secret config; never contains the reserved `_gen` key (see `generation`). */
   config: Record<string, unknown>
+  /**
+   * Token generation: bumped by every disconnect and reconnect. Token writes
+   * are conditional on `status = 'active'` and the generation read before
+   * the write, so a refresh racing a disconnect can never resurrect tokens.
+   * Persisted as `config._gen` (no dedicated column in migration 027).
+   */
+  generation: number
   createdByUserId?: string
   lastUsedAt?: string
   lastRefreshedAt?: string
@@ -73,9 +81,13 @@ export type ConnectionPatch = Partial<
   refreshTokenEnc?: string | null
   expiresAt?: string | null
   lastError?: string | null
+  generation?: number
 }
 
-export type NewConnection = Omit<StoredConnection, "createdAt" | "updatedAt">
+/** Key under which `generation` is persisted inside `config`. */
+export const GENERATION_CONFIG_KEY = "_gen"
+
+export type NewConnection = Omit<StoredConnection, "createdAt" | "updatedAt" | "generation"> & { generation?: number }
 
 export type OAuthStateRow = {
   nonce: string
@@ -196,9 +208,21 @@ export interface IntegrationStore {
     id: string,
     fn: (
       connection: StoredConnection | undefined,
-      update: (patch: ConnectionPatch) => Promise<StoredConnection | undefined>
+      /** With `expectedGeneration`, a compare-and-set write (see `updateConnectionIfCurrent`). */
+      update: (patch: ConnectionPatch, expectedGeneration?: number) => Promise<StoredConnection | undefined>
     ) => Promise<T>
   ): Promise<T>
+  /**
+   * Compare-and-set token write: applies only while the row is `active` and
+   * still at `generation`. Undefined when the write lost (disconnected,
+   * reconnected or flagged meanwhile).
+   */
+  updateConnectionIfCurrent(
+    workspaceId: string,
+    id: string,
+    generation: number,
+    patch: ConnectionPatch
+  ): Promise<StoredConnection | undefined>
   /** SYSTEM: active connections of one provider (tick jobs), instance-wide. */
   systemListActiveConnections(provider: ProviderId): Promise<StoredConnection[]>
 

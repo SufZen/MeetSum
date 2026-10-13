@@ -99,4 +99,86 @@ describe("getAccessToken refresh", () => {
     await expect(getAccessToken("ws_a", connectionId, deps())).rejects.toMatchObject({ kind: "retryable" })
     expect((await store.getConnection("ws_a", connectionId))?.status).toBe("active")
   })
+
+  it("revokes the fresh tokens and discards the write when a reconnect wins during a refresh", async () => {
+    const revoke = vi.fn(async () => undefined)
+    let release!: () => void
+
+    provider.oauth = { ...provider.oauth!, revoke }
+    refresh.mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { accessToken: "access-orphan", refreshToken: "refresh-orphan", scopes: [] }
+    })
+
+    const pending = getAccessToken("ws_a", connectionId, deps())
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalled())
+    // Reconnect (unlocked OAuth upsert) bumps the generation meanwhile.
+    const row = await store.getConnection("ws_a", connectionId)
+
+    await store.updateConnection("ws_a", connectionId, { generation: (row?.generation ?? 0) + 1 })
+    release()
+
+    await expect(pending).rejects.toMatchObject({ kind: "auth" })
+    expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ accessToken: "access-orphan" }))
+    const after = await store.getConnection("ws_a", connectionId)
+
+    expect(after && openToken(after, "refresh_token")).toBe("refresh-old")
+  })
+
+  it("serializes a disconnect behind an in-flight refresh and revokes what it wrote", async () => {
+    const { disconnectConnection } = await import("@/lib/integrations/core/connections")
+    const revoke = vi.fn(async () => undefined)
+    let release!: () => void
+
+    provider.oauth = { ...provider.oauth!, revoke }
+    refresh.mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { accessToken: "access-new", refreshToken: "refresh-new", scopes: [] }
+    })
+    const registry = await import("@/lib/integrations/core/registry")
+    const getProviderSpy = vi.spyOn(registry, "getProvider").mockReturnValue(provider)
+
+    const pending = getAccessToken("ws_a", connectionId, deps())
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalled())
+
+    const row = await store.getConnection("ws_a", connectionId)
+    const disconnecting = disconnectConnection(row!, { workspaceId: "ws_a" }, store)
+
+    release()
+    await pending
+    await disconnecting
+
+    const after = await store.getConnection("ws_a", connectionId)
+
+    expect(after?.status).toBe("revoked")
+    expect(after?.accessTokenEnc).toBeUndefined()
+    expect(after?.generation).toBe((row?.generation ?? 0) + 1)
+    // The refreshed token set was revoked at the provider by the disconnect.
+    expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ accessToken: "access-new", refreshToken: "refresh-new" }))
+    await expect(getAccessToken("ws_a", connectionId, deps())).rejects.toMatchObject({ kind: "auth" })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    getProviderSpy.mockRestore()
+  })
+
+  it("gives a reconnect a new generation", async () => {
+    const before = await store.getConnection("ws_a", connectionId)
+    const again = await upsertConnectionFromOAuth(
+      {
+        workspaceId: "ws_a",
+        provider: "hubspot",
+        actorUserId: "user_admin",
+        exchange: { accessToken: "a2", scopes: [], account: { externalId: "hub1", label: "hub.example" } },
+      },
+      store
+    )
+
+    expect(again.ok && again.connection.id).toBe(connectionId)
+    expect(again.ok && again.connection.generation).toBe((before?.generation ?? 0) + 1)
+  })
 })

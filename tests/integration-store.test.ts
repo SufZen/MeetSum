@@ -319,6 +319,27 @@ describe.each(backends)("IntegrationStore (%s)", (name, make) => {
     expect(await store.systemDeleteExpiredOAuthStates()).toBeGreaterThanOrEqual(1)
   })
 
+  it("applies token writes only to the active row at the expected generation", async (context) => {
+    const store = storeOrSkip(context)
+    const created = await store.createConnection(connection({ config: { defaultChannelId: "C1", _gen: 99 } }))
+    const id = created.ok ? created.connection.id : ""
+
+    expect(created.ok && created.connection.generation).toBe(0)
+    expect(created.ok && created.connection.config).toEqual({ defaultChannelId: "C1" })
+    expect(await store.updateConnectionIfCurrent("ws_a", id, 0, { accessTokenEnc: "v2:a" })).toMatchObject({ accessTokenEnc: "v2:a" })
+    expect(await store.updateConnectionIfCurrent("ws_a", id, 1, { accessTokenEnc: "v2:stale" })).toBeUndefined()
+
+    const bumped = await store.updateConnection("ws_a", id, { generation: 1, config: { defaultChannelId: "C2" } })
+
+    expect(bumped).toMatchObject({ generation: 1, config: { defaultChannelId: "C2" } })
+    expect((await store.updateConnection("ws_a", id, { config: { allowManualSend: false } }))?.generation).toBe(1)
+    expect(await store.updateConnectionIfCurrent("ws_b", id, 1, { accessTokenEnc: "v2:x" })).toBeUndefined()
+
+    await store.updateConnection("ws_a", id, { status: "revoked" })
+    expect(await store.updateConnectionIfCurrent("ws_a", id, 1, { accessTokenEnc: "v2:late" })).toBeUndefined()
+    expect((await store.getConnection("ws_a", id))?.accessTokenEnc).toBe("v2:a")
+  })
+
   it(`runs refresh work under a connection lock (${name})`, async (context) => {
     const store = storeOrSkip(context)
     const created = await store.createConnection(connection())

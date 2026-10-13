@@ -13,7 +13,7 @@
  * Routes never import this module (the route-coverage test checks it).
  */
 import { decryptSecret, encryptSecret } from "@/lib/auth/secret-crypto"
-import { storedIntegrationError } from "@/lib/integrations/core/errors"
+import { integrationLog, storedIntegrationError } from "@/lib/integrations/core/errors"
 import { markConnectionNeedsReauth, type ReauthDeps } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
 import { getIntegrationStore, type IntegrationStore, type StoredConnection } from "@/lib/integrations/core/store"
@@ -115,7 +115,31 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
     return token
   }
 
+  const key = `${workspaceId}:${connectionId}`
+  const inFlight = refreshesInFlight.get(key)
+
+  if (inFlight) return inFlight
+
+  const refresh = refreshUnderLock(store, workspaceId, connectionId, now, deps).finally(() => {
+    refreshesInFlight.delete(key)
+  })
+
+  refreshesInFlight.set(key, refresh)
+  return refresh
+}
+
+/** In-process single flight; the row lock serializes across processes. */
+const refreshesInFlight = new Map<string, Promise<string>>()
+
+async function refreshUnderLock(
+  store: IntegrationStore,
+  workspaceId: string,
+  connectionId: string,
+  now: () => number,
+  deps: TokenDeps
+): Promise<string> {
   let refreshFailure: unknown
+  let lost: { provider: IntegrationProvider; tokens: TokenSet } | undefined
 
   const token = await store.withConnectionLock(workspaceId, connectionId, async (connection, update) => {
     if (!connection || connection.status !== "active") throw new ProviderError("auth", "connection is not active")
@@ -139,6 +163,7 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
       return existing
     }
 
+    const generation = connection.generation
     let refreshed: TokenSet
 
     try {
@@ -148,21 +173,40 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
         refreshFailure = error
         return undefined
       }
-      await update({ lastError: storedIntegrationError(error, connection.provider) })
+      await update({ lastError: storedIntegrationError(error, connection.provider) }, generation)
       throw error
     }
 
-    await update({
-      ...sealTokenSet(workspaceId, connectionId, refreshed),
-      expiresAt: refreshed.expiresAt ?? null,
-      ...(refreshed.tokenType ? { tokenType: refreshed.tokenType } : {}),
-      ...(refreshed.scopes.length ? { scopes: refreshed.scopes } : {}),
-      lastRefreshedAt: new Date(now()).toISOString(),
-      lastError: null,
-    })
+    // Compare-and-set: discarded when a disconnect/reconnect won the race.
+    const written = await update(
+      {
+        ...sealTokenSet(workspaceId, connectionId, refreshed),
+        expiresAt: refreshed.expiresAt ?? null,
+        ...(refreshed.tokenType ? { tokenType: refreshed.tokenType } : {}),
+        ...(refreshed.scopes.length ? { scopes: refreshed.scopes } : {}),
+        lastRefreshedAt: new Date(now()).toISOString(),
+        lastError: null,
+      },
+      generation
+    )
+
+    if (!written) {
+      lost = { provider, tokens: refreshed }
+      return null
+    }
 
     return refreshed.accessToken
   })
+
+  if (token === null) {
+    // The fresh tokens belong to a connection that no longer exists: revoke them.
+    if (lost?.provider.oauth?.revoke) {
+      await lost.provider.oauth.revoke(lost.tokens).catch((error: unknown) => {
+        integrationLog.warn("revoke of a discarded refresh failed", error)
+      })
+    }
+    throw new ProviderError("auth", "connection changed during refresh")
+  }
 
   if (token === undefined) {
     await markConnectionNeedsReauth(workspaceId, connectionId, refreshFailure ?? "refresh rejected", {

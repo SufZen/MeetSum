@@ -10,6 +10,7 @@ import {
   MAX_CONNECTIONS_PER_WORKSPACE,
   MAX_RULES_PER_EVENT,
   MAX_RULES_PER_WORKSPACE,
+  GENERATION_CONFIG_KEY,
   linkKeyParts,
   type ConnectionPatch,
   type IntegrationStore,
@@ -30,6 +31,13 @@ function applyConnectionPatch(row: StoredConnection, patch: ConnectionPatch): St
 
   for (const [key, value] of Object.entries(patch) as [keyof ConnectionPatch, unknown][]) {
     if (value === undefined) continue
+    if (key === "config") {
+      const { [GENERATION_CONFIG_KEY]: _gen, ...config } = value as Record<string, unknown>
+
+      void _gen
+      next.config = clone(config)
+      continue
+    }
     if (value === null) delete (next as Record<string, unknown>)[key]
     else (next as Record<string, unknown>)[key] = clone(value)
   }
@@ -99,7 +107,10 @@ export function createMemoryIntegrationStore(): IntegrationStore {
         throw new Error("duplicate key value violates unique constraint uq_integration_connections_account")
       }
 
-      const row: StoredConnection = { ...clone(input), createdAt: now(), updatedAt: now() }
+      const { [GENERATION_CONFIG_KEY]: _gen, ...config } = input.config ?? {}
+
+      void _gen
+      const row: StoredConnection = { ...clone(input), config: clone(config), generation: input.generation ?? 0, createdAt: now(), updatedAt: now() }
 
       connections.set(row.id, row)
       return { ok: true, connection: clone(row) }
@@ -129,6 +140,17 @@ export function createMemoryIntegrationStore(): IntegrationStore {
       return clone(next)
     },
 
+    async updateConnectionIfCurrent(workspaceId, id, generation, patch) {
+      const row = scoped(connections.get(id), workspaceId)
+
+      if (!row || row.status !== "active" || row.generation !== generation) return undefined
+
+      const next = applyConnectionPatch(row, patch)
+
+      connections.set(id, next)
+      return clone(next)
+    },
+
     async withConnectionLock(workspaceId, id, fn) {
       const previous = locks.get(id) ?? Promise.resolve()
       let release!: () => void
@@ -143,7 +165,11 @@ export function createMemoryIntegrationStore(): IntegrationStore {
       try {
         const row = scoped(connections.get(id), workspaceId)
 
-        return await fn(row && clone(row), (patch) => store.updateConnection(workspaceId, id, patch))
+        return await fn(row && clone(row), (patch, expectedGeneration) =>
+          expectedGeneration === undefined
+            ? store.updateConnection(workspaceId, id, patch)
+            : store.updateConnectionIfCurrent(workspaceId, id, expectedGeneration, patch)
+        )
       } finally {
         release()
         if (locks.get(id) === chained) locks.delete(id)
