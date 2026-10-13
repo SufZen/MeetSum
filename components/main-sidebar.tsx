@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  BarChart3Icon,
   BrainIcon,
   CalendarDaysIcon,
   DatabaseIcon,
@@ -147,6 +148,14 @@ export function MainSidebar({
         >
           <ListChecksIcon aria-hidden className="size-4" />
           {dictionary.navTasks}
+        </Link>
+        {/* M9: the workspace analytics dashboard is its own page (Package C). */}
+        <Link
+          href={`/${locale}/analytics`}
+          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+        >
+          <BarChart3Icon aria-hidden className="size-4" />
+          {dictionary.analyticsNav}
         </Link>
       </nav>
 

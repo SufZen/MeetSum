@@ -16,6 +16,8 @@ import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
 import { isPaletteShortcut, openCommandPalette } from "@/components/command-palette"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { MediaIngestionDrawer } from "@/components/media-ingestion-drawer"
+import { NotificationBell } from "@/components/notifications/notification-bell"
+import { PendingUploadsIndicator } from "@/components/pwa/pending-uploads-indicator"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
 import {
@@ -250,6 +252,8 @@ export function TopCommandBar({
           <CitedMark className="size-5" />
           <span className="sr-only">AI status</span>
         </Button>
+        <PendingUploadsIndicator />
+        <NotificationBell locale={locale} />
         <LanguageSwitcher locale={locale} />
         <Button
           variant="ghost"

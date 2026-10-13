@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 
 import "../globals.css"
 import { I18nProvider } from "@/components/i18n-provider"
+import { ServiceWorkerRegistrar } from "@/components/pwa/service-worker-registrar"
 import { ThemeProvider } from "@/components/theme-provider"
 import { DirectionProvider } from "@/components/ui/direction"
 import { Toaster } from "@/components/ui/sonner"
@@ -50,6 +51,7 @@ export default async function LocaleLayout({
             <ThemeProvider>
               {children}
               <Toaster dir={dir} richColors />
+              <ServiceWorkerRegistrar />
             </ThemeProvider>
           </I18nProvider>
         </DirectionProvider>

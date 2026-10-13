@@ -20,6 +20,8 @@ import { useParams } from "next/navigation"
 import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
+import { NotificationPreferences } from "@/components/notifications/notification-preferences"
+import { PersonalPreferences } from "@/components/settings/personal-preferences"
 import { JobRecoveryPanel } from "@/components/job-recovery-panel"
 import {
   ProviderHealthPanel,
@@ -1599,6 +1601,9 @@ export function OperationalPage({
             "Integrations",
             "Language",
             "Account/Security",
+            // M9 Step 0 mount points (Package A replaces the nav with stable ids).
+            "Personal",
+            "Notifications",
           ].map((item, index) => (
             <button
               key={item}
@@ -1774,6 +1779,8 @@ export function OperationalPage({
           ) : null}
           {settingsSection === "Live meeting" ? <BotRulesSettings dictionary={t} /> : null}
           {settingsSection === "Integrations" ? <IntegrationsSettings dictionary={t} /> : null}
+          {settingsSection === "Personal" ? <PersonalPreferences /> : null}
+          {settingsSection === "Notifications" ? <NotificationPreferences /> : null}
           {settingsSection === "Developer/API" ? (
             <OpsCard
               icon={KeyRoundIcon}

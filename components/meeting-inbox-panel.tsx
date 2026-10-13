@@ -5,6 +5,7 @@ import {
 } from "lucide-react"
 
 import { BotStatusPill } from "@/components/bot/bot-status-pill"
+import { OnboardingChecklistCard } from "@/components/onboarding/onboarding-checklist-card"
 import { botPillFor, pickInboxPill, type BotPill } from "@/components/bot/bot-ui-state"
 import type { BotSessionsMap } from "@/components/bot/use-bot-sessions"
 import { Badge } from "@/components/ui/badge"
@@ -237,9 +238,12 @@ export function MeetingInboxPanel({
       <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-surface-2 p-2.5 lg:max-h-none">
         <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
           {!loading && meetings.length === 0 && (
-            <div className="rounded-md border border-dashed border-line bg-surface p-5 text-center text-sm text-muted-foreground">
-              No meetings match this view.
-            </div>
+            <>
+              <OnboardingChecklistCard locale={locale} />
+              <div className="rounded-md border border-dashed border-line bg-surface p-5 text-center text-sm text-muted-foreground">
+                No meetings match this view.
+              </div>
+            </>
           )}
           {meetingRows.map(({ meeting, group, showGroup }) => {
             const source = sourceMeta(meeting)

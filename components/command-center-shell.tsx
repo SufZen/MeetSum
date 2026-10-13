@@ -47,6 +47,7 @@ import { TalkTimePanel } from "@/components/talk-time-panel"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
+import { OfflineBanner } from "@/components/pwa/offline-banner"
 import { ShareMeetingDialog } from "@/components/share/share-meeting-dialog"
 import {
   TopCommandBar,
@@ -1466,6 +1467,7 @@ export function CommandCenterShell({
           user={user}
         />
         <section className="min-w-0 lg:h-svh lg:overflow-hidden">
+          <OfflineBanner />
           <TopCommandBar
             dictionary={dictionary}
             locale={locale}
