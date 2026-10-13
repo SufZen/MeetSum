@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Agent worktrees and build outputs that are not part of the app source.
+    ".claude/**",
+    "desktop-recorder/dist/**",
+    "desktop-recorder/release/**",
   ]),
 ]);
 

@@ -6,6 +6,7 @@ import { getDictionary } from "@/lib/i18n/dictionaries"
 import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { buildMeetingIntelligence } from "@/lib/intelligence"
 import { meetingRepository } from "@/lib/meetings/store"
+import { selectRecentRooms } from "@/lib/rooms"
 
 export default async function Page({
   params,
@@ -23,7 +24,11 @@ export default async function Page({
   }
 
   const dictionary = getDictionary(supportedLocale)
-  const meetings = (await meetingRepository.listMeetings({ limit: 5 })).map((meeting) => {
+  const [meetingList, rooms] = await Promise.all([
+    meetingRepository.listMeetings({ limit: 5 }),
+    meetingRepository.listRooms().catch(() => []),
+  ])
+  const meetings = meetingList.map((meeting) => {
     const intelligence = meeting.intelligence ?? buildMeetingIntelligence(meeting)
 
     return {
@@ -39,6 +44,12 @@ export default async function Page({
       dictionary={dictionary}
       locale={supportedLocale}
       meetings={meetings}
+      rooms={selectRecentRooms(rooms)}
+      user={{
+        email: session.email,
+        ...(session.name ? { name: session.name } : {}),
+        ...(session.picture ? { picture: session.picture } : {}),
+      }}
     />
   )
 }

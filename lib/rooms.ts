@@ -144,6 +144,19 @@ export function buildRoomDetail(
   }
 }
 
+export type RecentRoom = Pick<MeetingContext, "id" | "name" | "color">
+
+/** Newest rooms first, trimmed to the fields and count the sidebar shows. */
+export function selectRecentRooms(
+  rooms: Array<Pick<MeetingContext, "id" | "name" | "color" | "createdAt">>,
+  limit = 5
+): RecentRoom[] {
+  return [...rooms]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, limit)
+    .map(({ id, name, color }) => (color ? { id, name, color } : { id, name }))
+}
+
 export type RoomSuggestion = {
   name: string
   reason: string

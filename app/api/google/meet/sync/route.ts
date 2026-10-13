@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { syncMeetArtifacts } from "@/lib/google/meet-artifacts"
 import { createPlatformEvent } from "@/lib/platform/events"
 
@@ -14,7 +14,11 @@ export async function POST(request: Request) {
     subject?: string
     limit?: number
   }
-  const subject = body.subject ?? getWorkspaceSubject()
+  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+
+  if ("response" in resolved) return resolved.response
+
+  const { subject } = resolved
 
   try {
     const result = await syncMeetArtifacts({

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { getProviderHealthStatus, validateProviderConfig } from "@/lib/ai/provider-health"
 
@@ -56,5 +56,25 @@ describe("provider health status", () => {
     expect(issues[0]).toContain("GOOGLE_GEMINI_API_KEY")
 
     if (origKey) process.env.GOOGLE_GEMINI_API_KEY = origKey
+  })
+})
+
+describe("provider health model", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("prefers the canonical GOOGLE_GEMINI_SUMMARY_MODEL over the GEMINI_MODEL alias", () => {
+    vi.stubEnv("GOOGLE_GEMINI_SUMMARY_MODEL", "gemini-canonical")
+    vi.stubEnv("GEMINI_MODEL", "gemini-alias")
+
+    expect(getProviderHealthStatus().ai.model).toBe("gemini-canonical")
+  })
+
+  it("falls back to the legacy GEMINI_MODEL alias", () => {
+    vi.stubEnv("GOOGLE_GEMINI_SUMMARY_MODEL", undefined)
+    vi.stubEnv("GEMINI_MODEL", "gemini-alias")
+
+    expect(getProviderHealthStatus().ai.model).toBe("gemini-alias")
   })
 })

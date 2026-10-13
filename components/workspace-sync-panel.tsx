@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 
 export type WorkspaceStatusView = {
   google: {
-    subject: string
+    subject: string | null
     strategy: "user-oauth" | "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
     configured: boolean
     detail: string
@@ -67,7 +67,7 @@ export function WorkspaceSyncPanel({
       <div className="text-xs leading-5 text-muted-foreground">
         Subject:{" "}
         <span className="font-mono text-foreground">
-          {status?.google.subject ?? "info@realization.co.il"}
+          {status ? (status.google.subject ?? "Not configured") : "Checking…"}
         </span>
       </div>
       <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs leading-5 text-muted-foreground">

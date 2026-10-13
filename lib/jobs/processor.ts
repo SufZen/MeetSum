@@ -13,6 +13,7 @@ import {
   syncMeetArtifacts,
 } from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
+import { resolveWorkspaceSubject } from "@/lib/google/workspace-subject"
 import { cleanupTranscriptSegments } from "@/lib/intelligence"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
 import { meetingRepository } from "@/lib/meetings/store"
@@ -396,12 +397,9 @@ async function processGoogleJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload
 ) {
-  const subject =
-    typeof payload.subject === "string"
-      ? payload.subject
-      : process.env.GOOGLE_WORKSPACE_SUBJECT ??
-        process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ??
-        "info@realization.co.il"
+  const subject = resolveWorkspaceSubject({
+    explicit: typeof payload.subject === "string" ? payload.subject : undefined,
+  })
 
   if (name === "google.calendar.poll") {
     return pollCalendar(subject)

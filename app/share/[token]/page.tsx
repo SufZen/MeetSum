@@ -1,7 +1,18 @@
+import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 
-import { verifyApiKey } from "@/lib/auth/api-keys"
-import { meetingRepository } from "@/lib/meetings/store"
+import { getSessionSecret } from "@/lib/auth/session"
+import {
+  SHARE_ACCESS_COOKIE,
+  verifyShareAccessCookie,
+} from "@/lib/sharing/share-access"
+
+import { loadShare } from "./load-share"
+
+const SHARE_ERROR_MESSAGES: Record<string, string> = {
+  invalid: "Incorrect password. Please try again.",
+  rate_limited: "Too many attempts. Please wait a minute and try again.",
+}
 
 function formatMs(ms: number) {
   const totalSeconds = Math.floor(ms / 1000)
@@ -22,16 +33,26 @@ export default async function PublicMeetingSharePage({
 }) {
   const { token } = await params
   const sp = await searchParams
-  const result = await meetingRepository.getShareByToken(token)
+  const result = await loadShare(token)
 
   if (!result) notFound()
 
   const { meeting, share } = result
 
-  // Password gate: if share has a password, verify before showing content
+  // Password gate: the password is POSTed to /api/share/:token/verify, which
+  // sets a short-lived signed httpOnly cookie; it never appears in the URL.
   if (share.passwordHash) {
-    const password = typeof sp.p === "string" ? sp.p : ""
-    const isValid = password && verifyApiKey(password, [share.passwordHash])
+    const cookieStore = await cookies()
+    const isValid = verifyShareAccessCookie(
+      cookieStore.get(SHARE_ACCESS_COOKIE)?.value,
+      {
+        token,
+        passwordHash: share.passwordHash,
+        secret: getSessionSecret(),
+      }
+    )
+    const errorMessage =
+      typeof sp.error === "string" ? SHARE_ERROR_MESSAGES[sp.error] : undefined
 
     if (!isValid) {
       return (
@@ -44,10 +65,15 @@ export default async function PublicMeetingSharePage({
             <p className="mb-6 text-sm text-[var(--text-muted)]">
               This shared meeting is password-protected. Please enter the password to continue.
             </p>
-            <form method="GET">
+            <form
+              method="POST"
+              action={`/api/share/${encodeURIComponent(token)}/verify`}
+            >
               <input
                 type="password"
-                name="p"
+                name="password"
+                autoComplete="current-password"
+                aria-label="Password"
                 autoFocus
                 required
                 placeholder="Enter password"
@@ -59,11 +85,14 @@ export default async function PublicMeetingSharePage({
               >
                 Access Meeting
               </button>
-              {password && (
-                <p className="mt-3 text-center text-sm text-[var(--status-error)]">
-                  Incorrect password. Please try again.
+              {errorMessage ? (
+                <p
+                  role="alert"
+                  className="mt-3 text-center text-sm text-[var(--status-error)]"
+                >
+                  {errorMessage}
                 </p>
-              )}
+              ) : null}
             </form>
           </div>
         </main>
@@ -84,7 +113,7 @@ export default async function PublicMeetingSharePage({
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
             MeetSum shared meeting
           </div>
-          <h1 className="text-3xl font-semibold leading-tight">{meeting.title}</h1>
+          <h1 dir="auto" className="text-3xl font-semibold leading-tight">{meeting.title}</h1>
           <div className="mt-4 flex flex-wrap gap-3 text-sm text-[var(--text-muted)]">
             <span>{new Date(meeting.startedAt).toLocaleString()}</span>
             <span>{meeting.source.replaceAll("_", " ")}</span>
@@ -94,12 +123,12 @@ export default async function PublicMeetingSharePage({
           {includes.has("participants") && participants.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-2">
               {participants.map((participant) => (
-                <span
+                <bdi
                   className="rounded-full bg-[var(--surface-subtle)] px-3 py-1 text-sm"
                   key={participant}
                 >
                   {participant}
-                </span>
+                </bdi>
               ))}
             </div>
           ) : null}
@@ -108,7 +137,7 @@ export default async function PublicMeetingSharePage({
         {includes.has("summary") ? (
           <section className="mb-8">
             <h2 className="mb-3 text-xl font-semibold">Overview</h2>
-            <p className="leading-7 text-[var(--text-secondary)]">
+            <p dir="auto" className="leading-7 text-[var(--text-secondary)]">
               {meeting.summary?.overview ?? "No summary is available yet."}
             </p>
           </section>
@@ -117,12 +146,14 @@ export default async function PublicMeetingSharePage({
         {includes.has("decisions") ? (
           <section className="mb-8">
             <h2 className="mb-3 text-xl font-semibold">Decisions</h2>
-            <ul className="space-y-2 text-[var(--text-secondary)]">
+            <ul className="list-disc space-y-2 ps-5 text-[var(--text-secondary)]">
               {(meeting.summary?.decisions.length
                 ? meeting.summary.decisions
                 : ["No decisions extracted yet."]
               ).map((decision) => (
-                <li key={decision}>• {decision}</li>
+                <li dir="auto" key={decision}>
+                  {decision}
+                </li>
               ))}
             </ul>
           </section>
@@ -140,9 +171,11 @@ export default async function PublicMeetingSharePage({
                   className="rounded-md border border-[var(--border)] p-3 text-sm"
                   key={item.id}
                 >
-                  <div className="font-medium">{item.title}</div>
+                  <div dir="auto" className="font-medium">
+                    {item.title}
+                  </div>
                   <div className="mt-1 text-[var(--text-muted)]">
-                    {item.owner ?? "Unassigned"}
+                    {item.owner ? <bdi>{item.owner}</bdi> : "Unassigned"}
                     {item.dueDate ? ` · Due ${item.dueDate}` : ""}
                     {item.priority ? ` · ${item.priority}` : ""}
                   </div>
@@ -186,9 +219,11 @@ export default async function PublicMeetingSharePage({
                     key={segment.id}
                   >
                     <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-                      {formatMs(segment.startMs)} · {segment.speaker}
+                      {formatMs(segment.startMs)} · <bdi>{segment.speaker}</bdi>
                     </div>
-                    <p className="text-sm leading-6">{segment.text}</p>
+                    <p dir="auto" className="text-sm leading-6">
+                      {segment.text}
+                    </p>
                   </div>
                 )
               )}

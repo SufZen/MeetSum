@@ -5,7 +5,7 @@ import {
   buildGoogleSyncPlan,
   type GoogleSyncSource,
 } from "@/lib/google/workspace"
-import { getWorkspaceSubject } from "@/lib/google/auth"
+import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
@@ -29,15 +29,19 @@ export async function POST(
   }
 
   const { source } = await params
-  const { subject = getWorkspaceSubject() } = (await request
-    .json()
-    .catch(() => ({}))) as {
+  const body = (await request.json().catch(() => ({}))) as {
     subject?: string
   }
 
   if (!["calendar", "gmail", "drive"].includes(source)) {
     return jsonError("Unsupported Google source", 400)
   }
+
+  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+
+  if ("response" in resolved) return resolved.response
+
+  const { subject } = resolved
 
   const syncSource = source as GoogleSyncSource
 

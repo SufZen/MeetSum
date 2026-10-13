@@ -12,19 +12,21 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NEXT_TELEMETRY_DISABLED: 1
 
 jobs:
   quality:
     name: Quality checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Keep in sync with the Dockerfile base image (node:24-alpine).
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -33,9 +35,18 @@ jobs:
       - name: TypeScript type check
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+
       - name: Run tests
         run: npm test
 
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true
+      # The build needs no runtime secrets: route modules resolve storage and
+      # other runtime config lazily, and instrumentation.ts only validates the
+      # environment when the server boots.
+      - name: Build
+        run: npm run build
+        env:
+          # Matches the Dockerfile: next build's TypeScript pass exceeds V8's
+          # default old-space cap.
+          NODE_OPTIONS: --max-old-space-size=4096

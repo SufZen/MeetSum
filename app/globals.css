@@ -104,6 +104,15 @@
     --density-3: 0.75rem;
     --compact-card: 0.75rem;
     --compact-list: 0.5rem;
+    /* Aliases for legacy token names still used by some views (room detail,
+       share page, summary). They resolve to the real tokens above, so they
+       follow the .dark overrides too. */
+    --app-bg: var(--surface-subtle);
+    --text-primary: var(--foreground);
+    --text-secondary: var(--muted-foreground);
+    --text-muted: var(--muted-foreground);
+    --surface-hover: var(--surface-subtle);
+    --status-error: var(--destructive);
 }
 
 .dark {

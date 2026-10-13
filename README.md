@@ -25,7 +25,7 @@ Architecture highlights:
 - **Webhook management** with subscription CRUD, signed delivery, test endpoints, and retry.
 - **Rooms** with context linking, stat aggregation, and participant deduplication.
 - VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
-- **GitHub Actions CI** pipeline with typecheck, tests, and lint on every push/PR.
+- **GitHub Actions CI** on pushes and PRs to `main`: typecheck, lint (errors and warnings fail the build), tests, and a production `next build`.
 
 ## Quick Start
 
@@ -102,7 +102,8 @@ The compose stack includes:
 
 - `app`: Next.js UI and API.
 - `migrate`: one-shot migration runner.
-- `worker`: placeholder worker/MCP service process.
+- `worker`: BullMQ job worker (`npm run worker`) — media ingest, transcription, intelligence, Google Calendar/Drive/Meet sync schedules. The MCP server is not a compose service; run it locally over stdio with `npm run mcp`.
+- `faster-whisper` (optional, `--profile local-asr`): local Hebrew ASR server.
 - `postgres`: source-of-truth database.
 - `redis`: queues, locks, retry state.
 - `minio`: S3-compatible meeting media storage.
