@@ -2438,28 +2438,10 @@ export function OperationalPage({
               description="Choose preferred intelligence behavior. Active provider still depends on production secrets and environment validation."
               status={providers.find((provider) => provider.id === "gemini")?.mode ?? "Gemini"}
             >
+              {/* The default summary template lives in LlmSettings below
+                  (built-in and workspace templates); the legacy slug list
+                  was a second, conflicting control. */}
               <div className="grid gap-3">
-                <SettingRow
-                  title="Default summary template"
-                  description="Used as the default intelligence style for future reprocess and summary runs."
-                >
-                  <NativeSelect
-                    value={settings.summaryTemplate}
-                    disabled={settingsDisabled}
-                    onChange={(event) =>
-                      saveSettingsPatch({
-                        summaryTemplate: event.target
-                          .value as AppSettingsView["summaryTemplate"],
-                      })
-                    }
-                  >
-                    {["general", "sales", "real-estate", "product", "operations", "legal"].map((template) => (
-                      <NativeSelectOption key={template} value={template}>
-                        {template}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </SettingRow>
                 <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
                   {providers.map((provider) => (
                     <div key={provider.id} className="grid gap-1 text-sm">
