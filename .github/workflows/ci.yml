@@ -59,3 +59,77 @@ jobs:
       # M9 ratchet: first-load JS per route against bundle-budget.json.
       - name: Bundle budget
         run: npm run bundle:check
+
+  # M10 (docs/parity/m10.md, "Schema (D)"): migrations apply on a real
+  # Postgres, re-run as a no-op, install on plain Postgres without pgvector,
+  # and db/schema.sql matches a fresh pg_dump. Step 0 lays the job out;
+  # package D implements db:schema:check (until then it exits 0 with a notice).
+  # Images are pinned by tag and digest (resolved 2026-10-14).
+  schema:
+    name: Schema and migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+        env:
+          POSTGRES_USER: meetings
+          POSTGRES_PASSWORD: meetings
+          POSTGRES_DB: schema_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meetings -d schema_check"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      # Lexical path: the same migrations without the vector extension.
+      postgres-plain:
+        image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        env:
+          POSTGRES_USER: meetings
+          POSTGRES_PASSWORD: meetings
+          POSTGRES_DB: schema_plain
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U meetings -d schema_plain"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Throwaway service credentials for this job only (not secrets).
+      DATABASE_URL: postgresql://meetings:meetings@127.0.0.1:5432/schema_check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migrations (pgvector)
+        run: npm run db:migrate
+
+      - name: Re-apply migrations (must be a no-op)
+        run: |
+          npm run db:migrate | tee migrate-rerun.log
+          grep -q "No pending migrations" migrate-rerun.log
+
+      # pg_dump runs inside the service container, so the client always
+      # matches server 17.
+      - name: Generated db/schema.sql is current
+        run: npm run db:schema:check
+        env:
+          PG_DUMP_CMD: docker exec ${{ job.services.postgres.id }} pg_dump
+
+      - name: Apply migrations on plain Postgres (no pgvector)
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://meetings:meetings@127.0.0.1:5433/schema_plain
