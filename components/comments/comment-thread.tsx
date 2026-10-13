@@ -20,17 +20,24 @@ import {
 import { ReactionBar } from "@/components/comments/reaction-bar"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/components/workspace-context"
-import { splitMentions } from "@/lib/comments/mentions"
+import { mentionDisplayName, splitMentions } from "@/lib/comments/mentions"
 import type { CommentThread as Thread, MeetingComment } from "@/lib/comments/types"
 import { cn } from "@/lib/utils"
 
-export function CommentBody({ body }: { body: string }) {
+export function CommentBody({
+  body,
+  directory,
+}: {
+  body: string
+  /** Member directory: mention chips show its names, not the author's text. */
+  directory?: Readonly<Record<string, { name: string }>>
+}) {
   return (
     <p dir="auto" className="whitespace-pre-wrap break-words text-sm text-fg-2">
       {splitMentions(body).map((part, index) =>
         part.type === "mention" ? (
           <bdi key={index} className="rounded-xs bg-brand-soft-2 px-0.5 font-medium text-brand-text">
-            @{part.name}
+            @{mentionDisplayName(part, directory)}
           </bdi>
         ) : (
           <span key={index}>{part.text}</span>
@@ -137,7 +144,7 @@ function CommentItem({
           }}
         />
       ) : (
-        <CommentBody body={comment.body} />
+        <CommentBody body={comment.body} directory={snapshot?.authors} />
       )}
       <ReactionBar meetingId={meetingId} targetType="comment" targetId={comment.id} />
     </div>

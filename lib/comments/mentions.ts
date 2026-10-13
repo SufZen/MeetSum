@@ -80,3 +80,15 @@ export function mentionMarkup(name: string, userId: string): string {
 
   return `@[${safeName || "user"}](user:${userId})`
 }
+
+/**
+ * Name shown for a mention: the member directory's, never the author's text
+ * inside the markup (which could impersonate someone else). Unknown ids
+ * (e.g. a former member) render as a neutral dash.
+ */
+export function mentionDisplayName(
+  mention: { userId: string },
+  directory: Readonly<Record<string, { name: string }>> | undefined
+): string {
+  return directory?.[mention.userId]?.name ?? "—"
+}

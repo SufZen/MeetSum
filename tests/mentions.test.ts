@@ -2,11 +2,21 @@ import { describe, expect, it } from "vitest"
 
 import {
   filterMemberMentions,
+  mentionDisplayName,
   mentionMarkup,
   parseMentions,
   sanitizeMentions,
   splitMentions,
 } from "@/lib/comments/mentions"
+
+describe("mentionDisplayName", () => {
+  it("shows the member directory name, never the author-supplied text", () => {
+    const [mention] = splitMentions("@[The CEO](user:user_dana) hi").filter((part) => part.type === "mention")
+
+    expect(mention.type === "mention" && mentionDisplayName(mention, { user_dana: { name: "Dana" } })).toBe("Dana")
+    expect(mention.type === "mention" && mentionDisplayName(mention, {})).toBe("—")
+  })
+})
 
 /** M5 C3 `@[name](user:<id>)` mentions: parse, member filter, strip, split. */
 
