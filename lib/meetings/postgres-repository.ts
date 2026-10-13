@@ -2451,11 +2451,12 @@ export function createPostgresMeetingRepository(
             select 1 from meetings m
             where m.id = a.meeting_id and ${scoped("m", values)}
           )
+          returning a.id
         `,
         values
       )
 
-      return (result.rowCount ?? 0) > 0
+      return result.rows.length > 0
     },
 
     async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
