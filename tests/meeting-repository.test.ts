@@ -309,6 +309,186 @@ describe("meeting repository", () => {
     expect(persisted.actionItems.map((item) => item.id)).toEqual(["t1", "t2", "t3", "n4"])
   })
 
+  it("keeps action item ids unique when two meetings get a task with the same id", async () => {
+    const base = {
+      source: "upload" as const,
+      language: "en",
+      status: "completed" as const,
+      retention: "audio" as const,
+      startedAt: "2026-04-23T09:00:00.000Z",
+      participants: [],
+    }
+    const repository = createInMemoryMeetingRepository([
+      { ...base, id: "meet_week_1", title: "Weekly 1" },
+      { ...base, id: "meet_week_2", title: "Weekly 2" },
+    ])
+    const intelligence = buildMeetingIntelligence({ ...base, id: "meet_week_1", title: "Weekly" })
+    const shared: SmartTask = {
+      id: "task_weekly",
+      title: "Send weekly report",
+      status: "open",
+      priority: "normal",
+      confidence: 0.8,
+      sourceQuote: "Send weekly report",
+      sourceStartMs: 0,
+      kind: "explicit",
+    }
+
+    await repository.upsertMeetingIntelligence("meet_week_1", { ...intelligence, actionItems: [shared] })
+    await repository.upsertMeetingIntelligence("meet_week_2", { ...intelligence, actionItems: [shared] })
+
+    const first = (await repository.getMeeting("meet_week_1"))?.summary?.actionItems ?? []
+    const second = (await repository.getMeeting("meet_week_2"))?.summary?.actionItems ?? []
+
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(1)
+    expect(second[0].id).not.toBe(first[0].id)
+
+    const updated = await repository.updateActionItem(second[0].id, { status: "done" })
+
+    expect(updated.meetingId).toBe("meet_week_2")
+  })
+
+  describe("M5 action items, template and titles (in-memory)", () => {
+    const meetingInput = {
+      id: "meet_m5",
+      title: "Untitled",
+      source: "upload" as const,
+      language: "he",
+      status: "completed" as const,
+      retention: "audio" as const,
+      // Thursday 15.10.2026 in Jerusalem.
+      startedAt: "2026-10-15T09:00:00.000Z",
+      participants: ["dana@example.com"],
+      workspaceId: "ws_a",
+    }
+    const aiTask = (id: string, title: string, extra: Partial<SmartTask> = {}): SmartTask => ({
+      id,
+      title,
+      status: "open",
+      priority: "normal",
+      confidence: 0.8,
+      sourceQuote: title,
+      sourceStartMs: 0,
+      kind: "explicit",
+      ...extra,
+    })
+    const system = { kind: "system", workspaceId: "ws_a" } as const
+
+    it("stamps AI items with meeting and workspace ids", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+      const persisted = await repository.upsertMeetingIntelligence("meet_m5", {
+        ...buildMeetingIntelligence(meetingInput),
+        actionItems: [aiTask("t1", "לשלוח הצעה", { dueOn: "2026-10-18", dueSource: "parser" })],
+      })
+
+      expect(persisted.actionItems[0]).toMatchObject({
+        meetingId: "meet_m5",
+        workspaceId: "ws_a",
+        dueOn: "2026-10-18",
+        dueSource: "parser",
+      })
+    })
+
+    it("creates, edits and deletes user tasks; user owner/due survive regeneration", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+      const intelligence = buildMeetingIntelligence(meetingInput)
+
+      await repository.upsertMeetingIntelligence("meet_m5", {
+        ...intelligence,
+        actionItems: [aiTask("t1", "לשלוח הצעה", { owner: "יוסי", dueOn: "2026-11-01", dueSource: "ai" })],
+      })
+      const edited = await repository.updateActionItem("t1", {
+        ownerText: "דנה",
+        dueText: "עד יום ראשון",
+      })
+
+      expect(edited).toMatchObject({
+        owner: "דנה",
+        ownerText: "דנה",
+        dueOn: "2026-10-18",
+        dueText: "עד יום ראשון",
+        dueSource: "user",
+        dueDate: "2026-10-18T12:00:00.000Z",
+        editedByUser: true,
+      })
+
+      const created = await repository.createActionItem(
+        "meet_m5",
+        { title: "לתאם פגישה", dueText: "סוף החודש" },
+        { userId: "user_me" }
+      )
+
+      expect(created).toMatchObject({
+        origin: "user",
+        editedByUser: true,
+        dueOn: "2026-10-31",
+        createdByUserId: "user_me",
+        workspaceId: "ws_a",
+        meetingId: "meet_m5",
+      })
+
+      await repository.upsertMeetingIntelligence("meet_m5", {
+        ...intelligence,
+        actionItems: [aiTask("n1", "לשלוח הצעה", { owner: "יוסי", dueOn: "2026-11-01" })],
+      })
+
+      const items = (await repository.getMeeting("meet_m5"))?.summary?.actionItems ?? []
+
+      expect(items.map((item) => item.id)).toEqual(["t1", created.id])
+      expect(items[0]).toMatchObject({ ownerText: "דנה", dueOn: "2026-10-18", dueSource: "user" })
+
+      expect(await repository.deleteActionItem(created.id)).toBe(true)
+      expect(await repository.deleteActionItem(created.id)).toBe(false)
+    })
+
+    it("does not mark a status-only change as a content edit, and clears due with null", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+
+      await repository.upsertMeetingIntelligence("meet_m5", {
+        ...buildMeetingIntelligence(meetingInput),
+        actionItems: [aiTask("t1", "x", { dueOn: "2026-10-20", dueSource: "ai" })],
+      })
+
+      expect((await repository.updateActionItem("t1", { status: "done" })).editedByUser).toBe(false)
+      expect(await repository.updateActionItem("t1", { dueOn: null })).toMatchObject({
+        dueOn: undefined,
+        dueSource: undefined,
+        dueDate: undefined,
+        editedByUser: true,
+      })
+    })
+
+    it("sets the template and never lets an AI title overwrite a user title", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+
+      expect((await repository.setMeetingTemplate("meet_m5", "hebrew_business")).templateKey).toBe(
+        "hebrew_business"
+      )
+      expect((await repository.setMeetingTemplate("meet_m5", null)).templateKey).toBeUndefined()
+
+      expect(await repository.applyAiTitle("meet_m5", "עדכון סטטוס")).toBe(true)
+      expect((await repository.getMeeting("meet_m5"))).toMatchObject({
+        title: "עדכון סטטוס",
+        titleSource: "ai",
+      })
+
+      await repository.setMeetingTitle("meet_m5", "השם שלי", "user")
+      expect(await repository.applyAiTitle("meet_m5", "כותרת אחרת")).toBe(false)
+      expect((await repository.getMeeting("meet_m5"))?.title).toBe("השם שלי")
+      expect(await repository.applyAiTitle("missing", "x")).toBe(false)
+    })
+
+    it("treats a rename as a user title that AI titles never overwrite", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+
+      expect(await repository.applyAiTitle("meet_m5", "כותרת AI")).toBe(true)
+      expect((await repository.renameMeeting("meet_m5", "שם ידני")).titleSource).toBe("user")
+      expect(await repository.applyAiTitle("meet_m5", "כותרת AI חדשה")).toBe(false)
+      expect((await repository.getMeeting("meet_m5"))?.title).toBe("שם ידני")
+    })
+  })
+
   it("creates externally sourced meetings idempotently", async () => {
     const repository = createInMemoryMeetingRepository()
     const input = {

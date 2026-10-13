@@ -90,6 +90,8 @@ function recordingClient(override?: Responder) {
           rows: [{ ...UNIVERSAL_ROW, id: "seg_1", text: "hi", start_ms: 0, end_ms: 1000, revision: 0 }],
         }
       }
+      // M5: a user task insert validates its segment via a subquery.
+      if (/^insert into action_items\b/.test(normalized)) return { rows: [UNIVERSAL_ROW] }
       if (/from (intelligence_runs|summaries|transcript_segments)\b/.test(normalized)) {
         return { rows: [] }
       }
@@ -221,6 +223,24 @@ const invocations: Record<
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),
+  // M5 (Package B): user tasks, owner/due edits, template and titles.
+  createActionItem: (repo) =>
+    repo.createActionItem(
+      "meet_1",
+      {
+        title: "Send the deck",
+        dueText: "עד יום ראשון",
+        ownerParticipantId: "participant_1",
+        ownerUserId: "user_dana",
+        sourceSegmentId: "seg_1",
+      },
+      { userId: "user_me" }
+    ),
+  deleteActionItem: (repo) => repo.deleteActionItem("act_1"),
+  getActionItem: (repo) => repo.getActionItem("act_1"),
+  setMeetingTemplate: (repo) => repo.setMeetingTemplate("meet_1", "hebrew_business"),
+  applyAiTitle: (repo) => repo.applyAiTitle("meet_1", "Budget sync"),
+  setMeetingTitle: (repo) => repo.setMeetingTitle("meet_1", "Budget sync", "user"),
   createJob: (repo) =>
     repo.createJob({ name: "media.ingest", meetingId: "meet_1", payload: {} }),
   updateJob: (repo) => repo.updateJob("job_1", { status: "active" }),
@@ -607,6 +627,153 @@ describe("postgres meeting repository workspace scoping", () => {
     expect(rest).toHaveLength(0)
     expect(result?.meeting).toMatchObject({ id: "meet_1", workspaceId: WS })
     expect(result?.mediaAssets).toHaveLength(1)
+  })
+
+  it("M5: scopes user task create/edit/delete by a visible meeting and stamps workspace_id", async () => {
+    for (const scope of Object.values(scopes)) {
+      const label = scope.kind
+      const created = recordingClient()
+
+      await invocations.createActionItem(createPostgresMeetingRepository(created.client, scope))
+
+      const [lookup, insert] = created.statements
+
+      expect(lookup.text, label).toMatch(/^select m\.id, .* from meetings m where m\.id = \$1 and/)
+      expect(carriesScope(lookup, scope), label).toBe(true)
+      expect(insert.text, label).toMatch(/^insert into action_items/)
+      // workspace_id ($3) is the scope's workspace; origin user, edited.
+      expect(insert.values[2], label).toBe(WS)
+      expect(insert.text, label).toContain("'explicit', 'user', $4, true")
+      // Owner ids are re-validated against the meeting / workspace members.
+      expect(insert.text, label).toContain(
+        "(select mp.id from meeting_participants mp where mp.id = $6 and mp.meeting_id = $2)"
+      )
+      expect(insert.text, label).toContain(
+        "(select mb.user_id from memberships mb where mb.user_id = $9 and mb.workspace_id = $3)"
+      )
+      // "עד יום ראשון" parsed against the meeting start (Fri 1 May 2026 -> Sun 3 May).
+      expect(insert.values[9], label).toBe("2026-05-03")
+      expect(insert.values[11], label).toBe("user")
+
+      const deleted = recordingClient()
+
+      expect(
+        await invocations.deleteActionItem(createPostgresMeetingRepository(deleted.client, scope))
+      ).toBe(true)
+      expect(deleted.statements).toHaveLength(1)
+      expect(deleted.statements[0].text, label).toMatch(/^delete from action_items where id = \$1/)
+      expect(deleted.statements[0].text, label).toContain("exists ( select 1 from meetings m")
+      expect(carriesScope(deleted.statements[0], scope), label).toBe(true)
+    }
+  })
+
+  it("M5: owner edits join a visible meeting in the same statement", async () => {
+    const { client, statements } = recordingClient()
+
+    await createPostgresMeetingRepository(client, scopes.member).updateActionItem("act_1", {
+      ownerParticipantId: "participant_9",
+      ownerUserId: "user_x",
+      dueOn: "2026-05-10",
+    })
+
+    expect(statements).toHaveLength(1)
+    expect(statements[0].text).toMatch(/^update action_items set /)
+    expect(statements[0].text).toContain("mp.meeting_id = action_items.meeting_id")
+    expect(statements[0].text).toContain("mb.workspace_id = $")
+    expect(statements[0].values).toContain(WS)
+    expect(carriesScope(statements[0], scopes.member)).toBe(true)
+  })
+
+  it("M5: AI titles never overwrite a user title; titles record their source", async () => {
+    const ai = recordingClient()
+
+    await invocations.applyAiTitle(createPostgresMeetingRepository(ai.client, scopes.member))
+    expect(ai.statements[0].text).toContain("set title = $2, title_source = 'ai'")
+    expect(ai.statements[0].text).toContain("m.title_source <> 'user'")
+    expect(carriesScope(ai.statements[0], scopes.member)).toBe(true)
+
+    const user = recordingClient()
+
+    await invocations.setMeetingTitle(createPostgresMeetingRepository(user.client, scopes.member))
+    expect(user.statements[0].text).toContain("set title = $2, title_source = $3")
+    expect(user.statements[0].values.slice(0, 3)).toEqual(["meet_1", "Budget sync", "user"])
+
+    const rename = recordingClient()
+
+    await invocations.renameMeeting(createPostgresMeetingRepository(rename.client, scopes.member)).catch(() => {})
+    expect(rename.statements[0].text).toContain("set title = $2, title_source = 'user'")
+
+    const template = recordingClient()
+
+    await invocations.setMeetingTemplate(
+      createPostgresMeetingRepository(template.client, scopes.member)
+    )
+    expect(template.statements[0].text).toContain("set template_key = $2")
+    expect(template.statements[0].values[1]).toBe("hebrew_business")
+  })
+
+  it("M5: hydrates template_key and title_source", async () => {
+    const { client } = recordingClient((text) =>
+      /^select m\./.test(text)
+        ? [{ ...UNIVERSAL_ROW, template_key: "sales", title_source: "user" }]
+        : undefined
+    )
+    const meeting = await createPostgresMeetingRepository(client, scopes.member).getMeeting("meet_1")
+
+    expect(meeting).toMatchObject({ templateKey: "sales", titleSource: "user" })
+  })
+
+  it("M5: share lookups and link reuse only consider meeting-scope shares", async () => {
+    const scoped = recordingClient()
+
+    await createPostgresMeetingRepository(scoped.client, scopes.member).getShareByToken("tok_1")
+    expect(scoped.statements[0].text).toContain("s.scope = 'meeting'")
+
+    for (const method of ["getShareByToken", "getShareMediaByToken"] as const) {
+      const lookup = recordingClient()
+
+      await createPostgresShareLookup(lookup.client)[method]("tok_1")
+      expect(lookup.statements[0].text, method).toContain("s.scope = 'meeting'")
+    }
+
+    const create = recordingClient((text) =>
+      /from meeting_shares where meeting_id = \$1/.test(text) ? [] : undefined
+    )
+
+    await createPostgresMeetingRepository(create.client, scopes.member).createMeetingShare({
+      meetingId: "meet_1",
+    })
+    const latest = create.statements.find((statement) =>
+      /from meeting_shares where meeting_id = \$1/.test(statement.text)
+    )!
+
+    expect(latest.text).toContain("scope = 'meeting'")
+  })
+
+  it("M5: leaving link revokes meeting shares; going private also revokes clip shares", async () => {
+    const toWorkspace = recordingClient()
+
+    await createPostgresMeetingRepository(toWorkspace.client, scopes.member).updateMeetingVisibility(
+      "meet_1",
+      "workspace"
+    )
+    const workspaceRevoke = toWorkspace.statements.find((statement) =>
+      statement.text.startsWith("update meeting_shares")
+    )!
+
+    expect(workspaceRevoke.text).toContain("and scope = 'meeting'")
+
+    const toPrivate = recordingClient()
+
+    await createPostgresMeetingRepository(toPrivate.client, scopes.member).updateMeetingVisibility(
+      "meet_1",
+      "private"
+    )
+    const privateRevoke = toPrivate.statements.find((statement) =>
+      statement.text.startsWith("update meeting_shares")
+    )!
+
+    expect(privateRevoke.text).not.toContain("scope")
   })
 
   it("revokes active shares only when leaving link visibility", async () => {

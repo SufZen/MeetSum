@@ -49,14 +49,16 @@ const ALL_PERMISSIONS: Permission[] = [
   "ops:read",
   "owners:manage",
   "workspace:delete",
+  "comments:write",
 ]
 
 const EXPECTED: Record<WorkspaceRole, Permission[]> = {
-  viewer: ["workspace:read", "meeting:read", "jobs:read"],
+  viewer: ["workspace:read", "meeting:read", "jobs:read", "comments:write"],
   member: [
     "workspace:read",
     "meeting:read",
     "jobs:read",
+    "comments:write",
     "meeting:write",
     "meeting:create",
     "contexts:write",

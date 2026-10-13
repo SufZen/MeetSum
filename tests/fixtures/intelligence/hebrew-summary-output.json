@@ -1,0 +1,56 @@
+{
+  "_synthetic": true,
+  "title": {
+    "title": "\"עדכון מעבר ל-Supabase ותקציב רבעוני\"",
+    "meetingType": "other",
+    "topics": ["מעבר ל-Supabase", "תקציב", "ספקים"],
+    "tags": ["technical", "finance"]
+  },
+  "summary": {
+    "overview": "הצוות עדכן על המעבר ל-Supabase, סיכם להעביר את כל הלקוחות עד סוף החודש ודן בתקציב הרבעוני.",
+    "sections": [
+      {
+        "key": "numbers_dates",
+        "items": [
+          { "text": "תקציב רבעוני של 120,000 ₪", "refs": ["s5"] },
+          { "text": "העברת הלקוחות עד 31.10.2026", "refs": ["s3", "s404"] }
+        ]
+      }
+    ],
+    "decisions": [{ "text": "מעבירים את כל הלקוחות ל-Supabase עד סוף החודש", "refs": ["s3"] }],
+    "risks": [{ "text": "הספק עלול לא לעמוד בזמנים", "refs": ["s6"] }],
+    "openQuestions": [{ "text": "יש לקבוע מי בודק את ה-PR של ה-billing", "refs": ["s7", "s99"] }],
+    "commitments": [],
+    "nextSteps": [{ "text": "קביעת פגישת המשך בשבוע הבא", "refs": ["s8"] }],
+    "chapters": [
+      { "title": "סיכום והמשך", "startRef": "s8", "summary": "סגירה ופגישת המשך.", "bullets": ["פגישת המשך"] },
+      { "title": "עדכון טכני", "startRef": "s2", "summary": "מצב ה-API וה-staging.", "bullets": ["שתי בדיקות נותרו"] },
+      { "title": "החלטות ותקציב", "startRef": "s3", "summary": "החלטה על לוח הזמנים והתקציב.", "bullets": ["120,000 ₪"] },
+      { "title": "סיכונים", "startRef": "s6", "summary": "סיכון ספק ו-PR פתוח.", "bullets": [] },
+      { "title": "פרק מומצא", "startRef": "s77", "summary": "לא קיים.", "bullets": [] }
+    ],
+    "actionItems": [
+      {
+        "title": "שליחת הצעת המחיר ללקוח",
+        "ownerText": "אני",
+        "ownerIsSourceSpeaker": true,
+        "dueText": "עד יום ראשון",
+        "dueDate": "2026-10-18",
+        "priority": "high",
+        "confidence": 0.9,
+        "sourceRef": "s4",
+        "sourceQuote": "אשלח את הצעת המחיר ללקוח עד יום ראשון",
+        "kind": "explicit"
+      },
+      {
+        "title": "בדיקת ה-PR של ה-billing",
+        "ownerText": "דנה",
+        "sourceRef": "s7",
+        "sourceQuote": "דנה תבדוק את ה-PR מחר",
+        "kind": "inferred"
+      },
+      { "title": "שליחת הצעת המחיר ללקוח", "sourceRef": "s4" }
+    ],
+    "followUpDraft": "תודה על הפגישה. מצורף סיכום קצר."
+  }
+}

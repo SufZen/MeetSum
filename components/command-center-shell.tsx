@@ -74,6 +74,12 @@ import type {
 import type { MeetingDetailResponse } from "@/lib/meetings/transcript-wire"
 import { parseTimeParam } from "@/lib/player/deep-link"
 
+// M5 analytics card: its own chunk (right rail only).
+const AnalyticsCard = dynamic(
+  () => import("@/components/intelligence/analytics-card").then((mod) => mod.AnalyticsCard),
+  { ssr: false }
+)
+
 // Secondary panels load on demand so the meetings view stays light.
 const panelLoading = () => (
   <div aria-busy="true" className="min-h-[calc(100svh-3.5rem)] animate-pulse bg-surface-2" />
@@ -1578,6 +1584,17 @@ export function CommandCenterShell({
         onProcessMeeting={processMeeting}
         onSuggestAgents={suggestAgents}
         onApproveAgentRun={approveAgentRun}
+        analytics={
+          selectedMeeting ? (
+            <AnalyticsCard
+              meetingId={selectedMeeting.id}
+              dictionary={dictionary}
+              locale={locale}
+              canWrite={selectedPermissions.canWrite}
+              refreshKey={`${selectedMeeting.transcriptVersion ?? 0}:${transcript.data?.version ?? 0}`}
+            />
+          ) : undefined
+        }
         talkTime={
           selectedMeeting &&
           (transcript.data?.speakers ?? selectedMeeting.speakers ?? []).some(

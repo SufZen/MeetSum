@@ -30,7 +30,9 @@ import {
   GoogleNotConfiguredError,
   loadWorkspaceGoogleSubject,
 } from "@/lib/google/workspace-subject"
+import { insertAiRun } from "@/lib/ai/llm/runs"
 import { cleanupTranscriptSegments, type MeetingIntelligence } from "@/lib/intelligence"
+import { normalizeAutoTitleMode, shouldApplyAiTitle } from "@/lib/intelligence/title"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
 import type {
   MediaAsset,
@@ -44,12 +46,18 @@ import { summarizeSpeakerStats } from "@/lib/meetings/speakers/stats"
 import { refreshSpeakerSuggestions } from "@/lib/meetings/speakers/suggest"
 import type { TranscriptWord } from "@/lib/meetings/transcript-words"
 import { redactAsrErrorMessage } from "@/lib/ai/asr/errors"
+import { getAppSettings } from "@/lib/settings/app-settings"
 import { getAsrGlossary } from "@/lib/settings/asr-glossary"
+import type { TaskMember } from "@/lib/tasks/types"
+import { getWorkspaceStore } from "@/lib/workspaces/store"
 import {
   getSystemMeetingRepository,
   resolveMeetingWorkspaceId,
 } from "@/lib/meetings/store"
+import { analyzeMeetingJob } from "@/lib/analytics/job"
 import { recordAuditLog } from "@/lib/audit"
+import { renderClipJob } from "@/lib/clips/render"
+import { reanchorMeetingComments } from "@/lib/comments/reanchor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
 import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
@@ -291,45 +299,19 @@ async function recordAiRun(options: {
   audioDurationMs?: number
   metadata?: Record<string, unknown>
   error?: string
+  promptVersion?: string
+  templateKey?: string
 }) {
-  if (process.env.MEETSUM_STORAGE !== "postgres") return
-
   const confidence =
     options.confidence ??
     (typeof options.metadata?.confidence === "number" ? options.metadata.confidence : undefined)
 
-  try {
-    await getDatabasePool().query(
-      `
-        insert into ai_runs (
-          id, meeting_id, provider, task, status, metadata, model,
-          latency_ms, confidence, started_at, completed_at, error, job_id,
-          cost_estimate, audio_duration_ms, workspace_id
-        )
-        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, now(), $11, $12, $13, $14, $15)
-      `,
-      [
-        options.id ?? `airun_${crypto.randomUUID()}`,
-        options.meetingId,
-        options.provider ?? getGeminiProviderMode(),
-        options.task,
-        options.status,
-        JSON.stringify(options.metadata ?? {}),
-        options.model ?? null,
-        Math.round(options.latencyMs ?? Date.now() - options.startedAt),
-        confidence ?? null,
-        new Date(options.startedAt).toISOString(),
-        options.error ?? null,
-        options.jobId ?? null,
-        options.costEstimate ?? null,
-        options.audioDurationMs === undefined ? null : Math.round(options.audioDurationMs),
-        options.workspaceId ?? null,
-      ]
-    )
-  } catch (error) {
-    // ai_runs is observability; losing a row must not fail the pipeline.
-    console.warn("Failed to record ai_run", error)
-  }
+  // Single ai_runs writer (M5): lib/ai/llm/runs.ts.
+  await insertAiRun({
+    ...options,
+    provider: options.provider ?? getGeminiProviderMode(),
+    confidence,
+  })
 }
 
 /** Captured/uploaded media; derived playback renditions never feed ASR (M4). */
@@ -428,6 +410,55 @@ async function resolveRecording(
   return { meeting: refreshed, asset }
 }
 
+/** Workspace members for task-owner resolution (non-fatal). */
+async function loadTaskMembers(workspaceId: string): Promise<TaskMember[]> {
+  try {
+    const members = await getWorkspaceStore().listMembers(workspaceId)
+
+    return members.map((member) => ({
+      userId: member.user.id,
+      email: member.user.email,
+      ...(member.user.name ? { name: member.user.name } : {}),
+    }))
+  } catch {
+    return []
+  }
+}
+
+function payloadText(payload: MeetSumJobPayload | undefined, key: string): string | undefined {
+  const value = payload?.[key]
+
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+/**
+ * Applies the AI title per `autoTitleMode` (M5). Never overwrites a user
+ * title; failures only log.
+ */
+async function applyAutoTitle(scope: JobScope, meeting: MeetingRecord, title: string | undefined) {
+  if (!title) return
+
+  try {
+    const settings = await getAppSettings(scope.workspaceId)
+    const mode = normalizeAutoTitleMode(settings.autoTitleMode)
+
+    if (!shouldApplyAiTitle({ mode, title: meeting.title, titleSource: meeting.titleSource })) return
+    if (title === meeting.title) return
+    await scope.repo.applyAiTitle(meeting.id, title)
+  } catch (error) {
+    console.warn("AI title not applied", errorMessage(error))
+  }
+}
+
+/** Enqueues analytics after a summary (M5); failures only log. */
+async function enqueueMeetingAnalyze(scope: JobScope, meetingId: string) {
+  try {
+    await enqueueMeetSumJob("meeting.analyze", { meetingId, workspaceId: scope.workspaceId })
+  } catch (error) {
+    console.warn("meeting.analyze enqueue failed", errorMessage(error))
+  }
+}
+
 async function summarizeAndPersist(scope: JobScope, options: {
   meeting: MeetingRecord
   summaryInput: MeetingRecord
@@ -435,6 +466,7 @@ async function summarizeAndPersist(scope: JobScope, options: {
   jobRecordId?: string
   stageResult: Record<string, unknown>
   metadata?: Record<string, unknown>
+  payload?: MeetSumJobPayload
 }) {
   const { meeting, jobRecordId } = options
   const previousActionItemIds = new Set(
@@ -442,10 +474,17 @@ async function summarizeAndPersist(scope: JobScope, options: {
   )
   const summaryStartedAt = Date.now()
   const summaryProvider = createSummaryProvider()
+  const templateKey = payloadText(options.payload, "templateKey")
+  const language = payloadText(options.payload, "language")
   let intelligence: MeetingIntelligence
 
   try {
-    intelligence = await summaryProvider.summarize(options.summaryInput)
+    intelligence = await summaryProvider.summarize(options.summaryInput, {
+      ...(templateKey ? { templateKey } : {}),
+      ...(language ? { language } : {}),
+      jobId: jobRecordId,
+      members: await loadTaskMembers(scope.workspaceId),
+    })
   } catch (error) {
     const run = getSummaryRunMetadata(summaryProvider)
 
@@ -465,7 +504,10 @@ async function summarizeAndPersist(scope: JobScope, options: {
   }
 
   const summaryRun = getSummaryRunMetadata(summaryProvider)
+  const pipeline = summaryRun.pipeline
 
+  // Aggregate run; per-call LLM rows (llm.*) carry tokens and cost_estimate,
+  // so the cost is only in metadata here (no double counting).
   await recordAiRun({
     meetingId: meeting.id,
     workspaceId: scope.workspaceId,
@@ -475,12 +517,23 @@ async function summarizeAndPersist(scope: JobScope, options: {
     jobId: jobRecordId,
     provider: summaryRun.provider,
     model: summaryRun.model,
+    promptVersion: pipeline?.promptVersion,
+    templateKey: pipeline?.templateKey,
     metadata: {
       providerMode: getGeminiProviderMode(),
       fallbackUsed: summaryRun.fallbackUsed ?? false,
       fallbackReason: summaryRun.fallbackReason,
       tags: intelligence.tags,
       confidence: intelligence.languageMetadata.confidence,
+      ...(pipeline
+        ? {
+            language: pipeline.language,
+            languageCheck: pipeline.languageCheck,
+            costUsd: pipeline.costUsd,
+            usage: pipeline.usage,
+            aiRunIds: pipeline.aiRunIds,
+          }
+        : {}),
       ...options.metadata,
     },
   })
@@ -497,6 +550,9 @@ async function summarizeAndPersist(scope: JobScope, options: {
   const newActionItems = (persisted ?? intelligence).actionItems.filter(
     (item) => !previousActionItemIds.has(item.id)
   )
+
+  await applyAutoTitle(scope, meeting, intelligence.title)
+  await enqueueMeetingAnalyze(scope, meeting.id)
 
   return { intelligence, newActionItems }
 }
@@ -901,6 +957,7 @@ async function processMediaJob(
     speakers,
     asrRunId,
   })
+  await reanchorMeetingComments(meeting.id)
 
   const suggestedSpeakers = await refreshSuggestionsSafely(scope, meeting.id, {
     loadMeetTimeline: meetTimelineLoader(scope, meeting, payload),
@@ -919,6 +976,7 @@ async function processMediaJob(
     task: "summary.generate",
     jobRecordId,
     stageResult: { transcriptSegments: transcript.length },
+    payload,
   })
 
   await deliverPlatformEvent(scope, "summary.created", {
@@ -1013,6 +1071,7 @@ async function processIntelligenceOnlyJob(
       ),
       { preserveEdited: true }
     )
+    await reanchorMeetingComments(meeting.id)
   }
 
   const refreshed = await scope.repo.getMeeting(meeting.id)
@@ -1023,6 +1082,7 @@ async function processIntelligenceOnlyJob(
     jobRecordId,
     stageResult: { mode: payload.mode },
     metadata: { mode: payload.mode },
+    payload,
   })
 
   await deliverPlatformEvent(scope, "summary.created", {
@@ -1155,6 +1215,7 @@ async function processArtifactImportJob(
     segments: meetSegments,
     speakers: summarizeSpeakerStats(meetSegments, "meet"),
   })
+  await reanchorMeetingComments(meetingId)
   // Meet names only confirm through verified identities (meetSpeakers);
   // import never writes speaker profiles.
   await refreshSuggestionsSafely(scope, meetingId, {
@@ -1311,6 +1372,23 @@ async function dispatchJob(
   }
   if (job.name === "storage.delete") {
     return processStorageDeleteJob(job.data)
+  }
+  if (job.name === "meeting.analyze") {
+    return analyzeMeetingJob({
+      workspaceId: scope.workspaceId,
+      meetingId: requireMeetingId(job.data),
+      repo: scope.repo,
+    })
+  }
+  if (job.name === "clip.render") {
+    const clipId = typeof job.data.clipId === "string" ? job.data.clipId : ""
+
+    if (!clipId) throw toPermanentError(new Error("clipId is required"))
+    return renderClipJob({
+      workspaceId: scope.workspaceId,
+      clipId,
+      meetingId: job.data.meetingId,
+    })
   }
 
   return {}

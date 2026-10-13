@@ -93,6 +93,10 @@ export function TranscriptView({
   header,
   fill = false,
   className,
+  renderBeforeSegment,
+  renderSegmentActions,
+  renderSegmentBadges,
+  selectedSegmentIds,
 }: {
   dictionary: Dictionary
   locale: string
@@ -116,6 +120,14 @@ export function TranscriptView({
   /** Fill a height-constrained parent on large screens (meeting view). */
   fill?: boolean
   className?: string
+  /** M5: content above a row (e.g. a chapter heading); rendered inside the virtual item. */
+  renderBeforeSegment?: (segment: TranscriptSegmentWire, index: number) => ReactNode
+  /** M5: extra hover actions of a row (comment, react, clip). */
+  renderSegmentActions?: (segment: TranscriptSegmentWire, index: number) => ReactNode
+  /** M5: always-visible badges of a row (comment count, reactions). */
+  renderSegmentBadges?: (segment: TranscriptSegmentWire, index: number) => ReactNode
+  /** M5: rows highlighted as selected (clip range). */
+  selectedSegmentIds?: ReadonlySet<string>
 }) {
   const player = useMeetingPlayer()
   const directory = useSpeakerDirectory(speakers, participants, t.speakersGenericLabel)
@@ -687,6 +699,7 @@ export function TranscriptView({
                   className="absolute top-0 w-full pb-1"
                   style={{ left: 0, transform: `translateY(${item.start}px)` }}
                 >
+                  {renderBeforeSegment?.(segment, segmentIndex)}
                   <SegmentRow
                     segment={segment}
                     index={segmentIndex}
@@ -722,6 +735,9 @@ export function TranscriptView({
                     onReassign={(segmentId) => setReassignId(segmentId)}
                     onCopy={onCopy}
                     draft={editing?.segmentId === segment.id ? editing.draft : undefined}
+                    actionsSlot={renderSegmentActions?.(segment, segmentIndex)}
+                    badgeSlot={renderSegmentBadges?.(segment, segmentIndex)}
+                    selected={selectedSegmentIds?.has(segment.id) ?? false}
                   />
                 </div>
               )

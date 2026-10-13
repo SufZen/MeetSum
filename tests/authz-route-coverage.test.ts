@@ -157,6 +157,41 @@ describe("API route authz coverage", () => {
       "bot/status GET": "ops:read",
       "settings/bot GET": "workspace:read",
       "settings/bot PUT": "settings:write",
+      // M5 C clips (rename/delete/share also check author / canManageMeeting).
+      "meetings/[id]/clips GET": "meeting:read",
+      "meetings/[id]/clips POST": "meeting:write",
+      "clips/[id] GET": "meeting:read",
+      "clips/[id] PATCH": "meeting:write",
+      "clips/[id] DELETE": "meeting:write",
+      "clips/[id]/share POST": "meeting:read",
+      // M5 C comments and reactions (viewers and up; user principals only).
+      "meetings/[id]/comments GET": "meeting:read",
+      "meetings/[id]/comments POST": "comments:write",
+      "comments/[id] PATCH": "comments:write",
+      "comments/[id] DELETE": "comments:write",
+      "reactions POST": "comments:write",
+      // M5 action items and the cross-meeting Tasks view.
+      "action-items/[id] PATCH": "meeting:write",
+      "action-items/[id] DELETE": "meeting:write",
+      "meetings/[id]/action-items GET": "meeting:read",
+      "meetings/[id]/action-items POST": "meeting:write",
+      "tasks GET": "meeting:read",
+      "tasks/bulk POST": "meeting:write",
+      // M5 Package D: analytics, prep, follow-up, templates, intelligence runs.
+      "meetings/[id]/analytics GET": "meeting:read",
+      "meetings/[id]/analytics/sentiment POST": "meeting:write",
+      "meetings/[id]/prep GET": "meeting:read",
+      "meetings/[id]/prep POST": "meeting:read",
+      "meetings/[id]/follow-up GET": "meeting:read",
+      "meetings/[id]/follow-up POST": "meeting:read",
+      "meetings/[id]/template PATCH": "meeting:write",
+      "meetings/[id]/intelligence GET": "meeting:read",
+      "meetings/[id]/intelligence/run POST": "meeting:write",
+      "templates GET": "workspace:read",
+      "templates POST": "settings:write",
+      "templates/[id] GET": "workspace:read",
+      "templates/[id] PATCH": "settings:write",
+      "templates/[id] DELETE": "settings:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -217,6 +252,28 @@ describe("API route authz coverage", () => {
     )) {
       expect(route.source, route.route).not.toMatch(/withPublicRoute/)
     }
+  })
+
+  it("lets only user principals comment or react, and never audits comment text (M5)", () => {
+    for (const route of ["meetings/[id]/comments", "comments/[id]", "reactions"]) {
+      const source = routes.find((candidate) => candidate.route === route)?.source ?? ""
+
+      expect(source, route).toMatch(/commentStoreContext\(ctx\)/)
+      expect(source, route).toMatch(/if \(!store\) return userRequired\(\)/)
+      for (const args of callArguments(source, "recordAuditLog")) {
+        expect(args, route).not.toMatch(/comment\.body|body\.body|\bbody\s*[:,}]/)
+      }
+    }
+  })
+
+  it("serves clip shares through the media proxy, clip lookup first (M5)", () => {
+    const source = routes.find((candidate) => candidate.route === "share/[token]/media")?.source ?? ""
+
+    expect(source.indexOf("lookupClipShare(token)")).toBeGreaterThan(-1)
+    expect(source.indexOf("lookupClipShare(token)")).toBeLessThan(
+      source.indexOf("authorizeShareMediaRequest(request, token)")
+    )
+    expect(source).toMatch(/serveClipMedia\(/)
   })
 
   it("passes a workspace to every recordAuditLog call", () => {

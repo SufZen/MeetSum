@@ -7,6 +7,8 @@ import {
   type TranscriptionProviderMode,
 } from "@/lib/ai/providers"
 import { getAsrChainConfig, type AsrChainConfig } from "@/lib/ai/asr/router"
+import { getLlmStatus, type LlmStatus } from "@/lib/ai/llm"
+import { getGeminiModels } from "@/lib/ai/llm/config"
 
 
 export type ProviderHealthStatus = {
@@ -19,6 +21,8 @@ export type ProviderHealthStatus = {
   }
   /** M3 ASR router: effective chains and configured providers. */
   asr: AsrChainConfig
+  /** M5 LLM layer: configured providers, routes, Gemini tier. */
+  llm: LlmStatus
   configWarnings: string[]
 }
 
@@ -59,25 +63,28 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
 
   if (!asr.chain.length) {
     warnings.push(
-      "ASR: no transcription provider configured (RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, SONIOX_API_KEY or LOCAL_TRANSCRIPTION_URL)"
+      "ASR: no transcription provider configured (RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, MODAL_ASR_URL + MODAL_ASR_TOKEN, SONIOX_API_KEY or LOCAL_TRANSCRIPTION_URL)"
     )
   }
   if (
-    asr.providers.some((provider) => provider.id === "runpod-ivrit" && provider.configured) &&
+    asr.providers.some(
+      (provider) => (provider.id === "runpod-ivrit" || provider.id === "modal-worker") && provider.configured
+    ) &&
     !process.env.S3_PUBLIC_ENDPOINT?.trim() &&
     process.env.MEETSUM_ASR_MEDIA_HANDOFF?.trim() !== "blob"
   ) {
     warnings.push(
-      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod receives inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)"
+      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod/Modal receive inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)"
     )
   }
 
-  // GOOGLE_GEMINI_SUMMARY_MODEL is canonical (used by providers/processor);
-  // GEMINI_MODEL is kept as a legacy alias.
-  const model =
-    process.env.GOOGLE_GEMINI_SUMMARY_MODEL ??
-    process.env.GEMINI_MODEL ??
-    "gemini-3.5-flash"
+  // GOOGLE_GEMINI_SUMMARY_MODEL is canonical; GEMINI_MODEL is a legacy alias.
+  // Default gemini-3.8-flash (gemini-3.5-flash is deprecated).
+  const model = getGeminiModels().summary
+  const llm = getLlmStatus()
+
+  // Includes the GEMINI_TIER=free privacy warning: never silent.
+  warnings.push(...(llm.warnings ?? []))
 
   return {
     ai: {
@@ -88,6 +95,7 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
       localWhisperConfigured,
     },
     asr,
+    llm,
     configWarnings: warnings,
   }
 }

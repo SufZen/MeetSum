@@ -23,7 +23,10 @@ const enqueueMeetSumJob = vi.hoisted(() =>
   }))
 )
 
-vi.mock("@/lib/jobs/queue", () => ({ enqueueMeetSumJob }))
+vi.mock("@/lib/jobs/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/jobs/queue")>()),
+  enqueueMeetSumJob,
+}))
 
 import { POST as runAgent } from "@/app/api/agents/run/route"
 import { PATCH as patchFavorite } from "@/app/api/meetings/[id]/favorite/route"

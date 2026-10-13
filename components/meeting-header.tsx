@@ -221,7 +221,7 @@ export function MeetingHeader({
               className="h-7 rounded-md border-line bg-brand-soft text-brand-text"
               onClick={onAddToRoom}
             >
-              Add to room
+              {dictionary?.addToRoom ?? "Add to room"}
             </Button>
           </div>
           {dictionary ? (
@@ -238,7 +238,7 @@ export function MeetingHeader({
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" className="h-8" onClick={onShare}>
             <Share2Icon data-icon="inline-start" />
-            Share
+            {dictionary?.meetingShare ?? "Share"}
           </Button>
           {showMenu && dictionary ? (
             <DropdownMenu onOpenChange={(open) => open && setDialogsReady(true)}>

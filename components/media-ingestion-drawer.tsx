@@ -41,7 +41,7 @@ export function MediaIngestionDrawer({
 }) {
   const triggerLabel =
     mode === "record"
-      ? "Record on this computer"
+      ? dictionary.recordOnComputer
       : mode === "desktop"
         ? "Import desktop recorder"
         : dictionary.upload
@@ -49,7 +49,7 @@ export function MediaIngestionDrawer({
     mode === "record" ? MicIcon : mode === "desktop" ? LaptopIcon : UploadIcon
   const title =
     mode === "record"
-      ? "Record on this computer"
+      ? dictionary.recordOnComputer
       : mode === "desktop"
         ? "Import from desktop recorder"
         : "Upload meeting media"

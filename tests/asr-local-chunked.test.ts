@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
+import { estimateWhisperTokens, WHISPER_PROMPT_MAX_TOKENS } from "@/lib/ai/asr/glossary"
 import { createLocalWhisperChunkedProvider, parseWhisperChunk } from "@/lib/ai/asr/providers/local-whisper-chunked"
 import type { AsrRequest } from "@/lib/ai/asr/types"
 
@@ -141,5 +142,101 @@ describe("local Whisper chunked provider", () => {
 
   it("throws a config error without LOCAL_TRANSCRIPTION_URL", async () => {
     await expect(createLocalWhisperChunkedProvider({ env: {} }).transcribe(request())).rejects.toMatchObject({ kind: "config" })
+  })
+})
+
+describe("hosted OpenAI-compatible Whisper (Groq) via the local slot", () => {
+  const GROQ_KEY = "gsk_test_secret_key_123"
+  const groq = {
+    LOCAL_TRANSCRIPTION_URL: "https://api.groq.com/openai",
+    LOCAL_TRANSCRIPTION_MODEL: "whisper-large-v3-turbo",
+    LOCAL_TRANSCRIPTION_API_KEY: GROQ_KEY,
+    LOCAL_TRANSCRIPTION_SEND_HOTWORDS: "false",
+  }
+
+  it("sends the API key as a bearer token on transcription requests and omits hotwords", async () => {
+    const http = mockFetch({ "POST /v1/audio/transcriptions": () => json(fixture.withWords) })
+    const provider = createLocalWhisperChunkedProvider({ env: groq, fetch: http.fetch, execFile: fakeExecFile({ durationMs: 4000 }).execFile })
+
+    await provider.transcribe(request())
+
+    expect(http.requests[0].url).toBe("https://api.groq.com/openai/v1/audio/transcriptions")
+    expect(http.requests[0].headers.authorization).toBe(`Bearer ${GROQ_KEY}`)
+
+    const fields = formFields(http.requests[0].body)
+
+    expect(fields).toContainEqual(["model", "whisper-large-v3-turbo"])
+    expect(fields.find(([name]) => name === "hotwords")).toBeUndefined()
+  })
+
+  it("sends no Authorization header without a key and keeps hotwords by default", async () => {
+    const http = mockFetch({ "POST /v1/audio/transcriptions": () => json(fixture.withWords) })
+    const provider = createLocalWhisperChunkedProvider({ env, fetch: http.fetch, execFile: fakeExecFile({ durationMs: 4000 }).execFile })
+
+    await provider.transcribe(request())
+
+    expect(http.requests[0].headers.authorization).toBeUndefined()
+    expect(formFields(http.requests[0].body).some(([name]) => name === "hotwords")).toBe(true)
+  })
+
+  it("authenticates the /v1/models health check", async () => {
+    const http = mockFetch({ "GET /v1/models": () => json({ data: [{ id: "whisper-large-v3-turbo" }] }) })
+    const health = await createLocalWhisperChunkedProvider({ env: groq, fetch: http.fetch }).healthCheck()
+
+    expect(health).toMatchObject({ configured: true, healthy: true })
+    expect(http.requests[0]).toMatchObject({
+      url: "https://api.groq.com/openai/v1/models",
+      headers: { authorization: `Bearer ${GROQ_KEY}` },
+    })
+  })
+
+  it("never puts the key in error messages", async () => {
+    const http = mockFetch({
+      "POST /v1/audio/transcriptions": () => json({ error: { message: `Invalid API Key: Bearer ${GROQ_KEY}` } }, 401),
+    })
+    const provider = createLocalWhisperChunkedProvider({ env: groq, fetch: http.fetch, execFile: fakeExecFile({ durationMs: 4000 }).execFile })
+    const error = (await provider.transcribe(request()).catch((caught: unknown) => caught)) as Error
+
+    expect(error).toMatchObject({ kind: "auth", retryable: false })
+    expect(error.message).not.toContain(GROQ_KEY)
+  })
+
+  it("truncates the glossary prompt to Whisper's 224-token limit (whole terms)", async () => {
+    const terms = Array.from({ length: 80 }, (_, index) => ({
+      term: `מונח-ארוך-במיוחד-${index}`,
+      aliases: [],
+      hotword: true,
+    }))
+    const http = mockFetch({ "POST /v1/audio/transcriptions": () => json(fixture.withWords) })
+    const provider = createLocalWhisperChunkedProvider({
+      env: { ...groq, MEETSUM_ASR_USE_INITIAL_PROMPT: "true", MEETSUM_ASR_HOTWORDS_MAX_CHARS: "5000" },
+      fetch: http.fetch,
+      execFile: fakeExecFile({ durationMs: 4000 }).execFile,
+    })
+
+    await provider.transcribe(request({ glossary: { version: 1, terms } }))
+
+    const prompt = formFields(http.requests[0].body).find(([name]) => name === "prompt")?.[1] ?? ""
+    const prefix = "בפגישה הוזכרו: "
+
+    expect(prompt.startsWith(`${prefix}מונח-ארוך-במיוחד-0, `)).toBe(true)
+    expect(prompt.endsWith(".")).toBe(true)
+    expect(estimateWhisperTokens(prompt)).toBeLessThanOrEqual(WHISPER_PROMPT_MAX_TOKENS)
+
+    // Whole terms only, in order, and far fewer than the 80 requested.
+    const kept = prompt.slice(prefix.length, -1).split(", ")
+
+    expect(kept.every((term, index) => term === `מונח-ארוך-במיוחד-${index}`)).toBe(true)
+    expect(kept.length).toBeGreaterThan(3)
+    expect(kept.length).toBeLessThan(80)
+  })
+})
+
+describe("estimateWhisperTokens", () => {
+  it("counts ~3 ASCII characters per token and one per non-ASCII character", () => {
+    expect(estimateWhisperTokens("")).toBe(0)
+    expect(estimateWhisperTokens("abcdef")).toBe(2)
+    expect(estimateWhisperTokens("שלום")).toBe(4)
+    expect(estimateWhisperTokens("שלום abc")).toBe(6)
   })
 })

@@ -38,11 +38,16 @@ function existingKey(item: ActionItem) {
 /**
  * Plans how to fold a fresh AI extraction into the persisted action items
  * without losing user work. Pure: callers apply the plan in one transaction.
+ *
+ * `action_items.id` is a global primary key: `takenIds` are ids already used
+ * by other meetings, and an insert that would reuse one (or an id of this
+ * meeting) gets a fresh `createId()` instead.
  */
 export function mergeActionItems(
   existing: ActionItem[],
   incoming: ActionItem[],
-  createId: () => string
+  createId: () => string,
+  takenIds: Iterable<string> = []
 ): ActionItemMergePlan {
   const keep = existing.filter(isProtectedActionItem)
   const protectedKeys = new Set(keep.map(existingKey).filter(Boolean))
@@ -54,7 +59,7 @@ export function mergeActionItems(
     if (key && !unprotected.has(key)) unprotected.set(key, item)
   }
 
-  const usedIds = new Set(existing.map((item) => item.id))
+  const usedIds = new Set([...existing.map((item) => item.id), ...takenIds])
   const matchedIds = new Set<string>()
   const update: ActionItem[] = []
   const insert: ActionItem[] = []

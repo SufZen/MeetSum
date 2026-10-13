@@ -1,6 +1,13 @@
 import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
 import { botMessagesEn, botMessagesHe } from "@/lib/i18n/m7/bot"
 import { playerMessagesEn, playerMessagesHe } from "@/lib/i18n/player-messages"
+import { clipsMessagesEn, clipsMessagesHe } from "@/lib/i18n/m5/clips"
+import { commentsMessagesEn, commentsMessagesHe } from "@/lib/i18n/m5/comments"
+import {
+  intelligenceMessagesEn,
+  intelligenceMessagesHe,
+} from "@/lib/i18n/m5/intelligence"
+import { tasksMessagesEn, tasksMessagesHe } from "@/lib/i18n/m5/tasks"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import {
   workspaceMessagesEn,
@@ -74,6 +81,10 @@ export const dictionaries = {
     ...asrMessagesEn,
     ...playerMessagesEn,
     ...botMessagesEn,
+    ...intelligenceMessagesEn,
+    ...tasksMessagesEn,
+    ...clipsMessagesEn,
+    ...commentsMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -139,6 +150,10 @@ export const dictionaries = {
     ...asrMessagesHe,
     ...playerMessagesHe,
     ...botMessagesHe,
+    ...intelligenceMessagesHe,
+    ...tasksMessagesHe,
+    ...clipsMessagesHe,
+    ...commentsMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -204,6 +219,10 @@ export const dictionaries = {
     ...asrMessagesEn,
     ...playerMessagesEn,
     ...botMessagesEn,
+    ...intelligenceMessagesEn,
+    ...tasksMessagesEn,
+    ...clipsMessagesEn,
+    ...commentsMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -269,6 +288,10 @@ export const dictionaries = {
     ...asrMessagesEn,
     ...playerMessagesEn,
     ...botMessagesEn,
+    ...intelligenceMessagesEn,
+    ...tasksMessagesEn,
+    ...clipsMessagesEn,
+    ...commentsMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -334,6 +357,10 @@ export const dictionaries = {
     ...asrMessagesEn,
     ...playerMessagesEn,
     ...botMessagesEn,
+    ...intelligenceMessagesEn,
+    ...tasksMessagesEn,
+    ...clipsMessagesEn,
+    ...commentsMessagesEn,
   },
 } as const
 

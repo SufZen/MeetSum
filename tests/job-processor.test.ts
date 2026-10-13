@@ -137,6 +137,7 @@ vi.mock("@/lib/integrations/realizeos", () => ({
 const { processJob } = await import("@/lib/jobs/processor")
 const { TranscriptionUnavailableError } = await import("@/lib/ai/providers")
 const { AsrChainError, AsrError } = await import("@/lib/ai/asr")
+const { TransientSummaryError } = await import("@/lib/intelligence/pipeline")
 
 type RouterResult = Awaited<ReturnType<typeof import("@/lib/ai/asr").transcribeWithRouter>>
 
@@ -716,7 +717,7 @@ describe("processJob ASR router (M3)", () => {
     // Word-weighted: (0.9 × 3 + 0.7 × 1) / 4.
     expect(run[8]).toBeCloseTo(0.85, 4)
     expect(run[11]).toBe(job.data.jobRecordId)
-    expect(run.slice(12)).toEqual([0.0123, 120_000, "ws_1"])
+    expect(run.slice(12, 15)).toEqual([0.0123, 120_000, "ws_1"])
     expect(JSON.parse(run[5] as string)).toMatchObject({
       fallbackUsed: false,
       diarization: "provider",
@@ -1012,6 +1013,28 @@ describe("processJob ASR router (M3)", () => {
     expect(replaceTranscript).not.toHaveBeenCalled()
     expect((await mocks.repository.getMeeting(meeting.id))?.transcript).toEqual(before)
   })
+
+  it("retries a transient summary failure and keeps the existing summary", async () => {
+    const { meeting } = await seedWithAsset()
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+    const before = (await mocks.repository.getMeeting(meeting.id))?.intelligence
+    const upsert = vi.spyOn(mocks.repository, "upsertMeetingIntelligence")
+
+    mocks.summarize.mockRejectedValueOnce(new TransientSummaryError("rate_limit"))
+
+    const error = await processJob(
+      await makeJob("meeting.summarize", { meetingId: meeting.id, mode: "summary" }, { attempts: 3 })
+    ).catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(TransientSummaryError)
+    expect(error).not.toBeInstanceOf(UnrecoverableError)
+    expect(upsert).not.toHaveBeenCalled()
+    const after = await mocks.repository.getMeeting(meeting.id)
+
+    expect(after?.intelligence).toEqual(before)
+    expect(after?.status).not.toBe("failed")
+  })
 })
 
 describe("processJob webhook payloads respect meeting visibility", () => {
@@ -1121,7 +1144,7 @@ describe("processJob media preparation (M4)", () => {
 
     await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
 
-    expect(mocks.enqueue).not.toHaveBeenCalled()
+    expect(mocks.enqueue).not.toHaveBeenCalledWith("media.prepare", expect.anything())
   })
 
   it("never transcribes a playback rendition, even when it is the newest asset", async () => {
@@ -1266,5 +1289,97 @@ describe("processJob media preparation (M4)", () => {
     const [, input, options] = replaceTranscript.mock.calls[0]
     expect(options).toEqual({ preserveEdited: true })
     expect(input.segments.map((segment) => segment.id)).toEqual(["s1", "s3", "s4"])
+  })
+})
+
+describe("processJob intelligence wiring (M5)", () => {
+  it("enqueues meeting.analyze after the summary", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(mocks.enqueue).toHaveBeenCalledWith("meeting.analyze", {
+      meetingId: meeting.id,
+      workspaceId: "ws_1",
+    })
+  })
+
+  it("keeps the job green when the analyze enqueue fails", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    mocks.enqueue.mockImplementation(async (name: string) => {
+      if (name === "meeting.analyze") throw new Error("redis down")
+      return { id: "job" }
+    })
+
+    await expect(
+      processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+    ).resolves.toMatchObject({ meetingId: meeting.id })
+  })
+
+  it("passes payload templateKey and language through to the pipeline", async () => {
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    const job = await makeJob("media.ingest", {
+      meetingId: meeting.id,
+      templateKey: "sales",
+      language: "en",
+    })
+
+    await processJob(job)
+
+    expect(mocks.summarize.mock.calls[0][1]).toMatchObject({
+      templateKey: "sales",
+      language: "en",
+      jobId: job.data.jobRecordId,
+    })
+  })
+
+  it("applies the AI title to a generic title (generic_only)", async () => {
+    const meeting = await mocks.repository.createMeeting({
+      title: "Untitled meeting",
+      source: "upload",
+      language: "he",
+      startedAt: "2026-04-23T09:00:00.000Z",
+    })
+    const applyAiTitle = vi.fn().mockResolvedValue(true)
+    Object.assign(mocks.repository, { applyAiTitle })
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    mocks.summarize.mockResolvedValue({ ...intelligenceWith([]), title: "סנכרון שבועי" })
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(applyAiTitle).toHaveBeenCalledWith(meeting.id, "סנכרון שבועי")
+  })
+
+  it("keeps a specific title under generic_only", async () => {
+    const meeting = await seedMeeting()
+    const applyAiTitle = vi.fn().mockResolvedValue(true)
+    Object.assign(mocks.repository, { applyAiTitle })
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    mocks.summarize.mockResolvedValue({ ...intelligenceWith([]), title: "סנכרון שבועי" })
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(applyAiTitle).not.toHaveBeenCalled()
+  })
+
+  it("does not fail the job when applying the title fails", async () => {
+    const meeting = await mocks.repository.createMeeting({
+      title: "recording.m4a",
+      source: "upload",
+      language: "he",
+      startedAt: "2026-04-23T09:00:00.000Z",
+    })
+    Object.assign(mocks.repository, {
+      applyAiTitle: vi.fn().mockRejectedValue(new Error("db down")),
+    })
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+    mocks.summarize.mockResolvedValue({ ...intelligenceWith([]), title: "Title" })
+
+    await expect(
+      processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+    ).resolves.toMatchObject({ meetingId: meeting.id })
   })
 })

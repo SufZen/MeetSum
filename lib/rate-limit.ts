@@ -10,7 +10,24 @@ type RateLimitEntry = {
   timestamps: number[]
 }
 
-const store = new Map<string, RateLimitEntry>()
+/** The limiter's backing store (a Map in-process; swappable for tests). */
+export type RateLimitStore = Pick<
+  Map<string, RateLimitEntry>,
+  "get" | "set" | "delete" | "clear" | typeof Symbol.iterator
+>
+
+const defaultStore = new Map<string, RateLimitEntry>()
+let store: RateLimitStore = defaultStore
+
+/** Tests: replace the store (e.g. one that throws); undefined restores it. */
+export function setRateLimitStoreForTesting(next: RateLimitStore | undefined) {
+  store = next ?? defaultStore
+}
+
+/** A store failure denies the request (fail closed), never allows it. */
+function denied(config: RateLimitConfig): RateLimitResult {
+  return { allowed: false, remaining: 0, resetMs: Date.now() + Math.min(config.windowMs, 60_000), limit: config.maxRequests }
+}
 
 // Clean up stale entries every 5 minutes
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
@@ -53,6 +70,14 @@ export function checkRateLimit(
   key: string,
   config: RateLimitConfig
 ): RateLimitResult {
+  try {
+    return checkRateLimitInStore(key, config)
+  } catch {
+    return denied(config)
+  }
+}
+
+function checkRateLimitInStore(key: string, config: RateLimitConfig): RateLimitResult {
   cleanup(config.windowMs)
 
   const now = Date.now()
@@ -95,6 +120,68 @@ export function checkRateLimit(
 }
 
 /**
+ * Several sliding windows on one key (e.g. 3/min and 20/hour): a request is
+ * recorded only when every window allows it; a blocked request is not
+ * counted. `resetMs` is when the blocking window frees a slot (or, when
+ * allowed, when the tightest window resets).
+ */
+export function checkRateLimitWindows(
+  key: string,
+  windows: readonly RateLimitConfig[]
+): RateLimitResult {
+  try {
+    return checkRateLimitWindowsInStore(key, windows)
+  } catch {
+    return denied(windows[0] ?? { maxRequests: 0, windowMs: 60_000 })
+  }
+}
+
+function checkRateLimitWindowsInStore(key: string, windows: readonly RateLimitConfig[]): RateLimitResult {
+  const longest = Math.max(...windows.map((window) => window.windowMs))
+
+  cleanup(longest)
+
+  const now = Date.now()
+  const entry = store.get(key) ?? { timestamps: [] }
+
+  entry.timestamps = entry.timestamps.filter((timestamp) => timestamp > now - longest)
+  store.set(key, entry)
+
+  let tightest: RateLimitResult | undefined
+
+  for (const window of windows) {
+    const inWindow = entry.timestamps.filter((timestamp) => timestamp > now - window.windowMs)
+
+    if (inWindow.length >= window.maxRequests) {
+      const blocked: RateLimitResult = {
+        allowed: false,
+        remaining: 0,
+        resetMs: inWindow[inWindow.length - window.maxRequests] + window.windowMs,
+        limit: window.maxRequests,
+      }
+
+      if (!tightest || tightest.allowed || blocked.resetMs > tightest.resetMs) tightest = blocked
+      continue
+    }
+
+    const remaining = window.maxRequests - inWindow.length - 1
+
+    if (!tightest || (tightest.allowed && remaining < tightest.remaining)) {
+      tightest = {
+        allowed: true,
+        remaining,
+        resetMs: (inWindow[0] ?? now) + window.windowMs,
+        limit: window.maxRequests,
+      }
+    }
+  }
+
+  if (tightest?.allowed) entry.timestamps.push(now)
+
+  return tightest ?? { allowed: true, remaining: 0, resetMs: now, limit: 0 }
+}
+
+/**
  * Apply rate limit headers to a Response.
  */
 export function applyRateLimitHeaders(
@@ -127,7 +214,37 @@ export const RATE_LIMIT_PRESETS = {
 
   /** Admin operations: 30 per minute */
   admin: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
+
+  /**
+   * On-demand LLM generation (M5 prep briefs and follow-up emails share one
+   * budget per `${workspaceId}:${userId|apiKeyId}`): writers 3/min and
+   * 20/hour, everyone else 2/min and 10/hour. Use `checkRateLimitWindows`.
+   *
+   * Like every limit in this module it is in-memory and per instance (there
+   * is no Redis backend here): with N web instances the effective budget is
+   * up to N times these numbers.
+   */
+  llmOnDemand: {
+    writer: [
+      { maxRequests: 3, windowMs: 60_000 },
+      { maxRequests: 20, windowMs: 3_600_000 },
+    ] satisfies RateLimitConfig[],
+    nonWriter: [
+      { maxRequests: 2, windowMs: 60_000 },
+      { maxRequests: 10, windowMs: 3_600_000 },
+    ] satisfies RateLimitConfig[],
+  },
 } as const
+
+/** The `llmOnDemand` windows for a caller with or without `meeting:write`. */
+export function llmOnDemandWindows(canWrite: boolean): readonly RateLimitConfig[] {
+  return canWrite ? RATE_LIMIT_PRESETS.llmOnDemand.writer : RATE_LIMIT_PRESETS.llmOnDemand.nonWriter
+}
+
+/** Test hook: forgets every recorded request. */
+export function resetRateLimitsForTesting() {
+  store.clear()
+}
 
 function trustedProxyHops(env: NodeJS.ProcessEnv) {
   const parsed = Number(env.MEETSUM_TRUSTED_PROXY_HOPS)

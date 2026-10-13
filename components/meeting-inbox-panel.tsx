@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { StatusPill } from "@/components/ui/meeting-atoms"
-import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type {
   MeetingListItem,
@@ -292,7 +292,10 @@ export function MeetingInboxPanel({
                         </span>
                         <span>·</span>
                         <span className="min-w-0 truncate">
-                          {participantCount(meeting)} {participantCount(meeting) === 1 ? "participant" : "participants"}
+                          {formatMessage(
+                            participantCount(meeting) === 1 ? dictionary.participantCountOne : dictionary.participantCountOther,
+                            { count: participantCount(meeting) }
+                          )}
                         </span>
                       </div>
                       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">

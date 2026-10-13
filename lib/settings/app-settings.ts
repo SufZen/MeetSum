@@ -1,3 +1,4 @@
+import { isValidTemplateKey } from "@/lib/ai/templates/registry"
 import { getDatabasePool } from "@/lib/db/client"
 import {
   DEFAULT_LOCALE,
@@ -8,7 +9,11 @@ import {
 export type AppSettings = {
   defaultLocale: SupportedLocale
   meetingLanguageMode: "auto" | SupportedLocale
-  summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
+  /**
+   * Summary template (M5): a built-in key (legacy keys stay valid),
+   * `custom:<key>` or `auto`.
+   */
+  summaryTemplate: string
   googleArtifactsFirst: boolean
   pwaRecorderEnabled: boolean
   autoProcessImportedMedia: boolean
@@ -19,6 +24,14 @@ export type AppSettings = {
   retainVideoByDefault: boolean
   /** Visibility of newly created meetings (M2). */
   defaultMeetingVisibility: "workspace" | "private"
+  /** LLM provider preference (M5); Gemini is the `auto` default. */
+  llmProviderPreference: "auto" | "anthropic" | "gemini"
+  /** Summary output language (M5). */
+  summaryLanguageMode: "meeting" | "he" | "en" | "mixed"
+  /** When an AI title replaces the meeting title (M5). */
+  autoTitleMode: "generic_only" | "always" | "off"
+  /** Optional AI features (M5). */
+  aiFeatures: { sentiment: boolean; prepBriefs: boolean }
 }
 
 type AppSettingsRow = {
@@ -39,6 +52,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   audioRetentionDays: 180,
   retainVideoByDefault: false,
   defaultMeetingVisibility: "workspace",
+  llmProviderPreference: "auto",
+  summaryLanguageMode: "meeting",
+  autoTitleMode: "generic_only",
+  aiFeatures: { sentiment: true, prepBriefs: true },
 }
 
 /** In-memory (non-postgres) settings, keyed by workspace id. */
@@ -66,15 +83,22 @@ export function resolveDefaultMeetingLanguage(
     : settings.meetingLanguageMode
 }
 
-function isSummaryTemplate(value: unknown): value is AppSettings["summaryTemplate"] {
-  return (
-    value === "general" ||
-    value === "sales" ||
-    value === "real-estate" ||
-    value === "product" ||
-    value === "operations" ||
-    value === "legal"
-  )
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
+}
+
+function normalizeAiFeatures(value: unknown): AppSettings["aiFeatures"] {
+  const raw =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+
+  return {
+    sentiment: normalizeBoolean(raw.sentiment, DEFAULT_APP_SETTINGS.aiFeatures.sentiment),
+    prepBriefs: normalizeBoolean(raw.prepBriefs, DEFAULT_APP_SETTINGS.aiFeatures.prepBriefs),
+  }
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean) {
@@ -105,7 +129,7 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
   return {
     defaultLocale,
     meetingLanguageMode,
-    summaryTemplate: isSummaryTemplate(raw.summaryTemplate)
+    summaryTemplate: isValidTemplateKey(raw.summaryTemplate)
       ? raw.summaryTemplate
       : DEFAULT_APP_SETTINGS.summaryTemplate,
     googleArtifactsFirst: normalizeBoolean(
@@ -139,6 +163,22 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
     ),
     defaultMeetingVisibility:
       raw.defaultMeetingVisibility === "private" ? "private" : "workspace",
+    llmProviderPreference: oneOf(
+      raw.llmProviderPreference,
+      ["auto", "anthropic", "gemini"] as const,
+      DEFAULT_APP_SETTINGS.llmProviderPreference
+    ),
+    summaryLanguageMode: oneOf(
+      raw.summaryLanguageMode,
+      ["meeting", "he", "en", "mixed"] as const,
+      DEFAULT_APP_SETTINGS.summaryLanguageMode
+    ),
+    autoTitleMode: oneOf(
+      raw.autoTitleMode,
+      ["generic_only", "always", "off"] as const,
+      DEFAULT_APP_SETTINGS.autoTitleMode
+    ),
+    aiFeatures: normalizeAiFeatures(raw.aiFeatures),
   }
 }
 

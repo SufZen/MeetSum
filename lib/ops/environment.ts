@@ -4,6 +4,7 @@ import {
   isGeminiConfigured,
   isLocalWhisperConfigured,
 } from "@/lib/ai/providers"
+import { GEMINI_FREE_TIER_WARNING, getGeminiTier } from "@/lib/ai/llm/config"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 
 export type RuntimeEnvironmentReport = {
@@ -107,6 +108,9 @@ export function validateRuntimeEnvironment(
   }
   if (!geminiConfigured) {
     warnings.push("Gemini is not configured; AI actions will use fallbacks.")
+  } else if (getGeminiTier(env) === "free") {
+    // M5 privacy flag: never send meeting content to the free tier silently.
+    warnings.push(GEMINI_FREE_TIER_WARNING)
   }
   if (
     (transcriptionMode === "local-whisper" || transcriptionMode === "auto") &&

@@ -1,4 +1,4 @@
-import { CheckCircle2Icon, CircleAlertIcon } from "lucide-react"
+import { CheckCircle2Icon, CircleAlertIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 
@@ -8,6 +8,24 @@ export type ProviderStatusView = {
   configured: boolean
   detail: string
   mode?: string
+  /** Configuration/privacy warning (e.g. GEMINI_TIER=free); never silent. */
+  warning?: string
+}
+
+/** A provider's warning, shown as a soft warn callout. */
+export function ProviderWarning({ warning }: { warning?: string }) {
+  if (!warning) return null
+
+  return (
+    <p
+      role="status"
+      dir="ltr"
+      className="mt-1 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn-soft px-2 py-1 text-xs leading-5 text-warn-text"
+    >
+      <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      <span className="break-words">{warning}</span>
+    </p>
+  )
 }
 
 export function ProviderHealthPanel({
@@ -45,6 +63,7 @@ export function ProviderHealthPanel({
                 <p className="break-words text-xs leading-5 text-muted-foreground">
                   {provider.detail}
                 </p>
+                <ProviderWarning warning={provider.warning} />
               </div>
             </div>
           )

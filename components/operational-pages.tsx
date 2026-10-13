@@ -22,7 +22,11 @@ import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
 import { JobRecoveryPanel } from "@/components/job-recovery-panel"
-import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provider-health-panel"
+import {
+  ProviderHealthPanel,
+  ProviderWarning,
+  type ProviderStatusView,
+} from "@/components/provider-health-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
@@ -45,6 +49,15 @@ const BotRulesSettings = dynamic(
 // Only the AI settings section uses it; loaded when that section opens.
 const AsrGlossaryEditor = dynamic(
   () => import("@/components/asr-glossary-editor").then((mod) => mod.AsrGlossaryEditor),
+  { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
+// M5: AI model settings and workspace summary templates (AI settings section).
+const LlmSettings = dynamic(
+  () => import("@/components/intelligence/llm-settings").then((mod) => mod.LlmSettings),
+  { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
+const TemplatesSettings = dynamic(
+  () => import("@/components/intelligence/template-editor").then((mod) => mod.TemplatesSettings),
   { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
 )
 
@@ -2430,41 +2443,29 @@ export function OperationalPage({
               description="Choose preferred intelligence behavior. Active provider still depends on production secrets and environment validation."
               status={providers.find((provider) => provider.id === "gemini")?.mode ?? "Gemini"}
             >
+              {/* The default summary template lives in LlmSettings below
+                  (built-in and workspace templates); the legacy slug list
+                  was a second, conflicting control. */}
               <div className="grid gap-3">
-                <SettingRow
-                  title="Default summary template"
-                  description="Used as the default intelligence style for future reprocess and summary runs."
-                >
-                  <NativeSelect
-                    value={settings.summaryTemplate}
-                    disabled={settingsDisabled}
-                    onChange={(event) =>
-                      saveSettingsPatch({
-                        summaryTemplate: event.target
-                          .value as AppSettingsView["summaryTemplate"],
-                      })
-                    }
-                  >
-                    {["general", "sales", "real-estate", "product", "operations", "legal"].map((template) => (
-                      <NativeSelectOption key={template} value={template}>
-                        {template}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </SettingRow>
                 <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
                   {providers.map((provider) => (
-                    <div
-                      key={provider.id}
-                      className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                    >
-                      <span className="font-medium text-foreground">{provider.label}</span>
-                      <span className="text-muted-foreground">{provider.detail}</span>
+                    <div key={provider.id} className="grid gap-1 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">{provider.label}</span>
+                        <span className="text-muted-foreground">{provider.detail}</span>
+                      </div>
+                      <ProviderWarning warning={provider.warning} />
                     </div>
                   ))}
                 </div>
               </div>
             </OpsCard>
+          ) : null}
+          {settingsSection === "AI settings" ? (
+            <>
+              <LlmSettings dictionary={t} locale={settings.defaultLocale} readOnly={settingsReadOnly} />
+              <TemplatesSettings dictionary={t} locale={settings.defaultLocale} readOnly={settingsReadOnly} />
+            </>
           ) : null}
           {settingsSection === "AI settings" ? <AsrGlossaryEditor dictionary={t} /> : null}
           {settingsSection === "Live meeting" ? (
