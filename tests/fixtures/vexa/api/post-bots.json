@@ -1,0 +1,48 @@
+{
+  "_synthetic": true,
+  "_note": "Exact POST /bots bodies MeetSum sends (M7 A1/A6). transcribe_enabled is false unless MEETSUM_BOT_TRANSCRIBE or the live flag is on.",
+  "meet": {
+    "platform": "google_meet",
+    "native_meeting_id": "abc-defg-hij",
+    "bot_name": "MeetSum Notetaker",
+    "transcribe_enabled": false,
+    "recording_enabled": true,
+    "language": "he",
+    "authenticated": true,
+    "automatic_leave": { "max_time_left_alone": 600000 }
+  },
+  "teamsNumeric": {
+    "platform": "teams",
+    "native_meeting_id": "9384756123456",
+    "bot_name": "MeetSum Notetaker",
+    "transcribe_enabled": false,
+    "recording_enabled": true,
+    "passcode": "Qw12",
+    "meeting_url": "https://teams.live.com/meet/9384756123456?p=Qw12",
+    "teams_base_host": "teams.live.com",
+    "authenticated": true,
+    "automatic_leave": { "max_time_left_alone": 600000 }
+  },
+  "teamsThread": {
+    "platform": "teams",
+    "native_meeting_id": "19:meeting_NjY4YzEzMzQtZjBkZS00OTk1LWE4ZjAtMTIzNDU2Nzg5MDEy@thread.v2",
+    "bot_name": "MeetSum Notetaker",
+    "transcribe_enabled": false,
+    "recording_enabled": true,
+    "meeting_url": "https://teams.microsoft.com/l/meetup-join/19%3Ameeting_NjY4YzEzMzQtZjBkZS00OTk1LWE4ZjAtMTIzNDU2Nzg5MDEy%40thread.v2/0?context=%7B%22Tid%22%3A%2272f988bf-86f1-41af-91ab-2d7cd011db47%22%7D",
+    "authenticated": true,
+    "automatic_leave": { "max_time_left_alone": 600000 }
+  },
+  "zoom": {
+    "platform": "zoom",
+    "native_meeting_id": "81234567890",
+    "bot_name": "MeetSum Notetaker",
+    "transcribe_enabled": false,
+    "recording_enabled": true,
+    "language": "en",
+    "passcode": "AbC123",
+    "meeting_url": "https://zoom.us/j/81234567890?pwd=AbC123",
+    "authenticated": true,
+    "automatic_leave": { "max_time_left_alone": 600000 }
+  }
+}

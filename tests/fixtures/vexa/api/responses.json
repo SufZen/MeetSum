@@ -1,0 +1,102 @@
+{
+  "_synthetic": true,
+  "_note": "Built from the documented Vexa v0.12.28 shapes (docs.vexa.ai, 2026-10-13). POST /bots, the recordings list and the webhook body are undocumented; re-record against a real gateway during C1 (scripts/bot-simulate.ts --record).",
+  "botCreated": {
+    "id": 4242,
+    "platform": "google_meet",
+    "native_meeting_id": "abc-defg-hij",
+    "status": "requested",
+    "bot_container_id": "vexa-bot-4242",
+    "start_time": null,
+    "data": {}
+  },
+  "botCreatedNested": {
+    "meeting": { "id": "4343", "status": "requested" },
+    "message": "Bot requested"
+  },
+  "botStopping": { "status": "stopping", "meeting_id": 4242, "message": "Bot stop requested" },
+  "meetingCompleted": {
+    "id": 4242,
+    "platform": "google_meet",
+    "native_meeting_id": "abc-defg-hij",
+    "status": "completed",
+    "start_time": "2026-10-14T09:00:12Z",
+    "end_time": "2026-10-14T09:47:03Z",
+    "constructed_meeting_url": "https://meet.google.com/abc-defg-hij",
+    "recordings": [
+      {
+        "id": "rec_77",
+        "status": "completed",
+        "created_at": "2026-10-14T09:00:15Z",
+        "media_files": [
+          {
+            "id": "media_91",
+            "type": "audio",
+            "format": "webm",
+            "content_type": "audio/webm",
+            "file_size_bytes": 1843200,
+            "duration_seconds": 2808.4
+          }
+        ]
+      }
+    ],
+    "data": {
+      "completion_reason": "left_alone",
+      "service_provenance": {
+        "bot_admitted_at": "2026-10-14T09:00:40Z",
+        "bot_departed_at": "2026-10-14T09:47:01Z",
+        "bot_outcome": "served",
+        "transcription_provider": "none",
+        "lifecycle_contract_version": 2
+      }
+    }
+  },
+  "botsStatusV010": {
+    "running_bots": [
+      { "platform": "zoom", "native_meeting_id": "81234567890", "meeting_id": 99, "status": "active" },
+      { "platform": "google_meet", "native_meeting_id": "abc-defg-hij", "meeting_id": 4242, "status": "awaiting_admission" }
+    ]
+  },
+  "botsStatusV012": {
+    "running": [
+      { "platform": "teams", "native_meeting_id": "9384756123456", "id": "5151", "status": "active" }
+    ],
+    "count": 1
+  },
+  "recordingMasterSameOrigin": {
+    "raw_url": "http://vexa-gateway:8056/recordings/rec_77/media/media_91/raw",
+    "media_id": "media_91"
+  },
+  "recordingMasterOffOrigin": {
+    "raw_url": "https://storage.example.com/vexa-recordings/rec_77.webm?X-Amz-Signature=abc123",
+    "media_id": "media_91"
+  },
+  "transcript": {
+    "id": 4242,
+    "segments": [
+      {
+        "segment_id": "seg-1",
+        "speaker": "Dana Levi",
+        "text": "שלום לכולם",
+        "start": 1.2,
+        "end": 3.4,
+        "absolute_start_time": "2026-10-14T09:00:41.200Z",
+        "language": "he",
+        "completed": true,
+        "confidence": 0.91,
+        "words": [{ "word": "שלום", "start": 1.2, "end": 1.9, "probability": 0.95 }]
+      },
+      { "speaker": "Yossi", "text": "hi", "start": 4.0, "end": 4.6, "language": "en", "completed": false }
+    ]
+  },
+  "webhook": {
+    "webhook_url": "https://meetsum.example/api/integrations/vexa/webhook",
+    "webhook_events": { "meeting.status_change": true, "meeting.completed": true, "bot.failed": true, "meeting.started": true },
+    "webhook_secret": "whsec_should_never_leak_0123456789abcdef"
+  },
+  "errorConcurrency": { "detail": "Maximum concurrent bots limit reached (2)" },
+  "errorAlreadyInMeeting": { "detail": "A bot is already active in this meeting" },
+  "errorValidation": { "detail": [{ "loc": ["body", "password"], "msg": "extra fields not permitted", "type": "value_error.extra" }] },
+  "errorNoStt": { "detail": "transcribe_enabled requires TRANSCRIPTION_SERVICE_URL to be configured" },
+  "errorAuthSession": { "detail": "auth_session_missing: bot browser profile is signed out" }
+}
