@@ -946,6 +946,12 @@ export type MeetingRepository = {
     meetingId: string,
     patch: { revoked?: boolean; regenerate?: boolean; includedSections?: string[] }
   ) => Promise<MeetingShare>
+  /**
+   * Sets (scrypt-hashed) or clears a meeting-scope share's password (M9 B4).
+   * Changing or clearing it invalidates outstanding share-access cookies,
+   * whose MAC covers the stored hash.
+   */
+  updateMeetingSharePassword: (shareId: string, password: string | null) => Promise<MeetingShare>
   getShareByToken: (
     token: string
   ) => Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined>
@@ -2821,7 +2827,7 @@ export function createInMemoryMeetingRepository(
 
       const now = new Date().toISOString()
       const passwordHash = input.password
-        ? (await import("@/lib/auth/api-keys")).createApiKeyHash(input.password)
+        ? await (await import("@/lib/sharing/share-password")).hashSharePassword(input.password)
         : undefined
       const share: MeetingShare = {
         id: createId("share"),
@@ -2902,6 +2908,22 @@ export function createInMemoryMeetingRepository(
       }
 
       shares.set(existing.id, updated)
+      return updated
+    },
+
+    async updateMeetingSharePassword(shareId, password): Promise<MeetingShare> {
+      const existing = shares.get(shareId)
+
+      if (!existing || !isMeetingScopeShare(existing)) throw new Error(`Share not found: ${shareId}`)
+
+      requireVisibleMeeting(existing.meetingId)
+
+      const passwordHash = password
+        ? await (await import("@/lib/sharing/share-password")).hashSharePassword(password)
+        : undefined
+      const updated: MeetingShare = { ...existing, passwordHash, updatedAt: new Date().toISOString() }
+
+      shares.set(shareId, updated)
       return updated
     },
 

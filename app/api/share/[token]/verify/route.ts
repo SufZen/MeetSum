@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { verifyApiKey } from "@/lib/auth/api-keys"
+import { verifySharePassword } from "@/lib/sharing/share-password"
 import { withPublicRoute } from "@/lib/auth/authz"
 import { getSessionSecret } from "@/lib/auth/session"
 import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
@@ -87,7 +87,7 @@ export const POST = withPublicRoute<{ token: string }>(
 
     const password = await readPassword(request, form)
     const isValid =
-      Boolean(password) && verifyApiKey(password, [share.passwordHash])
+      Boolean(password) && (await verifySharePassword(password, share.passwordHash))
 
     if (!isValid) {
       if (form) return redirectToShare(token, "invalid")

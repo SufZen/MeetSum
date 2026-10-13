@@ -238,9 +238,9 @@ describe("API route authz coverage", () => {
       "analytics/overview GET": "meeting:read",
       "onboarding GET": "workspace:read",
       "onboarding POST": "workspace:read",
-      // M4 guard (+ canManageMeeting in the handler). The M9 map says meeting:write for the
-      // password PATCH; Package B flips the route and this row together (orchestrator-approved).
-      "meetings/[id]/share PATCH": "meeting:read",
+      // M9 B4: the share PATCH also sets the link password (+ canManageMeeting in the handler,
+      // `exports` rate limit). Flipped from M4's meeting:read (orchestrator-approved exception).
+      "meetings/[id]/share PATCH": "meeting:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(

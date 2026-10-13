@@ -261,6 +261,7 @@ const invocations: Record<
   createMeetingShare: (repo) => repo.createMeetingShare({ meetingId: "meet_1" }),
   updateMeetingShare: (repo) =>
     repo.updateMeetingShare("meet_1", { includedSections: ["summary"] }),
+  updateMeetingSharePassword: (repo) => repo.updateMeetingSharePassword("share_1", null),
   getShareByToken: (repo) => repo.getShareByToken("tok_1"),
   updateMeetingVisibility: (repo) =>
     repo.updateMeetingVisibility("meet_1", "workspace"),

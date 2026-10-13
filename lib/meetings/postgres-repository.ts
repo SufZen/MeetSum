@@ -67,6 +67,7 @@ import {
 } from "@/lib/meetings/transcript-edit"
 import { decodeWords, encodeWords } from "@/lib/meetings/transcript-words"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
+import { hashSharePassword } from "@/lib/sharing/share-password"
 import { DEFAULT_SHARE_SECTIONS } from "@/lib/sharing/share-sections"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
@@ -268,6 +269,8 @@ type MeetingShareRow = {
   /** M5 (022). */
   scope?: MeetingShare["scope"] | null
   clip_id?: string | null
+  /** M9 (030): `scrypt$…`, see lib/sharing/share-password.ts. */
+  password_hash?: string | null
 }
 
 type ExportRecordRow = {
@@ -571,6 +574,7 @@ function mapMeetingShare(row: MeetingShareRow): MeetingShare {
     updatedAt: toIso(row.updated_at),
     scope: row.scope ?? "meeting",
     clipId: row.clip_id ?? undefined,
+    ...(row.password_hash ? { passwordHash: row.password_hash } : {}),
   }
 }
 
@@ -1043,7 +1047,8 @@ function meetingColumns(alias = "m") {
 
 const SHARE_COLUMNS = `
   id, meeting_id, token, visibility, revoked, expires_at,
-  included_sections, created_by, created_at, updated_at, scope, clip_id
+  included_sections, created_by, created_at, updated_at, scope, clip_id,
+  password_hash
 `
 
 /**
@@ -3990,12 +3995,13 @@ export function createPostgresMeetingRepository(
 
       if (existing) return mapMeetingShare(existing)
 
+      const passwordHash = input.password ? await hashSharePassword(input.password) : null
       const result = await client.query(
         `
           insert into meeting_shares (
-            id, meeting_id, token, included_sections, created_by
+            id, meeting_id, token, included_sections, created_by, password_hash
           )
-          values ($1, $2, $3, $4::jsonb, $5)
+          values ($1, $2, $3, $4::jsonb, $5, $6)
           returning ${SHARE_COLUMNS}
         `,
         [
@@ -4004,6 +4010,7 @@ export function createPostgresMeetingRepository(
           crypto.randomUUID().replaceAll("-", ""),
           JSON.stringify(input.includedSections ?? DEFAULT_SHARE_SECTIONS),
           input.createdBy ?? null,
+          passwordHash,
         ]
       )
 
@@ -4094,6 +4101,32 @@ export function createPostgresMeetingRepository(
       )
 
       return mapMeetingShare(result.rows[0] as MeetingShareRow)
+    },
+
+    async updateMeetingSharePassword(shareId, password): Promise<MeetingShare> {
+      const passwordHash = password ? await hashSharePassword(password) : null
+      const values: unknown[] = [shareId, passwordHash]
+      const result = await client.query(
+        `
+          update meeting_shares s
+          set password_hash = $2, updated_at = now()
+          from meetings m
+          where s.id = $1
+            and s.scope = 'meeting'
+            and m.id = s.meeting_id
+            and ${scoped("m", values)}
+          returning ${SHARE_COLUMNS
+            .split(",")
+            .map((column) => `s.${column.trim()}`)
+            .join(", ")}
+        `,
+        values
+      )
+      const row = result.rows[0] as MeetingShareRow | undefined
+
+      if (!row) throw new Error(`Share not found: ${shareId}`)
+
+      return mapMeetingShare(row)
     },
 
     async getShareByToken(token) {
@@ -4340,6 +4373,7 @@ export function createPostgresShareLookup(client: Queryable): {
           select s.id, s.meeting_id, s.token, s.visibility, s.revoked,
                  s.expires_at, s.included_sections, s.created_by,
                  s.created_at, s.updated_at, s.scope, s.clip_id,
+                 s.password_hash,
                  m.workspace_id as meeting_workspace_id
           from meeting_shares s
           join meetings m on m.id = s.meeting_id
