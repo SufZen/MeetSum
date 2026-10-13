@@ -11,9 +11,10 @@ import type { Invitation, Membership, Workspace, WorkspaceUser } from "@/lib/wor
  * M9 (Package C): accepts a pending invitation by id for the signed-in user,
  * from the bell or `POST /api/me/invitations/[id]/accept`. The session email
  * must equal the invitation email (checked before anything changes); the
- * token is then rotated (keeping the remaining expiry) and the M2 accept
- * transaction runs unchanged; it locks the row and re-checks pending, so the
- * invitation is single-use. Accepted, revoked and expired invitations throw.
+ * store then accepts by id in one transaction that locks the row and
+ * re-checks pending, so the invitation is single-use. The emailed token is
+ * never rotated: if the accept fails, the link in the email still works.
+ * Accepted, revoked and expired invitations throw.
  */
 export async function acceptInvitationById(
   store: WorkspaceStore,
@@ -32,13 +33,11 @@ export async function acceptInvitationById(
     throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
   }
 
-  const { token } = await store.rotateInvitationToken(
-    invitation.workspaceId,
-    invitation.id,
-    Math.max(1 / 60, (Date.parse(invitation.expiresAt) - now) / 3_600_000)
-  )
-
-  return store.acceptInvitation({ token, user: input.user })
+  return store.acceptInvitationById({
+    workspaceId: invitation.workspaceId,
+    invitationId: invitation.id,
+    user: input.user,
+  })
 }
 
 /** Public origin used in invitation links. */

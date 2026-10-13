@@ -121,6 +121,16 @@ export type WorkspaceStore = {
     token: string
     user: Pick<WorkspaceUser, "id" | "email">
   }): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }>
+  /**
+   * The same accept by invitation id (the in-app bell), in one transaction
+   * that locks the row. The emailed token is left untouched, so a failed
+   * accept never invalidates the link.
+   */
+  acceptInvitationById(input: {
+    workspaceId: string
+    invitationId: string
+    user: Pick<WorkspaceUser, "id" | "email">
+  }): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }>
 
   /** Allowlist bootstrap of ws_default (lib/workspaces/bootstrap.ts). */
   ensureBootstrap(env?: NodeJS.ProcessEnv): Promise<void>
@@ -526,104 +536,127 @@ export function createInMemoryWorkspaceStore(
 
     async acceptInvitation(input) {
       const hash = hashInvitationToken(input.token)
-      const invitation = [...invitations.values()].find((item) => item.tokenHash === hash)
-      const workspace = invitation ? liveWorkspace(invitation.workspaceId) : undefined
 
-      if (!invitation || !workspace) {
-        throw new WorkspaceStoreError("not_found", "Invitation not found")
-      }
-
-      if (invitation.status === "accepted") {
-        const membership = memberships.get(membershipKey(invitation.workspaceId, input.user.id))
-
-        if (invitation.acceptedByUserId === input.user.id && membership) {
-          return {
-            membership,
-            workspace: publicWorkspace(workspace),
-            invitation: publicInvitation(invitation),
-          }
-        }
-
-        throw new WorkspaceStoreError("invitation_invalid", "Invitation was already used")
-      }
-
-      if (effectiveStatus(invitation.status, invitation.expiresAt) !== "pending") {
-        throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
-      }
-      if (normalizeEmail(input.user.email) !== invitation.email) {
-        throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
-      }
-
-      const membership = upsertMembership(
-        {
-          workspaceId: invitation.workspaceId,
-          userId: input.user.id,
-          role: invitation.role,
-          ...(invitation.invitedByUserId ? { invitedByUserId: invitation.invitedByUserId } : {}),
-        },
-        false
+      return acceptMemoryInvitation(
+        [...invitations.values()].find((item) => item.tokenHash === hash),
+        input
       )
-      const stamp = nowIso()
-      const accepted: MemoryInvitation = {
-        ...invitation,
-        status: "accepted",
-        acceptedByUserId: input.user.id,
-        acceptedAt: stamp,
-        updatedAt: stamp,
-      }
+    },
 
-      invitations.set(invitation.id, accepted)
-      await store.setDefaultWorkspace(input.user.id, invitation.workspaceId)
+    async acceptInvitationById(input) {
+      const invitation = invitations.get(input.invitationId)
 
-      return {
-        membership,
-        workspace: publicWorkspace(workspace),
-        invitation: publicInvitation(accepted),
-      }
+      return acceptMemoryInvitation(
+        invitation && invitation.workspaceId === input.workspaceId ? invitation : undefined,
+        input
+      )
     },
 
     async ensureBootstrap(env = process.env) {
-      const { owner, subject, emails } = resolveBootstrapIdentities(env)
+      return ensureMemoryBootstrap(env)
+    },
+  }
 
-      if (!owner) return
+  async function acceptMemoryInvitation(
+    invitation: MemoryInvitation | undefined,
+    input: { user: Pick<WorkspaceUser, "id" | "email"> }
+  ): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }> {
+    const workspace = invitation ? liveWorkspace(invitation.workspaceId) : undefined
 
-      if (!workspaces.has(DEFAULT_WORKSPACE_ID)) {
-        workspaces.set(DEFAULT_WORKSPACE_ID, {
-          id: DEFAULT_WORKSPACE_ID,
-          name: "MeetSum",
-          slug: "default",
-        })
-      }
+    if (!invitation || !workspace) {
+      throw new WorkspaceStoreError("not_found", "Invitation not found")
+    }
 
-      const ids: Record<string, string> = {}
+    if (invitation.status === "accepted") {
+      const membership = memberships.get(membershipKey(invitation.workspaceId, input.user.id))
 
-      for (const email of emails) ids[email] = (await store.upsertUser({ email })).id
-
-      if (ownerCount(DEFAULT_WORKSPACE_ID) === 0) {
-        upsertMembership(
-          { workspaceId: DEFAULT_WORKSPACE_ID, userId: ids[owner], role: "owner" },
-          true
-        )
-      }
-
-      for (const email of emails) {
-        upsertMembership(
-          { workspaceId: DEFAULT_WORKSPACE_ID, userId: ids[email], role: "admin" },
-          false
-        )
-        const user = users.get(ids[email])
-
-        if (user && !user.defaultWorkspaceId) {
-          users.set(user.id, { ...user, defaultWorkspaceId: DEFAULT_WORKSPACE_ID })
+      if (invitation.acceptedByUserId === input.user.id && membership) {
+        return {
+          membership,
+          workspace: publicWorkspace(workspace),
+          invitation: publicInvitation(invitation),
         }
       }
 
-      const workspace = workspaces.get(DEFAULT_WORKSPACE_ID)
+      throw new WorkspaceStoreError("invitation_invalid", "Invitation was already used")
+    }
 
-      if (subject && workspace && !workspace.googleSubject) {
-        workspaces.set(DEFAULT_WORKSPACE_ID, { ...workspace, googleSubject: subject })
+    if (effectiveStatus(invitation.status, invitation.expiresAt) !== "pending") {
+      throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
+    }
+    if (normalizeEmail(input.user.email) !== invitation.email) {
+      throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
+    }
+
+    const membership = upsertMembership(
+      {
+        workspaceId: invitation.workspaceId,
+        userId: input.user.id,
+        role: invitation.role,
+        ...(invitation.invitedByUserId ? { invitedByUserId: invitation.invitedByUserId } : {}),
+      },
+      false
+    )
+    const stamp = nowIso()
+    const accepted: MemoryInvitation = {
+      ...invitation,
+      status: "accepted",
+      acceptedByUserId: input.user.id,
+      acceptedAt: stamp,
+      updatedAt: stamp,
+    }
+
+    invitations.set(invitation.id, accepted)
+    await store.setDefaultWorkspace(input.user.id, invitation.workspaceId)
+
+    return {
+      membership,
+      workspace: publicWorkspace(workspace),
+      invitation: publicInvitation(accepted),
+    }
+  }
+
+  async function ensureMemoryBootstrap(env: NodeJS.ProcessEnv) {
+    const { owner, subject, emails } = resolveBootstrapIdentities(env)
+
+    if (!owner) return
+
+    if (!workspaces.has(DEFAULT_WORKSPACE_ID)) {
+      workspaces.set(DEFAULT_WORKSPACE_ID, {
+        id: DEFAULT_WORKSPACE_ID,
+        name: "MeetSum",
+        slug: "default",
+      })
+    }
+
+    const ids: Record<string, string> = {}
+
+    for (const email of emails) ids[email] = (await store.upsertUser({ email })).id
+
+    if (ownerCount(DEFAULT_WORKSPACE_ID) === 0) {
+      upsertMembership(
+        { workspaceId: DEFAULT_WORKSPACE_ID, userId: ids[owner], role: "owner" },
+        true
+      )
+    }
+
+    for (const email of emails) {
+      upsertMembership(
+        { workspaceId: DEFAULT_WORKSPACE_ID, userId: ids[email], role: "admin" },
+        false
+      )
+      const user = users.get(ids[email])
+
+      if (user && !user.defaultWorkspaceId) {
+        users.set(user.id, { ...user, defaultWorkspaceId: DEFAULT_WORKSPACE_ID })
       }
-    },
+    }
+
+    const workspace = workspaces.get(DEFAULT_WORKSPACE_ID)
+
+    if (subject && workspace && !workspace.googleSubject) {
+      workspaces.set(DEFAULT_WORKSPACE_ID, { ...workspace, googleSubject: subject })
+    }
   }
 
   return store
@@ -1142,76 +1175,103 @@ export function createPostgresWorkspaceStore(db: WorkspaceDb): WorkspaceStore {
           client
         )
 
-        if (!row) throw new WorkspaceStoreError("not_found", "Invitation not found")
+        return acceptLockedInvitation(client, row, input.user)
+      })
+    },
 
-        const invitation = mapInvitation(row)
-        const workspace = mapWorkspace(row, "w_")
-
-        if (invitation.status === "accepted") {
-          const existing = await first(
-            `select * from memberships where workspace_id = $1 and user_id = $2`,
-            [invitation.workspaceId, input.user.id],
-            client
-          )
-
-          if (invitation.acceptedByUserId === input.user.id && existing) {
-            return { membership: mapMembership(existing), workspace, invitation }
-          }
-
-          throw new WorkspaceStoreError("invitation_invalid", "Invitation was already used")
-        }
-
-        if (invitation.status !== "pending") {
-          throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
-        }
-        if (normalizeEmail(input.user.email) !== normalizeEmail(invitation.email)) {
-          throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
-        }
-
-        // Never downgrade an existing membership.
-        await client.query(
-          `insert into memberships (workspace_id, user_id, role, invited_by_user_id)
-           values ($1, $2, $3, $4)
-           on conflict (workspace_id, user_id) do nothing`,
-          [
-            invitation.workspaceId,
-            input.user.id,
-            invitation.role,
-            invitation.invitedByUserId ?? null,
-          ]
-        )
-
-        const membership = await first(
-          `select * from memberships where workspace_id = $1 and user_id = $2`,
-          [invitation.workspaceId, input.user.id],
-          client
-        )
-        const accepted = await first(
-          `update invitations i
-           set status = 'accepted', accepted_by_user_id = $2, accepted_at = now(),
-             updated_at = now()
-           where i.id = $1
-           returning ${INVITATION_COLUMNS}`,
-          [invitation.id, input.user.id],
+    async acceptInvitationById(input) {
+      return withTransaction(db, async (client) => {
+        const row = await first(
+          `select ${INVITATION_COLUMNS}, ${LIVE_WORKSPACE_COLUMNS}
+           from invitations i
+           join workspaces w on w.id = i.workspace_id and w.deleted_at is null
+           where i.id = $1 and i.workspace_id = $2
+           for update of i`,
+          [input.invitationId, input.workspaceId],
           client
         )
 
-        await client.query(
-          `update users set default_workspace_id = $2, updated_at = now() where id = $1`,
-          [input.user.id, invitation.workspaceId]
-        )
-
-        return {
-          membership: mapMembership(membership as Row),
-          workspace,
-          invitation: mapInvitation(accepted as Row),
-        }
+        return acceptLockedInvitation(client, row, input.user)
       })
     },
 
     async ensureBootstrap(env = process.env) {
       await ensureBootstrapWorkspace(db, env)
     },
+  }
+
+  /** The accept itself, on an invitation row locked `for update` in `client`'s transaction. */
+  async function acceptLockedInvitation(
+    client: Queryable,
+    row: Row | undefined,
+    user: Pick<WorkspaceUser, "id" | "email">
+  ): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }> {
+    const input = { user }
+
+    if (!row) throw new WorkspaceStoreError("not_found", "Invitation not found")
+
+    const invitation = mapInvitation(row)
+    const workspace = mapWorkspace(row, "w_")
+
+    if (invitation.status === "accepted") {
+      const existing = await first(
+        `select * from memberships where workspace_id = $1 and user_id = $2`,
+        [invitation.workspaceId, input.user.id],
+        client
+      )
+
+      if (invitation.acceptedByUserId === input.user.id && existing) {
+        return { membership: mapMembership(existing), workspace, invitation }
+      }
+
+      throw new WorkspaceStoreError("invitation_invalid", "Invitation was already used")
+    }
+
+    if (invitation.status !== "pending") {
+      throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
+    }
+    if (normalizeEmail(input.user.email) !== normalizeEmail(invitation.email)) {
+      throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
+    }
+
+    // Never downgrade an existing membership.
+    await client.query(
+      `insert into memberships (workspace_id, user_id, role, invited_by_user_id)
+       values ($1, $2, $3, $4)
+       on conflict (workspace_id, user_id) do nothing`,
+      [
+        invitation.workspaceId,
+        input.user.id,
+        invitation.role,
+        invitation.invitedByUserId ?? null,
+      ]
+    )
+
+    const membership = await first(
+      `select * from memberships where workspace_id = $1 and user_id = $2`,
+      [invitation.workspaceId, input.user.id],
+      client
+    )
+    const accepted = await first(
+      `update invitations i
+       set status = 'accepted', accepted_by_user_id = $2, accepted_at = now(),
+         updated_at = now()
+       where i.id = $1
+       returning ${INVITATION_COLUMNS}`,
+      [invitation.id, input.user.id],
+      client
+    )
+
+    await client.query(
+      `update users set default_workspace_id = $2, updated_at = now() where id = $1`,
+      [input.user.id, invitation.workspaceId]
+    )
+
+    return {
+      membership: mapMembership(membership as Row),
+      workspace,
+      invitation: mapInvitation(accepted as Row),
+    }
   }
 
   return store

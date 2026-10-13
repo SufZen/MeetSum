@@ -197,6 +197,23 @@ for (const [name, make] of variants) {
       expect(await (await listRequest()).json()).toEqual({ invitations: [] })
     })
 
+    it("accepts by id atomically without rotating the emailed token", async () => {
+      const rotate = vi.spyOn(fx.store, "rotateInvitationToken")
+      const failing = vi.spyOn(fx.store, "acceptInvitationById").mockRejectedValueOnce(new Error("db down"))
+
+      await expect(
+        acceptInvitationById(fx.store, { workspaceId: fx.workspaceId, invitationId: fx.invitationId, user: fx.alice })
+      ).rejects.toThrow("db down")
+      // The failed accept left the emailed link working.
+      expect((await fx.store.findInvitationByToken(fx.token))?.invitation.status).toBe("pending")
+
+      failing.mockRestore()
+      await acceptInvitationById(fx.store, { workspaceId: fx.workspaceId, invitationId: fx.invitationId, user: fx.alice })
+      expect((await fx.store.getMembership(fx.workspaceId, fx.alice.id))?.role).toBe("member")
+      expect(rotate).not.toHaveBeenCalled()
+      rotate.mockRestore()
+    })
+
     it("rejects a revoked invitation", async () => {
       await fx.store.revokeInvitation(fx.workspaceId, fx.invitationId)
       session = { user: fx.alice, memberships: [] }
