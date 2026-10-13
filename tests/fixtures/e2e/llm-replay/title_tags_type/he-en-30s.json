@@ -1,0 +1,10 @@
+{
+  "fixtureId": "he-en-30s",
+  "marker": "הוחלט להגדיל את תקציב השיווק",
+  "output": {
+    "title": "סקירת תקציב השיווק לרבעון הרביעי",
+    "meetingType": "general",
+    "topics": ["תקציב שיווק", "תחזית", "חוזה ספק"],
+    "tags": ["finance", "mixed-language"]
+  }
+}
