@@ -41,6 +41,7 @@ const TERMINAL_SQL = TERMINAL_BOT_STATUSES.map((status) => `'${status}'`).join("
 
 const SESSION_COLUMNS: Record<string, string> = {
   meetingId: "meeting_id",
+  origin: "origin",
   meetingUrlRedacted: "meeting_url_redacted",
   passcodeEnc: "passcode_enc",
   teamsBaseHost: "teams_base_host",

@@ -471,7 +471,11 @@ describe("/api/meetings/[id]/bot", () => {
       status: "scheduled",
       dispatchRev: 1,
       statusReason: null,
+      // The user's explicit request now: calendar polls must not cancel it,
+      // and its dispatch window runs from this request.
+      origin: "meeting_request",
     })
+    expect(Date.now() - Date.parse(store.sessions.get(optedOut.id)!.requestedAt!)).toBeLessThan(5_000)
     expect(mocks.scheduleDispatch).toHaveBeenCalledWith(expect.objectContaining({ id: optedOut.id, dispatchRev: 1 }))
     expect(store.sessions.size).toBe(1)
   })

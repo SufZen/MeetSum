@@ -194,6 +194,9 @@ async function cancelScheduled(
   session: BotSessionRecord,
   reason: BotStatusReason
 ): Promise<SyncOutcome> {
+  // Only rule-made sessions are the calendar's to cancel; a user's request never is.
+  if (session.origin !== "calendar_rule") return "unchanged"
+
   const result = await d.store.transition(session.id, {
     status: "cancelled",
     reason,

@@ -179,6 +179,29 @@ describe("syncCalendarBotSession", () => {
     expect(queue.jobs).toHaveLength(1)
   })
 
+  it("a reopened opt-out is the user's request: later polls and rule changes never cancel it", async () => {
+    let current = rules
+    const { store, queue, deps } = setup(() => current)
+
+    await syncCalendarBotSession(input(calendarEvent()), deps)
+
+    const session = (await store.findByCalendarEvent(WS, "cal_1"))!
+
+    await store.transition(session.id, { status: "cancelled", reason: "user_opt_out", at: new Date(), source: "api", workspaceId: WS })
+    // "Send bot" on the meeting reopens the opt-out as the user's own request.
+    await store.update(
+      session.id,
+      { status: "scheduled", statusReason: null, origin: "meeting_request", dispatchRev: 1 },
+      { workspaceId: WS, expectedRev: 0 }
+    )
+
+    current = { ...rules, autoJoin: "off" }
+    expect(await syncCalendarBotSession(input(calendarEvent()), deps)).toBe("unchanged")
+    expect(await cancelCalendarBotSession({ workspaceId: WS, calendarEventId: "cal_1", reason: "event_cancelled" }, deps)).toBe("unchanged")
+    expect(await store.get(session.id, { workspaceId: WS })).toMatchObject({ status: "scheduled", origin: "meeting_request" })
+    expect(queue.port.remove).not.toHaveBeenCalledWith(`bot.dispatch:${session.id}:1`)
+  })
+
   it("leaves live sessions alone", async () => {
     const { store, deps } = setup()
 

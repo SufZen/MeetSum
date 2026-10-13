@@ -162,6 +162,31 @@ describe("runDispatch", () => {
     expect(provider.requestBot).toHaveBeenCalledTimes(1)
   })
 
+  it("a reopened calendar opt-out whose meeting started an hour ago dispatches from the reopen time", async () => {
+    vi.setSystemTime(new Date("2026-10-13T12:00:00.000Z"))
+
+    const { store, provider, deps } = setup()
+    const session = await store.create(sessionInput())
+
+    await store.transition(session.id, { status: "cancelled", reason: "user_opt_out", at: new Date(), source: "api", workspaceId: "ws_a" })
+    vi.setSystemTime(new Date("2026-10-14T10:00:00.000Z"))
+    await store.update(
+      session.id,
+      {
+        status: "scheduled",
+        statusReason: null,
+        origin: "meeting_request",
+        requestedAt: "2026-10-14T10:00:00.000Z",
+        dispatchRev: 1,
+        dispatchAt: "2026-10-14T10:00:00.000Z",
+      },
+      { workspaceId: "ws_a", expectedRev: 0 }
+    )
+
+    expect((await runDispatch({ sessionId: session.id, rev: 1, workspaceId: "ws_a" }, deps)).outcome).toBe("requested")
+    expect(provider.requestBot).toHaveBeenCalledTimes(1)
+  })
+
   it("a manual request ignores a past calendar end; it expires late-join minutes after the request", async () => {
     vi.setSystemTime(new Date("2026-10-14T10:30:00.000Z"))
 

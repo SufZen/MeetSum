@@ -449,11 +449,15 @@ export async function sendBotToMeeting(
   try {
     if (existing && existing.status === "cancelled" && existing.statusReason === "user_opt_out") {
       // Reopen the user's opt-out; the bumped rev voids any old dispatch job.
+      // It is now the user's explicit request: calendar polls must not cancel
+      // it, and its dispatch window runs from this request.
       session = await store().update(
         existing.id,
         {
           status: "scheduled",
           statusReason: null,
+          origin: "meeting_request",
+          requestedAt: now.toISOString(),
           dispatchRev: existing.dispatchRev + 1,
           dispatchAt,
           meetingUrlRedacted: link.redactedUrl,

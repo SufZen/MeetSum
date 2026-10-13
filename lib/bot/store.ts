@@ -115,6 +115,11 @@ export type BotSessionPatch = Partial<
   >
 > & {
   /**
+   * Reopening a calendar opt-out turns it into the user's own request
+   * (`meeting_request`), which calendar sync never cancels.
+   */
+  origin?: BotOrigin
+  /**
    * Allowed only for scheduled-session bookkeeping (reopen an opt-out, revert
    * a capacity-refused `requested` to `scheduled`); never bypasses the rank
    * guard for Vexa-driven changes.
