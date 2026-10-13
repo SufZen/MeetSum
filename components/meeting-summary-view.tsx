@@ -1,8 +1,16 @@
 "use client"
 
-import type { ReactNode } from "react"
+/**
+ * Summary tab (M5 D7, Cadence §7 and §10). Order: Overview → Action items →
+ * Decisions → Open questions → template sections, risks and next steps →
+ * Chapters. Model-written lines carry a provenance hairline in the colours
+ * of the speakers they cite and citation chips only for refs that resolve to
+ * real segments; edited items are the user's. Paragraph direction comes from
+ * the meeting's primary language, never `auto`.
+ */
+import { useMemo, useState, type ReactNode } from "react"
 import {
-  CheckCircle2Icon,
+  AlertTriangleIcon,
   CopyIcon,
   FileAudioIcon,
   PlayCircleIcon,
@@ -11,11 +19,25 @@ import {
   UploadIcon,
 } from "lucide-react"
 
+import { ChapterList } from "@/components/intelligence/chapter-list"
+import {
+  SummaryLine,
+  useCitationColors,
+  useResolvedRefs,
+} from "@/components/intelligence/summary-line"
+import { TemplatePicker } from "@/components/intelligence/template-picker"
+import { requestJson } from "@/components/intelligence/use-json"
 import { PlayerCitation } from "@/components/player/player-citation"
+import type { SpeakerDirectory } from "@/components/player/speaker-directory"
+import { directionForLanguage } from "@/components/speaker-display"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { AiProvenance } from "@/components/ui/meeting-atoms"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { SummaryItem, SummaryItemKind, SummaryItemRef } from "@/lib/intelligence"
+import { normalizeIntelligence } from "@/lib/intelligence/normalize"
 import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
 import { formatTimestamp } from "@/lib/meetings/duration"
 import type { ActionItem, JobRecord, MeetingRecord } from "@/lib/meetings/repository"
@@ -25,22 +47,19 @@ function priorityLabel(priority: NonNullable<ActionItem["priority"]>) {
   return priority.charAt(0).toUpperCase() + priority.slice(1)
 }
 
-function dueDateLabel(dueDate: string) {
-  const parsed = new Date(dueDate)
+/** `YYYY-MM-DD` / ISO → `DD.MM.YYYY` (Hebrew business format). */
+function dueLabel(item: ActionItem): string | undefined {
+  const value = item.dueOn ?? item.dueDate
+  const match = value ? /^(\d{4})-(\d{2})-(\d{2})/.exec(value) : null
 
-  return Number.isNaN(parsed.getTime())
-    ? dueDate
-    : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(parsed)
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : undefined
 }
 
 function priorityClass(priority?: ActionItem["priority"]) {
-  if (priority === "urgent" || priority === "high") {
-    return "border-warn bg-warn-soft text-warn-text"
-  }
-  if (priority === "low") {
-    return "border-ok bg-brand-soft text-brand-text"
-  }
-  return "border-warn bg-warn-soft text-warn-text"
+  if (priority === "urgent" || priority === "high") return "bg-warn-soft text-warn-text"
+  if (priority === "low") return "bg-surface-3 text-fg-2"
+
+  return "bg-surface-3 text-fg-2"
 }
 
 function readinessBadgeClass(status: ReturnType<typeof getMeetingCaptureReadiness>["status"]) {
@@ -61,6 +80,32 @@ function checkDotClass(state: "ready" | "pending" | "missing") {
   return "bg-fg-3/40"
 }
 
+function actionItemRefs(item: ActionItem): SummaryItemRef[] {
+  return item.sourceStartMs === undefined && !item.sourceSegmentId
+    ? []
+    : [{ segmentId: item.sourceSegmentId ?? "", startMs: item.sourceStartMs ?? 0 }]
+}
+
+function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      {action}
+    </div>
+  )
+}
+
+function CopyButton({ label, text, onCopy }: { label: string; text: string; onCopy: (text: string, label: string) => void }) {
+  return (
+    <Button variant="ghost" size="sm" className="h-8 text-muted-foreground" onClick={() => onCopy(text, label)}>
+      <CopyIcon data-icon="inline-start" className="size-4" />
+      {label}
+    </Button>
+  )
+}
+
+type RegenerateLanguage = "" | "he" | "en"
+
 export function MeetingSummaryView({
   dictionary,
   meeting,
@@ -74,6 +119,11 @@ export function MeetingSummaryView({
   onSyncMeetArtifacts,
   onCopyText,
   talkTime,
+  directory,
+  locale,
+  canWrite = false,
+  onRegenerated,
+  onTemplateChanged,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
@@ -86,12 +136,38 @@ export function MeetingSummaryView({
   onFindDriveRecordings: () => void
   onSyncMeetArtifacts: () => void
   onCopyText: (text: string, label: string) => void
-  /** Talk-time panel slot (shown under the overview). */
+  /** Talk-time panel slot (shown after the chapters). */
   talkTime?: ReactNode
+  /** Speaker colours for provenance hairlines. */
+  directory?: SpeakerDirectory
+  locale?: string
+  /** `meeting:write`: template picker and Regenerate. */
+  canWrite?: boolean
+  /** A regeneration was queued (refresh jobs). */
+  onRegenerated?: () => void
+  onTemplateChanged?: (templateKey: string | null) => void
 }) {
-  const actionItems = meeting.summary?.actionItems ?? []
-  const quotes = meeting.intelligence?.timestampedQuotes ?? []
-  const commitments = meeting.intelligence?.commitments ?? []
+  const t = dictionary
+  const intelligence = useMemo(
+    () => (meeting.intelligence ? normalizeIntelligence(meeting.intelligence) : undefined),
+    [meeting.intelligence]
+  )
+  const items = useMemo(() => intelligence?.items ?? [], [intelligence])
+  const byKind = (kind: SummaryItemKind) => items.filter((item) => item.kind === kind)
+  const actionItems = meeting.summary?.actionItems ?? intelligence?.actionItems ?? []
+  const quotes = intelligence?.timestampedQuotes ?? []
+  const generation = intelligence?.generation
+  const summaryLanguage =
+    generation?.language ?? intelligence?.languageMetadata.primaryLanguage ?? meeting.language
+  const dir = directionForLanguage(summaryLanguage) ?? "rtl"
+  const meetingDir = directionForLanguage(meeting.languageMetadata?.primaryLanguage ?? meeting.language) ?? dir
+  const allRefs = useMemo(() => items.flatMap((item) => item.refs), [items])
+  const moments = useResolvedRefs(allRefs)
+  const sourceColors = useCitationColors(moments, directory)
+  const [regenerateLanguage, setRegenerateLanguage] = useState<RegenerateLanguage>("")
+  const [templateKey, setTemplateKey] = useState<string | null>(meeting.templateKey ?? null)
+  const [regenerateState, setRegenerateState] = useState<"idle" | "busy" | "queued" | "failed">("idle")
+
   const isUpcoming = meeting.status === "scheduled" && !meeting.summary
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
   const hasTranscript = (meeting.transcriptSegmentCount ?? meeting.transcript?.length ?? 0) > 0
@@ -102,364 +178,426 @@ export function MeetingSummaryView({
   )
   const canFullReprocess = hasMedia || hasMeetImportableArtifact
   const canProcess = hasMedia || hasTranscript || hasMeetImportableArtifact
-  const showContentGap = !meeting.summary?.overview
+  const overview = meeting.summary?.overview ?? intelligence?.overview
+  const showContentGap = !overview
   const readiness = getMeetingCaptureReadiness(meeting)
   const workStatus = getMeetingWorkStatus(meeting, jobs)
-  const latestJob = workStatus.jobId
-    ? jobs.find((job) => job.id === workStatus.jobId)
+  const latestJob = workStatus.jobId ? jobs.find((job) => job.id === workStatus.jobId) : undefined
+  const showWorkStatus = workStatus.kind === "processing" || workStatus.kind === "failed"
+  const languageMismatch = generation?.languageCheck === "failed"
+  const generatedAt = generation?.generatedAt
+    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(generation.generatedAt))
     : undefined
-  const showWorkStatus =
-    workStatus.kind === "processing" || workStatus.kind === "failed"
+
+  async function regenerate() {
+    setRegenerateState("busy")
+    try {
+      await requestJson(`/api/meetings/${encodeURIComponent(meeting.id)}/intelligence/run`, {
+        method: "POST",
+        body: {
+          ...(templateKey ? { templateKey } : {}),
+          ...(regenerateLanguage ? { language: regenerateLanguage } : {}),
+        },
+      })
+      setRegenerateState("queued")
+      onRegenerated?.()
+    } catch {
+      setRegenerateState("failed")
+    }
+  }
+
+  const itemList = (list: SummaryItem[]) =>
+    list.length ? (
+      <ul className="grid gap-0.5">
+        {list.map((item) => (
+          <SummaryLine
+            key={item.id}
+            id={item.id}
+            text={item.text}
+            refs={item.refs}
+            dir={dir}
+            meetingId={meeting.id}
+            dictionary={t}
+            directory={directory}
+          />
+        ))}
+      </ul>
+    ) : (
+      <p className="text-sm text-fg-3">{t.intelNoItems}</p>
+    )
+
+  const decisions = byKind("decision")
+  const questions = byKind("open_question")
+  const risks = byKind("risk")
+  const nextSteps = byKind("next_step")
+  const commitments = byKind("commitment")
+  const sections = intelligence?.sections ?? []
+  const chapters = intelligence?.chapters ?? []
 
   return (
     <div className="px-5 py-6 md:px-8">
-      <div className="mx-auto max-w-5xl">
-      {showWorkStatus ? (
-        <section
-          className={`mb-5 rounded-lg border p-4 text-sm leading-6 ${
-            workStatus.kind === "failed"
-              ? "border-danger/40 bg-warn-soft text-warn-text"
-              : "border-brand/30 bg-brand-soft text-brand-text"
-          }`}
-        >
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="font-semibold">{workStatus.title}</div>
-              <p className="mt-1 opacity-90">{workStatus.description}</p>
-              {workStatus.stage ? (
-                <div className="mt-2 font-mono text-xs opacity-80">
-                  {workStatus.stage}
-                  {workStatus.jobId ? ` · ${workStatus.jobId}` : ""}
-                </div>
+      <div className="mx-auto max-w-3xl">
+        {showWorkStatus ? (
+          <section
+            className={`mb-5 rounded-lg border p-4 text-sm leading-6 ${
+              workStatus.kind === "failed"
+                ? "border-danger/40 bg-warn-soft text-warn-text"
+                : "border-brand/30 bg-brand-soft text-brand-text"
+            }`}
+          >
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-semibold">{workStatus.title}</div>
+                <p className="mt-1 opacity-90">{workStatus.description}</p>
+                {workStatus.stage ? (
+                  <div className="mt-2 font-mono text-xs opacity-80">
+                    {workStatus.stage}
+                    {workStatus.jobId ? ` · ${workStatus.jobId}` : ""}
+                  </div>
+                ) : null}
+              </div>
+              {workStatus.primaryAction === "retry" && latestJob ? (
+                <Button size="sm" variant="outline" onClick={() => onRetryJob(latestJob)}>
+                  <RefreshCwIcon data-icon="inline-start" className="size-4" />
+                  Retry job
+                </Button>
               ) : null}
             </div>
-            {workStatus.primaryAction === "retry" && latestJob ? (
-              <Button size="sm" variant="outline" onClick={() => onRetryJob(latestJob)}>
-                <RefreshCwIcon data-icon="inline-start" className="size-4" />
-                Retry job
-              </Button>
-            ) : null}
-          </div>
-          {workStatus.kind === "processing" && typeof workStatus.progress === "number" ? (
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface/70">
-              <div
-                className="h-full rounded-full bg-brand"
-                style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{dictionary.overview}</h2>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-brand-text"
-              disabled={!canFullReprocess}
-              title={
-                hasMedia
-                  ? "Run the full media pipeline again"
-                  : hasMeetImportableArtifact
-                    ? "Import Google Meet recording, transcript entries, or smart notes and rerun intelligence"
-                    : "Attach a recording or sync a Meet artifact before full reprocessing"
-              }
-              onClick={() => onReprocessMeeting("full")}
-            >
-              <RefreshCwIcon data-icon="inline-start" className="size-4" />
-              {hasMeetImportableArtifact && !hasMedia
-                ? "Process from Google artifacts"
-                : "Reprocess"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-muted-foreground"
-              onClick={() =>
-                onCopyText(
-                  meeting.summary?.overview ??
-                    "No summary is available for this meeting yet.",
-                  "Overview"
-                )
-              }
-            >
-              <CopyIcon data-icon="inline-start" className="size-4" />
-              Copy
-            </Button>
-          </div>
-        </div>
-        {showContentGap ? (
-          <div className="max-w-3xl rounded-lg border border-line bg-surface-2 p-4 text-sm leading-6 text-muted-foreground">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="font-medium text-foreground">
-                {isUpcoming ? workStatus.title : "No meeting intelligence has been generated yet."}
-              </div>
-              <Badge
-                variant="outline"
-                className={`rounded-md ${readinessBadgeClass(readiness.status)}`}
-              >
-                {workStatus.title}
-              </Badge>
-            </div>
-            <p className="mt-1">
-              {isUpcoming
-                ? workStatus.description
-                : "Attach a recording, import a Google Meet artifact, or process an existing transcript to generate summary, decisions, tasks, and quotes."}
-            </p>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {readiness.checks.slice(0, 6).map((check) => (
+            {workStatus.kind === "processing" && typeof workStatus.progress === "number" ? (
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface/70">
                 <div
-                  key={check.key}
-                  className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-xs text-foreground"
+                  className="h-full rounded-full bg-brand"
+                  style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
+                />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* Overview */}
+        <section>
+          <SectionHeader
+            title={t.overview}
+            action={
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {canWrite ? (
+                  <>
+                    <TemplatePicker
+                      meetingId={meeting.id}
+                      value={templateKey}
+                      dictionary={t}
+                      locale={locale}
+                      onChange={(key) => {
+                        setTemplateKey(key)
+                        onTemplateChanged?.(key)
+                      }}
+                    />
+                    <NativeSelect
+                      size="sm"
+                      aria-label={t.intelLanguage}
+                      value={regenerateLanguage}
+                      onChange={(event) => setRegenerateLanguage(event.target.value as RegenerateLanguage)}
+                    >
+                      <NativeSelectOption value="">{t.intelLanguageAuto}</NativeSelectOption>
+                      <NativeSelectOption value="he">{t.intelLanguageHe}</NativeSelectOption>
+                      <NativeSelectOption value="en">{t.intelLanguageEn}</NativeSelectOption>
+                    </NativeSelect>
+                    <Button
+                      variant="ai"
+                      size="sm"
+                      disabled={!hasTranscript || regenerateState === "busy"}
+                      onClick={() => void regenerate()}
+                    >
+                      <RefreshCwIcon data-icon="inline-start" className="size-4" />
+                      {regenerateState === "busy" ? t.intelRegenerating : t.intelRegenerate}
+                    </Button>
+                  </>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={!canFullReprocess}
+                  onClick={() => onReprocessMeeting("full")}
                 >
-                  <span className={`size-2 rounded-full ${checkDotClass(check.state)}`} />
-                  <span className="min-w-0 truncate">{check.label}</span>
-                  <span className="ms-auto text-2xs text-muted-foreground">
-                    {check.state}
+                  <RefreshCwIcon data-icon="inline-start" className="size-4" />
+                  {hasMeetImportableArtifact && !hasMedia ? "Process from Google artifacts" : "Reprocess"}
+                </Button>
+                {overview ? <CopyButton label={t.intelCopy} text={overview} onCopy={onCopyText} /> : null}
+              </div>
+            }
+          />
+          {regenerateState === "queued" || regenerateState === "failed" ? (
+            <p role="status" className={`mb-2 text-xs ${regenerateState === "failed" ? "text-danger-text" : "text-fg-3"}`}>
+              {regenerateState === "failed" ? t.intelRegenerateFailed : t.intelRegenerateQueued}
+            </p>
+          ) : null}
+          {showContentGap ? (
+            <div className="rounded-lg border border-line bg-surface-2 p-4 text-sm leading-6 text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-medium text-foreground">
+                  {isUpcoming ? workStatus.title : "No meeting intelligence has been generated yet."}
+                </div>
+                <Badge variant="outline" className={`rounded-md ${readinessBadgeClass(readiness.status)}`}>
+                  {workStatus.title}
+                </Badge>
+              </div>
+              <p className="mt-1">
+                {isUpcoming
+                  ? workStatus.description
+                  : "Attach a recording, import a Google Meet artifact, or process an existing transcript to generate summary, decisions, tasks, and quotes."}
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {readiness.checks.slice(0, 6).map((check) => (
+                  <div
+                    key={check.key}
+                    className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-xs text-foreground"
+                  >
+                    <span className={`size-2 rounded-full ${checkDotClass(check.state)}`} />
+                    <span className="min-w-0 truncate">{check.label}</span>
+                    <span className="ms-auto text-2xs text-muted-foreground">{check.state}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {workStatus.primaryAction === "process" ? (
+                  <Button size="sm" disabled={!canProcess} onClick={onProcessMeeting}>
+                    <PlayCircleIcon data-icon="inline-start" className="size-4" />
+                    {hasMeetImportableArtifact ? "Process from Google artifacts" : "Process now"}
+                  </Button>
+                ) : null}
+                {workStatus.primaryAction === "sync_artifacts" ? (
+                  <Button size="sm" onClick={onSyncMeetArtifacts}>
+                    <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                    Sync Meet artifacts
+                  </Button>
+                ) : null}
+                <Button size="sm" variant={workStatus.primaryAction === "upload" ? "default" : "outline"} onClick={onOpenUpload}>
+                  <UploadIcon data-icon="inline-start" className="size-4" />
+                  Upload recording
+                </Button>
+                <Button size="sm" variant="outline" onClick={onFindDriveRecordings}>
+                  <FileAudioIcon data-icon="inline-start" className="size-4" />
+                  Find Drive recordings
+                </Button>
+                {workStatus.primaryAction !== "sync_artifacts" ? (
+                  <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
+                    <RadioTowerIcon data-icon="inline-start" className="size-4" />
+                    Sync Meet artifacts
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <>
+              <AiProvenance
+                state="ai"
+                dir={dir}
+                sources={sourceColors}
+                label={generatedAt ? formatMessage(t.intelAiLabelAt, { time: generatedAt }) : t.intelAiLabel}
+              >
+                <p className="leading-7">{overview}</p>
+              </AiProvenance>
+              {moments.length ? (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
+                  <span>{formatMessage(t.intelFromMoments, { n: moments.length })}</span>
+                  {moments.slice(0, 6).map((moment) => (
+                    <PlayerCitation
+                      key={moment.segmentId}
+                      segmentId={moment.segmentId}
+                      startMs={moment.startMs}
+                      source="citation"
+                      dictionary={t}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {intelligence?.topics?.length ? (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
+                  {intelligence.topics.map((topic) => (
+                    <span key={topic} dir={dir} className="rounded-sm bg-surface-3 px-2 py-0.5 text-xs text-fg-2">
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {languageMismatch ? (
+                <p role="status" className="mt-3 flex items-center gap-1.5 text-xs text-warn-text">
+                  <AlertTriangleIcon aria-hidden className="size-3.5" />
+                  {t.intelLanguageMismatch}
+                </p>
+              ) : null}
+            </>
+          )}
+        </section>
+
+        {/* Action items */}
+        <section className="mt-8">
+          <SectionHeader title={t.intelActions} />
+          {actionItems.length ? (
+            <ul className="grid gap-0.5">
+              {actionItems.map((item) => {
+                const due = dueLabel(item)
+                const owner = item.owner ?? item.ownerText
+
+                return (
+                  <SummaryLine
+                    key={item.id}
+                    id={item.id}
+                    text={item.title}
+                    refs={actionItemRefs(item)}
+                    dir={dir}
+                    meetingId={meeting.id}
+                    dictionary={t}
+                    directory={directory}
+                    targetType="action_item"
+                    edited={item.editedByUser === true || item.origin === "user"}
+                    leading={
+                      <Checkbox
+                        checked={item.status === "done"}
+                        onCheckedChange={() => onToggleActionItem(item)}
+                        className="mt-1.5"
+                        aria-label={item.title}
+                      />
+                    }
+                    meta={
+                      <>
+                        <span className="text-xs text-fg-2">
+                          {owner ? <bdi>{owner}</bdi> : t.unassigned}
+                        </span>
+                        {due ? (
+                          <span className="text-xs text-fg-3 [direction:ltr] [unicode-bidi:isolate]">
+                            {formatMessage(t.intelDue, { date: due })}
+                          </span>
+                        ) : null}
+                        {item.priority && item.priority !== "normal" ? (
+                          <span className={`rounded-full px-2 text-xs ${priorityClass(item.priority)}`}>
+                            {priorityLabel(item.priority)}
+                          </span>
+                        ) : null}
+                      </>
+                    }
+                  />
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="text-sm text-fg-3">{t.intelNoItems}</p>
+          )}
+        </section>
+
+        {/* Decisions */}
+        <section className="mt-8">
+          <SectionHeader
+            title={t.intelDecisions}
+            action={
+              decisions.length ? (
+                <CopyButton label={t.intelCopy} text={decisions.map((item) => item.text).join("\n")} onCopy={onCopyText} />
+              ) : undefined
+            }
+          />
+          {itemList(decisions)}
+        </section>
+
+        {/* Open questions */}
+        <section className="mt-8">
+          <SectionHeader title={t.intelOpenQuestions} />
+          {itemList(questions)}
+        </section>
+
+        {/* Template sections */}
+        {sections.map((section) => {
+          const sectionItems = section.itemIds.flatMap((id) => items.filter((item) => item.id === id))
+
+          return (
+            <section key={section.key} className="mt-8">
+              <SectionHeader title={section.title ?? section.key} />
+              {section.text ? (
+                <p dir={dir} className="mb-2 text-md leading-7 text-fg">
+                  {section.text}
+                </p>
+              ) : null}
+              {sectionItems.length ? itemList(sectionItems) : section.text ? null : (
+                <p className="text-sm text-fg-3">{t.intelSectionNoText}</p>
+              )}
+            </section>
+          )
+        })}
+
+        {risks.length ? (
+          <section className="mt-8">
+            <SectionHeader title={t.intelRisks} />
+            {itemList(risks)}
+          </section>
+        ) : null}
+        {nextSteps.length ? (
+          <section className="mt-8">
+            <SectionHeader title={t.intelNextSteps} />
+            {itemList(nextSteps)}
+          </section>
+        ) : null}
+        {commitments.length ? (
+          <section className="mt-8">
+            <SectionHeader title={t.intelCommitments} />
+            {itemList(commitments)}
+          </section>
+        ) : null}
+
+        {/* Chapters */}
+        {chapters.length ? (
+          <section className="mt-8">
+            <SectionHeader title={t.intelChapters} />
+            <ChapterList chapters={chapters} dir={dir} dictionary={t} />
+          </section>
+        ) : null}
+
+        {talkTime ? <div className="mt-8">{talkTime}</div> : null}
+
+        {quotes.length ? (
+          <section className="mt-8">
+            <SectionHeader
+              title={t.keyQuotesTitle}
+              action={
+                <CopyButton
+                  label={t.intelCopy}
+                  text={quotes.map((quote) => `${formatTimestamp(quote.startMs)} ${quote.speaker}: ${quote.text}`).join("\n")}
+                  onCopy={onCopyText}
+                />
+              }
+            />
+            <div className="grid gap-2">
+              {quotes.map((quote) => (
+                <div
+                  key={`${quote.segmentId}-${quote.startMs}`}
+                  className="flex items-baseline gap-3 rounded-md border border-line bg-surface px-3 py-2 text-sm"
+                >
+                  <span className="w-16 shrink-0">
+                    <PlayerCitation segmentId={quote.segmentId} startMs={quote.startMs} source="quote" dictionary={t} />
+                  </span>
+                  <span dir={meetingDir} className="min-w-0 text-muted-foreground">
+                    <bdi>{quote.speaker}</bdi>: “{quote.text}”
                   </span>
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {workStatus.primaryAction === "process" ? (
-                <Button
-                  size="sm"
-                  disabled={!canProcess}
-                  title={
-                    canProcess
-                      ? "Queue processing for this meeting"
-                      : "No recording, transcript, or importable Google Meet artifact is attached yet"
-                  }
-                  onClick={onProcessMeeting}
-                >
-                  <PlayCircleIcon data-icon="inline-start" className="size-4" />
-                  {hasMeetImportableArtifact
-                    ? "Process from Google artifacts"
-                    : "Process now"}
-                </Button>
-              ) : null}
-              {workStatus.primaryAction === "sync_artifacts" ? (
-                <Button size="sm" onClick={onSyncMeetArtifacts}>
-                  <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                  Sync Meet artifacts
-                </Button>
-              ) : null}
-              {workStatus.primaryAction === "upload" ? (
-                <Button size="sm" onClick={onOpenUpload}>
-                  <UploadIcon data-icon="inline-start" className="size-4" />
-                  Upload recording
-                </Button>
-              ) : null}
-              {workStatus.primaryAction !== "upload" ? (
-                <Button size="sm" variant="outline" onClick={onOpenUpload}>
-                  <UploadIcon data-icon="inline-start" className="size-4" />
-                  Upload recording
-                </Button>
-              ) : null}
-              <Button size="sm" variant="outline" onClick={onFindDriveRecordings}>
-                <FileAudioIcon data-icon="inline-start" className="size-4" />
-                Find Drive recordings
-              </Button>
-              {workStatus.primaryAction !== "sync_artifacts" ? (
-                <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
-                  <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                  Sync Meet artifacts
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <p className="max-w-3xl text-sm leading-7 text-foreground/80">
-            {meeting.summary?.overview ??
-              "Summary will appear after intelligence runs."}
-          </p>
-        )}
-      </section>
+          </section>
+        ) : null}
 
-      {talkTime ? <div className="mt-8 max-w-3xl">{talkTime}</div> : null}
-
-      <section className="mt-8 max-w-3xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{dictionary.decisions}</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 text-muted-foreground"
-            onClick={() =>
-              onCopyText(
-                (meeting.summary?.decisions ?? []).join("\n"),
-                "Decisions"
-              )
-            }
-          >
-            <CopyIcon data-icon="inline-start" className="size-4" />
-            Copy
-          </Button>
-        </div>
-        <div className="grid gap-2">
-          {(meeting.summary?.decisions.length
-            ? meeting.summary.decisions
-            : ["No decisions extracted yet."]).map((decision) => (
-            <div key={decision} className="flex items-start gap-3 text-sm text-foreground">
-              <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-ok-text" />
-              <span className="leading-6">{decision}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-8 max-w-5xl">
-        <h2 className="mb-3 text-lg font-semibold">{dictionary.actionItems}</h2>
-        <div className="grid gap-3">
-          {actionItems.length ? actionItems.map((item) => (
-            <div
-              key={item.id}
-              className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-transparent px-1 py-1 text-sm hover:border-line hover:bg-surface-2 md:grid-cols-[auto_minmax(0,1fr)_150px_90px_92px]"
-            >
-              <Checkbox
-                checked={item.status === "done"}
-                onCheckedChange={() => onToggleActionItem(item)}
-                className="mt-1"
-              />
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 leading-6 text-foreground">
-                <span className="min-w-0">{item.title}</span>
-                {item.sourceStartMs !== undefined ? (
-                  <PlayerCitation startMs={item.sourceStartMs} source="action_item" dictionary={dictionary} />
-                ) : null}
-              </div>
-              <div className="hidden items-center gap-2 text-muted-foreground md:flex">
-                {item.owner ? (
-                  <>
-                    <span className="grid size-6 place-items-center rounded-full bg-surface-3 text-xs font-semibold text-fg-2">
-                      {Array.from(item.owner)[0]?.toLocaleUpperCase()}
-                    </span>
-                    <bdi className="truncate">{item.owner}</bdi>
-                  </>
-                ) : (
-                  <span className="truncate">{dictionary.unassigned}</span>
-                )}
-              </div>
-              <div className="hidden text-muted-foreground md:block">
-                {item.dueDate ? dueDateLabel(item.dueDate) : null}
-              </div>
-              <div className="hidden md:block">
-                {item.priority ? (
-                  <span
-                    className={`flex h-7 w-fit items-center rounded-full border px-3 text-xs font-medium ${priorityClass(item.priority)}`}
-                  >
-                    {priorityLabel(item.priority)}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          )) : (
-            <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
-              No action items extracted yet.
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="mt-8 grid gap-4 lg:grid-cols-2">
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Risks & Blockers</h2>
-          <div className="grid gap-2">
-            {(meeting.intelligence?.risks.length
-              ? meeting.intelligence.risks
-              : ["No risks identified yet."]).map((risk) => (
-              <div key={risk} className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm leading-6 text-foreground/80">
-                {risk}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">Open Questions</h2>
-          <div className="grid gap-2">
-            {(meeting.intelligence?.openQuestions.length
-              ? meeting.intelligence.openQuestions
-              : ["No open questions extracted yet."]).map((question) => (
-              <div key={question} className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm leading-6 text-foreground/80">
-                {question}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {commitments.length ? (
-        <section className="mt-8 max-w-3xl">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Commitments</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-muted-foreground"
-              onClick={() => onCopyText(commitments.join("\n"), "Commitments")}
-            >
-              <CopyIcon data-icon="inline-start" className="size-4" />
-              Copy
-            </Button>
-          </div>
-          <div className="grid gap-2">
-            {commitments.map((commitment) => (
-              <div key={commitment} className="flex items-start gap-3 text-sm text-foreground">
-                <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-brand-text" />
-                <span className="leading-6">{commitment}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {quotes.length ? (
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{dictionary.keyQuotesTitle}</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-muted-foreground"
-              onClick={() =>
-                onCopyText(
-                  quotes
-                    .map(
-                      (quote) =>
-                        `${formatTimestamp(quote.startMs)} ${quote.speaker}: ${quote.text}`
-                    )
-                    .join("\n"),
-                  "Key quotes"
-                )
-              }
-            >
-              <CopyIcon data-icon="inline-start" className="size-4" />
-              Copy
-            </Button>
-          </div>
-          <div className="grid gap-2">
-            {quotes.map((quote) => (
-              <div
-                key={`${quote.segmentId}-${quote.startMs}`}
-                className="flex items-baseline gap-3 rounded-md border border-line bg-surface px-3 py-2 text-sm"
-              >
-                <span className="w-16 shrink-0">
-                  <PlayerCitation
-                    segmentId={quote.segmentId}
-                    startMs={quote.startMs}
-                    source="quote"
-                    dictionary={dictionary}
-                  />
-                </span>
-                <span className="min-w-0 text-muted-foreground">
-                  <bdi>{quote.speaker}</bdi>: “{quote.text}”
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+        {generation ? (
+          <footer className="mt-10 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-xs text-fg-3">
+            <span className="font-mono [direction:ltr] [unicode-bidi:isolate]">
+              {formatMessage(t.intelGeneratedBy, { provider: generation.provider, model: generation.model ?? "—" })}
+            </span>
+            {generation.language ? <span>{generation.language}</span> : null}
+            {generation.templateKey ? <span>{`${t.intelTemplate}: ${generation.templateKey}`}</span> : null}
+            <span className="font-mono [direction:ltr] [unicode-bidi:isolate]">
+              {typeof generation.costUsd === "number" ? `$${generation.costUsd.toFixed(4)}` : t.intelCostUnknown}
+            </span>
+            {generation.fallbackUsed || generation.provider === "heuristic" ? (
+              <span className="text-warn-text">{t.intelFallback}</span>
+            ) : null}
+          </footer>
+        ) : null}
       </div>
     </div>
   )

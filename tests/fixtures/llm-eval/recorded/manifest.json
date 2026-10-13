@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "recordedAt": "2026-10-13T00:00:00.000Z",
+  "baseline": "gemini:gemini-3.5-flash-lite",
+  "candidates": [
+    "gemini:gemini-3.8-flash",
+    "gemini:gemini-3.5-flash-lite"
+  ],
+  "judges": [
+    "gemini:gemini-3.5-pro"
+  ]
+}
