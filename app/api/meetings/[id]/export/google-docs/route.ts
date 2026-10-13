@@ -5,6 +5,7 @@ import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { meetingAppUrl } from "@/lib/integrations/core/links"
 import { checkManualPush } from "@/lib/integrations/core/manual-send"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import type { LinkStore } from "@/lib/integrations/core/types"
 import { googleDocsLocaleFor } from "@/lib/integrations/google-docs/builder"
 import type { GoogleDocsClientContext } from "@/lib/integrations/google-docs/client"
@@ -100,6 +101,7 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
   try {
     result = await exportRecapToGoogleDocs({ recap, client, ...(links ? { links } : {}), forceNew })
   } catch (error) {
+    if (connection) await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
     return providerErrorResponse("google_docs", error)
   }
 

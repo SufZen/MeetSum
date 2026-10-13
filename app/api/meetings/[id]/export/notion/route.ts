@@ -10,6 +10,7 @@ import { recordAuditLog } from "@/lib/audit"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { meetingAppUrl } from "@/lib/integrations/core/links"
 import { checkManualPush } from "@/lib/integrations/core/manual-send"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { ruleDestinationSchema } from "@/lib/integrations/core/rules"
 import { ProviderError, type DeliverResult, type RuleDestination } from "@/lib/integrations/core/types"
 import { notionLocaleFor } from "@/lib/integrations/notion/blocks"
@@ -102,6 +103,9 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
               connection,
               getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
               fetch: runtime.providerFetch,
+            }).catch(async (error: unknown) => {
+              await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
+              throw error
             }),
         }
       : {}),
@@ -164,6 +168,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       fetch: runtime.providerFetch,
     })
   } catch (error) {
+    await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
     await runtime
       .finishManualDelivery(workspaceId, delivery.id, {
         error: {

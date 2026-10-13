@@ -53,3 +53,21 @@ export async function markConnectionNeedsReauth(
     { provider: connection.provider, connectionId }
   )
 }
+
+/**
+ * `ProviderError` kind `auth` (a provider 401, revoked or expired grant) →
+ * `needs_reauth`, from any path that calls a provider outside the delivery
+ * worker (pickers, destination checks, manual exports). Other errors are
+ * ignored. Never throws.
+ */
+export async function flagNeedsReauthOnAuth(
+  workspaceId: string,
+  connectionId: string,
+  error: unknown,
+  deps: ReauthDeps = {}
+): Promise<void> {
+  const kind = error instanceof Error ? (error as { kind?: unknown }).kind : undefined
+
+  if (kind !== "auth") return
+  await markConnectionNeedsReauth(workspaceId, connectionId, error, deps).catch(() => undefined)
+}

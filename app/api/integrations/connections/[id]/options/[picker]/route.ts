@@ -4,6 +4,7 @@ import { can, withAuthz } from "@/lib/auth/authz"
 import { apiError, providerErrorResponse } from "@/lib/integrations/core/api"
 import { loadConnectionFor } from "@/lib/integrations/core/connection-access"
 import { isPersonalProvider, providerCtx } from "@/lib/integrations/core/connections"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
 import { getIntegrationStore } from "@/lib/integrations/core/store"
 
@@ -43,6 +44,7 @@ export const GET = withAuthz<{ id: string; picker: string }>("meeting:write", as
 
     return NextResponse.json(page)
   } catch (error) {
+    await flagNeedsReauthOnAuth(connection.workspaceId, connection.id, error, { store })
     return providerErrorResponse(error)
   }
 })

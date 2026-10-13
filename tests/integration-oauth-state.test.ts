@@ -12,7 +12,7 @@ import {
 import type { IntegrationStore } from "@/lib/integrations/core/store"
 import { createMemoryIntegrationStore } from "@/lib/integrations/core/store-memory"
 import { openToken } from "@/lib/integrations/core/tokens"
-import type { IntegrationProvider, OAuthExchangeResult } from "@/lib/integrations/core/types"
+import { ProviderError, type IntegrationProvider, type OAuthExchangeResult } from "@/lib/integrations/core/types"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
 
 vi.mock("@/lib/audit", () => ({ recordAuditLog: vi.fn(async () => undefined) }))
@@ -216,6 +216,15 @@ describe("startOAuth / completeOAuth", () => {
     const result = await completeOAuth({ provider: "slack", session: session("u_admin", "admin"), query: query(state), cookieNonce: nonce }, deps())
 
     expect(result.location).toBe("/he?panel=settings&section=integrations&integration_error=exchange_failed")
+  })
+
+  it("maps Microsoft's tenant_not_allowed ProviderError to integration_error=tenant_not_allowed", async () => {
+    exchange.mockRejectedValueOnce(new ProviderError("forbidden", "microsoft tenant not allowed", { providerCode: "tenant_not_allowed" }))
+
+    const { nonce, state } = await start()
+    const result = await completeOAuth({ provider: "slack", session: session("u_admin", "admin"), query: query(state), cookieNonce: nonce }, deps())
+
+    expect(result.location).toBe("/he?panel=settings&section=integrations&integration_error=tenant_not_allowed")
   })
 
   it("keeps a malicious returnTo on the same origin", async () => {

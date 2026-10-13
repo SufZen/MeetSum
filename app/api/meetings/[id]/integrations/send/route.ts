@@ -6,6 +6,7 @@ import { auditIntegration } from "@/lib/integrations/core/audit"
 import { providerCtx } from "@/lib/integrations/core/connections"
 import { createManualDelivery } from "@/lib/integrations/core/deliveries"
 import { checkManualPush } from "@/lib/integrations/core/manual-send"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
 import { getIntegrationQueuePort } from "@/lib/integrations/core/queue"
 import { ruleContentSchema, ruleDestinationSchema } from "@/lib/integrations/core/rules"
@@ -94,7 +95,15 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     connection,
     destination,
     clientDestination: body.destination !== undefined,
-    ...(validateDestination ? { validate: (value: RuleDestination) => validateDestination(value, providerCtx(connection, store)) } : {}),
+    ...(validateDestination
+      ? {
+          validate: (value: RuleDestination) =>
+            validateDestination(value, providerCtx(connection, store)).catch(async (error: unknown) => {
+              await flagNeedsReauthOnAuth(ctx.workspace.id, connection.id, error, { store })
+              throw error
+            }),
+        }
+      : {}),
     getPrefs: () => store.getPrefs(ctx.workspace.id, meeting.id),
     ...(actorUserId(ctx) ? { requestedByUserId: actorUserId(ctx) } : {}),
   })

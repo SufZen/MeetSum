@@ -12,6 +12,7 @@ import { z } from "zod"
 
 import { auditIntegration, type IntegrationAuditActor } from "@/lib/integrations/core/audit"
 import { providerCtx } from "@/lib/integrations/core/connections"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
 import type { IntegrationStore, StoredRule } from "@/lib/integrations/core/store"
 import { ProviderError, RULE_TRIGGERS, type IntegrationRuleDTO, type RuleContent, type RuleDestination } from "@/lib/integrations/core/types"
@@ -135,7 +136,10 @@ async function checkDestination(
     await provider.validateDestination(destination, providerCtx(connection, store))
     return undefined
   } catch (error) {
-    if (error instanceof ProviderError && error.kind === "auth") return { ok: false, status: 409, code: "integration_needs_reauth" }
+    if (error instanceof ProviderError && error.kind === "auth") {
+      await flagNeedsReauthOnAuth(workspaceId, connection.id, error, { store })
+      return { ok: false, status: 409, code: "integration_needs_reauth" }
+    }
 
     const providerCode = error instanceof ProviderError && /^[a-z_]{1,64}$/.test(error.providerCode ?? "") ? error.providerCode : undefined
 
