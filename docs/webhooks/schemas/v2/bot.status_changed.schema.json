@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "number",
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 timestamp"
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test": {
+      "type": "boolean",
+      "const": true
+    },
+    "name": {
+      "type": "string",
+      "const": "bot.status_changed"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "meetingId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "status"
+      ],
+      "additionalProperties": false,
+      "description": "Never carries meeting data beyond its id"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "occurredAt",
+    "workspace_id",
+    "name",
+    "data"
+  ],
+  "additionalProperties": false,
+  "description": "MeetSum webhook bot.status_changed (payload v2)"
+}

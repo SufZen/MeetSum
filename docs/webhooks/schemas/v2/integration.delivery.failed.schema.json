@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "number",
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 timestamp"
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test": {
+      "type": "boolean",
+      "const": true
+    },
+    "name": {
+      "type": "string",
+      "const": "integration.delivery.failed"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "deliveryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string"
+        },
+        "meetingId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deliveryId",
+        "provider",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "description": "No content: ids, provider and a reason code"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "occurredAt",
+    "workspace_id",
+    "name",
+    "data"
+  ],
+  "additionalProperties": false,
+  "description": "MeetSum webhook integration.delivery.failed (payload v2)"
+}

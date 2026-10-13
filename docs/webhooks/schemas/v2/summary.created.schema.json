@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "number",
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 timestamp"
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test": {
+      "type": "boolean",
+      "const": true
+    },
+    "name": {
+      "type": "string",
+      "const": "summary.created"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "visibility": {
+              "type": "string",
+              "enum": [
+                "workspace",
+                "link"
+              ],
+              "description": "Meeting visibility (private meetings get the minimal payload)"
+            }
+          },
+          "required": [
+            "meetingId",
+            "title",
+            "url",
+            "visibility"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "visibility": {
+              "type": "string",
+              "const": "private"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "visibility"
+          ],
+          "additionalProperties": false,
+          "description": "Private meeting: identifiers only"
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "occurredAt",
+    "workspace_id",
+    "name",
+    "data"
+  ],
+  "additionalProperties": false,
+  "description": "MeetSum webhook summary.created (payload v2)"
+}

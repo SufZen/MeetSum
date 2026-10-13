@@ -142,7 +142,7 @@ describe("renderMeetingDocx (Hebrew RTL)", () => {
     const xml = await documentXml(
       await renderMeetingDocx(hebrewMeeting(), {
         locale: "en",
-        env: { MEETSUM_DEFAULT_TIMEZONE: "Asia/Jerusalem" } as NodeJS.ProcessEnv,
+        env: { MEETSUM_DEFAULT_TIMEZONE: "Asia/Jerusalem" } as unknown as NodeJS.ProcessEnv,
       })
     )
 

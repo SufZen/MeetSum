@@ -1,13 +1,22 @@
 import { createApiKeyHash } from "@/lib/auth/api-keys"
 import { getDatabasePool } from "@/lib/db/client"
 import {
+  WEBHOOK_EVENTS_V2,
+  webhookEventsFor,
+  type WebhookEventV2,
+  type WebhookPayloadVersion,
+} from "@/lib/platform/event-catalog"
+import { webhookExampleData } from "@/lib/platform/event-schemas"
+import {
   createPlatformEvent,
   signWebhookPayload,
-  type PlatformEventName,
+  type PlatformEvent,
+  type PlatformEventV2,
 } from "@/lib/platform/events"
 import {
   enqueueWebhookDelivery,
   processWebhookDeliveryJob,
+  webhookRequestHeaders,
 } from "@/lib/webhooks/delivery"
 import {
   encryptWebhookSecret,
@@ -24,22 +33,21 @@ import {
   guardedWebhookFetch,
 } from "@/lib/webhooks/url-guard"
 
-export const WEBHOOK_EVENT_NAMES = [
-  "meeting.completed",
-  "summary.created",
-  "action_item.created",
-  "meeting.process_failed",
-  "realizeos.export.sent",
-  "realizeos.export.failed",
-] as const satisfies readonly PlatformEventName[]
+/** Every event of the catalog (v2 is a superset of v1). */
+export const WEBHOOK_EVENT_NAMES = WEBHOOK_EVENTS_V2
 
-export type WebhookEventName = (typeof WEBHOOK_EVENT_NAMES)[number]
+export type WebhookEventName = WebhookEventV2
+
+/** New subscriptions get the catalog version (M8 C4). */
+export const DEFAULT_WEBHOOK_PAYLOAD_VERSION: WebhookPayloadVersion = 2
 
 export type WebhookSubscriptionView = {
   id: string
   url: string
   events: WebhookEventName[]
   enabled: boolean
+  /** 1 = legacy payloads (frozen), 2 = catalog payloads. Always set by the store. */
+  payloadVersion?: WebhookPayloadVersion
   /** "generated" | "provided" for per-subscription secrets, "global" for legacy rows. */
   secretRef?: string
   createdAt: string
@@ -54,6 +62,7 @@ export type WebhookDeliveryView = {
   status: string
   attempts: number
   maxAttempts?: number
+  payloadVersion?: WebhookPayloadVersion
   responseStatus?: number
   lastError?: string
   deliveredAt?: string
@@ -76,11 +85,23 @@ export class WebhookNotFoundError extends Error {
   }
 }
 
+/** Invalid input (unknown event, event outside the version, downgrade) → 400. */
+export class WebhookValidationError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = "WebhookValidationError"
+    this.code = code
+  }
+}
+
 type SubscriptionRow = {
   id: string
   url: string
   events: string[] | string
   enabled: boolean
+  payload_version?: number | null
   secret_ref: string | null
   created_at: string | Date
   updated_at?: string | Date | null
@@ -94,6 +115,7 @@ type DeliveryRow = {
   status: string
   attempts: number
   max_attempts?: number | null
+  payload_version?: number | null
   response_status: number | null
   last_error: string | null
   delivered_at?: string | Date | null
@@ -103,9 +125,9 @@ type DeliveryRow = {
 }
 
 const SUBSCRIPTION_COLUMNS =
-  "id, url, events, enabled, secret_ref, created_at, updated_at"
+  "id, url, events, enabled, payload_version, secret_ref, created_at, updated_at"
 const DELIVERY_COLUMNS = `d.id, d.webhook_subscription_id, s.url as subscription_url,
-             d.event_name, d.status, d.attempts, d.max_attempts,
+             d.event_name, d.status, d.attempts, d.max_attempts, d.payload_version,
              d.response_status, d.last_error, d.delivered_at, d.duration_ms,
              d.created_at, d.updated_at`
 
@@ -141,19 +163,53 @@ function toIso(value: string | Date | null | undefined) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
-function normalizeEvents(events?: unknown): WebhookEventName[] {
-  if (!Array.isArray(events)) return [...WEBHOOK_EVENT_NAMES]
-
-  const normalized = events.filter((event): event is WebhookEventName =>
-    WEBHOOK_EVENT_NAMES.includes(event as WebhookEventName)
-  )
-
-  return normalized.length ? [...new Set(normalized)] : [...WEBHOOK_EVENT_NAMES]
+function toVersion(value: unknown): WebhookPayloadVersion {
+  return Number(value) === 2 ? 2 : 1
 }
 
-function parseEvents(events: string[] | string): WebhookEventName[] {
-  const parsed = typeof events === "string" ? JSON.parse(events) : events
-  return normalizeEvents(parsed)
+/** `payloadVersion` from a request: 1, 2 or undefined; anything else → 400. */
+function parseRequestedVersion(value: unknown): WebhookPayloadVersion | undefined {
+  if (value === undefined || value === null) return undefined
+  if (value === 1 || value === 2 || value === "1" || value === "2") return toVersion(value)
+
+  throw new WebhookValidationError("invalid_payload_version", "payloadVersion must be 1 or 2")
+}
+
+/**
+ * Events requested for a subscription of `version`. Missing or empty → every
+ * event of that version. An unknown event, or one outside the version (e.g.
+ * `clip.created` on a v1 subscription), is refused (400).
+ */
+function requestedEvents(events: unknown, version: WebhookPayloadVersion): WebhookEventName[] {
+  const allowed = webhookEventsFor(version)
+
+  if (events === undefined || events === null) return [...allowed]
+  if (!Array.isArray(events)) {
+    throw new WebhookValidationError("invalid_events", "events must be an array of event names")
+  }
+  if (!events.length) return [...allowed]
+
+  for (const event of events) {
+    if (!(allowed as readonly unknown[]).includes(event)) {
+      throw new WebhookValidationError(
+        "event_not_in_version",
+        `Event ${String(event)} is not available in webhook payload version ${version}`
+      )
+    }
+  }
+
+  return [...new Set(events as WebhookEventName[])]
+}
+
+/** Stored events (lenient: unknown names are dropped). */
+function parseEvents(events: string[] | string, version: WebhookPayloadVersion): WebhookEventName[] {
+  const parsed = (typeof events === "string" ? JSON.parse(events) : events) as unknown
+  const allowed = webhookEventsFor(version)
+  const list = Array.isArray(parsed)
+    ? parsed.filter((event): event is WebhookEventName => (allowed as readonly unknown[]).includes(event))
+    : []
+
+  return list.length ? [...new Set(list)] : [...allowed]
 }
 
 /** Resolves the signing secret for a new subscription (given ≥16 chars, or generated). */
@@ -172,11 +228,14 @@ function resolveNewSecret(secret: unknown): { secret: string; ref: string } {
 }
 
 function mapSubscription(row: SubscriptionRow): WebhookSubscriptionView {
+  const payloadVersion = toVersion(row.payload_version)
+
   return {
     id: row.id,
     url: row.url,
-    events: parseEvents(row.events),
+    events: parseEvents(row.events, payloadVersion),
     enabled: row.enabled,
+    payloadVersion,
     secretRef: row.secret_ref ?? undefined,
     createdAt: toIso(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIso(row.updated_at),
@@ -192,6 +251,7 @@ function mapDelivery(row: DeliveryRow): WebhookDeliveryView {
     status: row.status,
     attempts: row.attempts,
     maxAttempts: row.max_attempts ?? undefined,
+    payloadVersion: row.payload_version == null ? undefined : toVersion(row.payload_version),
     responseStatus: row.response_status ?? undefined,
     lastError: row.last_error ?? undefined,
     deliveredAt: toIso(row.delivered_at),
@@ -241,7 +301,8 @@ export async function listWebhookSubscriptions(workspaceId: string) {
 
 /**
  * Creates a subscription after the SSRF guard accepts its URL. The signing
- * secret is stored encrypted and returned exactly once, here.
+ * secret is stored encrypted and returned exactly once, here. New
+ * subscriptions default to payload version 2 (the catalog).
  */
 export async function createWebhookSubscription(
   workspaceId: string,
@@ -249,11 +310,13 @@ export async function createWebhookSubscription(
     url: string
     events?: unknown
     secret?: unknown
+    payloadVersion?: unknown
   }
 ): Promise<Required<WebhookSubscriptionWithSecret>> {
   requireWorkspaceId(workspaceId)
+  const payloadVersion = parseRequestedVersion(input.payloadVersion) ?? DEFAULT_WEBHOOK_PAYLOAD_VERSION
+  const events = requestedEvents(input.events, payloadVersion)
   const url = await assertSafeWebhookUrl(input.url)
-  const events = normalizeEvents(input.events)
   const { secret, ref } = resolveNewSecret(input.secret)
 
   if (!isPostgres()) {
@@ -262,6 +325,7 @@ export async function createWebhookSubscription(
       url,
       events,
       enabled: true,
+      payloadVersion,
       secretRef: ref,
       createdAt: new Date().toISOString(),
     } satisfies WebhookSubscriptionView
@@ -277,9 +341,9 @@ export async function createWebhookSubscription(
     `
       insert into webhook_subscriptions (
         id, workspace_id, url, events, secret_ref, secret_hash,
-        secret_ciphertext, enabled, updated_at
+        secret_ciphertext, enabled, updated_at, payload_version
       )
-      values ($1, $2, $3, $4::jsonb, $5, $6, $7, true, now())
+      values ($1, $2, $3, $4::jsonb, $5, $6, $7, true, now(), $8)
       returning ${SUBSCRIPTION_COLUMNS}
     `,
     [
@@ -290,12 +354,43 @@ export async function createWebhookSubscription(
       ref,
       createApiKeyHash(secret),
       encryptWebhookSecret(secret),
+      payloadVersion,
     ]
   )
 
   return { subscription: mapSubscription(result.rows[0] as SubscriptionRow), secret }
 }
 
+async function currentPayloadVersion(workspaceId: string, id: string): Promise<WebhookPayloadVersion> {
+  if (!isPostgres()) {
+    const subscription = memorySubscriptionIn(workspaceId, id)
+
+    if (!subscription) throw new WebhookNotFoundError("Webhook subscription not found")
+
+    return subscription.payloadVersion ?? 1
+  }
+
+  const result = await getDatabasePool().query(
+    `
+      select payload_version
+      from webhook_subscriptions
+      where id = $1 and workspace_id = $2
+      limit 1
+    `,
+    [id, workspaceId]
+  )
+  const row = result.rows[0] as { payload_version?: number | null } | undefined
+
+  if (!row) throw new WebhookNotFoundError("Webhook subscription not found")
+
+  return toVersion(row.payload_version)
+}
+
+/**
+ * Updates url, enabled, events, the payload version (1 → 2 only; the
+ * upgrade is one-way) or rotates the secret. Events are checked against the
+ * subscription's (new) version.
+ */
 export async function updateWebhookSubscription(
   workspaceId: string,
   id: string,
@@ -304,21 +399,39 @@ export async function updateWebhookSubscription(
     enabled?: unknown
     events?: unknown
     rotateSecret?: unknown
+    payloadVersion?: unknown
   }
 ): Promise<WebhookSubscriptionWithSecret> {
   requireWorkspaceId(workspaceId)
+  const requestedVersion = parseRequestedVersion(patch.payloadVersion)
+  let payloadVersion: WebhookPayloadVersion | undefined
+  let events: WebhookEventName[] | undefined
+
+  if (requestedVersion !== undefined || patch.events !== undefined) {
+    const current = await currentPayloadVersion(workspaceId, id)
+
+    if (requestedVersion === 1 && current === 2) {
+      throw new WebhookValidationError(
+        "payload_version_downgrade",
+        "A v2 webhook subscription cannot go back to v1 payloads"
+      )
+    }
+    if (requestedVersion === 2 && current === 1) payloadVersion = 2
+    if (patch.events !== undefined) events = requestedEvents(patch.events, requestedVersion ?? current)
+  }
+
   const url =
     typeof patch.url === "string" ? await assertSafeWebhookUrl(patch.url) : undefined
   const enabled = typeof patch.enabled === "boolean" ? patch.enabled : undefined
-  const events =
-    patch.events === undefined ? undefined : normalizeEvents(patch.events)
   const secret = patch.rotateSecret === true ? generateWebhookSecret() : undefined
 
   if (
     url === undefined &&
     enabled === undefined &&
     events === undefined &&
-    secret === undefined
+    secret === undefined &&
+    payloadVersion === undefined &&
+    requestedVersion === undefined
   ) {
     throw new Error("No webhook subscription changes were provided")
   }
@@ -333,6 +446,7 @@ export async function updateWebhookSubscription(
       url: url ?? subscription.url,
       enabled: enabled ?? subscription.enabled,
       events: events ?? subscription.events,
+      payloadVersion: payloadVersion ?? subscription.payloadVersion,
       secretRef: secret ? "generated" : subscription.secretRef,
       updatedAt: new Date().toISOString(),
     } satisfies WebhookSubscriptionView
@@ -361,6 +475,11 @@ export async function updateWebhookSubscription(
     updates.push(`events = $${values.length}::jsonb`)
   }
 
+  if (payloadVersion !== undefined) {
+    values.push(payloadVersion)
+    updates.push(`payload_version = $${values.length}`)
+  }
+
   if (secret !== undefined) {
     values.push(encryptWebhookSecret(secret))
     updates.push(`secret_ciphertext = $${values.length}`)
@@ -375,7 +494,7 @@ export async function updateWebhookSubscription(
   const result = await getDatabasePool().query(
     `
       update webhook_subscriptions
-      set ${updates.join(", ")},
+      set ${updates.length ? `${updates.join(", ")},` : ""}
           updated_at = now()
       where id = $${idIndex} and workspace_id = $${values.length}
       returning ${SUBSCRIPTION_COLUMNS}
@@ -584,13 +703,14 @@ async function getSubscriptionForTest(workspaceId: string, id: string) {
     return {
       url: subscription.url,
       enabled: subscription.enabled,
+      payloadVersion: subscription.payloadVersion ?? 1,
       secret: memorySecrets.get(id) ?? getWebhookSigningSecret(),
     }
   }
 
   const result = await getDatabasePool().query(
     `
-      select url, enabled, secret_ciphertext
+      select url, enabled, secret_ciphertext, payload_version
       from webhook_subscriptions
       where id = $1 and workspace_id = $2
       limit 1
@@ -598,7 +718,7 @@ async function getSubscriptionForTest(workspaceId: string, id: string) {
     [id, workspaceId]
   )
   const row = result.rows[0] as
-    | { url: string; enabled: boolean; secret_ciphertext: string | null }
+    | { url: string; enabled: boolean; secret_ciphertext: string | null; payload_version?: number | null }
     | undefined
 
   if (!row) throw new WebhookNotFoundError("Webhook subscription not found")
@@ -606,16 +726,45 @@ async function getSubscriptionForTest(workspaceId: string, id: string) {
   return {
     url: row.url,
     enabled: row.enabled,
+    payloadVersion: toVersion(row.payload_version),
     secret: resolveSubscriptionSecret(row),
   }
 }
 
 /**
- * Sends a signed test event through the SSRF guard. A subscription test uses
- * that subscription's own secret. An ad-hoc URL test is signed with a fresh
- * throwaway secret (returned once as `secret`) and never with the global
- * WEBHOOK_SIGNING_SECRET: signing attacker-chosen payloads with the global
- * secret would hand out valid signatures for legacy subscriptions.
+ * The test-fire envelope of `eventName` in `version`: the catalog example
+ * data (schema-valid) in the real envelope, flagged `test: true`.
+ */
+export function buildWebhookTestEvent(
+  eventName: WebhookEventName,
+  version: WebhookPayloadVersion,
+  workspaceId: string
+): PlatformEvent<Record<string, unknown>> | PlatformEventV2<Record<string, unknown>> {
+  const data = webhookExampleData(eventName, version)
+
+  if (!data) {
+    throw new WebhookValidationError(
+      "event_not_in_version",
+      `Event ${eventName} is not available in webhook payload version ${version}`
+    )
+  }
+
+  const base = createPlatformEvent(eventName, data, { workspaceId })
+
+  return version === 2
+    ? { id: base.id, name: base.name, version: 2, occurredAt: base.occurredAt, workspace_id: workspaceId, data, test: true }
+    : { ...base, test: true }
+}
+
+/**
+ * Sends a signed test event through the SSRF guard: the catalog example
+ * payload of `eventName` for the subscription's version (ad-hoc URLs:
+ * `payloadVersion`, default 2), with every production header. A
+ * subscription test uses that subscription's own secret. An ad-hoc URL test
+ * is signed with a fresh throwaway secret (returned once as `secret`) and
+ * never with the global WEBHOOK_SIGNING_SECRET: signing attacker-chosen
+ * payloads with the global secret would hand out valid signatures for
+ * legacy subscriptions.
  */
 export async function sendWebhookTest(
   workspaceId: string,
@@ -623,15 +772,15 @@ export async function sendWebhookTest(
     url?: string
     subscriptionId?: string
     eventName?: WebhookEventName
+    payloadVersion?: unknown
   }
 ) {
   requireWorkspaceId(workspaceId)
-  const eventName = normalizeEvents(
-    input.eventName ? [input.eventName] : ["meeting.completed"]
-  )[0]
+  const eventName: WebhookEventName = input.eventName ?? "meeting.completed"
   let url: string | undefined
   let secret: string | undefined
   let adHocSecret: string | undefined
+  let version: WebhookPayloadVersion = parseRequestedVersion(input.payloadVersion) ?? DEFAULT_WEBHOOK_PAYLOAD_VERSION
 
   if (input.url) {
     url = await assertSafeWebhookUrl(input.url)
@@ -643,37 +792,38 @@ export async function sendWebhookTest(
     if (!subscription.enabled) throw new Error("Webhook subscription is disabled")
     url = subscription.url
     secret = subscription.secret
+    version = subscription.payloadVersion
   }
 
   if (!url || !secret) throw new Error("Webhook URL or subscriptionId is required")
 
-  const event = createPlatformEvent(
-    eventName,
-    {
-      test: true,
-      source: "meetsum",
-      sentAt: new Date().toISOString(),
-    },
-    { workspaceId }
-  )
+  const event = buildWebhookTestEvent(eventName, version, workspaceId)
+  const body = JSON.stringify(event)
   const deliveryId = createId("whtest")
   const response = await guardedWebhookFetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-meetsum-signature": signWebhookPayload(event, secret),
-      "x-meetsum-event": event.name,
-      "x-meetsum-delivery": deliveryId,
-    },
-    body: JSON.stringify(event),
+    headers: webhookRequestHeaders({
+      body,
+      secret,
+      v1Signature: signWebhookPayload(event as PlatformEvent<Record<string, unknown>>, secret),
+      eventName: event.name,
+      deliveryId,
+      version,
+    }),
+    body,
     timeoutMs: getWebhookFetchTimeoutMs(),
   })
 
   return {
     event,
+    payloadVersion: version,
     url,
     status: response.ok ? "sent" : "failed",
     responseStatus: response.status,
     ...(adHocSecret ? { secret: adHocSecret } : {}),
   }
+}
+
+export function isWebhookEventName(value: unknown): value is WebhookEventName {
+  return (WEBHOOK_EVENTS_V2 as readonly unknown[]).includes(value)
 }
