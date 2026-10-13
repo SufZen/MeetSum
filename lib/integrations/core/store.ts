@@ -137,6 +137,8 @@ export type StoredDelivery = {
   externalRef: Record<string, unknown>
   lastError?: string
   requestedByUserId?: string
+  /** Worker lease (migration 029): set by a claim, cleared when the attempt ends. */
+  leaseUntil?: string
   createdAt: string
   updatedAt: string
   completedAt?: string
@@ -153,6 +155,7 @@ export type DeliveryPatch = Partial<
   skipReason?: DeliverySkipReason | null
   lastError?: string | null
   completedAt?: string | null
+  leaseUntil?: string | null
 }
 
 export type DeliveryListFilter = {
@@ -177,6 +180,9 @@ export type PrefsPatch = {
 export type UnsubscribeSource = "link" | "one_click" | "admin"
 
 /** Caps enforced in the store (docs/parity/m8.md, "Caps"). */
+/** Delivery lease: longer than any attempt (provider calls are capped at 15 s each). */
+export const DELIVERY_LEASE_MS = 10 * 60_000
+
 export const MAX_CONNECTIONS_PER_WORKSPACE = 20
 export const MAX_RULES_PER_WORKSPACE = 50
 export const MAX_RULES_PER_EVENT = 50
@@ -272,10 +278,21 @@ export interface IntegrationStore {
   getDelivery(workspaceId: string, id: string): Promise<StoredDelivery | undefined>
   listDeliveries(workspaceId: string, filter?: DeliveryListFilter): Promise<StoredDelivery[]>
   /**
-   * Lock for one attempt: `queued|retrying|running` → `running`,
-   * attempts + 1. Undefined for terminal rows (a no-op job).
+   * Atomic claim for one attempt: `queued|retrying`, or `running` whose lease
+   * expired (a crashed worker), → `running`, attempts + 1, lease_until =
+   * now + `leaseMs`. Undefined when another worker holds a live lease or the
+   * row is terminal (the job is then a no-op): never two concurrent attempts.
    */
-  claimDelivery(workspaceId: string, id: string): Promise<StoredDelivery | undefined>
+  claimDelivery(workspaceId: string, id: string, now?: Date, leaseMs?: number): Promise<StoredDelivery | undefined>
+  /**
+   * Re-queues a `failed|partial` (or `skipped/needs_reauth`) row for a manual
+   * retry, conditionally (never a row a worker holds): undefined otherwise.
+   */
+  requeueRetryableDelivery(workspaceId: string, id: string, maxAttempts: number): Promise<StoredDelivery | undefined>
+  /** SYSTEM (tick): `running` rows whose lease expired before `now` (crashed workers). */
+  systemListExpiredDeliveryLeases(now: Date, limit?: number): Promise<StoredDelivery[]>
+  /** Moves an expired `running` row (only while still expired) to the next state. */
+  reclaimExpiredDelivery(workspaceId: string, id: string, now: Date, patch: DeliveryPatch): Promise<StoredDelivery | undefined>
   updateDelivery(workspaceId: string, id: string, patch: DeliveryPatch): Promise<StoredDelivery | undefined>
   /** `queued|retrying` rows of a connection → `cancelled`; returns the ids. */
   cancelQueuedDeliveriesForConnection(workspaceId: string, connectionId: string): Promise<string[]>

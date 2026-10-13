@@ -86,26 +86,22 @@ export async function retryDelivery(
   row: StoredDelivery,
   actor: IntegrationAuditActor
 ): Promise<StoredDelivery | undefined> {
-  const updated = await store.updateDelivery(row.workspaceId, row.id, {
-    status: "queued",
-    attempts: 0,
-    maxAttempts: integrationMaxAttempts(),
-    skipReason: null,
-    lastError: null,
-    completedAt: null,
-  })
+  // Conditional: never a row a worker holds (it only re-queues; the worker
+  // claims it under the lease).
+  const updated = await store.requeueRetryableDelivery(row.workspaceId, row.id, integrationMaxAttempts())
 
   if (!updated) return undefined
 
-  // Throws IntegrationQueueUnavailableError (row stays queued) when Redis is down.
-  await boundedEnqueue(() =>
-    queue.enqueue("integration.deliver", { workspaceId: row.workspaceId, deliveryId: row.id }, { jobId: deliverJobId(row.id, Date.now()) })
-  )
+  // Audited before (and whatever the result of) the enqueue.
   await auditIntegration(actor, "integration.delivery.retried", { type: "integration_delivery", id: row.id }, {
     provider: row.provider,
     deliveryId: row.id,
     origin: row.origin,
   })
+  // Throws IntegrationQueueUnavailableError (row stays queued) when Redis is down.
+  await boundedEnqueue(() =>
+    queue.enqueue("integration.deliver", { workspaceId: row.workspaceId, deliveryId: row.id }, { jobId: deliverJobId(row.id, Date.now()) })
+  )
   return updated
 }
 
@@ -117,6 +113,8 @@ export type ManualSendInput = {
   requestedByUserId?: string
   clientKey?: string
   request: ManualRequest
+  /** Audited for every request (created, replayed or queue timeout); ids only. */
+  actor?: IntegrationAuditActor
 }
 
 /** Stable JSON (sorted keys) for hashing. */
@@ -195,6 +193,13 @@ export async function createManualDelivery(
 
     if (stored !== manualRequestFingerprint(input)) return { reuse: true }
   }
+
+  // Audited before (and whatever the result of) the enqueue: created,
+  // replayed and queue-timeout requests all leave an entry (ids only).
+  await auditIntegration(input.actor ?? { workspaceId: input.workspaceId, actor: "system:integrations" }, "integration.manual_send", {
+    type: "meeting",
+    id: input.meetingId,
+  }, { provider: input.provider, connectionId: input.connectionId, deliveryId: delivery.id, replayed: !created })
 
   if (created) {
     // Throws IntegrationQueueUnavailableError (row stays queued) when Redis is down.

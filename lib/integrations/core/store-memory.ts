@@ -14,6 +14,7 @@ import {
   type ConnectionPatch,
   type IntegrationStore,
   type OAuthStateRow,
+  DELIVERY_LEASE_MS,
   type StoredConnection,
   type StoredDelivery,
   type StoredRule,
@@ -348,12 +349,60 @@ export function createMemoryIntegrationStore(): IntegrationStore {
         .map(clone)
     },
 
-    async claimDelivery(workspaceId, id) {
+    async claimDelivery(workspaceId, id, at = new Date(), leaseMs = DELIVERY_LEASE_MS) {
+      // Synchronous read-check-write: atomic within this process.
       const row = scoped(deliveries.get(id), workspaceId)
 
-      if (!row || !["queued", "retrying", "running"].includes(row.status)) return undefined
+      if (!row) return undefined
 
-      const next = patchObject(row, { status: "running", attempts: row.attempts + 1 })
+      const leaseExpired = !row.leaseUntil || Date.parse(row.leaseUntil) <= at.getTime()
+      const claimable = row.status === "queued" || row.status === "retrying" || (row.status === "running" && leaseExpired)
+
+      if (!claimable) return undefined
+
+      const next = patchObject(row, {
+        status: "running",
+        attempts: row.attempts + 1,
+        leaseUntil: new Date(at.getTime() + leaseMs).toISOString(),
+      })
+
+      deliveries.set(id, next)
+      return clone(next)
+    },
+
+    async requeueRetryableDelivery(workspaceId, id, maxAttempts) {
+      const row = scoped(deliveries.get(id), workspaceId)
+      const retryable = row && (row.status === "failed" || row.status === "partial" || (row.status === "skipped" && row.skipReason === "needs_reauth"))
+
+      if (!row || !retryable) return undefined
+
+      const next = patchObject(row, {
+        status: "queued",
+        attempts: 0,
+        maxAttempts,
+        skipReason: null,
+        lastError: null,
+        completedAt: null,
+        leaseUntil: null,
+      })
+
+      deliveries.set(id, next)
+      return clone(next)
+    },
+
+    async systemListExpiredDeliveryLeases(at, limit = 100) {
+      return [...deliveries.values()]
+        .filter((row) => row.status === "running" && row.leaseUntil && Date.parse(row.leaseUntil) <= at.getTime())
+        .slice(0, limit)
+        .map(clone)
+    },
+
+    async reclaimExpiredDelivery(workspaceId, id, at, patch) {
+      const row = scoped(deliveries.get(id), workspaceId)
+
+      if (!row || row.status !== "running" || !row.leaseUntil || Date.parse(row.leaseUntil) > at.getTime()) return undefined
+
+      const next = patchObject(row, { ...patch, leaseUntil: null })
 
       deliveries.set(id, next)
       return clone(next)

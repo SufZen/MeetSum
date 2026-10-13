@@ -1,7 +1,9 @@
 /**
  * Delivery runner (`integration.deliver`, docs/parity/m8.md A5). Owner:
  * Package A. One attempt:
- *  1. claim the row (terminal rows are a no-op);
+ *  1. claim the row atomically with an expiring lease (terminal rows and
+ *     rows another worker holds are a no-op; a failed claim throws, so no
+ *     provider is ever called without the lease);
  *  2. re-read the meeting, the rule, the connection (aborts when it was
  *     revoked or flagged since dispatch), re-run the owner check, the
  *     privacy gate and the email recap mode with fresh prefs;
@@ -89,6 +91,7 @@ export async function runIntegrationDelivery(
   ): Promise<DeliveryOutcome> => {
     await store.updateDelivery(ws, delivery.id, {
       status,
+      leaseUntil: null,
       completedAt: rt.now().toISOString(),
       ...(extra.skipReason ? { skipReason: extra.skipReason } : {}),
       ...(extra.lastError ? { lastError: extra.lastError } : {}),
@@ -229,7 +232,7 @@ export async function runIntegrationDelivery(
 
     const delayMs = deliveryBackoffMs(delivery.attempts, error.retryAfterMs)
 
-    await store.updateDelivery(ws, delivery.id, { status: "retrying", lastError, progress })
+    await store.updateDelivery(ws, delivery.id, { status: "retrying", lastError, progress, leaseUntil: null })
     return { status: "retrying", delayMs }
   }
 }

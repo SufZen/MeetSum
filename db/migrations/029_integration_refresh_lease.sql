@@ -12,3 +12,11 @@
 
 alter table integration_connections
   add column if not exists refresh_lease_until timestamptz;
+
+-- Delivery lease (M8 review): a worker claims a delivery atomically
+-- (`queued|retrying`, or `running` with an expired lease → `running`,
+-- lease_until = now + lease) before any provider call, so two workers (or a
+-- retry and the sweeper) never deliver it concurrently. The minute tick
+-- re-queues expired leases (crashed workers) up to max_attempts.
+alter table integration_deliveries
+  add column if not exists lease_until timestamptz;

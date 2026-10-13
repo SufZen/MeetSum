@@ -12,7 +12,7 @@ import { type Job, UnrecoverableError, Worker } from "bullmq"
 import type { IntegrationRuntime } from "@/lib/integrations/core/runtime"
 import { RetryableDeliveryError, runIntegrationDelivery } from "@/lib/integrations/core/deliver"
 import { runIntegrationDispatch } from "@/lib/integrations/core/dispatcher"
-import { integrationLog } from "@/lib/integrations/core/errors"
+import { integrationLog, storedIntegrationError } from "@/lib/integrations/core/errors"
 import { deliveryBackoffMs, deliveryRetentionDays, integrationsConcurrency } from "@/lib/integrations/core/limits"
 import {
   deliverJobId,
@@ -28,7 +28,7 @@ import {
 } from "@/lib/integrations/core/queue"
 import { listProviders } from "@/lib/integrations/core/registry"
 import { getIntegrationStore, type IntegrationStore } from "@/lib/integrations/core/store"
-import type { IntegrationProvider, ProviderId } from "@/lib/integrations/core/types"
+import { ProviderError, type IntegrationProvider, type ProviderId } from "@/lib/integrations/core/types"
 
 export type IntegrationWorkerHandle = { close(): Promise<void> }
 
@@ -67,6 +67,35 @@ export async function runIntegrationTick(deps: IntegrationJobDeps = {}): Promise
         enqueued += 1
       }
     }
+  }
+
+  // Expired leases (a worker crashed mid-attempt): re-queue with backoff up
+  // to max attempts, then fail with a typed reason. Conditional on the lease
+  // still being expired, so a live worker is never pre-empted.
+  const at = new Date(now)
+
+  for (const row of await store.systemListExpiredDeliveryLeases(at)) {
+    if (row.attempts >= row.maxAttempts) {
+      await store.reclaimExpiredDelivery(row.workspaceId, row.id, at, {
+        status: "failed",
+        completedAt: at.toISOString(),
+        lastError: storedIntegrationError(new ProviderError("retryable", "lease expired", { providerCode: "lease_expired" }), row.provider),
+      })
+      continue
+    }
+
+    const reclaimed = await store.reclaimExpiredDelivery(row.workspaceId, row.id, at, {
+      status: "retrying",
+      lastError: storedIntegrationError(new ProviderError("retryable", "lease expired", { providerCode: "lease_expired" }), row.provider),
+    })
+
+    if (!reclaimed) continue
+    await queue.enqueue(
+      "integration.deliver",
+      { workspaceId: row.workspaceId, deliveryId: row.id },
+      { jobId: deliverJobId(row.id, row.attempts), delay: deliveryBackoffMs(row.attempts) }
+    )
+    enqueued += 1
   }
 
   // Deliveries whose enqueue timed out (Redis down) stay `queued`: hand

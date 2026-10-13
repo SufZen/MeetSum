@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { actorUserId, apiError, auditActor, idempotencyKeyOf, limitFor, providerErrorResponse, readJsonBody } from "@/lib/integrations/core/api"
-import { auditIntegration } from "@/lib/integrations/core/audit"
 import { providerCtx } from "@/lib/integrations/core/connections"
 import { createManualDelivery, IntegrationQueueUnavailableError } from "@/lib/integrations/core/deliveries"
 import { checkManualPush } from "@/lib/integrations/core/manual-send"
@@ -125,6 +124,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     ...(userId ? { requestedByUserId: userId } : {}),
     clientKey: idempotencyKeyOf(request),
     request: { destination, content: { ...DEFAULT_RULE_CONTENT, ...content.data } },
+      actor: auditActor(ctx),
     })
   } catch (error) {
     // Redis down: the delivery row stays queued for the sweeper.
@@ -136,14 +136,6 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   if (result.reuse) return apiError("idempotency_key_reuse", 422)
 
   const { delivery, created } = result
-
-  if (created) {
-    await auditIntegration(auditActor(ctx), "integration.manual_send", { type: "meeting", id: meeting.id }, {
-      provider: connection.provider,
-      connectionId: connection.id,
-      deliveryId: delivery.id,
-    })
-  }
 
   return NextResponse.json({ deliveryId: delivery.id, replayed: !created }, { status: 202 })
 })

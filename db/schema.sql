@@ -1385,6 +1385,8 @@ alter table integration_connections
 -- 029: token refresh lease (no row lock across the provider call).
 alter table integration_connections
   add column if not exists refresh_lease_until timestamptz;
+alter table integration_deliveries
+  add column if not exists lease_until timestamptz;
 
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')

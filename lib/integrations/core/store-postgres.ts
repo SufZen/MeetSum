@@ -14,6 +14,7 @@ import type {
   MeetingIntegrationPrefs,
 } from "@/lib/integrations/core/types"
 import {
+  DELIVERY_LEASE_MS,
   MAX_CONNECTIONS_PER_WORKSPACE,
   MAX_RULES_PER_EVENT,
   MAX_RULES_PER_WORKSPACE,
@@ -131,6 +132,7 @@ function toDelivery(row: Row): StoredDelivery {
     externalRef: json<Record<string, unknown>>(row.external_ref, {}),
     lastError: str(row.last_error),
     requestedByUserId: str(row.requested_by_user_id),
+    leaseUntil: iso(row.lease_until),
     createdAt: iso(row.created_at) ?? new Date(0).toISOString(),
     updatedAt: iso(row.updated_at) ?? new Date(0).toISOString(),
     completedAt: iso(row.completed_at),
@@ -216,6 +218,7 @@ const DELIVERY_COLUMNS: Record<keyof DeliveryPatch, { column: string; cast?: str
   skipReason: { column: "skip_reason" },
   lastError: { column: "last_error" },
   completedAt: { column: "completed_at", cast: "timestamptz" },
+  leaseUntil: { column: "lease_until", cast: "timestamptz" },
 }
 
 /** `set a = $n, …` from a patch (undefined skipped, null clears). */
@@ -666,13 +669,61 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
       ).map(toDelivery)
     },
 
-    async claimDelivery(workspaceId, id) {
+    async claimDelivery(workspaceId, id, at = new Date(), leaseMs = DELIVERY_LEASE_MS) {
       const [row] = await rows(
         db,
-        `update integration_deliveries set status = 'running', attempts = attempts + 1, updated_at = now()
-          where workspace_id = $1 and id = $2 and status in ('queued', 'retrying', 'running')
+        `update integration_deliveries
+            set status = 'running', attempts = attempts + 1, lease_until = $4::timestamptz, updated_at = now()
+          where workspace_id = $1 and id = $2
+            and (status in ('queued', 'retrying')
+                 or (status = 'running' and (lease_until is null or lease_until <= $3::timestamptz)))
           returning *`,
-        [workspaceId, id]
+        [workspaceId, id, at.toISOString(), new Date(at.getTime() + leaseMs).toISOString()]
+      )
+
+      return row ? toDelivery(row) : undefined
+    },
+
+    async requeueRetryableDelivery(workspaceId, id, maxAttempts) {
+      const [row] = await rows(
+        db,
+        `update integration_deliveries
+            set status = 'queued', attempts = 0, max_attempts = $3, skip_reason = null, last_error = null,
+                completed_at = null, lease_until = null, updated_at = now()
+          where workspace_id = $1 and id = $2
+            and (status in ('failed', 'partial') or (status = 'skipped' and skip_reason = 'needs_reauth'))
+          returning *`,
+        [workspaceId, id, maxAttempts]
+      )
+
+      return row ? toDelivery(row) : undefined
+    },
+
+    async systemListExpiredDeliveryLeases(at, limit = 100) {
+      return (
+        await rows(
+          db,
+          `select * from integration_deliveries
+            where status = 'running' and lease_until <= $1::timestamptz
+            order by lease_until asc limit $2`,
+          [at.toISOString(), limit]
+        )
+      ).map(toDelivery)
+    },
+
+    async reclaimExpiredDelivery(workspaceId, id, at, patch) {
+      const values: unknown[] = [workspaceId, id]
+      const sets = setClause({ ...patch, leaseUntil: null }, DELIVERY_COLUMNS, values)
+
+      sets.push("updated_at = now()")
+      values.push(at.toISOString())
+
+      const [row] = await rows(
+        db,
+        `update integration_deliveries set ${sets.join(", ")}
+          where workspace_id = $1 and id = $2 and status = 'running' and lease_until <= $${values.length}::timestamptz
+          returning *`,
+        values
       )
 
       return row ? toDelivery(row) : undefined
