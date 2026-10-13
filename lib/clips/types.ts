@@ -36,3 +36,18 @@ export type ClipShareView = {
 /** Minimum and default maximum clip length. */
 export const CLIP_MIN_MS = 2000
 export const CLIP_DEFAULT_MAX_MS = 600_000
+
+/** What the app's clip routes return: no storage key or raw render error. */
+export type ClipWire = Omit<MeetingClip, "storageKey" | "renderError" | "workspaceId"> & {
+  /** The caller may rename/delete/share (author or meeting manager). */
+  canManage: boolean
+}
+
+export function toClipWire(clip: MeetingClip, canManage: boolean): ClipWire {
+  const { storageKey: _storageKey, renderError: _renderError, workspaceId: _workspaceId, ...rest } = clip
+
+  void _storageKey
+  void _renderError
+  void _workspaceId
+  return { ...rest, canManage }
+}
