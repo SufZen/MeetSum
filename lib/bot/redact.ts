@@ -11,6 +11,7 @@
  * - long base64/base64url/hex blobs;
  * then truncates to at most {@link BOT_REDACT_MAX_LENGTH} characters.
  */
+import { getLogger } from "@/lib/log"
 
 export const BOT_REDACT_MAX_LENGTH = 300
 const REDACT_INPUT_MAX = 4000
@@ -109,12 +110,16 @@ export function scrubSecrets(text: string, secrets: readonly (string | undefined
   return result
 }
 
-/** console logging that always goes through redaction. */
+/**
+ * Bot logging (M10 B1): a thin wrapper over the server logger
+ * (`getLogger({ component: "bot" })`) that still runs the bot redactor on the
+ * message and detail before the logger's own two redaction layers.
+ */
 export const botLog = {
   info(message: string, detail?: unknown) {
-    console.log(`[bot] ${redactBotError(message)}${detail === undefined ? "" : ` ${redactBotError(detail)}`}`)
+    getLogger({ component: "bot" }).info(detail === undefined ? {} : { detail: redactBotError(detail) }, redactBotError(message))
   },
   error(message: string, detail?: unknown) {
-    console.error(`[bot] ${redactBotError(message)}${detail === undefined ? "" : ` ${redactBotError(detail)}`}`)
+    getLogger({ component: "bot" }).error(detail === undefined ? {} : { detail: redactBotError(detail) }, redactBotError(message))
   },
 }

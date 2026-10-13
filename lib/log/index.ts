@@ -11,11 +11,19 @@
  * transports run in worker threads, which Next bundling breaks; `pino` is in
  * `serverExternalPackages`). `pino-pretty` is a developer pipe, not a
  * dependency. Server-only: never import this module from client components.
+ *
+ * Redaction has two layers: pino `redact.paths` (REDACT_PATHS) and the deep
+ * scrub in `formatters.log` (lib/log/redact.ts). Message strings and the
+ * message of a logged Error are scrubbed in the `logMethod` hook, because
+ * they never reach the formatter.
  */
 import { AsyncLocalStorage } from "node:async_hooks"
 
 import pino from "pino"
 
+import { redactBotText } from "@/lib/bot/redact"
+import { maskEmails, REDACT_PATHS, redactErrorMessage, scrubString, scrubValue } from "@/lib/log/redact"
+import { logDestination } from "@/lib/log/sink"
 import packageJson from "@/package.json"
 
 export type Logger = pino.Logger
@@ -65,52 +73,66 @@ function resolveService(): LogService {
   return "app"
 }
 
-/** Keys whose values are replaced by "[redacted]" at any depth (B extends this). */
-const SECRET_KEY = /token|secret|password|passcode|authori[sz]ation|cookie|api[-_]?key|verifier|signature/i
-const SCRUB_MAX_DEPTH = 4
-const REDACTED = "[redacted]"
-
-function scrubAt(value: unknown, depth: number): unknown {
-  if (value === null || typeof value !== "object") return value
-  if (depth >= SCRUB_MAX_DEPTH) return "[truncated]"
-  if (Array.isArray(value)) return value.map((item) => scrubAt(item, depth + 1))
-  if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack }
+/** Message strings: URL queries, key=value secrets, bearer values, blobs, emails. */
+function scrubMessage(message: string): string {
+  try {
+    return maskEmails(redactBotText(scrubString(message)))
+  } catch {
+    return "[redacted]"
   }
+}
 
-  const out: Record<string, unknown> = {}
-
-  for (const [key, inner] of Object.entries(value)) {
-    out[key] = SECRET_KEY.test(key) ? REDACTED : scrubAt(inner, depth + 1)
-  }
-
-  return out
+function scrubArg(arg: unknown): unknown {
+  return typeof arg === "string" ? scrubMessage(arg) : scrubValue(arg)
 }
 
 /**
  * Returns a copy of `value` that is safe to log or send to Sentry: secret-ish
- * keys are redacted at any depth (up to 4 levels). Pure; never mutates.
+ * keys are redacted and content keys omitted at any depth (up to 4 levels),
+ * emails are masked, URL queries stripped and error text redacted. Pure;
+ * never mutates.
  */
 export function scrub<T>(value: T): T {
-  return scrubAt(value, 0) as T
+  return scrubValue(value)
 }
 
 /** The root logger. Every line carries `service` and `version`. */
-export const logger: Logger = pino({
-  level: resolveLevel(),
-  base: { service: resolveService(), version: packageJson.version },
-  timestamp: pino.stdTimeFunctions.isoTime,
-  messageKey: "msg",
-  formatters: {
-    level: (label) => ({ level: label }),
-    log: (object) => scrub(object),
+export const logger: Logger = pino(
+  {
+    level: resolveLevel(),
+    base: { service: resolveService(), version: packageJson.version },
+    timestamp: pino.stdTimeFunctions.isoTime,
+    messageKey: "msg",
+    redact: { paths: REDACT_PATHS, censor: "[redacted]" },
+    formatters: {
+      level: (label) => ({ level: label }),
+      bindings: (bindings) => scrubValue(bindings),
+      log: (object) => scrubValue(object),
+    },
+    hooks: {
+      logMethod(args, method) {
+        const [first, ...rest] = args as unknown[]
+
+        if (first instanceof Error) {
+          const message =
+            typeof rest[0] === "string" ? scrubMessage(rest.shift() as string) : redactErrorMessage(first.message ?? "")
+
+          return method.apply(this, [{ err: first }, message, ...rest.map(scrubArg)] as unknown as Parameters<typeof method>)
+        }
+
+        const scrubbed = args.map((arg, index) => (index === 0 && typeof arg !== "string" ? arg : scrubArg(arg)))
+
+        return method.apply(this, scrubbed as unknown as Parameters<typeof method>)
+      },
+    },
+    mixin: () => ({ ...contextStore.getStore() }),
   },
-  mixin: () => ({ ...contextStore.getStore() }),
-})
+  logDestination
+)
 
 /** A child logger with static bindings, e.g. `getLogger({ component: "bot" })`. */
 export function getLogger(bindings: LogBindings): Logger {
-  return logger.child(bindings)
+  return logger.child(scrubValue(bindings))
 }
 
 /**
