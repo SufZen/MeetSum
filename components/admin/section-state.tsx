@@ -47,7 +47,7 @@ export function SectionState({
     return (
       <div
         aria-busy="true"
-        className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground"
+        className="flex items-center gap-2 rounded-lg border border-dashed border-line p-4 text-sm text-muted-foreground"
       >
         <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
         {loadingLabel}
@@ -57,7 +57,7 @@ export function SectionState({
 
   if (empty) {
     return (
-      <div className="rounded-lg border border-dashed border-[var(--divider)] p-4 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-line p-4 text-sm text-muted-foreground">
         {emptyLabel}
       </div>
     )

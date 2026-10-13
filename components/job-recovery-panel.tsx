@@ -186,7 +186,7 @@ function StageGroupCard({
   const hasMore = group.jobs.length > 2
 
   return (
-    <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4">
+    <div className="rounded-lg border border-line bg-surface-2 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -214,14 +214,14 @@ function StageGroupCard({
         {displayed.map(({ job, meetingTitle }) => (
           <div
             key={job.id}
-            className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-3"
+            className="rounded-md border border-line bg-surface p-3"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">
                   {meetingTitle}
                 </div>
-                <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                <div className="mt-1 text-2xs leading-5 text-muted-foreground">
                   {job.id} · updated {formatJobTime(job.updatedAt)}
                 </div>
                 {job.error && job.error !== group.errorPattern ? (
@@ -301,8 +301,8 @@ function MeetingGroupCard({
     <div
       className={`rounded-lg border p-4 ${
         isStale
-          ? "border-[var(--divider)] bg-[var(--surface-subtle)] opacity-60"
-          : "border-[var(--divider)] bg-[var(--surface-subtle)]"
+          ? "border-line bg-surface-2 opacity-60"
+          : "border-line bg-surface-2"
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -322,7 +322,7 @@ function MeetingGroupCard({
             {group.latestError}
           </p>
           {isStale ? (
-            <p className="mt-1 text-xs leading-5 text-[var(--status-success)]">
+            <p className="mt-1 text-xs leading-5 text-ok-text">
               Meeting already completed — these are stale failures.
             </p>
           ) : null}
@@ -335,7 +335,7 @@ function MeetingGroupCard({
             {group.jobs.length} failed
           </Badge>
           {isStale ? (
-            <Badge variant="outline" className="rounded-md border-[var(--status-success)] text-[var(--status-success)]">
+            <Badge variant="outline" className="rounded-md border-ok text-ok-text">
               completed
             </Badge>
           ) : null}
@@ -385,7 +385,7 @@ function MeetingGroupCard({
           {group.jobs.map((job) => (
             <div
               key={job.id}
-              className="rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+              className="rounded-md border border-line bg-surface p-2 text-xs"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{jobStage(job)}</span>
@@ -521,7 +521,7 @@ export function JobRecoveryPanel({
             ))}
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
             No failed jobs need recovery. All processing pipelines are healthy.
           </div>
         )
@@ -538,7 +538,7 @@ export function JobRecoveryPanel({
           ))}
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+        <div className="rounded-md border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
           No failed jobs need recovery. All processing pipelines are healthy.
         </div>
       )}

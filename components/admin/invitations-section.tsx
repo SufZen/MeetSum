@@ -154,9 +154,9 @@ export function InvitationsSection({
         retryLabel={t.retry}
         onRetry={() => void invitations.reload()}
       >
-        <div className="overflow-x-auto rounded-lg border border-[var(--divider)]">
+        <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[620px] text-sm">
-            <thead className="bg-[var(--surface-subtle)] text-xs text-muted-foreground">
+            <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
                   {t.invitationsColumnEmail}
@@ -179,7 +179,7 @@ export function InvitationsSection({
               {invitations.data.map((invitation) => (
                 <tr
                   key={invitation.id}
-                  className="border-t border-[var(--divider)] align-top"
+                  className="border-t border-line align-top"
                 >
                   <td className="px-3 py-2">
                     <div className="truncate font-medium" dir="ltr">

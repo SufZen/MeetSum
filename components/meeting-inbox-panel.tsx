@@ -2,14 +2,12 @@ import {
   CalendarDaysIcon,
   SearchIcon,
   SlidersHorizontalIcon,
-  CheckCircle2Icon,
-  Clock3Icon,
-  CircleAlertIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { StatusPill } from "@/components/ui/meeting-atoms"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { meetingDurationLabel } from "@/lib/meetings/duration"
@@ -45,13 +43,13 @@ function sourceMeta(meeting: MeetingRecord) {
   const source = meeting.source
 
   if (source === "upload" && isDriveImport(meeting)) {
-    return { label: "Drive import", dot: "bg-sky-500", icon: "D" }
+    return { label: "Drive import", dot: "bg-info", icon: "D" }
   }
-  if (source === "google_meet") return { label: "Google Meet", dot: "bg-emerald-500", icon: "G" }
-  if (source === "upload") return { label: "Upload", dot: "bg-sky-500", icon: "U" }
-  if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-violet-500", icon: "R" }
-  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-indigo-500", icon: "D" }
-  return { label: source.replaceAll("_", " "), dot: "bg-amber-500", icon: "A" }
+  if (source === "google_meet") return { label: "Google Meet", dot: "bg-ok", icon: "G" }
+  if (source === "upload") return { label: "Upload", dot: "bg-info", icon: "U" }
+  if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-brand", icon: "R" }
+  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-fg-3", icon: "D" }
+  return { label: source.replaceAll("_", " "), dot: "bg-warn", icon: "A" }
 }
 
 function participantCount(meeting: MeetingRecord) {
@@ -60,46 +58,30 @@ function participantCount(meeting: MeetingRecord) {
 
 function tagClass(tag: string) {
   if (/(urgent|follow|review|action|task)/i.test(tag)) {
-    return "bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+    return "bg-warn-soft text-warn-text"
   }
   if (/(ai|mixed|hebrew|english|portuguese|spanish|italian)/i.test(tag)) {
-    return "bg-[var(--tag-ai)] text-[var(--tag-ai-fg)]"
+    return "bg-surface-3 text-fg-2"
   }
   if (/(technical|product|mcp|gemini|gemma|realizeos)/i.test(tag)) {
-    return "bg-[var(--tag-technical)] text-[var(--tag-technical-fg)]"
+    return "bg-info-soft text-info-text"
   }
 
-  return "bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+  return "bg-brand-soft text-brand-text"
 }
 
-function statusMeta(status: MeetingRecord["status"]) {
-  if (status === "completed") {
-    return {
-      label: "Ready",
-      Icon: CheckCircle2Icon,
-      className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
-    }
-  }
-  if (status === "failed") {
-    return {
-      label: "Failed",
-      Icon: CircleAlertIcon,
-      className: "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-200",
-    }
-  }
-  if (status === "scheduled") {
-    return {
-      label: "Upcoming",
-      Icon: Clock3Icon,
-      className: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-200",
-    }
-  }
+/**
+ * Inbox pills are for exceptions only (README §7): a finished, scheduled or
+ * just-created meeting gets no pill. Processing shows the step, never an
+ * invented percentage.
+ */
+function statusPill(
+  status: MeetingRecord["status"]
+): { status: "failed" | "processing"; label: string } | null {
+  if (status === "failed") return { status: "failed", label: "Failed" }
+  if (status === "completed" || status === "scheduled" || status === "created") return null
 
-  return {
-    label: "Processing",
-    Icon: Clock3Icon,
-    className: "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200",
-  }
+  return { status: "processing", label: "Processing" }
 }
 
 function dateGroupLabel(date: Date) {
@@ -184,8 +166,8 @@ export function MeetingInboxPanel({
   })
 
   return (
-    <section className="ms-no-x grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[var(--divider)] bg-[var(--surface)]">
-      <div className="ms-no-x border-b border-[var(--divider)] px-3 py-3">
+    <section className="ms-no-x grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-line bg-surface">
+      <div className="ms-no-x border-b border-line px-3 py-3">
         <div className="mb-2.5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-base font-semibold">
             <CalendarDaysIcon aria-hidden="true" className="size-4 text-muted-foreground" />
@@ -202,7 +184,7 @@ export function MeetingInboxPanel({
               <select
                 value={sortMode}
                 onChange={(event) => onSortChange(event.target.value as MeetingSortMode)}
-                className="h-8 rounded-sm border border-transparent bg-transparent px-1 text-sm font-medium text-foreground outline-none hover:border-[var(--divider)] focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]/20"
+                className="h-8 rounded-sm border border-transparent bg-transparent px-1 text-sm font-medium text-foreground outline-none hover:border-line focus:border-ring focus:ring-2 focus:ring-ring/20"
                 aria-label="Sort meetings"
               >
               {(Object.keys(sortLabels) as MeetingSortMode[]).map((mode) => (
@@ -213,7 +195,7 @@ export function MeetingInboxPanel({
               </select>
           </label>
         </div>
-        <div className="mb-2.5 flex h-8 items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-3">
+        <div className="mb-2.5 flex h-8 items-center gap-2 rounded-md border border-line bg-surface-2 px-3">
           <SearchIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <Input
             value={query}
@@ -228,14 +210,14 @@ export function MeetingInboxPanel({
               key={filter}
               type="button"
               onClick={() => onFilterChange(filter)}
-              className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+              className="rounded-sm focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent"
             >
               <Badge
                 variant={activeFilter === filter ? "secondary" : "outline"}
                 className={
                   activeFilter === filter
-                    ? "h-7 w-full justify-center rounded-md bg-[var(--selected)] px-1.5 text-[var(--primary)]"
-                    : "h-7 w-full justify-center rounded-md border-[var(--divider)] px-1.5 text-muted-foreground"
+                    ? "h-7 w-full justify-center rounded-md bg-brand-soft px-1.5 text-brand-text"
+                    : "h-7 w-full justify-center rounded-md border-line px-1.5 text-muted-foreground"
                 }
               >
                 {filter === "all" ? dictionary.all : label === "Processing" ? "Process" : label}
@@ -245,10 +227,10 @@ export function MeetingInboxPanel({
         </div>
       </div>
 
-      <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-[var(--surface-subtle)] p-2.5 lg:max-h-none">
+      <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-surface-2 p-2.5 lg:max-h-none">
         <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
           {!loading && meetings.length === 0 && (
-            <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)] p-5 text-center text-sm text-muted-foreground">
+            <div className="rounded-md border border-dashed border-line bg-surface p-5 text-center text-sm text-muted-foreground">
               No meetings match this view.
             </div>
           )}
@@ -256,25 +238,24 @@ export function MeetingInboxPanel({
             const source = sourceMeta(meeting)
             const selected = selectedMeetingId === meeting.id
             const started = new Date(meeting.startedAt)
-            const status = statusMeta(meeting.status)
-            const StatusIcon = status.Icon
+            const pill = statusPill(meeting.status)
 
             return (
               <div key={meeting.id} className="grid gap-2">
                 {showGroup && (
                   <div className="flex items-center gap-2 px-1 pt-1 text-xs font-medium text-muted-foreground">
-                    <span className="size-3 rounded border border-[var(--divider)] bg-[var(--surface)]" />
+                    <span className="size-3 rounded border border-line bg-surface" />
                     {group}
                   </div>
                 )}
                 <button
                   type="button"
                   data-selected={selected}
-                  className="ms-no-x grid min-h-[76px] gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-[var(--focus)] hover:bg-[var(--selected)]/50 data-[selected=true]:border-[var(--focus)] data-[selected=true]:bg-[var(--selected)] rtl:text-right"
+                  className="ms-no-x grid min-h-[76px] gap-2 rounded-md border border-line bg-surface px-2.5 py-2.5 text-start shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-ring hover:bg-brand-soft/50 data-[selected=true]:border-ring data-[selected=true]:bg-brand-soft"
                   onClick={() => onSelectMeeting(meeting.id)}
                 >
                   <div className="flex min-w-0 items-start gap-2.5">
-                    <div className="grid size-7 shrink-0 place-items-center rounded-md bg-[var(--surface-subtle)] text-xs font-semibold text-[var(--primary)] ring-1 ring-[var(--divider)]">
+                    <div className="grid size-7 shrink-0 place-items-center rounded-md bg-surface-2 text-xs font-semibold text-brand-text ring-1 ring-line">
                       {source.icon}
                     </div>
                     <div className="min-w-0 flex-1 overflow-hidden">
@@ -297,15 +278,12 @@ export function MeetingInboxPanel({
                         </span>
                       </div>
                       <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
-                        <span className={`inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium ${status.className}`}>
-                          <StatusIcon aria-hidden="true" className="size-3" />
-                          {status.label}
-                        </span>
+                        {pill ? <StatusPill status={pill.status}>{pill.label}</StatusPill> : null}
                         {(meeting.tags?.slice(0, 2) ?? []).map((tag) => (
                           <Badge
                             key={tag}
                             variant="secondary"
-                            className={`h-5 max-w-[112px] truncate rounded-md px-1.5 text-[11px] font-medium ${tagClass(tag)}`}
+                            className={`h-5 max-w-[112px] truncate rounded-md px-1.5 text-2xs font-medium ${tagClass(tag)}`}
                           >
                             {tag}
                           </Badge>
@@ -320,14 +298,14 @@ export function MeetingInboxPanel({
         </div>
       </div>
 
-      <div className="ms-no-x grid gap-2 border-t border-[var(--divider)] bg-[var(--surface)] px-3 py-2.5 text-xs text-muted-foreground">
+      <div className="ms-no-x grid gap-2 border-t border-line bg-surface px-3 py-2.5 text-xs text-muted-foreground">
         <div className="flex min-w-0 items-center justify-between gap-2">
         <label className="flex items-center gap-2">
           <span>Show</span>
           <select
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            className="h-8 rounded-sm border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 text-sm font-medium text-foreground outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]/20"
+            className="h-8 rounded-sm border border-line bg-surface-2 px-2 text-sm font-medium text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             aria-label="Meetings per page"
           >
             {[5, 10, 20].map((value) => (

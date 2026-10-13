@@ -56,13 +56,13 @@ export default async function PublicMeetingSharePage({
 
     if (!isValid) {
       return (
-        <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-5 py-8 text-[var(--text-primary)]">
-          <div className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+        <main className="flex min-h-screen items-center justify-center bg-canvas px-5 py-8 text-fg">
+          <div className="w-full max-w-md rounded-lg border border-line bg-surface p-8 shadow-sm">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-text">
               MeetSum shared meeting
             </div>
             <h1 className="mb-2 text-xl font-semibold">Password Required</h1>
-            <p className="mb-6 text-sm text-[var(--text-muted)]">
+            <p className="mb-6 text-sm text-fg-3">
               This shared meeting is password-protected. Please enter the password to continue.
             </p>
             <form
@@ -77,18 +77,18 @@ export default async function PublicMeetingSharePage({
                 autoFocus
                 required
                 placeholder="Enter password"
-                className="mb-4 w-full rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-sm"
+                className="mb-4 w-full rounded-md border border-line bg-surface-2 px-4 py-3 text-sm"
               />
               <button
                 type="submit"
-                className="w-full rounded-md bg-[var(--primary)] px-4 py-3 text-sm font-medium text-white"
+                className="w-full rounded-md bg-brand px-4 py-3 text-sm font-medium text-white"
               >
                 Access Meeting
               </button>
               {errorMessage ? (
                 <p
                   role="alert"
-                  className="mt-3 text-center text-sm text-[var(--status-error)]"
+                  className="mt-3 text-center text-sm text-danger-text"
                 >
                   {errorMessage}
                 </p>
@@ -107,14 +107,14 @@ export default async function PublicMeetingSharePage({
   const transcribeRun = meeting.aiRuns?.find((r) => r.task === "audio.transcribe")
 
   return (
-    <main className="min-h-screen bg-[var(--app-bg)] px-5 py-8 text-[var(--text-primary)]">
-      <article className="mx-auto max-w-4xl rounded-lg border border-[var(--border)] bg-[var(--surface)] p-8 shadow-sm">
-        <div className="mb-8 border-b border-[var(--border)] pb-6">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+    <main className="min-h-screen bg-canvas px-5 py-8 text-fg">
+      <article className="mx-auto max-w-4xl rounded-lg border border-line bg-surface p-8 shadow-sm">
+        <div className="mb-8 border-b border-line pb-6">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-brand-text">
             MeetSum shared meeting
           </div>
           <h1 dir="auto" className="text-3xl font-semibold leading-tight">{meeting.title}</h1>
-          <div className="mt-4 flex flex-wrap gap-3 text-sm text-[var(--text-muted)]">
+          <div className="mt-4 flex flex-wrap gap-3 text-sm text-fg-3">
             <span>{new Date(meeting.startedAt).toLocaleString()}</span>
             <span>{meeting.source.replaceAll("_", " ")}</span>
             <span>{meeting.language}</span>
@@ -124,7 +124,7 @@ export default async function PublicMeetingSharePage({
             <div className="mt-4 flex flex-wrap gap-2">
               {participants.map((participant) => (
                 <bdi
-                  className="rounded-full bg-[var(--surface-subtle)] px-3 py-1 text-sm"
+                  className="rounded-full bg-surface-2 px-3 py-1 text-sm"
                   key={participant}
                 >
                   {participant}
@@ -137,7 +137,7 @@ export default async function PublicMeetingSharePage({
         {includes.has("summary") ? (
           <section className="mb-8">
             <h2 className="mb-3 text-xl font-semibold">Overview</h2>
-            <p dir="auto" className="leading-7 text-[var(--text-secondary)]">
+            <p dir="auto" className="leading-7 text-fg-2">
               {meeting.summary?.overview ?? "No summary is available yet."}
             </p>
           </section>
@@ -146,7 +146,7 @@ export default async function PublicMeetingSharePage({
         {includes.has("decisions") ? (
           <section className="mb-8">
             <h2 className="mb-3 text-xl font-semibold">Decisions</h2>
-            <ul className="list-disc space-y-2 ps-5 text-[var(--text-secondary)]">
+            <ul className="list-disc space-y-2 ps-5 text-fg-2">
               {(meeting.summary?.decisions.length
                 ? meeting.summary.decisions
                 : ["No decisions extracted yet."]
@@ -168,13 +168,13 @@ export default async function PublicMeetingSharePage({
                 : []
               ).map((item) => (
                 <div
-                  className="rounded-md border border-[var(--border)] p-3 text-sm"
+                  className="rounded-md border border-line p-3 text-sm"
                   key={item.id}
                 >
                   <div dir="auto" className="font-medium">
                     {item.title}
                   </div>
-                  <div className="mt-1 text-[var(--text-muted)]">
+                  <div className="mt-1 text-fg-3">
                     {item.owner ? <bdi>{item.owner}</bdi> : "Unassigned"}
                     {item.dueDate ? ` · Due ${item.dueDate}` : ""}
                     {item.priority ? ` · ${item.priority}` : ""}
@@ -182,7 +182,7 @@ export default async function PublicMeetingSharePage({
                 </div>
               ))}
               {!meeting.summary?.actionItems.length ? (
-                <p className="text-[var(--text-muted)]">
+                <p className="text-fg-3">
                   No action items extracted yet.
                 </p>
               ) : null}
@@ -194,18 +194,18 @@ export default async function PublicMeetingSharePage({
           <section>
             <h2 className="mb-3 text-xl font-semibold">Transcript</h2>
             {transcribeRun ? (
-              <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-sm">
+              <div className="mb-4 rounded-md border border-line bg-surface-2 p-3 text-sm">
                 <div className="font-medium">
                   Transcription provided by {transcribeRun.provider}
                   {transcribeRun.model ? ` (${transcribeRun.model})` : ""}
                 </div>
                 {transcribeRun.latencyMs ? (
-                  <div className="mt-1 text-xs text-[var(--text-muted)]">
+                  <div className="mt-1 text-xs text-fg-3">
                     Completed in {(transcribeRun.latencyMs / 1000).toFixed(1)}s
                   </div>
                 ) : null}
                 {transcribeRun.metadata?.fallbackUsed ? (
-                  <div className="mt-1 text-xs text-[var(--status-warning)]">
+                  <div className="mt-1 text-xs text-warn-text">
                     Fallback used after {transcribeRun.metadata.attemptedProvider as string}. Reason: {(transcribeRun.metadata.fallbackReason as string) || "Unknown error"}
                   </div>
                 ) : null}
@@ -215,10 +215,10 @@ export default async function PublicMeetingSharePage({
               {(meeting.transcript?.length ? meeting.transcript : []).map(
                 (segment) => (
                   <div
-                    className="rounded-md bg-[var(--surface-subtle)] p-3"
+                    className="rounded-md bg-surface-2 p-3"
                     key={segment.id}
                   >
-                    <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+                    <div className="mb-1 text-xs font-medium text-fg-3">
                       {formatMs(segment.startMs)} · <bdi>{segment.speaker}</bdi>
                     </div>
                     <p dir="auto" className="text-sm leading-6">
@@ -228,7 +228,7 @@ export default async function PublicMeetingSharePage({
                 )
               )}
               {!meeting.transcript?.length ? (
-                <p className="text-[var(--text-muted)]">
+                <p className="text-fg-3">
                   No transcript is available yet.
                 </p>
               ) : null}
@@ -238,19 +238,19 @@ export default async function PublicMeetingSharePage({
 
         {/* Processing metadata footer */}
         {meeting.aiRuns?.length ? (
-          <footer className="mt-10 border-t border-[var(--border)] pt-6">
-            <h3 className="mb-3 text-sm font-semibold text-[var(--text-muted)]">
+          <footer className="mt-10 border-t border-line pt-6">
+            <h3 className="mb-3 text-sm font-semibold text-fg-3">
               Processing metadata
             </h3>
-            <div className="grid gap-2 text-xs text-[var(--text-muted)] sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-2 text-xs text-fg-3 sm:grid-cols-2 lg:grid-cols-3">
               {meeting.aiRuns
                 .filter((run) => run.status === "completed")
                 .map((run) => (
                   <div
                     key={run.id}
-                    className="rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-2"
+                    className="rounded-md border border-line bg-surface-2 p-2"
                   >
-                    <div className="font-medium text-[var(--text-secondary)]">
+                    <div className="font-medium text-fg-2">
                       {run.task.replace(/\./g, " · ")}
                     </div>
                     <div className="mt-1">

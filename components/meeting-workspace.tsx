@@ -77,7 +77,7 @@ export function MeetingWorkspace({
 }) {
   if (!meeting) {
     return (
-      <div className="flex min-h-[520px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface)]/70 p-8 text-center lg:h-full">
+      <div className="flex min-h-[520px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-line bg-surface/70 p-8 text-center lg:h-full">
         <FileAudioIcon aria-hidden="true" className="size-10 text-muted-foreground" />
         <h2 className="text-xl font-semibold">{dictionary.noMeetingsTitle}</h2>
         <p className="max-w-sm text-sm leading-6 text-muted-foreground">
@@ -102,7 +102,7 @@ export function MeetingWorkspace({
   }
 
   return (
-    <div className="ms-scrollbar min-h-0 min-w-0 overflow-y-auto bg-[var(--surface)] lg:h-full">
+    <div className="ms-scrollbar min-h-0 min-w-0 overflow-y-auto bg-surface lg:h-full">
       <MeetingHeader
         meeting={meeting}
         locale={locale}
@@ -117,14 +117,14 @@ export function MeetingWorkspace({
       <Tabs defaultValue="summary" className="min-w-0">
         <TabsList
           variant="line"
-          className="mx-auto mt-3 grid min-h-9 w-[min(690px,calc(100%-2.5rem))] grid-cols-3 border-b border-[var(--divider)] bg-transparent p-0 md:grid-cols-6"
+          className="mx-auto mt-3 grid min-h-9 w-[min(690px,calc(100%-2.5rem))] grid-cols-3 border-b border-line bg-transparent p-0 md:grid-cols-6"
         >
           <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
           <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>
           <TabsTrigger value="ask">{dictionary.ask}</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
-            <span className="ms-1 rounded-full bg-[var(--muted)] px-2 text-xs text-muted-foreground">
+            <span className="ms-1 rounded-full bg-surface-2 px-2 text-xs text-muted-foreground">
               {meeting.summary?.actionItems.length ?? 0}
             </span>
           </TabsTrigger>

@@ -60,7 +60,7 @@ export function TranscriptTimeline({
 
   return (
     <div className="grid gap-4">
-      <div className="sticky top-0 z-10 flex min-h-10 flex-wrap items-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-1.5">
+      <div className="sticky top-0 z-10 flex min-h-10 flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-1.5">
         <SearchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         <Input
           value={query}
@@ -85,7 +85,7 @@ export function TranscriptTimeline({
       </div>
 
       {speakerLabels.length && assignableParticipants.length && onAssignSpeaker ? (
-        <section className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+        <section className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Speaker mapping</h3>
@@ -109,11 +109,11 @@ export function TranscriptTimeline({
               return (
                 <label
                   key={speaker}
-                  className="grid gap-1 rounded-md border border-[var(--divider)] bg-[var(--surface)] p-2 text-xs"
+                  className="grid gap-1 rounded-md border border-line bg-surface p-2 text-xs"
                 >
                   <span className="font-medium text-foreground">{speaker}</span>
                   <select
-                    className="h-8 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 text-sm text-foreground"
+                    className="h-8 rounded-md border border-line bg-surface px-2 text-sm text-foreground"
                     value={mappedParticipant?.id ?? ""}
                     onChange={(event) => {
                       if (event.target.value) {
@@ -140,7 +140,7 @@ export function TranscriptTimeline({
       {filteredSegments.map((segment) => (
         <article
           key={segment.id}
-          className="grid gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] p-3 text-sm"
+          className="grid gap-2 rounded-lg border border-line bg-surface p-3 text-sm"
         >
           <div className="flex min-h-7 flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
@@ -159,7 +159,7 @@ export function TranscriptTimeline({
         </article>
       ))}
       {!filteredSegments.length && (
-        <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface)] p-6 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-line bg-surface p-6 text-center text-sm text-muted-foreground">
           No transcript segments match this search.
         </div>
       )}

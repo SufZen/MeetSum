@@ -1,0 +1,665 @@
+<title>MeetSum Cadence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="tokens.generated.css">
+<link rel="stylesheet" href="cadence.css">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-cite" viewBox="0 0 24 24"><path d="M8 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M10 8.6v6.8l5.2-3.4Z" fill="currentColor" stroke-width="1.2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-chev-end" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8M13 12h8M13 18h8"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="13" height="13" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5Z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+    <symbol id="i-arrow-end" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-enter" viewBox="0 0 24 24"><path d="m9 10-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+    <symbol id="i-diamond" viewBox="0 0 24 24"><path d="M12 3.8 20.2 12 12 20.2 3.8 12Z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 10v3M6 6v11M10 3v18M14 8v7M18 5v13M22 10v3"/></symbol>
+    <symbol id="i-motion" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+    <symbol id="i-lang" viewBox="0 0 24 24"><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect width="16" height="11" x="4" y="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="14" r="1" fill="currentColor"/><circle cx="15" cy="14" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-offline" viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 4.2-2.4M9.5 5.3A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.7M16.8 11.4A10 10 0 0 1 19 12.9M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><path d="m8 6 4-4 4 4"/><path d="M12 2v10.3a4 4 0 0 1-1.17 2.83L4 22"/><path d="m20 22-5-5"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="#top" aria-label="MeetSum Cadence home">
+      <svg class="sigma lanes" id="brand-sigma" viewBox="0 0 28 28" aria-hidden="true"><rect class="s1" x="5" y="4" width="18" height="3.4" rx="1.7"/><rect class="s2" x="5" y="9.3" width="18" height="3.4" rx="1.7"/><rect class="s3" x="5" y="15.3" width="18" height="3.4" rx="1.7"/><rect class="s4" x="5" y="20.6" width="18" height="3.4" rx="1.7"/></svg>
+      <span class="brand-word">MeetSum <b>Cadence</b></span>
+      <span class="ver">v2.0</span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#product">Product</a><a href="#principles">Principles</a><a href="#foundations">Foundations</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#patterns">Patterns</a><a href="#benchmark">Benchmark</a><a href="#rollout">Rollout</a>
+    </nav>
+    <div class="top-controls">
+      <div class="seg" role="group" aria-label="Prototype language">
+        <button type="button" id="lang-en" class="seg-btn" aria-pressed="true">EN</button>
+        <button type="button" id="lang-he" class="seg-btn" aria-pressed="false" lang="he">עב</button>
+      </div>
+      <button type="button" class="icon-btn" id="motion-toggle" aria-pressed="false" title="Reduce motion"><svg class="i"><use href="#i-motion"/></svg><span class="sr">Reduce motion</span></button>
+      <button type="button" class="icon-btn" id="theme-toggle" title="Switch theme"><svg class="i i-sun"><use href="#i-sun"/></svg><svg class="i i-moon"><use href="#i-moon"/></svg><span class="sr">Switch theme</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero wrap" id="product">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="tc">00:00</span>Design system v2.0 · MeetSum · October 2026</p>
+      <h1 lang="he" dir="rtl">כל שורה בסיכום מצביעה על הרגע שממנו היא באה.</h1>
+      <p class="h1-en">Every summary line points back to the moment it came from.</p>
+      <p class="lede">Cadence is MeetSum's design language: Hebrew-first, citation-first, calm until something matters. The workspace below is a working prototype. Press play, hover a summary line to see where it came from, click a timecode, ask a question, start a recording, or press <kbd>Ctrl</kbd> <kbd>K</kbd>.</p>
+    </div>
+    <div class="try" role="group" aria-label="Try the prototype">
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="play"><svg class="i"><use href="#i-play"/></svg>Play meeting</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="cite"><svg class="i"><use href="#i-clock"/></svg>Jump to a decision</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="stream"><svg class="i"><use href="#i-cite"/></svg>Regenerate with source trace</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="record"><svg class="i"><use href="#i-mic"/></svg>Start recording</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="share"><svg class="i"><use href="#i-share"/></svg>Share dialog</button>
+      <button type="button" class="btn btn-secondary btn-sm" data-moment="palette"><svg class="i"><use href="#i-search"/></svg>Command palette</button>
+    </div>
+  </section>
+
+  <!-- ================= PROTOTYPE ================= -->
+  <div class="wrap">
+    <div class="app" id="app" dir="ltr" lang="en">
+      <nav class="rail" aria-label="App">
+        <span class="rail-logo" aria-hidden="true"><svg class="sigma" id="rail-sigma" viewBox="0 0 28 28"><rect class="s1" x="5" y="4" width="18" height="3.4" rx="1.7"/><rect class="s2" x="5" y="9.3" width="18" height="3.4" rx="1.7"/><rect class="s3" x="5" y="15.3" width="18" height="3.4" rx="1.7"/><rect class="s4" x="5" y="20.6" width="18" height="3.4" rx="1.7"/></svg></span>
+        <button type="button" class="rail-btn is-active" aria-current="page" data-tip-i18n="nav.meetings"><svg class="i"><use href="#i-inbox"/></svg></button>
+        <button type="button" class="rail-btn" data-tip-i18n="nav.ask"><svg class="i"><use href="#i-chat"/></svg></button>
+        <button type="button" class="rail-btn" data-tip-i18n="nav.tasks"><svg class="i"><use href="#i-tasks"/></svg><span class="rail-badge" id="rail-badge"></span></button>
+        <button type="button" class="rail-btn" data-tip-i18n="nav.rooms"><svg class="i"><use href="#i-folder"/></svg></button>
+        <span class="rail-grow"></span>
+        <button type="button" class="rail-btn" data-tip-i18n="nav.settings"><svg class="i"><use href="#i-sliders"/></svg></button>
+        <span class="avatar avatar-sm rail-me" style="--c: var(--spk-1)" aria-hidden="true">RN</span>
+      </nav>
+
+      <aside class="inbox" id="inbox" aria-labelledby="inbox-title">
+        <div class="inbox-head">
+          <h2 class="inbox-title" id="inbox-title" data-i18n="inbox.title">Meetings</h2>
+          <button type="button" class="btn btn-ghost btn-xs" id="sim-upload"><svg class="i"><use href="#i-upload"/></svg><span data-i18n="inbox.upload">Upload</span></button>
+        </div>
+        <button type="button" class="search-field" id="open-palette">
+          <svg class="i"><use href="#i-search"/></svg>
+          <span data-i18n="inbox.search">Search or ask</span>
+          <span class="kbds" dir="ltr"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+        </button>
+        <div class="chips" role="group" data-i18n-aria="aria.filter" aria-label="Filter">
+          <button type="button" class="chip is-on" aria-pressed="true" data-i18n="filter.all">All</button>
+          <button type="button" class="chip" aria-pressed="false" data-i18n="filter.mine">My actions</button>
+          <button type="button" class="chip" aria-pressed="false" data-i18n="filter.review">Needs review</button>
+        </div>
+        <div class="inbox-list ms-scroll" id="inbox-list" role="listbox" aria-labelledby="inbox-title"></div>
+      </aside>
+
+      <section class="main" aria-labelledby="m-title">
+        <header class="m-head">
+          <button type="button" class="icon-btn m-inbox-toggle" id="inbox-toggle" aria-controls="inbox" aria-expanded="false" data-i18n-aria="inbox.title"><svg class="i"><use href="#i-panel"/></svg></button>
+          <div class="m-title-wrap">
+            <div class="m-crumbs"><span data-i18n="room">Rooms</span><svg class="i i-xs flip"><use href="#i-chev-end"/></svg><bdi>Lisboa acquisitions</bdi></div>
+            <h2 class="m-title" id="m-title"></h2>
+            <div class="m-meta" id="m-meta"></div>
+          </div>
+          <div class="m-actions">
+            <button type="button" class="btn btn-record btn-sm" id="rec-btn" aria-pressed="false"><span class="rec-dot" aria-hidden="true"></span><span data-i18n="rec.start">Record</span></button>
+            <button type="button" class="btn btn-secondary btn-sm" id="share-btn" aria-haspopup="dialog"><svg class="i"><use href="#i-share"/></svg><span data-i18n="share">Share</span></button>
+            <button type="button" class="icon-btn" id="more-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu" data-i18n-aria="aria.more"><svg class="i"><use href="#i-more"/></svg></button>
+          </div>
+          <div class="menu" id="more-menu" role="menu" aria-labelledby="more-btn" hidden>
+            <button type="button" role="menuitem" tabindex="-1" data-menu="rename"><svg class="i"><use href="#i-edit"/></svg><span data-i18n="menu.rename">Rename</span><kbd>F2</kbd></button>
+            <button type="button" role="menuitem" tabindex="-1" data-menu="pdf"><svg class="i"><use href="#i-file"/></svg><span data-i18n="menu.pdf">Export PDF</span></button>
+            <button type="button" role="menuitem" tabindex="-1" data-menu="docx"><svg class="i"><use href="#i-download"/></svg><span data-i18n="menu.docx">Download Word (.docx)</span></button>
+            <button type="button" role="menuitem" tabindex="-1" data-menu="reprocess"><svg class="i"><use href="#i-refresh"/></svg><span data-i18n="menu.reprocess">Reprocess audio</span></button>
+            <hr>
+            <button type="button" role="menuitem" tabindex="-1" class="danger" data-menu="delete"><svg class="i"><use href="#i-trash"/></svg><span data-i18n="menu.delete">Delete meeting</span></button>
+          </div>
+        </header>
+
+        <div class="player" id="player" dir="ltr">
+          <div class="p-controls">
+            <button type="button" class="icon-btn" id="p-back" data-i18n-aria="aria.back"><svg class="i"><use href="#i-back"/></svg></button>
+            <button type="button" class="p-play" id="p-play" data-i18n-aria="aria.play"><svg class="i i-play"><use href="#i-play"/></svg><svg class="i i-pause"><use href="#i-pause"/></svg></button>
+            <button type="button" class="icon-btn" id="p-fwd" data-i18n-aria="aria.fwd"><svg class="i"><use href="#i-fwd"/></svg></button>
+            <span class="p-time"><span id="p-now">0:00</span><span class="p-sep">/</span><span id="p-dur">0:00</span></span>
+            <span class="p-chap" id="p-chap"></span>
+            <span class="tl-legend" aria-hidden="true"><span><i class="lg lg-d"></i><span data-i18n="mark.decision">Decision</span></span><span><i class="lg lg-a"></i><span data-i18n="mark.action">Action</span></span><span><i class="lg lg-q"></i><span data-i18n="mark.question">Question</span></span></span>
+            <button type="button" class="p-speed" id="p-speed" data-i18n-aria="aria.speed">1×</button>
+          </div>
+          <div class="tl" id="tl">
+            <div class="tl-chapters" id="tl-chapters" aria-hidden="true"></div>
+            <div class="tl-rows" id="tl-rows"></div>
+            <div class="tl-marks" id="tl-marks"></div>
+            <div class="tl-hit" id="tl-hit" role="slider" tabindex="0" data-i18n-aria="aria.seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00"></div>
+            <div class="tl-scan" id="tl-scan" aria-hidden="true"></div>
+            <div class="tl-head" id="tl-head" aria-hidden="true"><span class="tl-head-knob"></span></div>
+            <div class="tl-hover" id="tl-hover" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <div class="tabs" role="tablist" id="tabs">
+          <button type="button" role="tab" id="tab-summary" aria-controls="pane-summary" aria-selected="true" data-tab="summary"><svg class="i"><use href="#i-cite"/></svg><span data-i18n="tab.summary">Summary</span></button>
+          <button type="button" role="tab" id="tab-transcript" aria-controls="pane-transcript" aria-selected="false" tabindex="-1" data-tab="transcript"><svg class="i"><use href="#i-wave"/></svg><span data-i18n="tab.transcript">Transcript</span></button>
+          <button type="button" role="tab" id="tab-ask" aria-controls="pane-ask" aria-selected="false" tabindex="-1" data-tab="ask"><svg class="i"><use href="#i-chat"/></svg><span data-i18n="tab.ask">Ask</span></button>
+          <span class="tabs-ink" id="tabs-ink" aria-hidden="true"></span>
+        </div>
+
+        <div class="panes">
+          <div class="pane ms-scroll" role="tabpanel" id="pane-summary" aria-labelledby="tab-summary" tabindex="0"></div>
+          <div class="pane ms-scroll" role="tabpanel" id="pane-transcript" aria-labelledby="tab-transcript" tabindex="0" hidden></div>
+          <div class="pane pane-ask" role="tabpanel" id="pane-ask" aria-labelledby="tab-ask" hidden>
+            <div class="ask-log ms-scroll" id="ask-log" aria-live="polite"></div>
+            <form class="ask-bar" id="ask-form" autocomplete="off">
+              <div class="ask-scope seg seg-sm" role="group" data-i18n-aria="aria.scope" aria-label="Scope">
+                <button type="button" class="seg-btn" aria-pressed="true" data-i18n="ask.scope.meeting">This meeting</button>
+                <button type="button" class="seg-btn" aria-pressed="false" id="scope-all" data-i18n="ask.scope.all">All meetings</button>
+              </div>
+              <div class="ask-input">
+                <input id="ask-input" type="text" dir="auto" data-i18n-ph="ask.ph" data-i18n-aria="ask.ph" placeholder="Ask about this meeting">
+                <button type="submit" class="ask-send" id="ask-send" data-i18n-aria="aria.send"><svg class="i i-send"><use href="#i-send"/></svg><svg class="i i-stop"><use href="#i-stop"/></svg></button>
+              </div>
+            </form>
+          </div>
+          <div class="pane ms-scroll" id="pane-preview" hidden></div>
+          <button type="button" class="follow-pill" id="follow-pill" hidden><svg class="i"><use href="#i-wave"/></svg><span data-i18n="follow">Back to playback</span></button>
+        </div>
+
+        <div class="peek" id="peek" role="dialog" aria-modal="false" aria-labelledby="peek-who" hidden></div>
+      </section>
+
+      <div class="recorder" id="recorder" hidden>
+        <span class="rec-live"><span class="rec-dot" aria-hidden="true"></span><span data-i18n="rec.label">REC</span></span>
+        <span class="rec-time" id="rec-time" dir="ltr" role="timer" aria-live="off">00<span class="colon">:</span>00</span>
+        <canvas class="rec-wave" id="rec-wave" width="240" height="36" aria-hidden="true"></canvas>
+        <span class="rec-note" data-i18n="rec.consent">Participants were notified</span>
+        <button type="button" class="btn btn-secondary btn-xs" id="rec-stop"><svg class="i"><use href="#i-stop"/></svg><span data-i18n="rec.stop">Stop &amp; summarize</span></button>
+      </div>
+      <div class="sr" id="sr-live" aria-live="polite"></div>
+
+      <div class="toasts" id="toasts" aria-live="polite"></div>
+
+      <div class="scrim" id="share-dlg" hidden>
+        <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="share-title" aria-describedby="share-sub">
+          <div class="dlg-head">
+            <div><h3 id="share-title" data-i18n="sh.title">Share summary</h3><p id="share-sub" class="dlg-sub"></p></div>
+            <button type="button" class="icon-btn" data-close-dlg data-i18n-aria="aria.close"><svg class="i"><use href="#i-x"/></svg></button>
+          </div>
+          <fieldset class="access">
+            <legend data-i18n="sh.who">Who can open it</legend>
+            <label class="opt"><input type="radio" name="access" value="room" id="acc-room" checked><span class="opt-ic"><svg class="i"><use href="#i-lock"/></svg></span><span><b data-i18n="sh.room">People in this room</b><small data-i18n="sh.roomSub">Lisboa acquisitions · 6 people</small></span></label>
+            <label class="opt"><input type="radio" name="access" value="ws" id="acc-ws"><span class="opt-ic"><svg class="i"><use href="#i-users"/></svg></span><span><b data-i18n="sh.ws">Everyone in the workspace</b><small data-i18n="sh.wsSub">Realization · signed-in members</small></span></label>
+            <label class="opt"><input type="radio" name="access" value="link" id="acc-link"><span class="opt-ic"><svg class="i"><use href="#i-globe"/></svg></span><span><b data-i18n="sh.link">Anyone with the link</b><small data-i18n="sh.linkSub">No sign-in. The link expires in 7 days.</small></span></label>
+          </fieldset>
+          <label class="switch switch-row"><span data-i18n="sh.transcript">Include transcript and recording</span><input type="checkbox" id="sh-transcript"><span class="switch-track"><span class="switch-thumb"></span></span></label>
+          <div class="link-row">
+            <svg class="i"><use href="#i-link"/></svg>
+            <input class="input" id="sh-url" readonly dir="ltr" value="https://meetsum.example/s/lisboa-0424" data-i18n-aria="sh.linkLabel">
+            <button type="button" class="btn btn-secondary btn-sm" id="sh-copy"><svg class="i"><use href="#i-copy"/></svg><span data-i18n="sh.copy">Copy link</span></button>
+          </div>
+          <p class="dlg-hint" id="sh-hint"></p>
+          <div class="dlg-foot"><button type="button" class="btn btn-primary btn-sm" data-close-dlg data-i18n="sh.done">Done</button></div>
+        </div>
+      </div>
+
+      <div class="scrim" id="palette" hidden>
+        <div class="palette" role="dialog" aria-modal="true" data-i18n-aria="aria.palette">
+          <div class="palette-input">
+            <svg class="i"><use href="#i-search"/></svg>
+            <input id="palette-input" type="text" dir="auto" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" data-i18n-ph="palette.ph" data-i18n-aria="palette.ph" placeholder="Jump to a meeting, decision, or action">
+            <kbd>Esc</kbd>
+          </div>
+          <div class="palette-list ms-scroll" id="palette-list" role="listbox"></div>
+          <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="palette.move">move</span></span><span><kbd>↵</kbd> <span data-i18n="palette.open">open</span></span></div>
+        </div>
+      </div>
+    </div>
+    <p class="app-caption">The prototype uses example data. Switch <b>EN / עב</b> in the header to see the same workspace for a Hebrew meeting, right to left.</p>
+  </div>
+
+  <!-- ================= PRINCIPLES ================= -->
+  <section class="section wrap" id="principles">
+    <p class="eyebrow"><span class="tc">01:00</span>Principles</p>
+    <h2>Five rules that settle arguments</h2>
+    <div class="principles">
+      <article class="principle"><h3>Hebrew first, not Hebrew too</h3><p>Every screen is designed in RTL with code-switched Hebrew and English, then checked in LTR. Logical properties only. Direction comes from the language you know.</p><p class="rule">Rule: a component isn't done until its Hebrew screenshot is.</p></article>
+      <article class="principle"><h3>Every AI claim has a source</h3><p>Summary lines, decisions, actions and answers carry a timecode that plays the moment. Hover any line and its source lanes light up on the timeline. If a citation can't resolve, it isn't shown.</p><p class="rule">Rule: no citation, no claim.</p></article>
+      <article class="principle"><h3>The AI mark is a citation</h3><p>Model-written text carries the cited mark <svg class="i i-inline"><use href="#i-cite"/></svg> and a hairline in the colours of the speakers it came from. When a person edits it, it becomes theirs and loses the mark. Iris is used for nothing else.</p><p class="rule">Rule: one AI hue, one mark, and the mark points at people.</p></article>
+      <article class="principle"><h3>Calm by default, expressive on meaning</h3><p>Routine feedback is fast and quiet (70–160ms). Longer motion is kept for moments that change what you know: a summary arrives and its sources light up, a citation lands, recording starts.</p><p class="rule">Rule: if it moves for more than 240ms, it must explain something.</p></article>
+      <article class="principle"><h3>Honest state</h3><p>Real durations, real progress, real owners. Show exceptions, not reassurance: no "Ready" on every row. Unconfirmed speaker names say so.</p><p class="rule">Rule: never invent a number to fill a layout.</p></article>
+    </div>
+  </section>
+
+  <!-- ================= FOUNDATIONS ================= -->
+  <section class="section wrap" id="foundations">
+    <p class="eyebrow"><span class="tc">02:00</span>Foundations</p>
+    <h2>Colour, type, space</h2>
+    <p class="lede">All colour is OKLCH, generated from one neutral hue (≈242) and four reserved accents. Contrast ratios below are measured live against <code>--surface</code> in the current theme.</p>
+
+    <h3 class="sub">Semantic colour</h3>
+    <div class="swatches" id="swatches"></div>
+
+    <h3 class="sub">Speakers</h3>
+    <p class="note">Eight hues at matched lightness, so no voice reads louder than another. They also mark provenance: the hairline beside AI text is split into the colours of the speakers it cites. Assigned in order of first speech and remembered per person across meetings.</p>
+    <div class="speakers" id="speaker-demo"></div>
+
+    <h3 class="sub">Type</h3>
+    <p class="note">IBM Plex Sans, Sans Hebrew and Mono were drawn as one superfamily, so x-heights and weights match when a sentence switches script mid-line. Body is 14px; transcript reading is 16px. Hebrew gets its own line-heights through <code>:lang(he)</code> token overrides, no italics, no negative tracking, and labels switch from mono to the Hebrew face because Plex Mono has no Hebrew.</p>
+    <div class="type-table" id="type-table"></div>
+    <div class="bilingual">
+      <p dir="rtl" lang="he">סגרנו <bdi>IRR</bdi> של <span class="num">18.2%</span> על <bdi>Lisboa Riverside</bdi>, וה-<bdi>term sheet</bdi> ייסגר עד ה-<span class="num">1</span> במאי.</p>
+      <p>We closed an <b>18.2%</b> IRR on Lisboa Riverside; the term sheet locks by May 1.</p>
+      <p class="mono-line" dir="ltr"><span class="tc">00:00</span><span class="tc">01:12</span><span class="tc">02:36</span><span class="tc">41:52</span><span class="tc">1:02:07</span></p>
+    </div>
+
+    <div class="found-grid">
+      <div>
+        <h3 class="sub">Space · 4px grid</h3>
+        <div class="space-scale" id="space-scale"></div>
+      </div>
+      <div>
+        <h3 class="sub">Radius · by role</h3>
+        <div class="radius-scale">
+          <div class="rad" style="--r: var(--radius-xs)"><span>xs · 4</span><small>timecodes, kbd</small></div>
+          <div class="rad" style="--r: var(--radius-sm)"><span>sm · 6</span><small>tags, small buttons</small></div>
+          <div class="rad" style="--r: var(--radius-md)"><span>md · 8</span><small>buttons, inputs</small></div>
+          <div class="rad" style="--r: var(--radius-lg)"><span>lg · 12</span><small>cards, popovers</small></div>
+          <div class="rad" style="--r: var(--radius-xl)"><span>xl · 16</span><small>dialogs, player</small></div>
+          <div class="rad" style="--r: var(--radius-full)"><span>full</span><small>pills, avatars</small></div>
+        </div>
+      </div>
+      <div>
+        <h3 class="sub">Elevation and layers</h3>
+        <div class="elev">
+          <div class="el" style="box-shadow: var(--shadow-1)"><b>1</b><small>cards</small></div>
+          <div class="el" style="box-shadow: var(--shadow-2)"><b>2</b><small>hover, dock</small></div>
+          <div class="el" style="box-shadow: var(--shadow-3)"><b>3</b><small>popover</small></div>
+          <div class="el" style="box-shadow: var(--shadow-4)"><b>4</b><small>dialog</small></div>
+        </div>
+        <p class="note">Light theme lifts with shadow. Dark theme lifts with a lighter surface and a 1px rim, because shadows disappear on dark grounds. Layers: sticky 10 · dock 15 · popover 20 · toast 30 · overlay 40.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MOTION ================= -->
+  <section class="section wrap" id="motion">
+    <p class="eyebrow"><span class="tc">03:00</span>Motion</p>
+    <h2>Two speeds: productive and expressive</h2>
+    <p class="lede">Productive motion (70–160ms) confirms that something happened. Expressive motion (240–400ms) is reserved for moments that change what you know. Springs move things; opacity and colour fade on their own curve and never bounce. With reduced motion, travel is removed and fades stay, so feedback never disappears.</p>
+
+    <div class="motion-grid">
+      <div class="card">
+        <div class="card-head"><h3>Durations</h3><button type="button" class="btn btn-ghost btn-xs" id="replay-dur"><svg class="i"><use href="#i-refresh"/></svg>Replay</button></div>
+        <div class="dur-list" id="dur-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Easing</h3><button type="button" class="btn btn-ghost btn-xs" id="replay-ease"><svg class="i"><use href="#i-refresh"/></svg>Replay</button></div>
+        <div class="ease-list" id="ease-list"></div>
+      </div>
+    </div>
+
+    <h3 class="sub">Signature moments</h3>
+    <p class="note">Each one runs in the prototype above. Press Play to watch it in place.</p>
+    <div class="moments" id="moments"></div>
+
+    <h3 class="sub">Reduced motion mapping</h3>
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead><tr><th>Moment</th><th>Default</th><th>prefers-reduced-motion</th></tr></thead>
+        <tbody>
+          <tr><td>Panel, sheet, tab change</td><td>Rise 6px + fade, 240ms ease-out</td><td>Fade only, 120ms</td></tr>
+          <tr><td>Summary streaming</td><td>Word chunks fade in, caret blinks, items stagger 35ms</td><td>Sections appear whole, no stagger, static caret</td></tr>
+          <tr><td>Source trace</td><td>Scan line sweeps the timeline; cited lanes glow as each line lands</td><td>No sweep; cited lanes glow without movement</td></tr>
+          <tr><td>Lanes to Σ</td><td>Four speaker lanes rotate into the Σ mark</td><td>Static Σ</td></tr>
+          <tr><td>Recording indicator</td><td>Pulsing halo, blinking colon, live waveform</td><td>Static ring, steady colon, frozen waveform, "REC" label stays</td></tr>
+          <tr><td>Compact player</td><td>Speaker lanes slide into one lane, 240ms</td><td>Instant</td></tr>
+          <tr><td>Citation landing</td><td>Smooth scroll + 1.2s brand flash</td><td>Instant scroll + flash (colour fade is kept)</td></tr>
+          <tr><td>Meeting open, theme switch</td><td>View-transition title morph; circular theme reveal</td><td>Instant swap</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= COMPONENTS ================= -->
+  <section class="section wrap" id="components">
+    <p class="eyebrow"><span class="tc">04:00</span>Components</p>
+    <h2>Primitives and meeting atoms</h2>
+    <p class="lede">The shadcn primitives stay; they get Cadence tokens and states. The meeting atoms are new and cover what generic kits don't: timecodes, citations, speakers, provenance, live state, bots and uploads.</p>
+
+    <div class="specimens">
+      <div class="card spec">
+        <h3>Buttons</h3>
+        <div class="row">
+          <button type="button" class="btn btn-primary">Start recording</button>
+          <button type="button" class="btn btn-secondary">Share</button>
+          <button type="button" class="btn btn-ghost">Cancel</button>
+          <button type="button" class="btn btn-danger">Delete meeting</button>
+        </div>
+        <div class="row">
+          <button type="button" class="btn btn-ai btn-sm"><svg class="i"><use href="#i-refresh"/></svg>Regenerate</button>
+          <button type="button" class="btn btn-record btn-sm"><span class="rec-dot"></span>Record</button>
+          <button type="button" class="btn btn-primary btn-sm is-loading" aria-busy="true"><span class="spinner" aria-hidden="true"></span>Uploading</button>
+          <button type="button" class="btn btn-secondary btn-sm" disabled>Disabled</button>
+        </div>
+        <div class="row">
+          <button type="button" class="btn btn-primary btn-lg">Large</button>
+          <button type="button" class="btn btn-secondary">Medium</button>
+          <button type="button" class="btn btn-secondary btn-sm">Small</button>
+          <button type="button" class="btn btn-secondary btn-xs">XS</button>
+        </div>
+        <p class="spec-note">One primary per view. In the meeting view that's Play. AI buttons use iris and only appear where a model will run. Record uses the live hue, and nothing else does.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Status: exceptions only</h3>
+        <div class="row">
+          <span class="pill pill-live"><span class="rec-dot"></span>Live</span>
+          <span class="pill pill-proc"><span class="spinner"></span>Transcribing 42%</span>
+          <span class="pill pill-new">New</span>
+          <span class="pill pill-warn"><svg class="i"><use href="#i-alert"/></svg>Needs review</span>
+          <span class="pill pill-danger"><svg class="i"><use href="#i-x"/></svg>Failed</span>
+        </div>
+        <div class="row">
+          <span class="tag">real-estate</span><span class="tag tag-info">finance</span><span class="tag tag-warn">follow-up</span><span class="tag tag-ai"><svg class="i"><use href="#i-cite"/></svg>auto-tagged</span>
+        </div>
+        <p class="spec-note">A finished meeting needs no badge. Pills appear only for states that ask for attention or explain a wait. State is carried by shape and icon as well as colour.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Meeting atoms</h3>
+        <div class="row">
+          <span class="tc">01:12</span>
+          <button type="button" class="cite" tabindex="-1" aria-hidden="true"><svg class="i"><use href="#i-play"/></svg>01:12</button>
+          <span class="speaker"><span class="avatar avatar-xs" style="--c: var(--spk-2)">YB</span>Yael Ben-David</span>
+          <span class="stack"><span class="avatar avatar-xs" style="--c: var(--spk-1)">RN</span><span class="avatar avatar-xs" style="--c: var(--spk-2)">YB</span><span class="avatar avatar-xs" style="--c: var(--spk-3)">LS</span><span class="avatar avatar-xs avatar-more">+2</span></span>
+        </div>
+        <div class="row">
+          <span class="dur"><svg class="i"><use href="#i-clock"/></svg><span dir="ltr">41:52</span></span>
+          <span class="speaker speaker-unconfirmed"><span class="avatar avatar-xs" style="--c: var(--spk-6)">?</span>Speaker 3<small>unconfirmed</small></span>
+          <span class="kbds" dir="ltr"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+        </div>
+        <p class="spec-note">Timecodes are always mono, tabular and isolated LTR, even inside Hebrew sentences. A citation is a timecode you can play. Stacks show three people, then +N.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Provenance</h3>
+        <div class="prov-demo">
+          <div class="prov prov-ai" style="--prov: linear-gradient(var(--spk-1) 0 40%, var(--spk-2) 40% 70%, var(--spk-3) 70% 100%)"><span class="prov-tag"><svg class="i"><use href="#i-cite"/></svg>AI · from 3 speakers</span><p>The team agreed to move Lisboa Riverside into full due diligence on Monday.</p></div>
+          <div class="prov prov-human"><span class="prov-tag"><svg class="i"><use href="#i-edit"/></svg>Edited by Ran</span><p>Lisboa Riverside starts full due diligence Monday, pending the lender's rate lock.</p></div>
+          <div class="prov prov-ai" style="--prov: linear-gradient(var(--spk-3) 0 100%)"><span class="prov-tag"><svg class="i"><use href="#i-cite"/></svg>Writing</span><p>Leandro owns financing and will push the lender<span class="caret" aria-hidden="true"></span></p></div>
+        </div>
+        <p class="spec-note">No violet slabs. Model text gets the cited mark and a hairline split into the colours of the speakers it draws on. Edited text loses both and names the editor.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Speaker review</h3>
+        <div class="spk-review" id="spk-review">
+          <div class="spk-review-head"><span class="avatar avatar-md speaker-unconfirmed-av" id="sr-avatar" style="--c: var(--spk-6)">?</span><div><b id="sr-name">Speaker 3</b><small>4 segments · 2:14 talk time · <span class="unconf" id="sr-state">unconfirmed</span></small></div><button type="button" class="cite"><svg class="i"><use href="#i-play"/></svg>12:40</button></div>
+          <p class="spk-q">Who is this? Suggestions come from the calendar invite.</p>
+          <div class="row" id="sr-sugg">
+            <button type="button" class="chip" data-assign="Noa Levi|NL">Noa Levi</button>
+            <button type="button" class="chip" data-assign="Daniel Cohen|DC">Daniel Cohen</button>
+            <button type="button" class="chip" data-assign="Omer Katz|OK">Omer Katz</button>
+            <button type="button" class="btn btn-ghost btn-xs"><svg class="i"><use href="#i-merge"/></svg>Merge with…</button>
+          </div>
+        </div>
+        <p class="spec-note">Names are a suggestion until a person confirms them. Confirmed names are remembered per workspace.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Meeting bot</h3>
+        <div class="bot" id="bot-demo">
+          <ol class="bot-steps" id="bot-steps"></ol>
+          <div class="bot-now" id="bot-now" aria-live="polite"></div>
+          <button type="button" class="btn btn-secondary btn-xs" id="bot-next"><svg class="i"><use href="#i-arrow-end"/></svg>Next state</button>
+        </div>
+        <p class="spec-note">"Waiting to be admitted" says what the host must do. "Blocked" names the reason and offers the desktop recorder.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Upload</h3>
+        <label class="drop" id="drop" for="drop-input">
+          <input type="file" id="drop-input" accept="audio/*,video/*" class="sr">
+          <span class="drop-ic"><svg class="i"><use href="#i-upload"/></svg></span>
+          <b>Drop a recording, or choose a file</b>
+          <small>m4a, mp3, wav, mp4, webm · up to 2 GB · Hebrew, English or both</small>
+        </label>
+        <p class="spec-note">Dropping a file here starts a processing row in the prototype's inbox. Nothing leaves your browser.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Errors and offline</h3>
+        <div class="err-card"><span class="toast-icon danger"><svg class="i"><use href="#i-alert"/></svg></span><div><b>Transcription failed</b><p>The audio track is silent from 00:00 to 41:52. Check the microphone source, then upload the file again.</p><div class="row"><button type="button" class="btn btn-secondary btn-xs"><svg class="i"><use href="#i-refresh"/></svg>Retry</button><button type="button" class="btn btn-ghost btn-xs"><svg class="i"><use href="#i-upload"/></svg>Upload another file</button></div></div></div>
+        <div class="offline"><svg class="i"><use href="#i-offline"/></svg><span>You're offline. Recording continues on this device and uploads when you reconnect.</span></div>
+        <p class="spec-note">Errors name the cause and the next step. Offline never stops a recording.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Feedback</h3>
+        <div class="toast toast-static"><span class="toast-icon ai"><svg class="i"><use href="#i-cite"/></svg></span><div><b>Summary ready</b><span>Board prep — Q2 pipeline</span></div><button type="button" class="btn btn-ghost btn-xs">Open</button></div>
+        <div class="alert"><svg class="i"><use href="#i-alert"/></svg><div><b>2 speakers need names.</b> Confirm them so search and tasks show the right people.</div><button type="button" class="btn btn-secondary btn-xs">Review</button></div>
+        <div class="skel-demo" aria-hidden="true"><span class="skel" style="width: 38%"></span><span class="skel" style="width: 92%"></span><span class="skel" style="width: 76%"></span></div>
+        <p class="spec-note">Skeletons match the final layout line for line. Toasts confirm with the object's name and offer one next step.</p>
+      </div>
+
+      <div class="card spec">
+        <h3>Inputs &amp; selection</h3>
+        <div class="field">
+          <label for="f-title">Meeting title</label>
+          <input id="f-title" class="input" value="Lisboa Riverside — deal check-in" dir="ltr">
+          <small class="hint">Shown in the inbox and on shared links.</small>
+        </div>
+        <div class="field">
+          <label for="f-hook">Webhook URL</label>
+          <input id="f-hook" class="input is-invalid" value="http://192.168.1.10/hook" aria-invalid="true" aria-describedby="f-hook-err" dir="ltr">
+          <small class="err" id="f-hook-err"><svg class="i"><use href="#i-alert"/></svg>Private network addresses aren't allowed. Use a public https URL.</small>
+        </div>
+        <div class="row">
+          <div class="seg seg-sm" role="group" aria-label="Density"><button type="button" class="seg-btn" aria-pressed="true">Comfortable</button><button type="button" class="seg-btn" aria-pressed="false">Compact</button></div>
+          <label class="switch"><input type="checkbox" id="sw-auto" checked><span class="switch-track"><span class="switch-thumb"></span></span>Auto-summarize</label>
+          <label class="check"><input type="checkbox" id="ck-demo"><span class="check-box"><svg class="i"><use href="#i-check"/></svg></span>Email recap</label>
+        </div>
+      </div>
+
+      <div class="card spec">
+        <h3>Dialog and menu</h3>
+        <p class="spec-note">Both run in the prototype. Share opens a dialog with real access choices. The ⋯ button opens a keyboard menu (arrows, Home/End, Esc). Destructive items sit last, after a separator, in the danger colour.</p>
+        <div class="row"><button type="button" class="btn btn-secondary btn-sm" data-moment="share"><svg class="i"><use href="#i-share"/></svg>Open share dialog</button><button type="button" class="btn btn-secondary btn-sm" data-moment="menu"><svg class="i"><use href="#i-more"/></svg>Open menu</button></div>
+      </div>
+
+      <div class="card spec">
+        <h3>Keyboard</h3>
+        <dl class="keys">
+          <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Jump to a meeting, decision or action, or ask</dd></div>
+          <div><dt><kbd>Space</kbd></dt><dd>Play or pause (scrubber focused)</dd></div>
+          <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Seek 5 seconds; Page Up/Down for 30</dd></div>
+          <div><dt><kbd>F2</kbd></dt><dd>Rename the meeting</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Close the palette, menu, dialog or peek and return focus</dd></div>
+        </dl>
+        <p class="spec-note">Arrow keys in tabs follow reading direction: in Hebrew, ← moves forward.</p>
+      </div>
+
+      <div class="card spec spec-wide">
+        <h3>Table: tasks across meetings</h3>
+        <div class="table-wrap table-flat">
+          <table class="tbl tasks">
+            <thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>From</th></tr></thead>
+            <tbody id="tasks-body"></tbody>
+          </table>
+        </div>
+        <p class="spec-note">Rendered from the prototype's meeting, so every timecode plays the real moment. Switch EN / עב and the rows follow the meeting's language and direction.</p>
+      </div>
+
+      <div class="card spec spec-wide">
+        <h3>Empty state</h3>
+        <div class="empty">
+          <div class="empty-art" aria-hidden="true"><svg class="sigma lanes" id="empty-sigma" viewBox="0 0 28 28"><rect class="s1" x="5" y="4" width="18" height="3.4" rx="1.7"/><rect class="s2" x="5" y="9.3" width="18" height="3.4" rx="1.7"/><rect class="s3" x="5" y="15.3" width="18" height="3.4" rx="1.7"/><rect class="s4" x="5" y="20.6" width="18" height="3.4" rx="1.7"/></svg></div>
+          <div>
+            <h4>No meetings yet</h4>
+            <p>Record in the browser, upload a file, or connect Google Calendar so MeetSum joins on its own.</p>
+            <div class="row"><button type="button" class="btn btn-primary btn-sm"><svg class="i"><use href="#i-mic"/></svg>Record now</button><button type="button" class="btn btn-secondary btn-sm"><svg class="i"><use href="#i-upload"/></svg>Upload a file</button><button type="button" class="btn btn-ghost btn-sm"><svg class="i"><use href="#i-cal"/></svg>Connect calendar</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PATTERNS ================= -->
+  <section class="section wrap" id="patterns">
+    <p class="eyebrow"><span class="tc">05:00</span>Patterns</p>
+    <h2>RTL, bidi and accessibility</h2>
+    <p class="lede">The first card shows a bug the current app ships today, rendered live, with the fix next to it.</p>
+
+    <div class="bidi-grid">
+      <div class="card bidi">
+        <h3>Mixed-direction text</h3>
+        <div class="bidi-pair">
+          <div class="bad"><span class="verdict">Today</span><div dir="rtl" class="bidi-box"><p>Proceed with due diligence on Lisboa Riverside.</p><p>4 participants · 1m</p></div></div>
+          <div class="good"><span class="verdict">Cadence</span><div dir="rtl" class="bidi-box"><p dir="ltr">Proceed with due diligence on Lisboa Riverside.</p><p><bdi>4</bdi> משתתפים · <span dir="ltr" class="num">2:41</span></p></div></div>
+        </div>
+        <p class="spec-note">Set <code>dir</code> from the language you already know: ASR gives each segment a language, and summaries are written in the meeting's language. Use <code>dir="auto"</code> only for text of unknown language (search, chat input, user fields). It picks direction from the first strong character, so "Lisboa Riverside נכנסת…" would render left-to-right. Names and numbers inside sentences get <code>&lt;bdi&gt;</code>.</p>
+      </div>
+
+      <div class="card bidi">
+        <h3>What mirrors</h3>
+        <div class="mirror" dir="rtl">
+          <div><span class="mirror-label" dir="ltr">Mirrors</span>
+            <span class="mi"><svg class="i flip"><use href="#i-arrow-end"/></svg></span><span class="mi"><svg class="i flip"><use href="#i-chev-end"/></svg></span><span class="mi"><svg class="i flip"><use href="#i-panel"/></svg></span><span class="mi"><svg class="i flip"><use href="#i-enter"/></svg></span><span class="mi"><svg class="i flip"><use href="#i-chat"/></svg></span>
+          </div>
+          <div><span class="mirror-label" dir="ltr">Never mirrors</span>
+            <span class="mi"><svg class="i"><use href="#i-play"/></svg></span><span class="mi"><svg class="i"><use href="#i-back"/></svg></span><span class="mi"><svg class="i"><use href="#i-clock"/></svg></span><span class="mi"><svg class="i"><use href="#i-check"/></svg></span><span class="mi"><svg class="i"><use href="#i-search"/></svg></span><span class="mi"><svg class="i"><use href="#i-mic"/></svg></span>
+          </div>
+        </div>
+        <p class="spec-note">Shown right to left, as in a Hebrew screen. Media controls, the scrubber, the speaker timeline and the recording waveform show time, not reading direction, so they stay left-to-right in Hebrew. Give icons that mirror <code>data-icon="directional"</code>; everything else is static.</p>
+      </div>
+
+      <div class="card bidi">
+        <h3>Accessibility floor</h3>
+        <ul class="checks">
+          <li>Text 4.5:1, controls and input boundaries 3:1, in both themes (measured in Foundations).</li>
+          <li>Icon buttons are 28px. Citation chips are 20px tall and spaced so a 24px circle never overlaps a neighbour (WCAG 2.5.8 spacing exception). Timeline markers are a shortcut: every moment they mark is also reachable from the summary and the scrubber.</li>
+          <li>The scrubber is a keyboard slider: arrows ±5s, Page Up/Down ±30s, Home/End, Space plays.</li>
+          <li>Focus rings use a transparent outline plus a shadow, so they survive Windows forced-colours mode.</li>
+          <li>Live regions announce once: "Recording started", never the ticking timer. Streams announce on completion.</li>
+          <li>Every label and aria-label is translated, including icon buttons.</li>
+        </ul>
+      </div>
+
+      <div class="card bidi">
+        <h3>AI UX contract</h3>
+        <ul class="checks">
+          <li>Citations resolve to a real segment or they aren't rendered.</li>
+          <li>Stop is visible for the whole stream; Regenerate is one click.</li>
+          <li>Feedback is a flag on the exact line, so it can be checked against the transcript. No thumbs.</li>
+          <li>Edited AI text becomes human text and survives reprocessing.</li>
+          <li>Unknown answers say so plainly. The scope (this meeting or all) is always shown.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 class="sub">Do and don't</h3>
+    <div class="dodont">
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Show a citation only when it plays a real moment.</p><div class="dd-ex"><span>Lisboa moves to full due diligence</span><button type="button" class="cite"><svg class="i"><use href="#i-play"/></svg>0:53</button></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Link "Source" to the top of the transcript.</p><div class="dd-ex"><span>Lisboa moves to full due diligence</span><span class="fake-link">Source</span></div></div></div>
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Mark AI text once, with the cited mark and a speaker hairline.</p><div class="dd-ex"><span class="prov-mini"><svg class="i"><use href="#i-cite"/></svg>AI · from 3 speakers</span></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Stack sparkles, violet fills and a banner on one block.</p><div class="dd-ex"><span class="slab">✦ AI summary ✦</span></div></div></div>
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Show exceptions: live, processing, needs review.</p><div class="dd-ex"><span class="pill pill-warn"><svg class="i"><use href="#i-alert"/></svg>Needs review</span></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Put "Ready" on every finished row.</p><div class="dd-ex"><span class="pill pill-ok"><svg class="i"><use href="#i-check"/></svg>Ready</span><span class="pill pill-ok"><svg class="i"><use href="#i-check"/></svg>Ready</span></div></div></div>
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Spring the transform; fade opacity on its own curve.</p><div class="dd-ex"><code>ms-pop (spring) + ms-fade 160ms</code></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Bounce opacity or colour.</p><div class="dd-ex"><code>opacity 1.04 → 0.98 → 1</code></div></div></div>
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Use the real duration from the media.</p><div class="dd-ex"><span class="dur" dir="ltr">41:52</span></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Fill the slot with a placeholder.</p><div class="dd-ex"><span class="dur">1m</span></div></div></div>
+      <div class="dd"><div class="dd-do"><span class="verdict">Do</span><p>Keep media time left-to-right in Hebrew.</p><div class="dd-ex" dir="ltr"><span class="tc">0:00</span><span class="mini-track"><i></i></span><span class="tc">2:41</span></div></div><div class="dd-dont"><span class="verdict">Don't</span><p>Mirror the scrubber.</p><div class="dd-ex" dir="rtl"><span class="tc">0:00</span><span class="mini-track"><i></i></span><span class="tc">2:41</span></div></div></div>
+    </div>
+  </section>
+
+  <!-- ================= BENCHMARK ================= -->
+  <section class="section wrap" id="benchmark">
+    <p class="eyebrow"><span class="tc">06:00</span>Benchmark</p>
+    <h2>What the market does, and what Cadence takes</h2>
+    <div class="table-wrap">
+      <table class="tbl bench">
+        <thead><tr><th>Product</th><th>Best idea</th><th>Cadence takes</th><th>Cadence avoids</th></tr></thead>
+        <tbody>
+          <tr><td><b>Granola</b></td><td>Your notes in black, AI text in grey; zoom into the source quotes.</td><td>Edit-to-own provenance and the citation peek.</td><td>Weak playback and team views.</td></tr>
+          <tr><td><b>Fathom</b></td><td>Clickable timeline; every summary topic jumps to the moment.</td><td>Speaker timeline with markers, plus source trace on hover.</td><td>Cramped scrolling on small laptops.</td></tr>
+          <tr><td><b>Fireflies</b></td><td>Chapters, AskFred, filter chips over the transcript.</td><td>Structured summary sections with one regenerate.</td><td>Panel overload; three docks fighting for width.</td></tr>
+          <tr><td><b>Otter</b></td><td>Word highlighting synced to playback.</td><td>Word-level follow with a "Back to playback" pill.</td><td>Dated chrome and upsell modals inside meetings.</td></tr>
+          <tr><td><b>tl;dv</b></td><td>One box that searches and answers.</td><td>Ctrl K palette that jumps or asks, with visible scope.</td><td>Shallow interaction detail.</td></tr>
+          <tr><td><b>Notion AI notes</b></td><td>Edit the transcript, then retry the summary.</td><td>Edits survive reprocessing; regenerate from corrected text.</td><td>Weak speaker labels.</td></tr>
+          <tr><td><b>Timeless</b></td><td>Rooms per client; a recorder with character.</td><td>Rooms as the breadcrumb; blinking-colon recorder.</td><td>Marketing-only claims.</td></tr>
+          <tr><td><b>Read.ai</b></td><td>Jump to impactful moments.</td><td>Markers for decisions, questions and actions.</td><td>Per-person engagement scores.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <table class="tbl bench">
+        <thead><tr><th>System</th><th>Benchmark</th><th>Applied in Cadence</th></tr></thead>
+        <tbody>
+          <tr><td><b>Linear</b></td><td>LCH themes generated from base, accent and contrast.</td><td>OKLCH ramps from one neutral hue; elevation by lightness in dark mode.</td></tr>
+          <tr><td><b>Radix Colors</b></td><td>12-step scales with fixed roles per step.</td><td>surface 1–4, three line roles, fg 3 steps; soft / solid / text per accent.</td></tr>
+          <tr><td><b>IBM Carbon</b></td><td>Productive vs expressive motion; 70/110/150/240/400ms.</td><td>dur-1…dur-5 and the two-speed rule; Plex superfamily.</td></tr>
+          <tr><td><b>Atlassian</b></td><td>50–150ms interaction timing.</td><td>Hover and press at 70ms; menus at 160ms.</td></tr>
+          <tr><td><b>Material 3 Expressive</b></td><td>Spatial springs vs effect springs.</td><td>Springs on transform only; opacity and colour on their own curve.</td></tr>
+          <tr><td><b>Vercel Geist</b></td><td>Two canvases and a disciplined grey scale.</td><td>canvas vs surface; hue-biased neutrals instead of pure grey.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= ROLLOUT ================= -->
+  <section class="section wrap" id="rollout">
+    <p class="eyebrow"><span class="tc">07:00</span>Rollout</p>
+    <h2>From prototype to production</h2>
+    <p class="lede">Measured with <code>node design-system/check.mjs</code> on branch <code>parity/m1-pipeline</code> (661 violations in <code>components/</code> and <code>app/</code>), next to the target after phase 4. The same script becomes the CI gate.</p>
+    <div class="audit">
+      <div class="metric"><b>528</b><span>bracketed colours and <code>var()</code> classes</span><em>→ 0, registered utilities</em></div>
+      <div class="metric"><b>53</b><span>arbitrary px / rem sizes</span><em>→ 0, type and space scale</em></div>
+      <div class="metric"><b>50</b><span>raw palette classes</span><em>→ 0, semantic only</em></div>
+      <div class="metric"><b>25</b><span>physical direction classes</span><em>→ 0, lint-enforced</em></div>
+      <div class="metric"><b>0</b><span>motion tokens</span><em>→ 9 durations, 5 moments, 5 easings</em></div>
+      <div class="metric"><b>5</b><span>teal buttons in one top bar</span><em>→ 1 primary per view</em></div>
+    </div>
+    <ol class="phases">
+      <li><h3>Tokens</h3><p>Replace the token block in <code>app/globals.css</code> with <code>design-system/tokens.css</code>. Shadcn names are aliased, so existing components keep working. Swap fonts in <code>app/[locale]/layout.tsx</code> to the Plex family and drop the <code>html { font-size: 14px }</code> override.</p><span class="when">Independent of the parity work. Fits after M1.</span></li>
+      <li><h3>Primitives</h3><p>Restyle <code>components/ui</code> (button, badge, tabs, input, dialog, menu, sonner) on the tokens. Add <code>TimecodeChip</code>, <code>CitationChip</code>, <code>SpeakerAvatar</code>, <code>StatusPill</code>, <code>AiProvenance</code>, <code>LiveDot</code> and <code>lib/motion.ts</code>.</p><span class="when">Lands before M4 so the player is built on it.</span></li>
+      <li><h3>Surfaces</h3><p>Workspace becomes rail, inbox and a single reading column. Player, speaker timeline and source trace ride with M4; summary sections and provenance with M5; Ask and the palette with M6; bot states with M7.</p><span class="when">Ships inside M4–M7.</span></li>
+      <li><h3>Guardrails</h3><p>Lint rules that reject physical direction classes, raw palette colours and arbitrary values. Playwright screenshots in he/en × light/dark for every surface.</p><span class="when">Part of M9 polish.</span></li>
+    </ol>
+  </section>
+
+  <footer class="foot wrap">
+    <p>MeetSum Cadence v2.0 · Source: <code>design-system/</code> on branch <code>design/system-v2</code> · Tokens in this page are generated from <code>tokens.css</code>.</p>
+  </footer>
+</main>
+
+<script src="cadence.js"></script>

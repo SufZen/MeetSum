@@ -73,15 +73,15 @@ export function PipelineTimeline({
           ) : null}
         </div>
         {workStatus?.kind === "failed" ? (
-          <span className="rounded-md bg-[var(--tag-action)] px-2 py-1 text-[11px] font-medium text-[var(--tag-action-fg)]">
+          <span className="rounded-md bg-warn-soft px-2 py-1 text-2xs font-medium text-warn-text">
             failed
           </span>
         ) : null}
       </div>
       {workStatus?.kind === "processing" && typeof workStatus.progress === "number" ? (
-        <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+        <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-surface-2">
           <div
-            className="h-full rounded-full bg-[var(--primary)]"
+            className="h-full rounded-full bg-brand"
             style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
           />
         </div>
@@ -104,7 +104,7 @@ export function PipelineTimeline({
                   <CircleIcon className={active ? "size-4 text-amber-500" : "size-4 text-emerald-500"} />
                 )}
                 {index < pipeline.length - 1 && (
-                  <span className="h-6 w-px bg-[var(--divider)]" />
+                  <span className="h-6 w-px bg-line" />
                 )}
               </div>
               <div className="pb-2">

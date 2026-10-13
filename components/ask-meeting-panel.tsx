@@ -40,7 +40,7 @@ export function AskMeetingPanel({
           disabled={disabled || asking || !question.trim()}
           onClick={onAsk}
         >
-          <SendIcon data-icon="inline-start" />
+          <SendIcon data-icon="inline-start" data-directional="" />
           {asking ? "Thinking..." : dictionary.ask}
         </Button>
       </div>

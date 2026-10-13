@@ -55,7 +55,17 @@ export function MediaIngestionDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetTrigger render={<Button className="h-9" disabled={pending} />}>
+      {/* One primary action per view (Cadence §7): upload stays primary,
+          recording uses the live `record` treatment, desktop import is secondary. */}
+      <SheetTrigger
+        render={
+          <Button
+            className="h-9"
+            disabled={pending}
+            variant={mode === "record" ? "record" : mode === "desktop" ? "secondary" : "default"}
+          />
+        }
+      >
         <TriggerIcon data-icon="inline-start" />
         {triggerLabel}
       </SheetTrigger>
@@ -66,7 +76,7 @@ export function MediaIngestionDrawer({
         </SheetHeader>
         <div className="grid gap-4 p-4">
           {pending && (
-            <div className="rounded-md border border-[var(--focus)] bg-[var(--selected)] p-3 text-sm text-foreground">
+            <div className="rounded-md border border-ring bg-brand-soft p-3 text-sm text-foreground">
               Upload is queued. Keep this page open while MeetSum stores the media and starts processing.
             </div>
           )}

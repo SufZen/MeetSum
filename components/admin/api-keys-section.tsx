@@ -126,9 +126,9 @@ export function ApiKeysSection({
         retryLabel={t.retry}
         onRetry={() => void keys.reload()}
       >
-        <div className="overflow-x-auto rounded-lg border border-[var(--divider)]">
+        <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-[var(--surface-subtle)] text-xs text-muted-foreground">
+            <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
                   {t.apiKeysColumnKey}
@@ -151,7 +151,7 @@ export function ApiKeysSection({
               {keys.data.map((key) => (
                 <tr
                   key={key.id}
-                  className="border-t border-[var(--divider)] align-middle"
+                  className="border-t border-line align-middle"
                 >
                   <td className="px-3 py-2">
                     <div className="font-medium">
@@ -270,7 +270,7 @@ export function ApiKeysSection({
             <DialogDescription className="flex items-start gap-2">
               <TriangleAlertIcon
                 aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]"
+                className="mt-0.5 size-4 shrink-0 text-warn-text"
               />
               {t.apiKeysCreatedDescription}
             </DialogDescription>

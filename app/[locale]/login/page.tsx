@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation"
-import { AlertCircleIcon, LockIcon, SparklesIcon } from "lucide-react"
+import { AlertCircleIcon, LockIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { SigmaMark } from "@/components/ui/sigma-mark"
 import { getCurrentSession } from "@/lib/auth/server"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
@@ -50,9 +51,7 @@ export default async function LoginPage({
       <Card className="w-full max-w-md rounded-md shadow-sm">
         <CardContent className="grid gap-6 p-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <SparklesIcon aria-hidden="true" className="size-5" />
-            </div>
+            <SigmaMark className="size-10" />
             <div>
               <h1 className="text-xl font-semibold">MeetSum</h1>
               <p className="text-sm text-muted-foreground">

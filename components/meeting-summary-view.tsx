@@ -31,30 +31,30 @@ function dueDateLabel(dueDate: string) {
 
 function priorityClass(priority?: ActionItem["priority"]) {
   if (priority === "urgent" || priority === "high") {
-    return "border-[var(--accent)] bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+    return "border-warn bg-warn-soft text-warn-text"
   }
   if (priority === "low") {
-    return "border-[var(--status-success)] bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+    return "border-ok bg-brand-soft text-brand-text"
   }
-  return "border-[var(--accent)] bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+  return "border-warn bg-warn-soft text-warn-text"
 }
 
 function readinessBadgeClass(status: ReturnType<typeof getMeetingCaptureReadiness>["status"]) {
   if (status === "ready_to_process" || status === "processed") {
-    return "border-[var(--status-success)]/40 bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+    return "border-ok/40 bg-brand-soft text-brand-text"
   }
   if (status === "capture_armed") {
-    return "border-[var(--primary)]/30 bg-[var(--selected)] text-[var(--primary)]"
+    return "border-brand/30 bg-brand-soft text-brand-text"
   }
 
-  return "border-[var(--accent)]/40 bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+  return "border-warn/40 bg-warn-soft text-warn-text"
 }
 
 function checkDotClass(state: "ready" | "pending" | "missing") {
-  if (state === "ready") return "bg-[var(--status-success)]"
-  if (state === "missing") return "bg-[var(--status-error)]"
+  if (state === "ready") return "bg-ok"
+  if (state === "missing") return "bg-danger"
 
-  return "bg-[var(--muted-foreground)]/40"
+  return "bg-fg-3/40"
 }
 
 export function MeetingSummaryView({
@@ -111,8 +111,8 @@ export function MeetingSummaryView({
         <section
           className={`mb-5 rounded-lg border p-4 text-sm leading-6 ${
             workStatus.kind === "failed"
-              ? "border-[var(--status-error)]/40 bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
-              : "border-[var(--primary)]/30 bg-[var(--selected)] text-[var(--primary)]"
+              ? "border-danger/40 bg-warn-soft text-warn-text"
+              : "border-brand/30 bg-brand-soft text-brand-text"
           }`}
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -134,9 +134,9 @@ export function MeetingSummaryView({
             ) : null}
           </div>
           {workStatus.kind === "processing" && typeof workStatus.progress === "number" ? (
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface)]/70">
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface/70">
               <div
-                className="h-full rounded-full bg-[var(--primary)]"
+                className="h-full rounded-full bg-brand"
                 style={{ width: `${Math.round(workStatus.progress * 100)}%` }}
               />
             </div>
@@ -150,7 +150,7 @@ export function MeetingSummaryView({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 text-[var(--primary)]"
+              className="h-8 text-brand-text"
               disabled={!canFullReprocess}
               title={
                 hasMedia
@@ -184,7 +184,7 @@ export function MeetingSummaryView({
           </div>
         </div>
         {showContentGap ? (
-          <div className="max-w-3xl rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm leading-6 text-muted-foreground">
+          <div className="max-w-3xl rounded-lg border border-line bg-surface-2 p-4 text-sm leading-6 text-muted-foreground">
             <div className="flex flex-wrap items-center gap-2">
               <div className="font-medium text-foreground">
                 {isUpcoming ? workStatus.title : "No meeting intelligence has been generated yet."}
@@ -205,11 +205,11 @@ export function MeetingSummaryView({
               {readiness.checks.slice(0, 6).map((check) => (
                 <div
                   key={check.key}
-                  className="flex items-center gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-xs text-foreground"
+                  className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-xs text-foreground"
                 >
                   <span className={`size-2 rounded-full ${checkDotClass(check.state)}`} />
                   <span className="min-w-0 truncate">{check.label}</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">
+                  <span className="ms-auto text-2xs text-muted-foreground">
                     {check.state}
                   </span>
                 </div>
@@ -307,7 +307,7 @@ export function MeetingSummaryView({
           {actionItems.length ? actionItems.map((item) => (
             <div
               key={item.id}
-              className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-transparent px-1 py-1 text-sm hover:border-[var(--divider)] hover:bg-[var(--surface-subtle)] md:grid-cols-[auto_minmax(0,1fr)_150px_90px_92px]"
+              className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-transparent px-1 py-1 text-sm hover:border-line hover:bg-surface-2 md:grid-cols-[auto_minmax(0,1fr)_150px_90px_92px]"
             >
               <Checkbox
                 checked={item.status === "done"}
@@ -341,7 +341,7 @@ export function MeetingSummaryView({
               </div>
             </div>
           )) : (
-            <div className="rounded-lg border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-4 text-sm text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
               No action items extracted yet.
             </div>
           )}
@@ -355,7 +355,7 @@ export function MeetingSummaryView({
             {(meeting.intelligence?.risks.length
               ? meeting.intelligence.risks
               : ["No risks identified yet."]).map((risk) => (
-              <div key={risk} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-foreground/80">
+              <div key={risk} className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm leading-6 text-foreground/80">
                 {risk}
               </div>
             ))}
@@ -367,7 +367,7 @@ export function MeetingSummaryView({
             {(meeting.intelligence?.openQuestions.length
               ? meeting.intelligence.openQuestions
               : ["No open questions extracted yet."]).map((question) => (
-              <div key={question} className="rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] px-3 py-2 text-sm leading-6 text-foreground/80">
+              <div key={question} className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm leading-6 text-foreground/80">
                 {question}
               </div>
             ))}
@@ -392,7 +392,7 @@ export function MeetingSummaryView({
           <div className="grid gap-2">
             {commitments.map((commitment) => (
               <div key={commitment} className="flex items-start gap-3 text-sm text-foreground">
-                <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--primary)]" />
+                <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-brand-text" />
                 <span className="leading-6">{commitment}</span>
               </div>
             ))}
@@ -428,7 +428,7 @@ export function MeetingSummaryView({
             {quotes.map((quote) => (
               <div
                 key={`${quote.segmentId}-${quote.startMs}`}
-                className="grid gap-2 rounded-md border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm md:grid-cols-[72px_minmax(0,1fr)]"
+                className="grid gap-2 rounded-md border border-line bg-surface px-3 py-2 text-sm md:grid-cols-[72px_minmax(0,1fr)]"
               >
                 <span className="font-mono text-xs text-muted-foreground">
                   {formatTimestamp(quote.startMs)}

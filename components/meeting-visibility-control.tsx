@@ -102,7 +102,7 @@ export function MeetingVisibilityControl({
   }
 
   const badgeClass =
-    "inline-flex h-6 items-center gap-1.5 rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] px-2 text-xs font-medium text-foreground"
+    "inline-flex h-6 items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 text-xs font-medium text-foreground"
 
   if (!canManage) {
     return (
@@ -125,7 +125,7 @@ export function MeetingVisibilityControl({
           render={
             <button
               type="button"
-              className={`${badgeClass} hover:bg-[var(--selected)]`}
+              className={`${badgeClass} hover:bg-brand-soft`}
               aria-label={`${t.visibilityLabel}: ${label}`}
               title={hint}
             />

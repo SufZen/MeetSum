@@ -30,7 +30,7 @@ export function ProviderHealthPanel({
           return (
             <div
               key={provider.id}
-              className="flex min-h-14 items-start gap-3 rounded-lg border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+              className="flex min-h-14 items-start gap-3 rounded-lg border border-line bg-surface-2 p-3"
             >
               <Icon
                 aria-hidden="true"

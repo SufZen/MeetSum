@@ -5,13 +5,13 @@ import {
   FileTextIcon,
   MoreHorizontalIcon,
   NotepadTextIcon,
-  SparklesIcon,
 } from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CitedMark } from "@/components/ui/meeting-atoms"
 import type {
   JobRecord,
   MeetingRecord,
@@ -43,16 +43,16 @@ function formatLatency(value: number | undefined) {
 
 function tagClass(tag: string) {
   if (/(urgent|follow|review|action|task)/i.test(tag)) {
-    return "rounded-sm bg-[var(--tag-action)] text-[var(--tag-action-fg)]"
+    return "rounded-sm bg-warn-soft text-warn-text"
   }
   if (/(ai|mixed|hebrew|english|portuguese|spanish|italian)/i.test(tag)) {
-    return "rounded-sm bg-[var(--tag-ai)] text-[var(--tag-ai-fg)]"
+    return "rounded-sm bg-surface-3 text-fg-2"
   }
   if (/(technical|product|mcp|gemini|gemma|realizeos)/i.test(tag)) {
-    return "rounded-sm bg-[var(--tag-technical)] text-[var(--tag-technical-fg)]"
+    return "rounded-sm bg-info-soft text-info-text"
   }
 
-  return "rounded-sm bg-[var(--tag-business)] text-[var(--tag-business-fg)]"
+  return "rounded-sm bg-brand-soft text-brand-text"
 }
 
 export function MeetingRightRail({
@@ -98,7 +98,7 @@ export function MeetingRightRail({
   const qualityWarnings = meeting?.qualityWarnings ?? []
 
   return (
-    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-[var(--rail)] p-3 lg:h-full lg:border-l lg:border-[var(--divider)]">
+    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:h-full lg:border-l lg:border-line">
       <PipelineTimeline meeting={meeting} jobs={jobs} />
 
       <section className="ms-card p-4">
@@ -112,7 +112,7 @@ export function MeetingRightRail({
               {percent}%
             </div>
             <div>
-              <div className="font-medium text-[var(--status-success)]">
+              <div className="font-medium text-ok-text">
                 {percent >= 80 ? "High" : percent >= 60 ? "Medium" : "Low"}
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -121,14 +121,14 @@ export function MeetingRightRail({
             </div>
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
             Confidence appears after transcription or structured intelligence.
           </div>
         )}
         <Button
           variant="ghost"
           size="sm"
-          className="mt-2 h-8 px-0 text-[var(--primary)]"
+          className="mt-2 h-8 px-0 text-brand-text"
           disabled
           title={
             percent
@@ -145,9 +145,9 @@ export function MeetingRightRail({
         {transcriptionRun || summaryRun ? (
           <div className="grid gap-2">
             {transcriptionRun ? (
-              <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3">
+              <div className="rounded-md border border-line bg-surface-2 p-3">
                 <div className="flex items-start gap-2">
-                  <ActivityIcon aria-hidden="true" className="mt-0.5 size-4 text-[var(--primary)]" />
+                  <ActivityIcon aria-hidden="true" className="mt-0.5 size-4 text-brand-text" />
                   <div className="min-w-0">
                     <div className="text-sm font-medium">
                       {transcriptionRun.provider}
@@ -159,7 +159,7 @@ export function MeetingRightRail({
                         : ""}
                     </p>
                     {fallbackUsed ? (
-                      <p className="mt-1 text-xs leading-5 text-[var(--status-warning)]">
+                      <p className="mt-1 text-xs leading-5 text-warn-text">
                         Fallback used{attemptedProvider ? ` after ${attemptedProvider}` : ""}.
                         {fallbackReason ? ` Reason: ${fallbackReason}` : ""}
                       </p>
@@ -169,14 +169,14 @@ export function MeetingRightRail({
               </div>
             ) : null}
             {summaryRun ? (
-              <div className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-xs leading-5 text-muted-foreground">
+              <div className="rounded-md border border-line bg-surface-2 p-3 text-xs leading-5 text-muted-foreground">
                 Summary: <span className="font-medium text-foreground">{summaryRun.provider}</span>
                 {summaryRun.model ? ` · ${summaryRun.model}` : ""}
               </div>
             ) : null}
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
             Provider metadata appears after transcription or summarization.
           </div>
         )}
@@ -189,15 +189,15 @@ export function MeetingRightRail({
             {qualityWarnings.slice(0, 4).map((warning) => (
               <div
                 key={warning.code}
-                className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                className="rounded-md border border-line bg-surface-2 p-3"
               >
                 <div className="flex items-start gap-2">
                   <AlertTriangleIcon
                     aria-hidden="true"
                     className={
                       warning.severity === "warning"
-                        ? "mt-0.5 size-4 text-[var(--status-warning)]"
-                        : "mt-0.5 size-4 text-[var(--primary)]"
+                        ? "mt-0.5 size-4 text-warn-text"
+                        : "mt-0.5 size-4 text-brand-text"
                     }
                   />
                   <div>
@@ -219,7 +219,7 @@ export function MeetingRightRail({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 text-[var(--primary)]"
+            className="h-7 text-brand-text"
             onClick={onEditTags}
             disabled={!meeting}
           >
@@ -288,7 +288,7 @@ export function MeetingRightRail({
             <MoreHorizontalIcon aria-hidden="true" className="size-4" />
           </Button>
         </div>
-        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-[11px] text-muted-foreground">
+        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-2xs text-muted-foreground">
           <span>PDF</span>
           <span>MD</span>
           <span>Notion</span>
@@ -306,13 +306,13 @@ export function MeetingRightRail({
             </p>
           </div>
           <Button
-            variant="outline"
+            variant="ai"
             size="sm"
-            className="h-8 gap-1.5"
+            className="gap-1.5"
             onClick={onSuggestAgents}
             disabled={!meeting || suggestingAgents}
           >
-            <SparklesIcon aria-hidden="true" className="size-3.5" />
+            <CitedMark className="size-3.5" />
             Suggest
           </Button>
         </div>
@@ -332,7 +332,7 @@ export function MeetingRightRail({
               return (
                 <div
                   key={run.id}
-                  className="rounded-md border border-[var(--divider)] bg-[var(--surface-subtle)] p-3"
+                  className="rounded-md border border-line bg-surface-2 p-3"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -365,7 +365,7 @@ export function MeetingRightRail({
             })}
           </div>
         ) : (
-          <div className="rounded-md border border-dashed border-[var(--divider)] bg-[var(--surface-subtle)] p-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
             Suggestions appear after a meeting has transcript or summary content.
           </div>
         )}

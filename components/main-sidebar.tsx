@@ -8,12 +8,13 @@ import {
   FolderPlusIcon,
   SettingsIcon,
   WorkflowIcon,
-  AudioWaveformIcon,
   ZapIcon,
   ChevronDownIcon,
   LogOutIcon,
   ShieldCheckIcon,
 } from "lucide-react"
+
+import { SigmaMark } from "@/components/ui/sigma-mark"
 import Link from "next/link"
 import { useRef } from "react"
 
@@ -98,16 +99,14 @@ export function MainSidebar({
   ]
 
   return (
-    <aside className="flex min-h-0 flex-col border-e border-[var(--sidebar-border)] bg-[var(--sidebar)] p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
+    <aside className="flex min-h-0 flex-col border-e border-line bg-canvas p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
       <div className="flex h-11 items-center justify-center gap-3 px-1 lg:h-12 lg:justify-start">
-        <div className="grid size-7 place-items-center rounded-md bg-[var(--primary)]/10 text-[var(--primary)]">
-          <AudioWaveformIcon aria-hidden="true" className="size-4" />
-        </div>
+        <SigmaMark className="size-6" />
         <div className="text-lg font-semibold tracking-tight text-foreground">MeetSum</div>
       </div>
       {user ? <WorkspaceSwitcher dictionary={dictionary} /> : null}
 
-      <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-[var(--divider)] py-3 lg:grid lg:gap-1.5 lg:overflow-visible">
+      <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-line py-3 lg:grid lg:gap-1.5 lg:overflow-visible">
         {navItems.map((label, index) => {
           const Icon = navIcons[index]
           const panel = panelKeys[index]
@@ -121,8 +120,8 @@ export function MainSidebar({
               variant="ghost"
               className={
                 active
-                  ? "h-9 min-w-fit justify-start rounded-md bg-[var(--sidebar-primary)] px-3 font-semibold text-[var(--sidebar-primary-foreground)] hover:bg-[var(--sidebar-primary)] hover:text-[var(--sidebar-primary-foreground)] lg:min-w-0"
-                  : "h-9 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground lg:min-w-0"
+                  ? "h-9 min-w-fit justify-start rounded-md bg-brand-soft px-3 font-semibold text-brand-text hover:bg-brand-soft hover:text-brand-text lg:min-w-0"
+                  : "h-9 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground hover:bg-surface-3 hover:text-sidebar-accent-foreground lg:min-w-0"
               }
               onClick={() => onPanelChange(panel)}
             >
@@ -138,18 +137,18 @@ export function MainSidebar({
           <div className="hidden lg:block">
             <div className="mb-4 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <span>Recent rooms</span>
-              <FolderPlusIcon aria-hidden="true" className="size-4 text-[var(--primary)]" />
+              <FolderPlusIcon aria-hidden="true" className="size-4 text-brand-text" />
             </div>
             <div className="grid gap-1 text-sm text-sidebar-foreground">
               {rooms.map((room) => (
                 <Link
                   key={room.id}
                   href={`/${locale}/rooms/${room.id}`}
-                  className="-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-[var(--sidebar-accent)] hover:text-sidebar-accent-foreground"
+                  className="-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-surface-3 hover:text-sidebar-accent-foreground"
                 >
                   <span
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: room.color ?? "var(--primary)" }}
+                    style={{ backgroundColor: room.color ?? "var(--brand)" }}
                   />
                   <span className="truncate">{room.name}</span>
                 </Link>
@@ -183,7 +182,7 @@ export function MainSidebar({
                     className="size-8 shrink-0 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--primary)] text-sm font-semibold text-white">
+                  <div className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-sm font-semibold text-white">
                     {initial}
                   </div>
                 )}

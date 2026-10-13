@@ -1,22 +1,13 @@
 import type { Metadata } from "next"
-import { Geist_Mono, Inter, Noto_Sans_Hebrew } from "next/font/google"
 
 import "../../globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { DirectionProvider } from "@/components/ui/direction"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
+import { fontVariables } from "@/lib/fonts"
 import { cn } from "@/lib/utils"
 
 import { loadShare } from "./load-share"
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" })
-const notoHebrew = Noto_Sans_Hebrew({
-  subsets: ["hebrew"],
-  variable: "--font-hebrew",
-})
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
 
 export const metadata: Metadata = {
   title: "MeetSum shared meeting",
@@ -44,16 +35,12 @@ export default async function ShareLayout({
       lang={lang}
       dir={dir}
       suppressHydrationWarning
-      className={cn(
-        "antialiased",
-        fontMono.variable,
-        inter.variable,
-        notoHebrew.variable,
-        lang === "he" ? "font-hebrew" : "font-sans"
-      )}
+      className={cn("antialiased", fontVariables)}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <DirectionProvider direction={dir}>
+          <ThemeProvider>{children}</ThemeProvider>
+        </DirectionProvider>
       </body>
     </html>
   )

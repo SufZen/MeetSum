@@ -50,10 +50,10 @@ export function AdminPanel({
   }
 
   return (
-    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-[var(--surface-subtle)] p-3 lg:h-[calc(100svh-3.5rem)] lg:p-5">
+    <div className="ms-scrollbar min-h-[calc(100svh-3.5rem)] overflow-y-auto bg-surface-2 p-3 lg:h-[calc(100svh-3.5rem)] lg:p-5">
       <div className="mx-auto grid max-w-7xl gap-4">
         <header className="px-1 py-1">
-          <div className="text-xs font-semibold tracking-wide text-[var(--primary)] uppercase">
+          <div className="text-xs font-semibold tracking-wide text-brand-text uppercase">
             {t.adminEyebrow}
             {activeWorkspace ? (
               <>
