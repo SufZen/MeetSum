@@ -8,6 +8,7 @@
  * is returned with `Calendars.Read`, and the extra scope would force a tenant
  * admin-consent prompt.
  */
+import { providerAuthorizeUrl } from "@/lib/integrations/core/http"
 import {
   type OAuthExchangeResult,
   ProviderError,
@@ -77,18 +78,22 @@ export function microsoftAuthorizeUrl(
 
   if (!params.codeChallenge) throw new ProviderError("config", "microsoft requires PKCE")
 
-  const url = new URL(`${LOGIN_BASE}/${encodeURIComponent(config.tenant)}/oauth2/v2.0/authorize`)
-
-  url.searchParams.set("client_id", config.clientId)
-  url.searchParams.set("response_type", "code")
-  url.searchParams.set("response_mode", "query")
-  url.searchParams.set("redirect_uri", params.redirectUri)
-  url.searchParams.set("scope", MICROSOFT_SCOPES.join(" "))
-  url.searchParams.set("state", params.state)
-  url.searchParams.set("prompt", "select_account")
-  url.searchParams.set("code_challenge", params.codeChallenge)
-  url.searchParams.set("code_challenge_method", "S256")
-  return url.toString()
+  return providerAuthorizeUrl(
+    "microsoft",
+    `${LOGIN_BASE}/${encodeURIComponent(config.tenant)}/oauth2/v2.0/authorize`,
+    {
+      client_id: config.clientId,
+      response_type: "code",
+      response_mode: "query",
+      redirect_uri: params.redirectUri,
+      scope: MICROSOFT_SCOPES.join(" "),
+      state: params.state,
+      prompt: "select_account",
+      code_challenge: params.codeChallenge,
+      code_challenge_method: "S256",
+    },
+    env
+  )
 }
 
 type TokenResponse = {

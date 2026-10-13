@@ -9,6 +9,7 @@
  *
  * Token exchange errors never carry Notion's `error_description`.
  */
+import { providerAuthorizeUrl } from "@/lib/integrations/core/http"
 import {
   ProviderError,
   type OAuthExchangeResult,
@@ -24,24 +25,6 @@ export function notionClientConfig(env: NodeJS.ProcessEnv = process.env) {
   return clientId && clientSecret ? { clientId, clientSecret } : undefined
 }
 
-/**
- * Dev/e2e fake mode: the loopback origin of `MEETSUM_INTEGRATIONS_FAKE_BASE_URL`
- * (never in production) that browser redirects are rewritten to.
- */
-export function fakeProviderOrigin(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const raw = env.MEETSUM_INTEGRATIONS_FAKE_BASE_URL?.trim()
-
-  if (!raw || env.NODE_ENV === "production") return undefined
-
-  try {
-    const url = new URL(raw)
-
-    return url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) ? url.origin : undefined
-  } catch {
-    return undefined
-  }
-}
-
 export function notionAuthorizeUrl(
   params: { state: string; redirectUri: string },
   env: NodeJS.ProcessEnv = process.env
@@ -50,15 +33,14 @@ export function notionAuthorizeUrl(
 
   if (!config) throw new ProviderError("config", "notion_not_configured")
 
-  const url = new URL("/v1/oauth/authorize", fakeProviderOrigin(env) ?? NOTION_API_ORIGIN)
-
-  url.searchParams.set("client_id", config.clientId)
-  url.searchParams.set("response_type", "code")
-  url.searchParams.set("owner", "user")
-  url.searchParams.set("redirect_uri", params.redirectUri)
-  url.searchParams.set("state", params.state)
-
-  return url.toString()
+  // Through the shared builder: authorize-host allowlist and the fake-mode
+  // rewrite to `<fake>/api.notion.com/...`.
+  return providerAuthorizeUrl(
+    "notion",
+    `${NOTION_API_ORIGIN}/v1/oauth/authorize`,
+    { client_id: config.clientId, response_type: "code", owner: "user", redirect_uri: params.redirectUri, state: params.state },
+    env
+  )
 }
 
 type NotionTokenResponse = {

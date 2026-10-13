@@ -11,6 +11,7 @@
  * PKCE is off: HubSpot's OAuth docs do not document PKCE for public apps
  * (confidential client with a secret); re-check before enabling.
  */
+import { providerAuthorizeUrl } from "@/lib/integrations/core/http"
 import { ProviderError, type OAuthExchangeResult, type ProviderFetch, type TokenSet } from "@/lib/integrations/core/types"
 import { HUBSPOT_API, hubspotError } from "@/lib/integrations/hubspot/client"
 
@@ -47,14 +48,18 @@ function requireEnv(env: NodeJS.ProcessEnv): HubspotEnv {
 
 export function hubspotAuthorizeUrl(params: { state: string; redirectUri: string }, env: NodeJS.ProcessEnv = process.env): string {
   const config = requireEnv(env)
-  const url = new URL(HUBSPOT_AUTHORIZE_URL)
-
-  url.searchParams.set("client_id", config.clientId)
-  url.searchParams.set("redirect_uri", params.redirectUri)
-  url.searchParams.set("scope", HUBSPOT_SCOPES.join(" "))
-  if (config.optionalScopes.length) url.searchParams.set("optional_scope", config.optionalScopes.join(" "))
-  url.searchParams.set("state", params.state)
-  return url.toString()
+  return providerAuthorizeUrl(
+    "hubspot",
+    HUBSPOT_AUTHORIZE_URL,
+    {
+      client_id: config.clientId,
+      redirect_uri: params.redirectUri,
+      scope: HUBSPOT_SCOPES.join(" "),
+      optional_scope: config.optionalScopes.length ? config.optionalScopes.join(" ") : undefined,
+      state: params.state,
+    },
+    env
+  )
 }
 
 export type HubspotOAuthDeps = { fetch: ProviderFetch; env?: NodeJS.ProcessEnv; now?: () => Date }

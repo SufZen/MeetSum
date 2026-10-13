@@ -19,7 +19,7 @@ import {
   type TokenSet,
 } from "@/lib/integrations/core/types"
 import { DRIVE_API, googleErrorFrom } from "@/lib/integrations/google-docs/client"
-import { fakeProviderOrigin } from "@/lib/integrations/notion/oauth"
+import { providerAuthorizeUrl } from "@/lib/integrations/core/http"
 
 export const GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 export const GOOGLE_DOCS_SCOPE = "https://www.googleapis.com/auth/documents"
@@ -43,20 +43,23 @@ export function googleDocsAuthorizeUrl(
   if (!config) throw new ProviderError("config", "google_docs_not_configured")
   if (!params.codeChallenge) throw new ProviderError("config", "google_docs_pkce_required")
 
-  const url = new URL("/o/oauth2/v2/auth", fakeProviderOrigin(env) ?? AUTHORIZE_ORIGIN)
-
-  url.searchParams.set("client_id", config.clientId)
-  url.searchParams.set("redirect_uri", params.redirectUri)
-  url.searchParams.set("response_type", "code")
-  url.searchParams.set("scope", GOOGLE_DRIVE_FILE_SCOPE)
-  url.searchParams.set("access_type", "offline")
-  url.searchParams.set("prompt", "consent")
-  url.searchParams.set("include_granted_scopes", "true")
-  url.searchParams.set("code_challenge", params.codeChallenge)
-  url.searchParams.set("code_challenge_method", "S256")
-  url.searchParams.set("state", params.state)
-
-  return url.toString()
+  return providerAuthorizeUrl(
+    "google_drive",
+    `${AUTHORIZE_ORIGIN}/o/oauth2/v2/auth`,
+    {
+      client_id: config.clientId,
+      redirect_uri: params.redirectUri,
+      response_type: "code",
+      scope: GOOGLE_DRIVE_FILE_SCOPE,
+      access_type: "offline",
+      prompt: "consent",
+      include_granted_scopes: "true",
+      code_challenge: params.codeChallenge,
+      code_challenge_method: "S256",
+      state: params.state,
+    },
+    env
+  )
 }
 
 type GoogleTokenResponse = {

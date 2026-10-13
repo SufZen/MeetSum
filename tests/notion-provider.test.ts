@@ -78,10 +78,12 @@ describe("Notion OAuth", () => {
   it("rewrites the authorize origin to the loopback fake server outside production only", () => {
     const fake = { ...ENV, MEETSUM_INTEGRATIONS_FAKE_BASE_URL: "http://127.0.0.1:4010" } as NodeJS.ProcessEnv
 
-    expect(notionAuthorizeUrl({ state: "s", redirectUri: "r" }, fake)).toMatch(/^http:\/\/127\.0\.0\.1:4010\/v1\/oauth\/authorize/)
-    expect(
+    // The shared builder keeps the `/<host>` prefix the fake server routes on.
+    expect(notionAuthorizeUrl({ state: "s", redirectUri: "r" }, fake)).toMatch(/^http:\/\/127\.0\.0\.1:4010\/api\.notion\.com\/v1\/oauth\/authorize/)
+    // Fake mode in production is refused outright (as the boot check does).
+    expect(() =>
       notionAuthorizeUrl({ state: "s", redirectUri: "r" }, { ...fake, NODE_ENV: "production" } as NodeJS.ProcessEnv)
-    ).toMatch(/^https:\/\/api\.notion\.com/)
+    ).toThrow(/refused in production/)
   })
 
   it("exchanges the code with Basic auth; the account is the Notion workspace", async () => {
