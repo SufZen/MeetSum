@@ -155,6 +155,10 @@ export const microsoftProvider: IntegrationProvider = {
   async test(ctx) {
     await graphGet(ctx.fetch, await ctx.getAccessToken(), `${GRAPH_BASE}/me?$select=id`)
   },
+  // Calendar sync only: Microsoft is never a rule or send target.
+  async validateDestination() {
+    throw new ProviderError("invalid", "microsoft is not a send destination", { providerCode: "not_a_destination" })
+  },
   jobs: {
     calendarSync: {
       get everyMinutes() {

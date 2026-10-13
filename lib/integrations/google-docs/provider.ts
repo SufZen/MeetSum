@@ -39,5 +39,9 @@ export const googleDocsProvider: IntegrationProvider = {
     revoke: async (tokens) => revokeGoogleDocsToken(tokens, { fetch: oauthFetch() }),
   },
   test: async (ctx) => googleDocsTokenInfo(await ctx.getAccessToken(), { fetch: ctx.fetch }),
+  // Google Docs is an export to the requester's own Drive, never a rule or send target.
+  async validateDestination() {
+    throw new ProviderError("invalid", "google docs is not a send destination", { providerCode: "not_a_destination" })
+  },
   fake: createFakeGoogleDocsHandlers(),
 }

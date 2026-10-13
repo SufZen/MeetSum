@@ -130,7 +130,8 @@ async function checkDestination(
 
   const provider = getProvider(connection.provider)
 
-  if (!provider?.validateDestination) return undefined
+  // Fail closed: a destination the provider cannot verify is never saved.
+  if (!provider?.validateDestination) return { ok: false, status: 400, code: "destination_not_verifiable" }
 
   try {
     await provider.validateDestination(destination, providerCtx(connection, store))

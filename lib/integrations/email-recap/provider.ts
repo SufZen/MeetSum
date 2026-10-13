@@ -147,6 +147,10 @@ export function createEmailRecapProvider(deps: EmailRecapDeps = {}): Integration
     id: "email",
     scope: "none",
     configured: (value = process.env) => getEmailSender(value).isConfigured(),
+    // No external id to check: only the email destination shape is accepted.
+    async validateDestination(destination) {
+      if (destination.provider !== "email") throw new ProviderError("invalid", "destination is not email")
+    },
     deliver,
   }
 }
