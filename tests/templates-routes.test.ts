@@ -13,7 +13,10 @@ const recordAuditLog = vi.hoisted(() => vi.fn(async () => undefined))
 const enqueueMeetSumJob = vi.hoisted(() => vi.fn(async (name: string) => ({ id: "job_1", name })))
 
 vi.mock("@/lib/audit", () => ({ recordAuditLog }))
-vi.mock("@/lib/jobs/queue", () => ({ enqueueMeetSumJob }))
+vi.mock("@/lib/jobs/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/jobs/queue")>()),
+  enqueueMeetSumJob,
+}))
 
 import { GET as listTemplates, POST as createTemplate } from "@/app/api/templates/route"
 import {
@@ -213,6 +216,18 @@ describe("/api/meetings/:id/intelligence", () => {
     expect((await run("m_a", { language: "fr" })).status).toBe(400)
     expect((await run("m_b", {})).status).toBe(404)
     expect(enqueueMeetSumJob).not.toHaveBeenCalled()
+  })
+
+  it("answers 503 queue_unavailable when the queue does not accept the job", async () => {
+    await as("member")
+    const { QueueUnavailableError } = await import("@/lib/jobs/queue")
+
+    enqueueMeetSumJob.mockRejectedValueOnce(new QueueUnavailableError("meeting.summarize"))
+
+    const response = await run("m_a")
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: "queue_unavailable" })
   })
 
   it("returns normalized V2 intelligence", async () => {

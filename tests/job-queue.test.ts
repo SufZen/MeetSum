@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   add: vi.fn(),
   close: vi.fn(),
   createJob: vi.fn(),
+  updateJob: vi.fn(),
   resolveMeetingWorkspaceId: vi.fn(),
   repositoryWorkspaces: [] as string[],
 }))
@@ -17,12 +18,12 @@ vi.mock("bullmq", () => ({
 vi.mock("@/lib/meetings/store", () => ({
   getSystemMeetingRepository: (workspaceId: string) => {
     mocks.repositoryWorkspaces.push(workspaceId)
-    return { createJob: mocks.createJob }
+    return { createJob: mocks.createJob, updateJob: mocks.updateJob }
   },
   resolveMeetingWorkspaceId: mocks.resolveMeetingWorkspaceId,
 }))
 
-const { closeMeetSumQueue, enqueueMeetSumJob, getJobAttempts, JobWorkspaceRequiredError } =
+const { closeMeetSumQueue, enqueueMeetSumJob, getJobAttempts, JobWorkspaceRequiredError, QueueUnavailableError } =
   await import("@/lib/jobs/queue")
 /** Untyped call path (legacy payloads): exercises the runtime workspace guard. */
 const enqueueUntyped = enqueueMeetSumJob as unknown as (
@@ -36,6 +37,7 @@ const { getCaptureScheduleConfig, getRetentionScheduleConfig } = await import(
 beforeEach(() => {
   mocks.repositoryWorkspaces.length = 0
   mocks.add.mockReset().mockResolvedValue({})
+  mocks.updateJob.mockReset().mockResolvedValue({})
   mocks.resolveMeetingWorkspaceId.mockReset().mockResolvedValue("ws_meeting")
   mocks.createJob.mockReset().mockImplementation(async (input) => ({
     id: "job_123",
@@ -50,6 +52,28 @@ afterEach(async () => {
 })
 
 describe("enqueueMeetSumJob", () => {
+  it("rejects with QueueUnavailableError after the enqueue timeout and fails the job record", async () => {
+    vi.useFakeTimers()
+    mocks.add.mockReturnValue(new Promise(() => undefined))
+
+    const pending = enqueueMeetSumJob("meeting.summarize", { meetingId: "meet_1", workspaceId: "ws_1" })
+    const outcome = pending.catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(await outcome).toBeInstanceOf(QueueUnavailableError)
+    expect(mocks.updateJob).toHaveBeenCalledWith("job_123", { status: "failed", error: "queue_unavailable" })
+    vi.useRealTimers()
+  })
+
+  it("maps an add() rejection to QueueUnavailableError", async () => {
+    mocks.add.mockRejectedValue(new Error("ECONNREFUSED"))
+
+    await expect(
+      enqueueMeetSumJob("meeting.summarize", { meetingId: "meet_1", workspaceId: "ws_1" })
+    ).rejects.toBeInstanceOf(QueueUnavailableError)
+  })
+
   it("defaults to 3 attempts with exponential backoff and the record id as jobId", async () => {
     await enqueueMeetSumJob("media.ingest", {
       meetingId: "meet_1",

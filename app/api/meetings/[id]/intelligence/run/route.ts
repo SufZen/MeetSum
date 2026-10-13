@@ -7,7 +7,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
 import { isUsableTemplateKey } from "@/lib/ai/templates/catalog"
-import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { enqueueMeetSumJob, QueueUnavailableError } from "@/lib/jobs/queue"
 import { createPlatformEvent } from "@/lib/platform/events"
 
 const RUN_LANGUAGES = new Set(["he", "en"])
@@ -55,6 +55,9 @@ export const POST = withAuthz<{ id: string }>(
         { status: 202 }
       )
     } catch (error) {
+      if (error instanceof QueueUnavailableError) {
+        return NextResponse.json({ error: "queue_unavailable" }, { status: 503, headers: { "Retry-After": "10" } })
+      }
       return jsonError(
         error instanceof Error ? error.message : "Unable to run intelligence",
         404

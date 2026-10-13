@@ -176,6 +176,32 @@ export async function enqueueMeetSumJob(
   return enqueueJob(name, payload, options)
 }
 
+/** The queue (Redis) did not accept the job in time (routes → 503 `queue_unavailable`). */
+export class QueueUnavailableError extends Error {
+  constructor(readonly jobName: string) {
+    super("queue_unavailable")
+    this.name = "QueueUnavailableError"
+  }
+}
+
+const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000
+
+export function getEnqueueTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ENQUEUE_TIMEOUT_MS
+}
+
+/** BullMQ's add() never rejects while Redis is unreachable: bound it. */
+function withEnqueueTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new QueueUnavailableError("enqueue_timeout")), getEnqueueTimeoutMs())
+  })
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 async function enqueueJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload,
@@ -205,13 +231,26 @@ async function enqueueJob(
 
   await persistJobWorkspace(record.id, workspaceId)
 
-  const added = await getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
-    jobId: jobId ?? record.id,
-    attempts,
-    backoff: { type: "exponential", delay: 3000 },
-    removeOnComplete: 250,
-    removeOnFail: 500,
-  })
+  let added: unknown
+
+  try {
+    added = await withEnqueueTimeout(
+      getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
+        jobId: jobId ?? record.id,
+        attempts,
+        backoff: { type: "exponential", delay: 3000 },
+        removeOnComplete: 250,
+        removeOnFail: 500,
+      })
+    )
+  } catch (error) {
+    // Redis unreachable or slow: the job never reached the queue, so its
+    // record must not stay "queued" forever.
+    await getSystemMeetingRepository(workspaceId)
+      .updateJob(record.id, { status: "failed", error: "queue_unavailable" })
+      .catch(() => undefined)
+    throw error instanceof QueueUnavailableError ? error : new QueueUnavailableError(name)
+  }
 
   // An idempotent id that already exists returns the existing BullMQ job:
   // close the jobs row created for this ignored add.
