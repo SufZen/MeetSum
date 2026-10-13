@@ -45,6 +45,29 @@ export function encodeTaskCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url")
 }
 
+/** A timestamp Postgres accepts as timestamptz (ISO or `YYYY-MM-DD HH:MM:SS[.ffffff]+TZ`). */
+const CURSOR_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}[T ]([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,6})?)?(Z|[+-]\d{2}(:?\d{2})?)?$/
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+function isCursorTimestamp(value: string): boolean {
+  return CURSOR_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value))
+}
+
+/** A real calendar date (`2026-02-30` is rejected, like Postgres). */
+function isCursorDate(value: string): boolean {
+  if (!DATE_ONLY.test(value)) return false
+
+  const date = new Date(`${value}T00:00:00.000Z`)
+
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+/**
+ * Decodes a keyset cursor. `c` (timestamp) and `d` (date-only) reach the SQL
+ * as typed parameters, so they are validated here: a tampered cursor is an
+ * InvalidTaskCursorError (400), never a Postgres 22007 (500).
+ */
 export function decodeTaskCursor(value: string): Cursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Cursor
@@ -52,8 +75,9 @@ export function decodeTaskCursor(value: string): Cursor {
     if (
       typeof parsed === "object" &&
       parsed !== null &&
-      (parsed.d === null || typeof parsed.d === "string") &&
+      (parsed.d === null || (typeof parsed.d === "string" && isCursorDate(parsed.d))) &&
       typeof parsed.c === "string" &&
+      isCursorTimestamp(parsed.c) &&
       typeof parsed.i === "string"
     ) {
       return parsed
@@ -330,7 +354,12 @@ export function filterTasks(
     tasks,
     nextCursor:
       start + limit < rows.length && last
-        ? encodeTaskCursor({ d: last.dueOn ?? null, c: last.createdAt ?? "", i: last.id })
+        ? encodeTaskCursor({
+            // Memory paging only uses `i`; `d`/`c` must still decode.
+            d: last.dueOn && isCursorDate(last.dueOn) ? last.dueOn : null,
+            c: last.createdAt && isCursorTimestamp(last.createdAt) ? last.createdAt : new Date(0).toISOString(),
+            i: last.id,
+          })
         : undefined,
   }
 }

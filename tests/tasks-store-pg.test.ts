@@ -145,6 +145,28 @@ describe("buildTaskListSql", () => {
       buildTaskListSql(member, { scope: "all", status: "all", cursor: "eyJ4IjoxfQ" })
     ).toThrow(InvalidTaskCursorError)
   })
+
+  it("rejects cursor timestamps and due dates Postgres would refuse (22007 -> 400, not 500)", () => {
+    const bad = [
+      { d: null, c: "not a timestamp", i: "act_1" },
+      { d: null, c: "1", i: "act_1" },
+      { d: null, c: "2026-10-15 99:00:00+00", i: "act_1" },
+      { d: "next week", c: "2026-10-15 09:00:00+00", i: "act_1" },
+      { d: "2026-02-30", c: "2026-10-15 09:00:00+00", i: "act_1" },
+      { d: "2026-10-15T09:00:00Z", c: "2026-10-15 09:00:00+00", i: "act_1" },
+    ]
+
+    for (const cursor of bad) {
+      expect(() => decodeTaskCursor(encodeTaskCursor(cursor)), JSON.stringify(cursor)).toThrow(
+        InvalidTaskCursorError
+      )
+    }
+    expect(decodeTaskCursor(encodeTaskCursor({ d: "2026-10-18", c: "2026-10-15T09:00:00.000Z", i: "a" }))).toEqual({
+      d: "2026-10-18",
+      c: "2026-10-15T09:00:00.000Z",
+      i: "a",
+    })
+  })
 })
 
 describe("listTasksPostgres", () => {

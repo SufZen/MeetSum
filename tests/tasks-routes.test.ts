@@ -152,6 +152,14 @@ describe("GET /api/tasks", () => {
     expect((await get("limit=500")).status).toBe(400)
     expect((await get("dueFrom=yesterday")).status).toBe(400)
     expect((await get("cursor=garbage")).status).toBe(400)
+
+    const badTimestamp = Buffer.from(JSON.stringify({ d: null, c: "yesterday", i: "a_late" })).toString("base64url")
+    const badDate = Buffer.from(
+      JSON.stringify({ d: "2026-02-30", c: "2026-10-01 10:00:00+00", i: "a_late" })
+    ).toString("base64url")
+
+    expect((await get(`cursor=${badTimestamp}`)).status).toBe(400)
+    expect((await get(`cursor=${badDate}`)).status).toBe(400)
   })
 })
 
