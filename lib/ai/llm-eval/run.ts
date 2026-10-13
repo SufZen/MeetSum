@@ -31,6 +31,9 @@ import {
   loadManifestMeetings,
 } from "@/lib/ai/llm-eval/fixtures"
 import { runJudge } from "@/lib/ai/llm-eval/judge"
+import type { IntelligencePipelineOptions, IntelligencePipelineResult } from "@/lib/intelligence/pipeline"
+import type { MeetingRecord } from "@/lib/meetings/repository"
+import { DEFAULT_APP_SETTINGS } from "@/lib/settings/app-settings"
 import {
   combineVerdicts,
   decideRoute,
@@ -472,12 +475,12 @@ type PipelineIntelligence = {
 
 type PipelineModule = {
   runIntelligencePipeline?: (
-    meeting: Record<string, unknown>,
-    options: { provider: string; model: string; language?: string; templateKey?: string }
-  ) => Promise<PipelineIntelligence>
+    meeting: MeetingRecord,
+    options: IntelligencePipelineOptions
+  ) => Promise<IntelligencePipelineResult>
 }
 
-/** Package A's pipeline, loaded lazily so the harness builds without it. */
+/** Package A's pipeline, loaded lazily (it pulls in the LLM SDKs). */
 const PIPELINE_MODULE = "@/lib/intelligence/pipeline"
 
 export function toCandidateRecording(
@@ -510,16 +513,31 @@ export function toCandidateRecording(
   }
 }
 
+/**
+ * Live candidate: A's `runIntelligencePipeline` with `{provider, model}`
+ * forced (the router then has a single route, no cross-provider fallback).
+ * A run that fell back to the heuristic or answered from another provider
+ * is an error, never a recording of the candidate.
+ */
 export const pipelineCandidateRunner: CandidateRunner = async ({ candidate, meeting }) => {
   const { provider, model } = parseModelSpec(candidate)
   const pipeline = (await import(/* @vite-ignore */ PIPELINE_MODULE)) as PipelineModule
+
+  return runPipelineCandidate(pipeline, { provider, model }, meeting)
+}
+
+export async function runPipelineCandidate(
+  pipeline: PipelineModule,
+  { provider, model }: { provider: "anthropic" | "gemini"; model: string },
+  meeting: EvalMeetingFixture
+): Promise<CandidateRecording> {
 
   if (!pipeline.runIntelligencePipeline) {
     throw new Error("runIntelligencePipeline is not available (Package A)")
   }
 
   const started = Date.now()
-  const intelligence = await pipeline.runIntelligencePipeline(
+  const { intelligence, run } = await pipeline.runIntelligencePipeline(
     {
       id: meeting.id,
       title: meeting.title,
@@ -531,11 +549,20 @@ export const pipelineCandidateRunner: CandidateRunner = async ({ candidate, meet
       participants: [],
       workspaceId: "llm-eval",
       transcript: meeting.segments,
-    },
-    { provider, model }
+    } as MeetingRecord,
+    // Default settings: the eval never reads a workspace's settings.
+    { provider, model, settings: { ...DEFAULT_APP_SETTINGS } }
   )
 
-  return toCandidateRecording(meeting, intelligence, Date.now() - started)
+  if (run.fallbackUsed || run.provider !== provider) {
+    throw new Error(
+      `Candidate ${provider}:${model} did not answer (got ${run.provider}:${run.model}${
+        run.fallbackReason ? `, ${run.fallbackReason}` : ""
+      })`
+    )
+  }
+
+  return toCandidateRecording(meeting, intelligence as PipelineIntelligence, Date.now() - started)
 }
 
 export type LlmEvalDeps = {
