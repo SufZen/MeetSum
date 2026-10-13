@@ -370,6 +370,8 @@ describe("settings and API keys", () => {
 
     expect(ok.status).toBe(200)
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "admin.settings.updated", workspaceId: workspace.id }))
+    // M9: the workspace default locale never overwrites the user's locale cookie.
+    expect(ok.headers.get("set-cookie") ?? "").not.toContain("meetsum_locale")
   })
 
   it("manages API keys only as admin, bound to the active workspace", async () => {
