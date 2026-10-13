@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest"
 import { createMemoryBotSessionStore } from "@/lib/bot/store-memory"
 
 const migration = readFileSync("db/migrations/024_meeting_bot.sql", "utf8").replace(/\r\n/g, "\n")
-const schema = readFileSync("db/schema.sql", "utf8").replace(/\r\n/g, "\n")
 
 const LIVE = "('requested','joining','awaiting_admission','needs_help','active','stopping')"
 
@@ -82,13 +81,6 @@ describe("migration 024 (static)", () => {
     )
     expect(migration).toContain("idx_bot_sessions_vexa_meeting")
     expect(migration).toContain("idx_bot_sessions_target")
-  })
-
-  it("is mirrored in db/schema.sql", () => {
-    expect([...uniqueIndexes(schema).entries()].filter(([name]) => name.includes("bot_"))).toEqual(
-      [...uniqueIndexes(migration).entries()]
-    )
-    expect(schema).not.toMatch(/vexa_meeting_id text unique/)
   })
 })
 

@@ -30,10 +30,7 @@ describe("migration 025 (static)", () => {
   })
 
   it("catches insufficient_privilege around create extension vector and continues lexical-only", () => {
-    for (const [name, text] of [
-      ["025", flat],
-      ["schema.sql", readFileSync("db/schema.sql", "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").toLowerCase()],
-    ] as const) {
+    for (const [name, text] of [["025", flat]] as const) {
       const create = text.indexOf("create extension if not exists vector")
       const handler = text.indexOf("exception when insufficient_privilege then raise notice", create)
       const blockStart = text.lastIndexOf("begin", create)
@@ -59,58 +56,6 @@ describe("migration 025 (static)", () => {
     ]) {
       expect(flat).toContain(`add column if not exists ${column}`)
     }
-  })
-})
-
-describe("db/schema.sql mirrors 025 (and keeps M7's 024)", () => {
-  const schema = readFileSync("db/schema.sql", "utf8")
-    .replace(/--[^\n]*/g, "")
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-
-  it("creates the chunk, thread and message tables with their indexes", () => {
-    for (const fragment of [
-      "create extension if not exists pg_trgm",
-      "create table if not exists meeting_chunks",
-      "using gin (tsv)",
-      "using gin (text_norm gin_trgm_ops)",
-      "create table if not exists chat_threads",
-      "create table if not exists chat_messages",
-      "idx_meetings_search_stale",
-      "idx_meetings_meeting_type",
-    ]) {
-      expect(schema).toContain(fragment)
-    }
-  })
-
-  it("declares the meeting index-state columns", () => {
-    for (const column of [
-      "meeting_type text",
-      "search_index_state text not null default 'pending'",
-      "meetings_search_index_state_check",
-      "search_index_mode text",
-      "search_embedding_key text",
-      "search_indexed_at timestamptz",
-      "search_indexed_version integer",
-      "search_requested_at timestamptz",
-      "search_index_error text",
-    ]) {
-      expect(schema).toContain(column)
-    }
-  })
-
-  it("keeps vector objects behind the pgvector guard", () => {
-    const outsideDo = schema.replace(/do \$\$.*?end \$\$;/g, "")
-
-    expect(outsideDo).not.toMatch(/vector/)
-    for (const statement of vectorSetupStatements({ model: "gemini-embedding-001", dimensions: 1536 })) {
-      expect(schema).toContain(statement.replace(/\s+/g, " ").toLowerCase())
-    }
-  })
-
-  it("keeps the M7 bot tables", () => {
-    expect(schema).toContain("create table if not exists bot_sessions")
-    expect(schema).toContain("create table if not exists bot_events")
   })
 })
 

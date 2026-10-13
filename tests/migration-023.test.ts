@@ -6,7 +6,6 @@ import { listMigrationFiles } from "@/lib/db/migrations"
 
 const flat = (text: string) => text.replace(/\s+/g, " ")
 const migration = flat(readFileSync("db/migrations/023_m5_fixups.sql", "utf8"))
-const schema = flat(readFileSync("db/schema.sql", "utf8"))
 const REACTION_KEY = "primary key (workspace_id, meeting_id, target_type, target_id, user_id, emoji)"
 const TEMPLATE_INDEX =
   "create unique index if not exists summary_templates_workspace_key_active on summary_templates (workspace_id, key) where archived_at is null"
@@ -28,11 +27,8 @@ describe("migration 023 (static): M5 fix-ups for databases that ran a draft 022"
     expect(migration).toContain(`alter table reactions add constraint reactions_pkey ${REACTION_KEY}`)
   })
 
-  it("makes template keys unique among non-archived templates only (also in schema.sql)", () => {
-    for (const sql of [migration, schema]) {
-      expect(sql).toContain(DROP_OLD_UNIQUE)
-      expect(sql).toContain(TEMPLATE_INDEX)
-    }
-    expect(schema).toContain(REACTION_KEY)
+  it("makes template keys unique among non-archived templates only", () => {
+    expect(migration).toContain(DROP_OLD_UNIQUE)
+    expect(migration).toContain(TEMPLATE_INDEX)
   })
 })

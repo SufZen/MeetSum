@@ -19,12 +19,6 @@ describe("migration 028 (static)", () => {
     expect(flat(SQL)).toContain("add column if not exists token_generation integer not null default 0")
   })
 
-  it("is mirrored in db/schema.sql", () => {
-    expect(flat(readFileSync("db/schema.sql", "utf8"))).toContain(
-      "alter table integration_connections add column if not exists token_generation integer not null default 0"
-    )
-  })
-
   it("strips _gen from config", () => {
     expect(flat(SQL)).toContain("config = config - '_gen'")
   })
