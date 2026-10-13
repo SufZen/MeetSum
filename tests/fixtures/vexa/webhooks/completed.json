@@ -1,0 +1,25 @@
+{
+  "_synthetic": true,
+  "event_type": "meeting.completed",
+  "event_id": "evt_completed",
+  "data": {
+    "meeting": {
+      "id": 4242,
+      "platform": "google_meet",
+      "native_meeting_id": "abc-defg-hij",
+      "status": "completed",
+      "start_time": "2026-10-13T10:00:00Z",
+      "end_time": "2026-10-13T10:45:00Z",
+      "data": {
+        "service_provenance": {
+          "bot_admitted_at": "2026-10-13T10:00:20Z",
+          "bot_departed_at": "2026-10-13T10:45:00Z",
+          "bot_outcome": "served",
+          "transcription_provider": "none",
+          "lifecycle_contract_version": "1"
+        }
+      }
+    },
+    "webhook_secret": "must-not-be-stored"
+  }
+}

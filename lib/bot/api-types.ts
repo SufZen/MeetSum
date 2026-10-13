@@ -22,6 +22,7 @@ export type BotErrorCode =
   | "invalid_meeting_link"
   | "bot_already_in_meeting"
   | "bot_session_terminal"
+  | "bot_provider_unavailable"
   | "bot_no_link"
   | "consent_ack_required"
   | "live_unavailable"
