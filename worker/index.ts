@@ -1,3 +1,4 @@
+import { startBotWorker } from "@/lib/bot/worker"
 import { isTeamsSubscriptionConfigured } from "@/lib/capture/teams-subscriptions"
 import { createMeetSumWorker } from "@/lib/jobs/processor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
@@ -15,6 +16,8 @@ import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 assertRuntimeEnvironment()
 
 const worker = createMeetSumWorker()
+// M7: separate `meetsum-bot` queue worker; undefined when MEETSUM_BOT_ENABLED is off.
+const botWorker = startBotWorker()
 const scheduledTimers: NodeJS.Timeout[] = []
 
 worker.on("completed", (job) => {
@@ -27,13 +30,13 @@ worker.on("failed", (job, error) => {
 
 process.on("SIGTERM", async () => {
   scheduledTimers.forEach((timer) => clearInterval(timer))
-  await worker.close()
+  await Promise.all([worker.close(), botWorker?.close()])
   process.exit(0)
 })
 
 process.on("SIGINT", async () => {
   scheduledTimers.forEach((timer) => clearInterval(timer))
-  await worker.close()
+  await Promise.all([worker.close(), botWorker?.close()])
   process.exit(0)
 })
 

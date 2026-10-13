@@ -52,6 +52,12 @@ export type AuditAction =
   | "meeting.transcript.edited"
   | "meeting.transcript.reverted"
   | "media.prepare.failed"
+  | "bot.join_requested"
+  | "bot.scheduled"
+  | "bot.cancelled"
+  | "bot.stop_requested"
+  | "bot.rules.updated"
+  | "bot.consent.acknowledged"
 
 export type RecordAuditLogInput = {
   action: AuditAction

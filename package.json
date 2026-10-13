@@ -27,6 +27,8 @@
     "backup:full": "sh scripts/backup-full.sh",
     "backup:restore": "sh scripts/restore-full.sh",
     "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
+    "vexa:configure": "tsx scripts/vexa-configure.ts",
+    "bot:simulate": "tsx scripts/bot-simulate.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
   },

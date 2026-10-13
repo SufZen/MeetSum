@@ -1,4 +1,5 @@
 import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
+import { botMessagesEn, botMessagesHe } from "@/lib/i18n/m7/bot"
 import { playerMessagesEn, playerMessagesHe } from "@/lib/i18n/player-messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import {
@@ -72,6 +73,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -136,6 +138,7 @@ export const dictionaries = {
     ...workspaceMessagesHe,
     ...asrMessagesHe,
     ...playerMessagesHe,
+    ...botMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -200,6 +203,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -264,6 +268,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -328,6 +333,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
   },
 } as const
 

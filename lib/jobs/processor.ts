@@ -13,6 +13,7 @@ import {
   getSummaryRunMetadata,
   TranscriptionUnavailableError,
 } from "@/lib/ai/providers"
+import { loadBotSpeakerTimeline } from "@/lib/bot/speaker-timeline"
 import { importPlatformRecording } from "@/lib/capture/recording-import"
 import { renewTeamsSubscriptions } from "@/lib/capture/teams-subscriptions"
 import type { CaptureEvent } from "@/lib/capture/types"
@@ -632,7 +633,14 @@ function meetTimelineLoader(
     record.artifacts.some((artifact) => artifact.artifactType === "transcript")
   )
 
-  if (!hasMeetTranscript || process.env.MEETSUM_STORAGE !== "postgres") return undefined
+  if (!hasMeetTranscript || process.env.MEETSUM_STORAGE !== "postgres") {
+    // M7: bot-recorded meetings fall back to the bot-observed speaker timeline.
+    if (meeting.source === "meeting_bot") {
+      return () => loadBotSpeakerTimeline(meeting.id, scope.workspaceId)
+    }
+
+    return undefined
+  }
 
   return async () => {
     const explicit =
