@@ -77,7 +77,7 @@ export async function probeDurationMs(
   try {
     const { stdout } = await run(
       "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file],
+      ["-v", "error", ...FFMPEG_INPUT_PROTOCOLS, "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file],
       { timeout: ffmpegTimeout(env) }
     )
     const seconds = Number.parseFloat(stdout.trim().split(/\s+/)[0] ?? "")
@@ -92,6 +92,13 @@ export async function probeDurationMs(
     throw wrapFfmpegError(error, deps.provider ?? "asr", "ffprobe")
   }
 }
+
+/**
+ * Input option for every ffmpeg/ffprobe call: only local files and pipes,
+ * so crafted media (HLS playlists, concat lists) cannot make ffmpeg fetch
+ * URLs or read other protocols.
+ */
+export const FFMPEG_INPUT_PROTOCOLS: readonly string[] = ["-protocol_whitelist", "file,pipe"]
 
 /** Arguments that encode 16 kHz mono Opus/OGG at the ASR bitrate. */
 function opusArgs(env: AsrEnv) {
@@ -122,7 +129,7 @@ export async function transcodeForAsr(
   const run = deps.execFile ?? defaultExecFile
 
   try {
-    await run("ffmpeg", ["-hide_banner", "-nostats", "-y", "-i", input, ...opusArgs(env), output], {
+    await run("ffmpeg", ["-hide_banner", "-nostats", "-y", ...FFMPEG_INPUT_PROTOCOLS, "-i", input, ...opusArgs(env), output], {
       timeout: ffmpegTimeout(env),
     })
     return output
@@ -153,6 +160,7 @@ export async function cutAudioChunk(
         seconds(chunk.startMs),
         "-t",
         seconds(chunk.endMs - chunk.startMs),
+        ...FFMPEG_INPUT_PROTOCOLS,
         "-i",
         input,
         ...opusArgs(env),
@@ -206,7 +214,7 @@ export async function detectSilences(
   try {
     const { stderr } = await run(
       "ffmpeg",
-      ["-hide_banner", "-nostats", "-i", file, "-af", "silencedetect=noise=-35dB:d=0.4", "-f", "null", "-"],
+      ["-hide_banner", "-nostats", ...FFMPEG_INPUT_PROTOCOLS, "-i", file, "-af", "silencedetect=noise=-35dB:d=0.4", "-f", "null", "-"],
       { timeout: ffmpegTimeout(env) }
     )
     return parseSilenceDetect(stderr)
@@ -257,13 +265,18 @@ export function planChunks(
   return chunks
 }
 
-function safeFilename(name: string | undefined, fallback: string) {
-  return (name ?? fallback).replace(/[^\w. -]+/g, "_").slice(-120) || fallback
+/** Lower-case extension of an uploaded filename when it is a plain one, else "". */
+function safeExtension(name: string | undefined): string {
+  const ext = path.extname(name ?? "").toLowerCase()
+
+  return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : ""
 }
 
 /**
  * Local path for request media: file media as-is, object media downloaded
- * into `dir`.
+ * into `dir` as `input-<uuid><ext>`. The user's filename is ignored (only a
+ * plain extension is kept) so it can never collide with an output file or
+ * escape `dir`.
  */
 export async function materializeMedia(
   media: AsrMedia,
@@ -272,7 +285,7 @@ export async function materializeMedia(
 ): Promise<string> {
   if (media.kind === "file") return media.path
 
-  const destination = path.join(dir, safeFilename(media.filename, "input.media"))
+  const destination = path.join(dir, `input-${crypto.randomUUID()}${safeExtension(media.filename)}`)
 
   try {
     await (deps.download ?? downloadMeetingObjectToFile)(media.storageKey, destination)

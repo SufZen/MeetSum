@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 
+import { FFMPEG_INPUT_PROTOCOLS } from "@/lib/ai/asr/audio"
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
 import { TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
 import { transcribeWithRouter, type AsrRouterOptions } from "@/lib/ai/asr/router"
@@ -366,6 +367,7 @@ async function extractAudioForGemini(inputPath: string, outputPath: string) {
     "ffmpeg",
     [
       "-y",
+      ...FFMPEG_INPUT_PROTOCOLS,
       "-i",
       inputPath,
       "-vn",
@@ -389,6 +391,7 @@ async function compressMediaForInlineGemini(inputPath: string, outputPath: strin
     "ffmpeg",
     [
       "-y",
+      ...FFMPEG_INPUT_PROTOCOLS,
       "-i",
       inputPath,
       "-vn",

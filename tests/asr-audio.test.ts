@@ -78,6 +78,39 @@ describe("planChunks", () => {
 })
 
 describe("ffmpeg wrappers", () => {
+  it("restricts every ffmpeg/ffprobe input to the file and pipe protocols", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "asr-audio-"))
+    dirs.push(dir)
+    const fake = fakeExecFile({ durationMs: 1000, silenceStderr: SILENCE_STDERR })
+
+    await probeDurationMs("in.ogg", { execFile: fake.execFile, env: {} })
+    await transcodeForAsr("in.mp4", path.join(dir, "out.ogg"), { execFile: fake.execFile, env: {} })
+    await cutAudioChunk("asr.ogg", path.join(dir, "c.ogg"), { startMs: 0, endMs: 1000 }, { execFile: fake.execFile, env: {} })
+    await detectSilences("asr.ogg", { execFile: fake.execFile, env: {} })
+
+    expect(fake.calls).toHaveLength(4)
+    for (const call of fake.calls) {
+      const at = call.args.indexOf("-protocol_whitelist")
+      const input = call.file === "ffprobe" ? call.args.length - 1 : call.args.indexOf("-i")
+
+      expect(at, call.args.join(" ")).toBeGreaterThanOrEqual(0)
+      expect(call.args[at + 1]).toBe("file,pipe")
+      expect(at).toBeLessThan(input)
+    }
+  })
+
+  it("passes the protocol whitelist in the Gemini and Drive ffmpeg callers too", async () => {
+    const { readFile } = await import("node:fs/promises")
+
+    for (const source of ["lib/ai/providers.ts", "lib/google/services.ts"]) {
+      const text = await readFile(path.join(__dirname, "..", source), "utf8")
+      const ffmpegCalls = text.split('"ffmpeg",').length - 1
+
+      expect(ffmpegCalls, source).toBeGreaterThan(0)
+      expect(text.split("...FFMPEG_INPUT_PROTOCOLS,").length - 1, source).toBe(ffmpegCalls)
+    }
+  })
+
   it("probes duration with ffprobe", async () => {
     const fake = fakeExecFile({ durationMs: 1_500_000 })
 
@@ -110,7 +143,7 @@ describe("ffmpeg wrappers", () => {
     const fake = fakeExecFile({ durationMs: 1000, silenceStderr: SILENCE_STDERR })
 
     await cutAudioChunk("asr.ogg", path.join(dir, "c.ogg"), { startMs: 551_000, endMs: 1_151_000 }, { execFile: fake.execFile, env: {} })
-    expect(fake.calls[0].args.join(" ")).toContain("-ss 551.000 -t 600.000 -i asr.ogg")
+    expect(fake.calls[0].args.join(" ")).toContain("-ss 551.000 -t 600.000 -protocol_whitelist file,pipe -i asr.ogg")
 
     await expect(detectSilences("asr.ogg", { execFile: fake.execFile, env: {} })).resolves.toHaveLength(3)
     expect(fake.calls[1].args).toContain("silencedetect=noise=-35dB:d=0.4")
@@ -152,7 +185,25 @@ describe("materializeMedia", () => {
     )
 
     expect(downloads[0][0]).toBe("meetings/m1/a.mp4")
-    expect(local).toBe(path.join(dir, "My Meeting_.mp4"))
+    expect(path.dirname(local)).toBe(dir)
+    expect(path.basename(local)).toMatch(/^input-[0-9a-f-]{36}\.mp4$/)
+    expect(downloads[0][1]).toBe(local)
+  })
+
+  it("ignores hostile or colliding user filenames", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "asr-audio-"))
+    dirs.push(dir)
+    const download = async () => undefined
+
+    for (const filename of ["../../etc/passwd", "asr.ogg", "..", "a.weird ext!", "x.verylongextension"]) {
+      const local = await materializeMedia({ kind: "object", storageKey: "k", contentType: "audio/ogg", filename }, dir, {
+        download,
+      })
+
+      expect(path.dirname(local), filename).toBe(dir)
+      expect(path.basename(local), filename).toMatch(/^input-[0-9a-f-]{36}(\.[a-z0-9]{1,8})?$/)
+      expect(path.basename(local), filename).not.toBe("asr.ogg")
+    }
   })
 
   it("maps a missing object to bad_input", async () => {
