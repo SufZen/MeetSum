@@ -114,7 +114,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   }
 
   const userId = actorUserId(ctx)
-  const { delivery, created } = await createManualDelivery(store, getIntegrationQueuePort(), {
+  const result = await createManualDelivery(store, getIntegrationQueuePort(), {
     workspaceId: ctx.workspace.id,
     connectionId: connection.id,
     provider: connection.provider,
@@ -123,6 +123,11 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     clientKey: idempotencyKeyOf(request),
     request: { destination, content: { ...DEFAULT_RULE_CONTENT, ...content.data } },
   })
+
+  // An Idempotency-Key bound to another meeting/destination/content never replays it.
+  if (result.reuse) return apiError("idempotency_key_reuse", 422)
+
+  const { delivery, created } = result
 
   if (created) {
     await auditIntegration(auditActor(ctx), "integration.manual_send", { type: "meeting", id: meeting.id }, {

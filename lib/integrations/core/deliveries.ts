@@ -5,7 +5,7 @@
  * `partial`, or `skipped/needs_reauth`; it resets attempts and keeps the
  * idempotency key.
  */
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 
 import type { MeetingRepository } from "@/lib/meetings/repository"
 import { auditIntegration, type IntegrationAuditActor } from "@/lib/integrations/core/audit"
@@ -79,12 +79,57 @@ export type ManualSendInput = {
   request: ManualRequest
 }
 
-/** Inserts (or replays) a manual delivery; enqueues only a new row. */
+/** Stable JSON (sorted keys) for hashing. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+/**
+ * What an Idempotency-Key is bound to: the meeting, provider, connection,
+ * destination and content options. A replay with a different binding is a
+ * client bug (or a reused key), never a silent replay of another delivery.
+ */
+export function manualRequestFingerprint(input: {
+  meetingId?: string
+  provider: string
+  connectionId?: string
+  request?: ManualRequest
+}): string {
+  return createHash("sha256")
+    .update(
+      stableJson({
+        meetingId: input.meetingId ?? null,
+        provider: input.provider,
+        connectionId: input.connectionId ?? null,
+        destination: input.request?.destination ?? null,
+        content: input.request?.content ?? null,
+      })
+    )
+    .digest("hex")
+}
+
+export type ManualDeliveryResult =
+  | { delivery: StoredDelivery; created: boolean; reuse?: false }
+  /** The key was already used for another meeting/destination/content (→ 422). */
+  | { reuse: true }
+
+/**
+ * Inserts (or replays) a manual delivery; enqueues only a new row. A replayed
+ * key must carry the same request fingerprint, else `{reuse: true}`.
+ */
 export async function createManualDelivery(
   store: IntegrationStore,
   queue: IntegrationQueuePort,
   input: ManualSendInput
-): Promise<{ delivery: StoredDelivery; created: boolean }> {
+): Promise<ManualDeliveryResult> {
   const { delivery, created } = await store.insertDelivery({
     id: `intd_${randomUUID()}`,
     workspaceId: input.workspaceId,
@@ -99,6 +144,17 @@ export async function createManualDelivery(
     ...(input.requestedByUserId ? { requestedByUserId: input.requestedByUserId } : {}),
     progress: { request: input.request },
   })
+
+  if (!created) {
+    const stored = manualRequestFingerprint({
+      meetingId: delivery.meetingId,
+      provider: delivery.provider,
+      connectionId: delivery.connectionId,
+      request: delivery.progress.request as ManualRequest | undefined,
+    })
+
+    if (stored !== manualRequestFingerprint(input)) return { reuse: true }
+  }
 
   if (created) {
     await queue.enqueue("integration.deliver", { workspaceId: input.workspaceId, deliveryId: delivery.id }, { jobId: deliverJobId(delivery.id) })

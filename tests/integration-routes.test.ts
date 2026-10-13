@@ -328,6 +328,27 @@ describe("integration routes", () => {
       expect((await getDelivery(new Request(`${BASE}/x`), routeParams({ id: firstBody.deliveryId }))).status).toBe(404)
     })
 
+    it("rejects an Idempotency-Key reused for another meeting, destination or content (422) without replaying", async () => {
+      await as("member", "user_me")
+      const key = "9a8b7c6d-1d2a-4c3b-9e8f-0a1b2c3d4e5f"
+      const first = await (await send("m_a", key)).json()
+      const other = { connectionId: "intc_a", destination: { provider: "slack", channelId: "C1", channelName: "general" } }
+
+      await store.upsertPrefs("ws_a", "m_mine_private", { allowPrivatePush: true, allowPrivateSetByUserId: "user_me" })
+
+      const otherMeeting = await send("m_mine_private", key, other)
+
+      expect(otherMeeting.status).toBe(422)
+      expect(await otherMeeting.json()).toEqual({ error: "idempotency_key_reuse" })
+
+      const otherContent = await send("m_a", key, { ...other, content: { transcript: true } })
+
+      expect(otherContent.status).toBe(422)
+      // The original request still replays.
+      expect(await (await send("m_a", key, other)).json()).toEqual({ deliveryId: first.deliveryId, replayed: true })
+      expect(jobs).toHaveLength(1)
+    })
+
     it("hides invisible meetings (404) and needs manage rights on visible private ones (403)", async () => {
       await as("member", "user_me")
       expect((await send("m_other_private")).status).toBe(404)
