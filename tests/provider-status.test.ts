@@ -26,6 +26,44 @@ describe("provider status", () => {
     )
   })
 
+  it("shows a visible privacy warning for the Gemini free tier (M5)", async () => {
+    const { getProviderHealthStatus } = await import("@/lib/ai/provider-health")
+
+    process.env.GOOGLE_GENAI_USE_VERTEXAI = "false"
+    process.env.GOOGLE_GEMINI_API_KEY = "test-key"
+    process.env.GEMINI_TIER = "free"
+
+    const gemini = getProviderStatus().find((provider) => provider.id === "gemini")
+
+    expect(gemini?.warning).toContain("may be used by Google")
+    expect(gemini?.detail).toContain("free tier")
+    expect(validateRuntimeEnvironment().warnings.join(" ")).toContain("GEMINI_TIER=free")
+    expect(getProviderHealthStatus().configWarnings.join(" ")).toContain("GEMINI_TIER=free")
+
+    process.env.GEMINI_TIER = "paid"
+    expect(getProviderStatus().find((provider) => provider.id === "gemini")?.warning).toBeUndefined()
+  })
+
+  it("lists Claude as optional and the LLM route (M5)", () => {
+    process.env.GOOGLE_GENAI_USE_VERTEXAI = "false"
+    process.env.GOOGLE_GEMINI_API_KEY = "test-key"
+    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.MEETSUM_LLM_ROUTES
+    delete process.env.GOOGLE_GEMINI_SUMMARY_MODEL
+    delete process.env.GEMINI_MODEL
+
+    const providers = getProviderStatus()
+
+    expect(providers.find((provider) => provider.id === "anthropic")).toMatchObject({
+      configured: false,
+      detail: "Optional; missing ANTHROPIC_API_KEY",
+    })
+    expect(providers.find((provider) => provider.id === "llm-router")).toMatchObject({
+      configured: true,
+      detail: "Summary: gemini:gemini-3.8-flash",
+    })
+  })
+
   it("warns about missing local Whisper only when that provider is selected", () => {
     process.env.MEETSUM_TRANSCRIPTION_PROVIDER = "local-whisper"
     delete process.env.LOCAL_TRANSCRIPTION_URL

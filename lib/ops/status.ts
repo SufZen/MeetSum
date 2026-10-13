@@ -7,6 +7,8 @@ import {
   isGeminiConfigured,
   isLocalWhisperConfigured,
 } from "@/lib/ai/providers"
+import { getLlmStatus } from "@/lib/ai/llm"
+import { getAnthropicModels, getGeminiModels, getGeminiTier } from "@/lib/ai/llm/config"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
 import { getGoogleWorkspaceOAuthConnectionStatus } from "@/lib/google/oauth-tokens"
 import { getWorkspaceGoogleSubject } from "@/lib/google/workspace-subject"
@@ -17,6 +19,8 @@ export type ProviderStatus = {
   configured: boolean
   detail: string
   mode?: string
+  /** Visible configuration/privacy warning (e.g. Gemini free tier). */
+  warning?: string
 }
 
 export type WorkspaceStatus = {
@@ -64,6 +68,11 @@ export function getProviderStatus(): ProviderStatus[] {
   const asrProvider = (id: string) => asr.providers.find((provider) => provider.id === id)
   const runpod = asrProvider("runpod-ivrit")
   const soniox = asrProvider("soniox")
+  const llm = getLlmStatus()
+  const geminiModels = getGeminiModels()
+  const anthropicModels = getAnthropicModels()
+  const geminiTier = getGeminiTier()
+  const geminiFreeWarning = llm.warnings?.find((warning) => warning.startsWith("GEMINI_TIER=free"))
 
   return [
     {
@@ -99,10 +108,30 @@ export function getProviderStatus(): ProviderStatus[] {
       configured: geminiConfigured,
       mode: geminiMode,
       detail: geminiConfigured
-        ? `Audio and summary provider configured via ${geminiMode}`
+        ? `Default LLM (summary ${geminiModels.summary}, fast ${geminiModels.fast}) via ${geminiMode}, ${geminiTier} tier`
         : geminiMode === "vertex-ai"
           ? "Missing Vertex project/location or GOOGLE_APPLICATION_CREDENTIALS"
           : "Missing GOOGLE_GEMINI_API_KEY",
+      ...(geminiConfigured && geminiFreeWarning ? { warning: geminiFreeWarning } : {}),
+    },
+    {
+      id: "anthropic",
+      label: "Claude (Anthropic)",
+      configured: llm.providers.some((provider) => provider.id === "anthropic" && provider.configured),
+      mode: anthropicModels.summary,
+      detail: llm.providers.some((provider) => provider.id === "anthropic" && provider.configured)
+        ? `Optional LLM (summary ${anthropicModels.summary}, fast ${anthropicModels.fast}); fallback after Gemini under auto`
+        : "Optional; missing ANTHROPIC_API_KEY",
+    },
+    {
+      id: "llm-router",
+      label: "LLM routing",
+      configured: !llm.heuristicOnly,
+      mode: llm.preference,
+      detail: llm.heuristicOnly
+        ? "No LLM provider configured: summaries use the heuristic fallback"
+        : `Summary: ${(llm.routes.summary ?? []).map((route) => `${route.provider}:${route.model}`).join(" → ")}`,
+      ...(llm.warnings?.length ? { warning: llm.warnings.join(" ") } : {}),
     },
     {
       id: "local-whisper",

@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai"
+import { type GoogleGenAI, Type } from "@google/genai"
 import { execFile } from "node:child_process"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -10,11 +10,20 @@ import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
 import { TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
 import { transcribeWithRouter, type AsrRouterOptions } from "@/lib/ai/asr/router"
 import type { AsrGlossary, AsrResult } from "@/lib/ai/asr/types"
+import { getGeminiModels } from "@/lib/ai/llm/config"
 import {
-  buildMeetingIntelligence,
-  cleanupTranscriptSegments,
-  type SmartTask,
-} from "@/lib/intelligence"
+  createGeminiClient,
+  getGeminiHttpOptions,
+  getGeminiProviderMode,
+  isGeminiConfigured,
+} from "@/lib/ai/llm/gemini-client"
+import { cleanupTranscriptSegments, type MeetingIntelligence } from "@/lib/intelligence"
+import {
+  buildHeuristicIntelligence,
+  runIntelligencePipeline,
+  type IntelligencePipelineOptions,
+  type IntelligenceRunMetadata,
+} from "@/lib/intelligence/pipeline"
 
 export { TranscriptionUnavailableError }
 
@@ -26,11 +35,11 @@ import {
   downloadMeetingObjectToFile,
   getMeetingObjectBytes,
 } from "@/lib/storage/object-storage"
-import { getAppSettings } from "@/lib/settings/app-settings"
-import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
-import { getSummaryTemplatePrompt, type SummaryTemplate } from "@/lib/ai/summary-templates"
 
 const execFileAsync = promisify(execFile)
+
+/** `gemini-3.5-flash` is deprecated (auto-routed to 3.6, retiring 2026-11-19). */
+const DEFAULT_GEMINI_AUDIO_MODEL = "gemini-3.8-flash"
 
 export type TranscriptionProvider = {
   id: string
@@ -44,12 +53,20 @@ export type SummaryRunMetadata = {
   model: string
   fallbackUsed?: boolean
   fallbackReason?: string
+  /** M5 pipeline details (tokens, cost, template, language check, title). */
+  pipeline?: IntelligenceRunMetadata
 }
+
+/** Per-run options passed through from the job payload (M5). */
+export type SummarizeOptions = Pick<
+  IntelligencePipelineOptions,
+  "templateKey" | "language" | "jobId" | "members" | "provider"
+>
 
 export type SummaryProvider = {
   id: string
   model: string
-  summarize: (meeting: MeetingRecord) => Promise<ReturnType<typeof buildMeetingIntelligence>>
+  summarize: (meeting: MeetingRecord, options?: SummarizeOptions) => Promise<MeetingIntelligence>
   getLastRun?: () => SummaryRunMetadata
 }
 
@@ -217,47 +234,12 @@ export function getSummaryRunMetadata(provider: SummaryProvider): SummaryRunMeta
   }
 }
 
-export type GeminiProviderMode = "gemini-developer-api" | "vertex-ai"
-
-export function getGeminiProviderMode(): GeminiProviderMode {
-  return process.env.GOOGLE_GENAI_USE_VERTEXAI === "true"
-    ? "vertex-ai"
-    : "gemini-developer-api"
-}
-
-export function isGeminiConfigured() {
-  if (getGeminiProviderMode() === "vertex-ai") {
-    return Boolean(
-      process.env.GOOGLE_CLOUD_PROJECT &&
-        process.env.GOOGLE_CLOUD_LOCATION &&
-        process.env.GOOGLE_APPLICATION_CREDENTIALS
-    )
-  }
-
-  return Boolean(process.env.GOOGLE_GEMINI_API_KEY)
-}
-
-function getGeminiHttpOptions() {
-  return {
-    timeout: Number(process.env.GOOGLE_GEMINI_HTTP_TIMEOUT_MS ?? 900_000),
-  }
-}
-
-export function createGeminiClient() {
-  if (getGeminiProviderMode() === "vertex-ai") {
-    return new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION ?? "global",
-      httpOptions: getGeminiHttpOptions(),
-    })
-  }
-
-  return new GoogleGenAI({
-    apiKey: process.env.GOOGLE_GEMINI_API_KEY,
-    httpOptions: getGeminiHttpOptions(),
-  })
-}
+export {
+  createGeminiClient,
+  getGeminiProviderMode,
+  isGeminiConfigured,
+  type GeminiProviderMode,
+} from "@/lib/ai/llm/gemini-client"
 
 type GeminiTranscriptSegment = {
   speaker?: string
@@ -468,181 +450,42 @@ export class HeuristicFallbackProvider
     )
   }
 
-  async summarize(meeting: MeetingRecord) {
-    return buildMeetingIntelligence(meeting)
+  /** Heuristic V2 (no chapters), `generation.provider = "heuristic"`. */
+  async summarize(meeting: MeetingRecord, options: SummarizeOptions = {}) {
+    return buildHeuristicIntelligence(meeting, { language: options.language })
   }
 }
 
-export class GeminiSummaryProvider implements SummaryProvider {
-  readonly id = "gemini"
-  readonly model = process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-3.5-flash"
-  private readonly fallback = new HeuristicFallbackProvider()
-  private lastRun: SummaryRunMetadata = { provider: this.id, model: this.model }
+/**
+ * Summary adapter over the M5 intelligence pipeline (Gemini default, Claude
+ * optional, heuristic fallback). Kept for callers of the pre-M5
+ * `SummaryProvider` contract.
+ */
+export class PipelineSummaryProvider implements SummaryProvider {
+  readonly id = "pipeline"
+  readonly model = getGeminiModels().summary
+  private lastRun: SummaryRunMetadata = { provider: "gemini", model: this.model }
 
   getLastRun(): SummaryRunMetadata {
     return this.lastRun
   }
 
-  private async summarizeWithFallback(meeting: MeetingRecord, reason: string) {
+  async summarize(meeting: MeetingRecord, options: SummarizeOptions = {}) {
+    const { intelligence, run } = await runIntelligencePipeline(meeting, options)
+
     this.lastRun = {
-      provider: this.fallback.id,
-      model: this.fallback.model,
-      fallbackUsed: true,
-      fallbackReason: reason,
+      provider: run.provider,
+      model: run.model,
+      fallbackUsed: run.fallbackUsed,
+      ...(run.fallbackReason ? { fallbackReason: run.fallbackReason } : {}),
+      pipeline: run,
     }
-
-    return this.fallback.summarize(meeting)
-  }
-
-  private async getTemplateAddendum(meeting: MeetingRecord): Promise<string[]> {
-    try {
-      const settings = await getAppSettings(
-        meeting.workspaceId ?? DEFAULT_WORKSPACE_ID
-      )
-      const template = (settings.summaryTemplate ?? "general") as SummaryTemplate
-      const addendum = getSummaryTemplatePrompt(template)
-
-      return addendum ? [addendum] : []
-    } catch {
-      return []
-    }
-  }
-
-  async summarize(meeting: MeetingRecord) {
-    if (!isGeminiConfigured()) {
-      return this.summarizeWithFallback(meeting, "Gemini is not configured")
-    }
-    if (!meeting.transcript?.length) {
-      return this.summarizeWithFallback(meeting, "Meeting has no transcript")
-    }
-
-    this.lastRun = { provider: this.id, model: this.model }
-
-    const ai = createGeminiClient()
-    const transcript = meeting.transcript
-      .map(
-        (segment) =>
-          `[${Math.floor(segment.startMs / 1000)}s] ${segment.speaker}: ${segment.text}`
-      )
-      .join("\n")
-    const response = await ai.models.generateContent({
-      model: this.model,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: [
-                "Create structured meeting intelligence as JSON.",
-                "Support Hebrew, English, Portuguese, Spanish, Italian, and mixed-language meetings.",
-                "Do not invent details; mark uncertainty in the text when needed.",
-                "Action items must be real tasks only: commitments, assignments, next steps, decisions requiring follow-up, or explicit requests. Do not copy ordinary transcript fragments as tasks.",
-                "For every action item, include title, owner if known, dueDate if stated or strongly implied, priority, confidence, sourceQuote, sourceStartMs, and kind explicit/inferred.",
-                "Decisions should be concise business decisions and should not include generic discussion.",
-                ...(await this.getTemplateAddendum(meeting)),
-                `Meeting: ${meeting.title}`,
-                transcript,
-              ].join("\n\n"),
-            },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            overview: { type: Type.STRING },
-            decisions: { type: Type.ARRAY, items: { type: Type.STRING } },
-            actionItems: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  owner: { type: Type.STRING },
-                  dueDate: { type: Type.STRING },
-                  priority: { type: Type.STRING },
-                  confidence: { type: Type.NUMBER },
-                  sourceQuote: { type: Type.STRING },
-                  sourceStartMs: { type: Type.NUMBER },
-                  kind: { type: Type.STRING },
-                },
-                required: ["title"],
-              },
-            },
-            risks: { type: Type.ARRAY, items: { type: Type.STRING } },
-            openQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
-            commitments: { type: Type.ARRAY, items: { type: Type.STRING } },
-            followUpDraft: { type: Type.STRING },
-            tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-          },
-          required: ["overview"],
-        },
-      },
-    })
-
-    try {
-      const parsed = JSON.parse(response.text ?? "{}") as Partial<
-        ReturnType<typeof buildMeetingIntelligence>
-      >
-      const fallback = buildMeetingIntelligence(meeting)
-      const parsedActionItems: SmartTask[] = Array.isArray(parsed.actionItems)
-        ? parsed.actionItems
-            .filter((item) => item?.title && String(item.title).trim().length > 0)
-            .slice(0, 20)
-            .map((item, index) => {
-              const priority: SmartTask["priority"] =
-                item.priority === "low" ||
-                item.priority === "high" ||
-                item.priority === "urgent"
-                  ? item.priority
-                  : "normal"
-              const kind: SmartTask["kind"] =
-                item.kind === "inferred" ? "inferred" : "explicit"
-
-              return {
-                id: item.id ?? `task_${crypto.randomUUID()}_${index}`,
-                title: String(item.title).trim(),
-                owner: item.owner ? String(item.owner) : undefined,
-                status: item.status === "done" ? "done" : "open",
-                dueDate: item.dueDate ? String(item.dueDate) : undefined,
-                priority,
-                confidence:
-                typeof item.confidence === "number"
-                  ? Math.min(1, Math.max(0, item.confidence))
-                  : 0.75,
-                sourceQuote: item.sourceQuote
-                  ? String(item.sourceQuote)
-                  : String(item.title),
-                sourceStartMs:
-                  typeof item.sourceStartMs === "number" ? item.sourceStartMs : 0,
-                kind,
-              }
-            })
-        : fallback.actionItems
-
-      return {
-        ...fallback,
-        overview: parsed.overview ?? fallback.overview,
-        decisions: parsed.decisions ?? fallback.decisions,
-        actionItems: parsedActionItems,
-        risks: parsed.risks ?? fallback.risks,
-        openQuestions: parsed.openQuestions ?? fallback.openQuestions,
-        commitments: parsed.commitments ?? fallback.commitments,
-        followUpDraft: parsed.followUpDraft ?? fallback.followUpDraft,
-        tags: parsed.tags ?? fallback.tags,
-      }
-    } catch (error) {
-      return this.summarizeWithFallback(
-        meeting,
-        `Gemini returned unparseable output: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      )
-    }
+    return intelligence
   }
 }
+
+/** @deprecated Alias of `PipelineSummaryProvider` (Gemini is the default route). */
+export const GeminiSummaryProvider = PipelineSummaryProvider
 
 export type GeminiUsageMetadata = {
   promptTokenCount?: number
@@ -652,7 +495,7 @@ export type GeminiUsageMetadata = {
 
 export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   readonly id = "gemini"
-  readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash"
+  readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? DEFAULT_GEMINI_AUDIO_MODEL
   private readonly fallback = new HeuristicFallbackProvider()
   private lastUsage: GeminiUsageMetadata | undefined
 
@@ -761,7 +604,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
       }
 
       const response = await ai.models.generateContent({
-        model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash",
+        model: process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? DEFAULT_GEMINI_AUDIO_MODEL,
         contents: [
           {
             role: "user",
@@ -912,8 +755,11 @@ export function createTranscriptionProvider(): TranscriptionProvider {
   return new AsrRouterTranscriptionProvider()
 }
 
+/**
+ * Summary provider: always the M5 pipeline adapter. The pipeline itself
+ * routes (Gemini default, Claude when configured) and falls back to the
+ * heuristic V2 summary when no provider is configured or all fail.
+ */
 export function createSummaryProvider(): SummaryProvider {
-  return isGeminiConfigured()
-    ? new GeminiSummaryProvider()
-    : new HeuristicFallbackProvider()
+  return new PipelineSummaryProvider()
 }

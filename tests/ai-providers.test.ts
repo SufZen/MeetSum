@@ -6,10 +6,12 @@ import type { AsrProvider, AsrResult } from "@/lib/ai/asr/types"
 import {
   asrResultToTranscriptSegments,
   AsrRouterTranscriptionProvider,
+  createSummaryProvider,
   getLocalWhisperProviderConfig,
   getTranscriptionProviderMode,
   HeuristicFallbackProvider,
   isLocalWhisperConfigured,
+  PipelineSummaryProvider,
   TranscriptionUnavailableError,
 } from "@/lib/ai/providers"
 import type { MeetingRecord } from "@/lib/meetings/repository"
@@ -238,5 +240,70 @@ describe("ASR router adapter (deprecated TranscriptionProvider)", () => {
 
     await expect(adapter.transcribe(meeting)).resolves.toHaveLength(1)
     await expect(adapter.transcribe({ ...meeting, transcript: [] })).rejects.toBeInstanceOf(TranscriptionUnavailableError)
+  })
+})
+
+describe("summary provider adapter (M5)", () => {
+  const meeting: MeetingRecord = {
+    id: "meet_s",
+    title: "Weekly",
+    source: "upload",
+    language: "he",
+    status: "summarizing",
+    retention: "audio",
+    startedAt: "2026-10-15T07:00:00.000Z",
+    participants: [],
+    transcript: [{ id: "seg_1", speaker: "דנה", startMs: 0, endMs: 3_000, text: "יש בעיה עם הספק" }],
+  }
+
+  it("createSummaryProvider is the pipeline adapter with the new Gemini default", () => {
+    const provider = createSummaryProvider()
+
+    expect(provider).toBeInstanceOf(PipelineSummaryProvider)
+    expect(provider.model).toBe(process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-3.8-flash")
+  })
+
+  it("the heuristic provider returns the V2 shape without chapters", async () => {
+    const intelligence = await new HeuristicFallbackProvider().summarize(meeting, { language: "he" })
+
+    expect(intelligence.version).toBe(2)
+    expect(intelligence.generation).toMatchObject({
+      provider: "heuristic",
+      model: "heuristic-v1",
+      language: "he",
+      fallbackUsed: true,
+    })
+    expect(intelligence.chapters).toBeUndefined()
+    expect(intelligence.items?.[0]).toMatchObject({
+      kind: "risk",
+      refs: [{ segmentId: "seg_1", startMs: 0 }],
+    })
+  })
+
+  it("records the pipeline run in getLastRun", async () => {
+    const provider = new PipelineSummaryProvider()
+    const saved = {
+      gemini: process.env.GOOGLE_GEMINI_API_KEY,
+      anthropic: process.env.ANTHROPIC_API_KEY,
+      vertex: process.env.GOOGLE_GENAI_USE_VERTEXAI,
+    }
+
+    delete process.env.GOOGLE_GEMINI_API_KEY
+    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.GOOGLE_GENAI_USE_VERTEXAI
+    try {
+      await provider.summarize(meeting)
+    } finally {
+      if (saved.gemini !== undefined) process.env.GOOGLE_GEMINI_API_KEY = saved.gemini
+      if (saved.anthropic !== undefined) process.env.ANTHROPIC_API_KEY = saved.anthropic
+      if (saved.vertex !== undefined) process.env.GOOGLE_GENAI_USE_VERTEXAI = saved.vertex
+    }
+
+    expect(provider.getLastRun()).toMatchObject({
+      provider: "heuristic",
+      model: "heuristic-v1",
+      fallbackUsed: true,
+      pipeline: { promptVersion: "m5.1" },
+    })
   })
 })

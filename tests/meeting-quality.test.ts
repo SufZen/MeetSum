@@ -15,6 +15,38 @@ const baseMeeting: MeetingRecord = {
 }
 
 describe("meeting quality warnings", () => {
+  it("flags a summary that failed the language check (M5)", () => {
+    const intelligence = {
+      overview: "",
+      decisions: [],
+      actionItems: [],
+      risks: [],
+      openQuestions: [],
+      commitments: [],
+      followUpDraft: "",
+      timestampedQuotes: [],
+      tags: [],
+      languageMetadata: {
+        primaryLanguage: "he" as const,
+        secondaryLanguages: [],
+        segmentLanguages: [],
+        confidence: 0.9,
+        mixedLanguage: false,
+      },
+    }
+    const failed = deriveMeetingQualityWarnings({
+      ...baseMeeting,
+      intelligence: { ...intelligence, generation: { provider: "gemini", language: "he", languageCheck: "failed" } },
+    })
+    const passed = deriveMeetingQualityWarnings({
+      ...baseMeeting,
+      intelligence: { ...intelligence, generation: { provider: "gemini", languageCheck: "passed" } },
+    })
+
+    expect(failed.map((warning) => warning.code)).toContain("summary_language_mismatch")
+    expect(passed.map((warning) => warning.code)).not.toContain("summary_language_mismatch")
+  })
+
   it("marks Google smart-notes-only meetings without treating them as full transcripts", () => {
     const warnings = deriveMeetingQualityWarnings({
       ...baseMeeting,

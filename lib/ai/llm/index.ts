@@ -1,28 +1,159 @@
 /**
- * LLM entry point (owner: Package A). Step 0 stubs: no provider is wired yet,
- * so every call fails with a `config` error and callers keep their current
- * (Gemini/heuristic) paths.
+ * LLM entry point (owner: Package A). Every structured LLM call goes through
+ * `generateStructured`: routing (Gemini default, Claude optional), the
+ * provider fallback chain, zod validation + repair, cost and `ai_runs`.
+ *
+ * With no provider configured (no key and no injected client) every call
+ * fails fast with `LlmError("config")` and never touches the network.
  */
+import { createAnthropicProvider } from "@/lib/ai/llm/anthropic"
 import {
-  LlmError,
-  type LlmResult,
-  type LlmStatus,
-  type LlmStructuredRequest,
+  GEMINI_FREE_TIER_WARNING,
+  getDefaultLlmPreference,
+  getGeminiTier,
+  isAnthropicConfigured,
+  isGeminiLlmConfigured,
+} from "@/lib/ai/llm/config"
+import { createGeminiProvider } from "@/lib/ai/llm/gemini"
+import {
+  candidateRoutes,
+  LLM_TASKS,
+  resolveRoutes,
+  runRoutes,
+  type LlmPreference,
+  type LlmRoute,
+} from "@/lib/ai/llm/router"
+import { recordLlmRun } from "@/lib/ai/llm/runs"
+import type {
+  LlmProvider,
+  LlmResult,
+  LlmStatus,
+  LlmStructuredRequest,
+  LlmTask,
 } from "@/lib/ai/llm/types"
+import { getAppSettings } from "@/lib/settings/app-settings"
 
 export * from "@/lib/ai/llm/types"
+export { LlmChainError, HEURISTIC_FALLBACK_TASKS } from "@/lib/ai/llm/router"
+export type { LlmPreference, LlmRoute } from "@/lib/ai/llm/router"
 
-export async function generateStructured<T>(
-  req: LlmStructuredRequest<T>
-): Promise<LlmResult<T>> {
-  throw new LlmError(
-    `generateStructured(${req.task}): not implemented (M5)`,
-    "config",
-    "none",
-    false
-  )
+type Env = Record<string, string | undefined>
+type ProviderMap = Record<LlmRoute["provider"], LlmProvider>
+
+let overrides: Partial<ProviderMap> | undefined
+let defaults: ProviderMap | undefined
+
+/** Test seam: inject providers (e.g. over mocked SDK clients); `undefined` resets. */
+export function setLlmProvidersForTesting(providers?: Partial<ProviderMap>) {
+  overrides = providers
+  defaults = undefined
 }
 
-export function getLlmStatus(): LlmStatus {
-  throw new LlmError("getLlmStatus: not implemented (M5)", "config", "none", false)
+function getProviders(): ProviderMap {
+  defaults ??= { anthropic: createAnthropicProvider(), gemini: createGeminiProvider() }
+
+  return {
+    anthropic: overrides?.anthropic ?? defaults.anthropic,
+    gemini: overrides?.gemini ?? defaults.gemini,
+  }
+}
+
+let freeTierWarned = false
+
+function warnFreeTierOnce() {
+  if (freeTierWarned) return
+  freeTierWarned = true
+  console.warn(GEMINI_FREE_TIER_WARNING)
+}
+
+async function workspacePreference(workspaceId: string): Promise<LlmPreference> {
+  try {
+    const settings = await getAppSettings(workspaceId)
+    const preference = settings.llmProviderPreference
+
+    if (preference === "anthropic" || preference === "gemini") return preference
+  } catch {
+    // Settings unavailable (e.g. no database): fall back to the env default.
+  }
+
+  return getDefaultLlmPreference()
+}
+
+export async function generateStructured<T>(req: LlmStructuredRequest<T>): Promise<LlmResult<T>> {
+  const providers = getProviders()
+  const preference = req.preference ?? (await workspacePreference(req.ctx.workspaceId))
+  const routes = resolveRoutes(req.task, {
+    preference,
+    provider: req.provider,
+    model: req.model,
+    isConfigured: (provider) => providers[provider].isConfigured(),
+  })
+  const record = req.record !== false
+
+  try {
+    const result = await runRoutes(req, routes, providers)
+    const freeTier = result.provider === "gemini" && getGeminiTier() === "free"
+
+    if (freeTier) warnFreeTierOnce()
+
+    const aiRunId = record
+      ? await recordLlmRun(req.ctx, req.task, result, {
+          batch: req.batch,
+          metadata: { ...req.runMetadata, ...(freeTier ? { geminiTier: "free" } : {}) },
+        })
+      : undefined
+
+    return { ...result, ...(aiRunId ? { aiRunId } : {}) }
+  } catch (error) {
+    if (record) {
+      await recordLlmRun(req.ctx, req.task, error, { batch: req.batch, metadata: req.runMetadata })
+    }
+    throw error
+  }
+}
+
+/** Configured providers and the resolved routes (no network). */
+export function getLlmStatus(
+  options: { preference?: LlmPreference; env?: Env } = {}
+): LlmStatus {
+  const env = options.env ?? process.env
+  const preference = options.preference ?? getDefaultLlmPreference(env)
+  const configured = {
+    gemini: overrides?.gemini ? overrides.gemini.isConfigured(env) : isGeminiLlmConfigured(env),
+    anthropic: overrides?.anthropic
+      ? overrides.anthropic.isConfigured(env)
+      : isAnthropicConfigured(env),
+  }
+  const geminiTier = getGeminiTier(env)
+  const warnings: string[] = []
+  const routes: LlmStatus["routes"] = {}
+
+  for (const task of LLM_TASKS) {
+    routes[task as LlmTask] = candidateRoutes(task, preference, env).filter(
+      (route) => configured[route.provider]
+    )
+  }
+
+  if (!configured.gemini && !configured.anthropic) {
+    warnings.push(
+      "No LLM provider configured: summaries use the heuristic fallback (set GOOGLE_GEMINI_API_KEY, optionally ANTHROPIC_API_KEY)"
+    )
+  }
+  if (configured.gemini && geminiTier === "free") warnings.push(GEMINI_FREE_TIER_WARNING)
+  if (preference === "anthropic" && !configured.anthropic) {
+    warnings.push("LLM preference is anthropic but ANTHROPIC_API_KEY is not set; using Gemini")
+  }
+
+  return {
+    providers: [
+      { id: "gemini", configured: configured.gemini },
+      { id: "anthropic", configured: configured.anthropic },
+      { id: "heuristic", configured: true },
+    ],
+    routes,
+    preference,
+    geminiTier,
+    warnings,
+    heuristicOnly: !configured.gemini && !configured.anthropic,
+  }
 }
