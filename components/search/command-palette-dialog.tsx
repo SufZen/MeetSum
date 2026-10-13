@@ -9,6 +9,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowUpRightIcon, CalendarDaysIcon, SearchIcon } from "lucide-react"
 
+import { defaultPaletteSelection } from "@/components/search/palette-selection"
 import { formatMeetingDate } from "@/components/search/search-results"
 import { fetchSearch } from "@/components/search/use-search"
 import {
@@ -43,7 +44,23 @@ export function CommandPaletteDialog({
   const [value, setValue] = useState("")
   const [groups, setGroups] = useState<SearchMeetingGroup[]>([])
   const [searchedFor, setSearchedFor] = useState("")
+  const [selected, setSelected] = useState("__open")
   const q = value.trim()
+
+  const [wasOpen, setWasOpen] = useState(open)
+
+  // Every open starts fresh (the palette also closes through `go`, which
+  // bypasses the dialog's own close handler). Reset while rendering, not in
+  // an effect (https://react.dev/learn/you-might-not-need-an-effect).
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setValue("")
+      setGroups([])
+      setSearchedFor("")
+      setSelected("__open")
+    }
+  }
 
   useEffect(() => {
     if (!open || !q) return
@@ -52,13 +69,18 @@ export function CommandPaletteDialog({
     const timer = window.setTimeout(() => {
       void fetchSearch({ ...EMPTY_SEARCH_STATE, q }, { limit: PALETTE_LIMIT, hits: 1, signal: controller.signal })
         .then((response) => {
-          setGroups((response.groups ?? []).slice(0, PALETTE_LIMIT))
+          const next = (response.groups ?? []).slice(0, PALETTE_LIMIT)
+
+          setGroups(next)
           setSearchedFor(q)
+          // The top meeting is selected once results arrive: Enter jumps to it.
+          setSelected(defaultPaletteSelection(q, next))
         })
         .catch(() => {
           if (!controller.signal.aborted) {
             setGroups([])
             setSearchedFor(q)
+            setSelected(defaultPaletteSelection(q, []))
           }
         })
     }, DEBOUNCE_MS)
@@ -103,8 +125,9 @@ export function CommandPaletteDialog({
       title={t.searchPaletteTitle}
       description={t.searchPaletteDescription}
     >
-      <Command shouldFilter={false} loop>
+      <Command shouldFilter={false} loop value={selected} onValueChange={setSelected}>
         <CommandInput
+          aria-label={t.searchPaletteTitle}
           dir="auto"
           value={value}
           maxLength={SEARCH_QUERY_MAX}
