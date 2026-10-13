@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell"
 import { NoWorkspaceState } from "@/components/no-workspace-state"
 import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { selectRecentRooms } from "@/lib/rooms"
 
 export default async function Page({
@@ -15,7 +15,7 @@ export default async function Page({
   const { locale } = await params
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
-    : "en"
+    : DEFAULT_LOCALE
   const auth = await getServerAuthState()
 
   if (auth.status === "unauthenticated") {

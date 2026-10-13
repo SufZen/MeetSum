@@ -1,6 +1,9 @@
 import type { ActionItem } from "@/lib/meetings/repository"
 
-export type ContentLanguage = "en" | "he" | "pt" | "es" | "it" | "mixed"
+/** Meeting/content languages (all kept in M9; separate from the he/en UI locale). */
+export const CONTENT_LANGUAGES = ["en", "he", "pt", "es", "it", "mixed"] as const
+
+export type ContentLanguage = (typeof CONTENT_LANGUAGES)[number]
 
 export type SegmentLanguage = {
   segmentId: string

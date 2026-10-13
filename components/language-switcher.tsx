@@ -9,11 +9,8 @@ import {
 } from "@/lib/i18n/locales"
 
 const localeLabels: Record<SupportedLocale, string> = {
-  en: "EN",
   he: "HE",
-  pt: "PT",
-  es: "ES",
-  it: "IT",
+  en: "EN",
 }
 
 export function LanguageSwitcher({ locale }: { locale: SupportedLocale }) {
@@ -30,7 +27,7 @@ export function LanguageSwitcher({ locale }: { locale: SupportedLocale }) {
   }
 
   return (
-    <div className="inline-grid h-9 grid-cols-5 rounded-md border bg-card p-0.5">
+    <div className="inline-grid h-9 grid-cols-2 rounded-md border bg-card p-0.5">
       {SUPPORTED_LOCALES.map((item) => (
         <button
           key={item}

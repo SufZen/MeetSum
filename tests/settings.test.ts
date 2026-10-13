@@ -30,7 +30,7 @@ describe("app settings", () => {
 
   it("returns safe production defaults", async () => {
     await expect(getAppSettings(DEFAULT_WORKSPACE_ID)).resolves.toMatchObject({
-      defaultLocale: "en",
+      defaultLocale: "he",
       meetingLanguageMode: "auto",
       googleArtifactsFirst: true,
       pwaRecorderEnabled: true,
@@ -48,10 +48,20 @@ describe("app settings", () => {
       audioRetentionDays: 99999,
     } as never)
 
-    expect(settings.defaultLocale).toBe("en")
+    expect(settings.defaultLocale).toBe("he")
     expect(settings.meetingLanguageMode).toBe("auto")
     expect(settings.summaryTemplate).toBe("general")
     expect(settings.audioRetentionDays).toBe(3650)
+  })
+
+  it("coerces a stored legacy pt/es/it UI locale to he and keeps content languages (M9)", async () => {
+    const settings = await updateAppSettings(DEFAULT_WORKSPACE_ID, {
+      defaultLocale: "pt",
+      meetingLanguageMode: "es",
+    } as never)
+
+    expect(settings.defaultLocale).toBe("he")
+    expect(settings.meetingLanguageMode).toBe("es")
   })
 
   it("persists supported settings in the memory fallback", async () => {

@@ -142,6 +142,6 @@ describe("Google OAuth callback", () => {
 
     const response = await callback("//evil.example/x")
 
-    expect(response.headers.get("location")).toBe("http://localhost/en")
+    expect(response.headers.get("location")).toBe("http://localhost/he")
   })
 })

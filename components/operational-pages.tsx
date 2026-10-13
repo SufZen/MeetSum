@@ -37,7 +37,8 @@ import type { MainPanelKey } from "@/components/main-sidebar"
 import { useWorkspace } from "@/components/workspace-context"
 import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
-import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
+import { CONTENT_LANGUAGES, type ContentLanguage } from "@/lib/intelligence/types"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
 // Only Settings → Live meeting uses it; loaded when that section opens (M7).
@@ -189,7 +190,7 @@ type MeetArtifactStatusView = {
 
 type AppSettingsView = {
   defaultLocale: SupportedLocale
-  meetingLanguageMode: "auto" | SupportedLocale
+  meetingLanguageMode: "auto" | ContentLanguage
   summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
   googleArtifactsFirst: boolean
   pwaRecorderEnabled: boolean
@@ -212,15 +213,21 @@ const webhookEvents: Array<{ value: WebhookEventName; label: string }> = [
 ]
 
 const localeLabels: Record<SupportedLocale, string> = {
+  he: "Hebrew",
+  en: "English",
+}
+
+const contentLanguageLabels: Record<ContentLanguage, string> = {
   en: "English",
   he: "Hebrew",
   pt: "Portuguese",
   es: "Spanish",
   it: "Italian",
+  mixed: "Mixed",
 }
 
 const defaultSettings: AppSettingsView = {
-  defaultLocale: "en",
+  defaultLocale: DEFAULT_LOCALE,
   meetingLanguageMode: "auto",
   summaryTemplate: "general",
   googleArtifactsFirst: true,
@@ -1755,9 +1762,9 @@ export function OperationalPage({
                     }
                   >
                     <NativeSelectOption value="auto">Auto-detect</NativeSelectOption>
-                    {SUPPORTED_LOCALES.map((locale) => (
-                      <NativeSelectOption key={locale} value={locale}>
-                        {localeLabels[locale]}
+                    {CONTENT_LANGUAGES.map((language) => (
+                      <NativeSelectOption key={language} value={language}>
+                        {contentLanguageLabels[language]}
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
@@ -1841,9 +1848,9 @@ export function OperationalPage({
                     }
                   >
                     <NativeSelectOption value="auto">Auto-detect</NativeSelectOption>
-                    {SUPPORTED_LOCALES.map((locale) => (
-                      <NativeSelectOption key={locale} value={locale}>
-                        {localeLabels[locale]}
+                    {CONTENT_LANGUAGES.map((language) => (
+                      <NativeSelectOption key={language} value={language}>
+                        {contentLanguageLabels[language]}
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>

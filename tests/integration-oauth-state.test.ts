@@ -273,6 +273,6 @@ describe("startOAuth / completeOAuth", () => {
     const { nonce, state } = await start("admin", "slack", "u_admin", "//evil.test/steal")
     const result = await completeOAuth({ provider: "slack", session: session("u_admin", "admin"), query: query(state), cookieNonce: nonce }, deps())
 
-    expect(result.location).toBe("/en?panel=settings&section=integrations")
+    expect(result.location).toBe("/he?panel=settings&section=integrations")
   })
 })

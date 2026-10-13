@@ -5,7 +5,7 @@ import { redirect } from "next/navigation"
 import { TasksView } from "@/components/tasks/tasks-view"
 import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { listTaskMembers } from "@/lib/tasks/api"
 
 /** Cross-meeting Tasks view (docs/parity/m5.md B8). */
@@ -15,7 +15,7 @@ export default async function TasksPage({
   params: Promise<{ locale: string }>
 }) {
   const { locale } = await params
-  const supportedLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en"
+  const supportedLocale: SupportedLocale = isSupportedLocale(locale) ? locale : DEFAULT_LOCALE
   const auth = await getServerAuthState()
 
   if (auth.status === "unauthenticated") redirect(`/${supportedLocale}/login`)

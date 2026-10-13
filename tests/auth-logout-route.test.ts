@@ -17,6 +17,6 @@ describe("logout route", () => {
   it("falls back to the default locale for unknown values", async () => {
     const response = await GET(new Request("http://localhost/api/auth/logout?locale=xx"), route)
 
-    expect(response.headers.get("location")).toBe("/en/login")
+    expect(response.headers.get("location")).toBe("/he/login")
   })
 })

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation"
 import { InviteAcceptCard } from "@/components/invite-accept-card"
 import { getCurrentSession } from "@/lib/auth/server"
 import { getDictionary } from "@/lib/i18n/dictionaries"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 
 /** Same token shape the OAuth callback accepts as an invite return target. */
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/
@@ -19,7 +19,7 @@ export default async function InvitePage({
   const query = await searchParams
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
-    : "en"
+    : DEFAULT_LOCALE
 
   if (!TOKEN_PATTERN.test(token)) notFound()
 

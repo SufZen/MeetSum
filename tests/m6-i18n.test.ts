@@ -75,7 +75,7 @@ describe("M6 i18n", () => {
   it("merges into every locale's dictionary without overriding older keys", () => {
     for (const key of [...Object.keys(searchMessagesEn), ...Object.keys(askMessagesEn)]) {
       expect(dictionaries.en, key).toHaveProperty(key)
-      expect(dictionaries.pt, key).toHaveProperty(key)
+      expect(dictionaries.he, key).toHaveProperty(key)
     }
     // Existing M4 keys keep their values.
     expect(dictionaries.en.askCitation).toBeTruthy()
