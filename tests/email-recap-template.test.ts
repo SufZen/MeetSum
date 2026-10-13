@@ -63,7 +63,7 @@ describe("buildMeetingRecapEmail", () => {
     expect(email.html).not.toContain("<b>מכירות")
     expect(email.html).toContain("&lt;script&gt;")
     expect(email.html).toContain("<bdi>דנה כהן</bdi>")
-    expect(email.html).toContain('<bdi dir="ltr">2026-10-05</bdi>')
+    expect(email.html).toContain('<bdi dir="ltr">5.10.2026</bdi>')
     expect(email.html).toContain('href="https://app.test/he?meeting=m_he"')
     expect(email.html).toContain("api/email/unsubscribe")
     expect(email.html).toContain("<bdi>אקמי</bdi>")

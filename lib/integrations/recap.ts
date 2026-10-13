@@ -7,6 +7,78 @@
 import type { RuleContent } from "@/lib/integrations/core/types"
 import { isRtlLanguage } from "@/lib/integrations/bidi"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
+import { getTaskTimeZone } from "@/lib/tasks/time-zone"
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+/** `YYYY-MM-DD` of an instant in `timeZone`. */
+function localDate(instant: Date, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(instant)
+      .map((part) => [part.type, part.value])
+  )
+
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+/**
+ * The date-only due date of an action item (M8 e2e fix #8): `dueOn` when
+ * set, a date-only `dueDate`, else the LOCAL date (Asia/Jerusalem by
+ * default, `MEETSUM_DEFAULT_TIMEZONE`) of a timestamp `dueDate`, so
+ * 2026-10-19T23:00Z is 2026-10-20 and never shows as the day before.
+ */
+export function recapDueOn(item: { dueOn?: string | null; dueDate?: string | null }, timeZone: string = getTaskTimeZone()): string | undefined {
+  if (item.dueOn && DATE_ONLY.test(item.dueOn)) return item.dueOn
+  if (!item.dueDate) return undefined
+  if (DATE_ONLY.test(item.dueDate)) return item.dueDate
+
+  const instant = new Date(item.dueDate)
+
+  return Number.isNaN(instant.getTime()) ? undefined : localDate(instant, timeZone)
+}
+
+/** A date-only due date for display: `20.10.2026` (he), `Oct 20, 2026` (en). */
+export function formatRecapDueDate(dueOn: string, locale: "he" | "en"): string {
+  if (!DATE_ONLY.test(dueOn)) return dueOn
+
+  const [year, month, day] = dueOn.split("-").map(Number)
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12))
+
+  return locale === "he"
+    ? new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric", year: "numeric", timeZone: "UTC" }).format(noonUtc)
+    : new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(noonUtc)
+}
+
+/** Milliseconds `timeZone` is ahead of UTC at `instant`. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, part.value])
+  )
+  const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second))
+
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000
+}
+
+/** 23:59:59 local time on `dueOn` in `timeZone`, as a UTC ISO instant. */
+export function dueEndOfDayIso(dueOn: string, timeZone: string = getTaskTimeZone()): string {
+  const [year, month, day] = dueOn.split("-").map(Number)
+  const guess = Date.UTC(year, month - 1, day, 23, 59, 59)
+  const first = guess - zoneOffsetMs(new Date(guess), timeZone)
+
+  return new Date(guess - zoneOffsetMs(new Date(first), timeZone)).toISOString()
+}
 
 export type MeetingRecapActionItem = {
   id: string
@@ -136,7 +208,7 @@ export function buildMeetingRecap(meeting: MeetingRecord, options: BuildMeetingR
     actionItems: content.actionItems
       ? (meeting.summary?.actionItems ?? []).map((item) => {
           const owner = item.owner?.trim() || item.ownerText?.trim() || undefined
-          const dueDate = item.dueOn ?? item.dueDate
+          const dueDate = recapDueOn(item)
 
           return {
             id: item.id,

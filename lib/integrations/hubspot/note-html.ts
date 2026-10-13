@@ -7,7 +7,7 @@
  * current HubSpot docs).
  */
 import { RLM } from "@/lib/integrations/bidi"
-import type { MeetingRecap } from "@/lib/integrations/recap"
+import { formatRecapDueDate, type MeetingRecap } from "@/lib/integrations/recap"
 
 export const HUBSPOT_BODY_MAX = 60_000
 
@@ -114,7 +114,7 @@ export function renderHubspotNoteHtml(recap: MeetingRecap): string {
   list(
     t.actionItems,
     recap.actionItems.map((item) =>
-      [item.title, item.owner ? `${t.owner}: ${item.owner}` : "", item.dueDate ? `${t.due}: ${item.dueDate}` : ""]
+      [item.title, item.owner ? `${t.owner}: ${item.owner}` : "", item.dueDate ? `${t.due}: ${formatRecapDueDate(item.dueDate, rtl ? "he" : "en")}` : ""]
         .filter(Boolean)
         .join(" · ")
     )

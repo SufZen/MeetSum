@@ -17,7 +17,7 @@
  * Text only: content is never interpreted as markup.
  */
 import { chunkText, isolateLtr, isRtlLanguage, rtlLine } from "@/lib/integrations/bidi"
-import type { MeetingRecap } from "@/lib/integrations/recap"
+import { formatRecapDueDate, type MeetingRecap } from "@/lib/integrations/recap"
 import { getExportsMessages, type ExportsMessages } from "@/lib/i18n/m8/exports"
 
 export const NOTION_MAX_TEXT_LENGTH = 2000
@@ -137,7 +137,9 @@ export function buildNotionPage(
     for (const item of recap.actionItems) {
       const details = [
         item.owner,
-        item.dueDate ? `${t.exportLabelDue} ${meetingRtl ? isolateLtr(item.dueDate, "marks") : item.dueDate}` : undefined,
+        item.dueDate
+          ? `${t.exportLabelDue} ${meetingRtl ? isolateLtr(formatRecapDueDate(item.dueDate, locale), "marks") : formatRecapDueDate(item.dueDate, locale)}`
+          : undefined,
       ].filter(Boolean)
       const text = details.length ? `${item.title} — ${details.join(" · ")}` : item.title
 

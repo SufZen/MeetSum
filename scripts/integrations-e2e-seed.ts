@@ -225,8 +225,9 @@ async function seed() {
     )
     for (const action of item.actions) {
       await pool.query(
-        `insert into action_items (id, meeting_id, title, owner, status, due_date, priority, workspace_id)
-         values ($1, $2, $3, $4, 'open', $5, $6, $7) on conflict (id) do nothing`,
+        // due_on (date-only) is what the recap shows; due_date stays for M2 views.
+        `insert into action_items (id, meeting_id, title, owner, status, due_date, due_on, priority, workspace_id)
+         values ($1, $2, $3, $4, 'open', $5, $5::date, $6, $7) on conflict (id) do nothing`,
         [action.id, item.id, action.title, action.owner ?? null, action.dueDate ?? null, action.priority ?? "normal", item.workspaceId]
       )
     }

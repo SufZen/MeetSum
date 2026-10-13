@@ -32,7 +32,7 @@ exports[`buildSlackRecapMessage > renders a Hebrew recap (snapshot) with RLM on 
     {
       "text": {
         "text": "‏*משימות*
-‏• לשלוח הצעת מחיר — דנה · עד ⁦2026-10-05⁩
+‏• לשלוח הצעת מחיר — דנה · עד ⁦5.10.2026⁩
 ‏• לתאם הדגמה",
         "type": "mrkdwn",
       },
@@ -100,7 +100,7 @@ We reviewed the pipeline.",
     {
       "text": {
         "text": "*Action items*
-• לשלוח הצעת מחיר — דנה · due ⁦2026-10-05⁩
+• לשלוח הצעת מחיר — דנה · due ⁦Oct 5, 2026⁩
 • לתאם הדגמה",
         "type": "mrkdwn",
       },

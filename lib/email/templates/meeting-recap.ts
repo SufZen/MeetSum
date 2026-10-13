@@ -15,7 +15,7 @@
 import type { EmailMessage } from "@/lib/email/types"
 import { RLM } from "@/lib/integrations/bidi"
 import { recapStrings } from "@/lib/integrations/email-recap/strings"
-import type { MeetingRecap } from "@/lib/integrations/recap"
+import { formatRecapDueDate, type MeetingRecap } from "@/lib/integrations/recap"
 
 export type MeetingRecapEmailInput = {
   to: string
@@ -93,7 +93,7 @@ export function buildMeetingRecapEmail(input: MeetingRecapEmailInput): EmailMess
           const parts = [escapeHtml(item.title)]
 
           if (item.owner) parts.push(`${escapeHtml(strings.recapOwner)}: <bdi>${escapeHtml(item.owner)}</bdi>`)
-          if (item.dueDate) parts.push(`${escapeHtml(strings.recapDue)}: <bdi dir="ltr">${escapeHtml(item.dueDate)}</bdi>`)
+          if (item.dueDate) parts.push(`${escapeHtml(strings.recapDue)}: <bdi dir="ltr">${escapeHtml(formatRecapDueDate(item.dueDate, locale))}</bdi>`)
           return parts.join(" · ")
         })
       )
@@ -146,7 +146,7 @@ ${rows.join("\n")}
     lines.push(strings.recapActionItems)
     for (const item of recap.actionItems) {
       lines.push(
-        `• ${item.title}${item.owner ? ` — ${item.owner}` : ""}${item.dueDate ? ` · ${strings.recapDue} ${item.dueDate}` : ""}`
+        `• ${item.title}${item.owner ? ` — ${item.owner}` : ""}${item.dueDate ? ` · ${strings.recapDue} ${formatRecapDueDate(item.dueDate, locale)}` : ""}`
       )
     }
     lines.push("")

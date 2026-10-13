@@ -303,7 +303,8 @@ describe("hubspot deliver", () => {
       hs_task_subject: "לשלוח הצעת מחיר",
       hs_task_status: "NOT_STARTED",
       hs_task_priority: "HIGH",
-      hs_timestamp: "2026-10-20T09:00:00.000Z",
+      // Local end of the due day (Asia/Jerusalem, UTC+3 in October).
+      hs_timestamp: "2026-10-20T20:59:59.000Z",
       hubspot_owner_id: "31337",
     })
     expect(batch.inputs[1]?.properties.hubspot_owner_id).toBeUndefined()

@@ -8,7 +8,7 @@
  * fixtures before the first live run.
  */
 import type { HubspotClient } from "@/lib/integrations/hubspot/client"
-import type { MeetingRecap, MeetingRecapActionItem } from "@/lib/integrations/recap"
+import { dueEndOfDayIso, type MeetingRecap, type MeetingRecapActionItem } from "@/lib/integrations/recap"
 
 export const ASSOCIATION_TYPE_IDS = {
   meeting: { contact: 200, deal: 212 },
@@ -123,7 +123,9 @@ export function taskProperties(
   recap: MeetingRecap,
   ownerId: string | undefined
 ): Record<string, string> {
-  const due = item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate) ? `${item.dueDate}T09:00:00.000Z` : endIso(recap)
+  // Due at the local end of the due day (MEETSUM_DEFAULT_TIMEZONE); the
+  // meeting end only when there is no due date.
+  const due = item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate) ? dueEndOfDayIso(item.dueDate) : endIso(recap)
   const body = [recap.title, recap.links.meeting].filter(Boolean).join("\n")
   const properties: Record<string, string> = {
     hs_task_subject: item.title.slice(0, 500),

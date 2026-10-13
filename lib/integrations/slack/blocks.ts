@@ -15,7 +15,7 @@
  * isolated with LRI…PDI.
  */
 import { chunkText, isolateLtr, RLM } from "@/lib/integrations/bidi"
-import type { MeetingRecap, MeetingRecapActionItem } from "@/lib/integrations/recap"
+import { formatRecapDueDate, type MeetingRecap, type MeetingRecapActionItem } from "@/lib/integrations/recap"
 
 export const SLACK_MAX_BLOCKS = 50
 export const SLACK_HEADER_MAX = 150
@@ -102,7 +102,7 @@ function itemLine(item: MeetingRecapActionItem, locale: Locale): string {
   const parts = [escapeSlack(item.title)]
 
   if (item.owner) parts.push(`— ${escapeSlack(item.owner)}`)
-  if (item.dueDate) parts.push(`· ${labels.due} ${isolateLtr(escapeSlack(item.dueDate), "isolates")}`)
+  if (item.dueDate) parts.push(`· ${labels.due} ${isolateLtr(escapeSlack(formatRecapDueDate(item.dueDate, locale)), "isolates")}`)
   return `• ${parts.join(" ")}`
 }
 
