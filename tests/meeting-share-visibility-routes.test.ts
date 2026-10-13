@@ -172,6 +172,60 @@ describe("POST /api/meetings/:id/share", () => {
   })
 })
 
+describe("share sections (M4)", () => {
+  it("rejects unknown sections with 400 and keeps the recording out of defaults", async () => {
+    const ctx = await createTestCtx({ role: "member", meetings: meetings() })
+    stubVisibility(ctx)
+    setRouteCtx(ctx)
+
+    const bad = await createShare(
+      jsonRequest(`${BASE}/api/meetings/m_mine/share`, "POST", {
+        includedSections: ["summary", "secrets"],
+      }),
+      routeParams({ id: "m_mine" })
+    )
+
+    expect(bad.status).toBe(400)
+    expect((await bad.json()).error).toContain("secrets")
+
+    const created = await createShare(
+      jsonRequest(`${BASE}/api/meetings/m_mine/share`, "POST", {}),
+      routeParams({ id: "m_mine" })
+    )
+
+    expect((await created.json()).share.includedSections).not.toContain("media")
+  })
+
+  it("accepts media when it is listed explicitly", async () => {
+    const ctx = await createTestCtx({ role: "member", meetings: meetings() })
+    stubVisibility(ctx)
+    setRouteCtx(ctx)
+
+    await createShare(
+      jsonRequest(`${BASE}/api/meetings/m_mine/share`, "POST", {}),
+      routeParams({ id: "m_mine" })
+    )
+
+    const response = await patchShare(
+      jsonRequest(`${BASE}/api/meetings/m_mine/share`, "PATCH", {
+        includedSections: ["summary", " media ", "media"],
+      }),
+      routeParams({ id: "m_mine" })
+    )
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).share.includedSections).toEqual(["summary", "media"])
+    expect(
+      (
+        await patchShare(
+          jsonRequest(`${BASE}/api/meetings/m_mine/share`, "PATCH", { includedSections: "media" }),
+          routeParams({ id: "m_mine" })
+        )
+      ).status
+    ).toBe(400)
+  })
+})
+
 describe("PATCH /api/meetings/:id/share", () => {
   it("forbids non-owner members (403)", async () => {
     setRouteCtx(await createTestCtx({ meetings: meetings() }))

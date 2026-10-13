@@ -84,6 +84,12 @@ function recordingClient(override?: Responder) {
       if (/^(begin|commit|rollback)$/.test(normalized)) return { rows: [] }
       if (/^select count\(\*\)/.test(normalized)) return { rows: [{ total: 1 }] }
       if (/^select m\./.test(normalized)) return { rows: [UNIVERSAL_ROW] }
+      // M4: the (locked) segment of a transcript edit / undo.
+      if (/^select ts\.id, ts\.speaker_id\b.* where ts\.id = \$1/.test(normalized)) {
+        return {
+          rows: [{ ...UNIVERSAL_ROW, id: "seg_1", text: "hi", start_ms: 0, end_ms: 1000, revision: 0 }],
+        }
+      }
       if (/from (intelligence_runs|summaries|transcript_segments)\b/.test(normalized)) {
         return { rows: [] }
       }
@@ -187,40 +193,31 @@ const invocations: Record<
       participant: { name: "Dana" },
       aliases: ["דנה"],
     }),
-  // M4 Step 0: stubs that throw "not implemented (M4)" (no SQL yet).
-  getMeetingTranscript: (repo) =>
-    repo.getMeetingTranscript("meet_1").catch((error: Error) => error),
-  getTranscriptVersion: (repo) =>
-    repo.getTranscriptVersion("meet_1").catch((error: Error) => error),
+  // M4: transcript, edits/undo, rename, delete, media preparation, duration.
+  getMeetingTranscript: (repo) => repo.getMeetingTranscript("meet_1"),
+  getTranscriptVersion: (repo) => repo.getTranscriptVersion("meet_1"),
   updateTranscriptSegment: (repo) =>
-    repo
-      .updateTranscriptSegment("meet_1", "seg_1", {
-        expectedRevision: 0,
-        text: "hello",
-        actorUserId: "user_me",
-      })
-      .catch((error: Error) => error),
+    repo.updateTranscriptSegment("meet_1", "seg_1", {
+      expectedRevision: 0,
+      text: "hello",
+      newSpeakerName: "Dana",
+      scope: "turn",
+      actorUserId: "user_me",
+    }),
   undoTranscriptSegment: (repo) =>
-    repo
-      .undoTranscriptSegment("meet_1", "seg_1", {
-        expectedRevision: 1,
-        actorUserId: "user_me",
-      })
-      .catch((error: Error) => error),
-  listTranscriptRevisions: (repo) =>
-    repo.listTranscriptRevisions("meet_1", "seg_1").catch((error: Error) => error),
-  renameMeeting: (repo) =>
-    repo.renameMeeting("meet_1", "Renamed").catch((error: Error) => error),
-  deleteMeeting: (repo) => repo.deleteMeeting("meet_1").catch((error: Error) => error),
+    repo.undoTranscriptSegment("meet_1", "seg_1", {
+      expectedRevision: 0,
+      actorUserId: "user_me",
+    }),
+  listTranscriptRevisions: (repo) => repo.listTranscriptRevisions("meet_1", "seg_1"),
+  renameMeeting: (repo) => repo.renameMeeting("meet_1", "Renamed"),
+  deleteMeeting: (repo) => repo.deleteMeeting("meet_1"),
   updateMediaAssetPreparation: (repo) =>
-    repo
-      .updateMediaAssetPreparation("asset_1", {
-        durationMs: 1000,
-        preparedAt: "2026-05-01T09:00:00.000Z",
-      })
-      .catch((error: Error) => error),
-  setMeetingDurationMs: (repo) =>
-    repo.setMeetingDurationMs("meet_1", 1000, "media").catch((error: Error) => error),
+    repo.updateMediaAssetPreparation("asset_1", {
+      durationMs: 1000,
+      preparedAt: "2026-05-01T09:00:00.000Z",
+    }),
+  setMeetingDurationMs: (repo) => repo.setMeetingDurationMs("meet_1", 1000, "transcript"),
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),
@@ -261,9 +258,9 @@ const invocations: Record<
 
 const MEETINGS_TABLE = /\bmeetings\b/
 const CHILD_TABLES =
-  /\b(transcript_segments|speakers|action_items|intelligence_runs|summaries|summary_sections|meeting_tags|meeting_participants|export_records|suggested_agent_runs|meeting_shares|meeting_contexts|media_assets|meeting_favorites|ai_runs)\b/
+  /\b(transcript_segments|transcript_segment_revisions|speakers|action_items|intelligence_runs|summaries|summary_sections|meeting_tags|meeting_participants|export_records|suggested_agent_runs|meeting_shares|meeting_contexts|media_assets|meeting_favorites|ai_runs)\b/
 const WORKSPACE_TABLES =
-  /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets|speaker_profiles)\b/
+  /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets|speaker_profiles|transcript_segment_revisions)\b/
 
 /** Value bound to the first placeholder matched by `pattern` in `statement`. */
 function boundValues(statement: Statement, pattern: RegExp): unknown[] {

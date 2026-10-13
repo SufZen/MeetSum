@@ -9,10 +9,19 @@ import {
   computeTurnIndexes,
   normalizeProfileName,
   runningMeanEmbedding,
+  segmentWordCount,
   unionAliases,
 } from "@/lib/meetings/speakers/stats"
+import {
+  nextSpeakerLabel,
+  preserveEditedSegments,
+  realignWords,
+  transcriptRevisionsKeep,
+} from "@/lib/meetings/transcript-edit"
 import type { TranscriptWord } from "@/lib/meetings/transcript-words"
+import { getMeetingDurationMs } from "@/lib/meetings/duration"
 import { canViewMeeting } from "@/lib/meetings/visibility"
+import { DEFAULT_SHARE_SECTIONS } from "@/lib/sharing/share-sections"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 import {
   buildMeetingIntelligence,
@@ -180,6 +189,8 @@ export type MeetingTranscript = {
   version: number
   segments: TranscriptSegment[]
   speakers: MeetingSpeaker[]
+  /** Meeting primary language (`dir` fallback for mixed/unknown segments). */
+  language?: string
 }
 
 /** Manual edit of one segment (M4). At most one of speakerId/newSpeakerName. */
@@ -219,6 +230,30 @@ export class SegmentNotFoundError extends Error {
     super(`Transcript segment not found: ${segmentId}`)
     this.name = "SegmentNotFoundError"
   }
+}
+
+/** `SegmentPatch.speakerId` is not a speaker of the segment's meeting. */
+export class TranscriptSpeakerNotFoundError extends Error {
+  constructor(speakerId: string) {
+    super(`Speaker not found: ${speakerId}`)
+    this.name = "TranscriptSpeakerNotFoundError"
+  }
+}
+
+/** Undo found no revision left to restore. */
+export class NothingToUndoError extends Error {
+  constructor(segmentId: string) {
+    super(`Nothing to undo for segment: ${segmentId}`)
+    this.name = "NothingToUndoError"
+  }
+}
+
+/** Result of `deleteMeeting`: object keys to delete after the commit. */
+export type DeletedMeeting = {
+  /** Media, derived renditions and peaks objects of the meeting. */
+  storageKeys: string[]
+  title: string
+  assetCount: number
 }
 
 export type MeetingSpeakerPatch = {
@@ -515,21 +550,46 @@ export type MeetingListItem = Omit<
 }
 
 /**
- * M4 Step 0 bridge: a list item derived from a fully hydrated record. The
- * record's other fields stay present at runtime until Package B ships the
- * lightweight list.
+ * Lightweight list item from a meeting record: drops the transcript, summary,
+ * intelligence, speakers, AI/agent runs and Meet records, and media metadata.
  */
 export function toMeetingListItem(meeting: MeetingRecord): MeetingListItem {
+  const {
+    transcript,
+    intelligence,
+    aiRuns,
+    suggestedAgentRuns,
+    meetConferenceRecords,
+    speakers,
+    summary,
+    ...rest
+  } = meeting
+
+  void intelligence
+  void aiRuns
+  void suggestedAgentRuns
+  void meetConferenceRecords
+  void speakers
+
   return {
-    ...meeting,
-    transcriptSegmentCount: meeting.transcriptSegmentCount ?? meeting.transcript?.length ?? 0,
-    actionItemCount: meeting.summary?.actionItems.length ?? 0,
+    ...rest,
+    mediaAssets: meeting.mediaAssets?.map((asset) => {
+      const { metadata, ...withoutMetadata } = asset
+
+      void metadata
+      return withoutMetadata
+    }),
+    transcriptSegmentCount: meeting.transcriptSegmentCount ?? transcript?.length ?? 0,
+    actionItemCount: summary?.actionItems.length ?? 0,
     hasMedia: (meeting.mediaAssets?.length ?? 0) > 0,
   }
 }
 
 export type GetMeetingOptions = {
-  /** M4: include transcript segments (current behaviour always does). */
+  /**
+   * M4: include transcript segments (default true for internal callers; the
+   * detail API passes false and reads `/transcript` separately).
+   */
   includeTranscript?: boolean
 }
 
@@ -686,7 +746,7 @@ export type MeetingRepository = {
    * keys (media, derived renditions, peaks) to delete afterwards; undefined
    * when the meeting is not visible.
    */
-  deleteMeeting: (id: string) => Promise<{ storageKeys: string[]; title: string } | undefined>
+  deleteMeeting: (id: string) => Promise<DeletedMeeting | undefined>
   updateMediaAssetPreparation: (
     assetId: string,
     patch: MediaAssetPreparationPatch
@@ -796,11 +856,6 @@ export type MeetingRepository = {
 
 function normalize(value: string): string {
   return value.toLowerCase()
-}
-
-/** Placeholder for M4 repository methods that are not implemented yet. */
-export function notImplementedM4(method: string): never {
-  throw new Error(`${method}: not implemented (M4)`)
 }
 
 function createId(prefix: string): string {
@@ -965,7 +1020,11 @@ export type InMemoryMeetingDatabase = {
   speakers: Map<string, StoredSpeaker>
   /** Workspace speaker memory (M3), keyed by profile id. */
   speakerProfiles: Map<string, StoredSpeakerProfile>
+  /** Prior states of edited segments (M4), keyed by revision id. */
+  transcriptRevisions: Map<string, StoredTranscriptRevision>
 }
+
+export type StoredTranscriptRevision = TranscriptRevision & { workspaceId: string }
 
 /** A `speakers` row; `displayName` is the stored display name only. */
 export type StoredSpeaker = MeetingSpeaker & {
@@ -997,6 +1056,7 @@ export function createInMemoryMeetingDatabase(
     favorites: new Set(),
     speakers: new Map(),
     speakerProfiles: new Map(),
+    transcriptRevisions: new Map(),
   }
 }
 
@@ -1031,6 +1091,7 @@ export function createInMemoryMeetingRepository(
     favorites,
     speakers,
     speakerProfiles,
+    transcriptRevisions,
   } = db
   const workspaceId = scope.workspaceId
   const favoriteUserId = scope.kind === "member" ? scope.userId : undefined
@@ -1196,7 +1257,7 @@ export function createInMemoryMeetingRepository(
     const limit = normalizeListLimit(options.limit)
     const offset = normalizeListOffset(options.offset)
     const filtered = visibleMeetings()
-      .map(hydrate)
+      .map((meeting) => hydrate(meeting))
       .filter((meeting) => meetingMatchesStatus(meeting, options.status))
       .filter((meeting) => meetingMatchesQuery(meeting, options.query))
     const sorted = sortMeetings(filtered, options.sort)
@@ -1216,11 +1277,25 @@ export function createInMemoryMeetingRepository(
   function writeTranscript(
     meeting: MeetingRecord,
     input: ReplaceTranscriptInput,
-    preserveDiarizedMappings = false
+    preserveDiarizedMappings = false,
+    preserveEdited = false
   ): { segments: TranscriptSegment[]; speakers: MeetingSpeaker[] } {
+    const edited = preserveEdited
+      ? (meeting.transcript ?? []).filter((segment) => segment.source === "edited")
+      : []
+    const { segments: incoming, preservedIds } = preserveEditedSegments(input.segments, edited)
+    // Re-inserted rows start fresh (mirrors Postgres defaults); kept rows keep their edit state.
     const plan = planTranscriptReplacement({
       existing: existingSpeakerRows(meeting.id),
-      segments: input.segments,
+      segments: incoming.map((segment) => {
+        if (preservedIds.has(segment.id)) return segment
+
+        const { revision, editedAt, ...fresh } = segment
+
+        void revision
+        void editedAt
+        return fresh
+      }),
       speakers: input.speakers,
       createId,
       preserveDiarizedMappings,
@@ -1264,7 +1339,22 @@ export function createInMemoryMeetingRepository(
       speakers.set(upsert.id, next)
     }
 
-    meetings.set(meeting.id, { ...meeting, transcript: plan.segments })
+    // Revisions cascade with their (deleted and re-inserted) segment rows.
+    for (const [id, revision] of transcriptRevisions) {
+      if (revision.meetingId === meeting.id && !preservedIds.has(revision.segmentId)) {
+        transcriptRevisions.delete(id)
+      }
+    }
+
+    const mediaDuration = (meeting.mediaAssets ?? []).some((asset) => asset.durationMs)
+    const transcriptEnd = plan.segments.reduce((end, segment) => Math.max(end, segment.endMs), 0)
+
+    meetings.set(meeting.id, {
+      ...meeting,
+      transcript: plan.segments,
+      transcriptVersion: (meeting.transcriptVersion ?? 0) + 1,
+      ...(!mediaDuration && transcriptEnd > 0 ? { durationMs: Math.round(transcriptEnd) } : {}),
+    })
 
     return {
       segments: plan.segments,
@@ -1272,16 +1362,153 @@ export function createInMemoryMeetingRepository(
     }
   }
 
-  function hydrate(meeting: MeetingRecord): MeetingRecord {
+  function bumpTranscriptVersion(meetingId: string): number {
+    const meeting = meetings.get(meetingId)
+
+    if (!meeting) return 0
+
+    const version = (meeting.transcriptVersion ?? 0) + 1
+
+    meetings.set(meetingId, { ...meeting, transcriptVersion: version })
+    return version
+  }
+
+  /** Public segment: speaker name resolved through its speaker row. */
+  function resolveSegment(segment: TranscriptSegment): TranscriptSegment {
+    const row = segment.speakerId ? speakers.get(segment.speakerId) : undefined
+    const speaker = row ? resolveSpeaker(row) : undefined
+
+    return speaker ? { ...segment, speaker: speaker.displayName ?? speaker.label } : { ...segment }
+  }
+
+  /** Talk time / words / segments / first start of every speaker, from segments. */
+  function recomputeSpeakerStats(meetingId: string, transcript: readonly TranscriptSegment[]) {
+    for (const row of meetingSpeakerRows(meetingId)) {
+      const own = transcript.filter((segment) => segment.speakerId === row.id)
+
+      speakers.set(row.id, {
+        ...row,
+        talkTimeMs: own.reduce(
+          (sum, segment) => sum + Math.max(0, segment.endMs - segment.startMs),
+          0
+        ),
+        wordCount: own.reduce((sum, segment) => sum + segmentWordCount(segment), 0),
+        segmentCount: own.length,
+        firstStartMs: own.length ? Math.min(...own.map((segment) => segment.startMs)) : undefined,
+      })
+    }
+  }
+
+  function withTurnIndexes(transcript: TranscriptSegment[]): TranscriptSegment[] {
+    const turns = computeTurnIndexes(transcript, (segment) => segment.speakerId ?? segment.speaker)
+
+    return transcript.map((segment, index) => ({ ...segment, turnIndex: turns[index] }))
+  }
+
+  function storeRevision(
+    meetingId: string,
+    segment: TranscriptSegment,
+    actorUserId: string | undefined
+  ) {
+    const revision: StoredTranscriptRevision = {
+      id: createId("rev"),
+      workspaceId,
+      meetingId,
+      segmentId: segment.id,
+      revision: segment.revision ?? 0,
+      text: segment.text,
+      words: segment.words?.map((word) => ({ ...word })),
+      speakerId: segment.speakerId,
+      source: segment.source ?? "asr",
+      createdByUserId: actorUserId,
+      createdAt: new Date().toISOString(),
+    }
+
+    transcriptRevisions.set(revision.id, revision)
+  }
+
+  function segmentRevisions(meetingId: string, segmentId: string): StoredTranscriptRevision[] {
+    return [...transcriptRevisions.values()]
+      .filter(
+        (revision) =>
+          revision.workspaceId === workspaceId &&
+          revision.meetingId === meetingId &&
+          revision.segmentId === segmentId
+      )
+      .sort((a, b) => b.revision - a.revision || b.createdAt.localeCompare(a.createdAt))
+  }
+
+  function pruneRevisions(meetingId: string, segmentIds: readonly string[]) {
+    const keep = transcriptRevisionsKeep()
+
+    for (const segmentId of segmentIds) {
+      for (const revision of segmentRevisions(meetingId, segmentId).slice(keep)) {
+        transcriptRevisions.delete(revision.id)
+      }
+    }
+  }
+
+  function requireEditableSegment(meetingId: string, segmentId: string, expectedRevision: number) {
+    const meeting = visibleMeeting(meetingId)
+    const transcript = meeting?.transcript ?? []
+    const current = transcript.find((segment) => segment.id === segmentId)
+
+    if (!meeting || !current) throw new SegmentNotFoundError(segmentId)
+    if ((current.revision ?? 0) !== expectedRevision) {
+      throw new TranscriptConflictError(resolveSegment(current))
+    }
+
+    return { meeting, transcript, current }
+  }
+
+  function mutationResult(
+    meetingId: string,
+    transcript: readonly TranscriptSegment[],
+    segmentId: string,
+    speakerChanged: boolean,
+    version: number
+  ): SegmentMutationResult {
+    const segment = transcript.find((candidate) => candidate.id === segmentId) as TranscriptSegment
+
+    return {
+      segment: resolveSegment(segment),
+      ...(speakerChanged
+        ? { speakers: meetingSpeakerRows(meetingId).map((row) => resolveSpeaker(row)) }
+        : {}),
+      version,
+    }
+  }
+
+  function hydrate(meeting: MeetingRecord, includeTranscript = true): MeetingRecord {
     const speakerRows = meetingSpeakerRows(meeting.id)
+    const segments = meeting.transcript ?? []
+    const edited = segments.filter((segment) => segment.source === "edited")
+    const editedAt = edited
+      .map((segment) => segment.editedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
     const hydrated: MeetingRecord = {
       ...meeting,
       isFavorite: favoriteUserId
         ? favorites.has(favoriteKey(favoriteUserId, meeting.id))
         : false,
       participantDetails: ensureParticipants(meeting),
+      transcriptSegmentCount: segments.length,
+      transcriptVersion: meeting.transcriptVersion ?? 0,
+      editedSegmentCount: edited.length,
+      transcriptEditedAt: editedAt[editedAt.length - 1],
     }
 
+    if (!includeTranscript) {
+      delete hydrated.transcript
+      // Without segments: stored duration, media duration, else last segment end.
+      const end = segments.reduce((max, segment) => Math.max(max, segment.endMs), 0)
+      const durationMs =
+        getMeetingDurationMs({ durationMs: meeting.durationMs, mediaAssets: meeting.mediaAssets }) ??
+        (end > 0 ? end : undefined)
+
+      if (durationMs !== undefined) hydrated.durationMs = durationMs
+    }
     if (!speakerRows.length) return hydrated
 
     const resolved = new Map(speakerRows.map((row) => [row.id, resolveSpeaker(row)]))
@@ -1289,11 +1516,17 @@ export function createInMemoryMeetingRepository(
     return {
       ...hydrated,
       speakers: [...resolved.values()],
-      transcript: meeting.transcript?.map((segment) => {
-        const speaker = segment.speakerId ? resolved.get(segment.speakerId) : undefined
+      ...(includeTranscript
+        ? {
+            transcript: meeting.transcript?.map((segment) => {
+              const speaker = segment.speakerId ? resolved.get(segment.speakerId) : undefined
 
-        return speaker ? { ...segment, speaker: speaker.displayName ?? speaker.label } : segment
-      }),
+              return speaker
+                ? { ...segment, speaker: speaker.displayName ?? speaker.label }
+                : segment
+            }),
+          }
+        : {}),
     }
   }
 
@@ -1325,6 +1558,35 @@ export function createInMemoryMeetingRepository(
 
   function setLinkVisibility(meeting: MeetingRecord) {
     meetings.set(meeting.id, { ...meeting, visibility: "link" })
+  }
+
+  /** Deletes a meeting and its rows (mirrors the Postgres cascades). */
+  function removeMeetingRows(id: string) {
+    meetings.delete(id)
+    for (const [participantId, participant] of participants) {
+      if (participant.meetingId === id) participants.delete(participantId)
+    }
+    for (const [jobId, job] of jobs) {
+      if (job.meetingId === id) jobs.set(jobId, { ...job, meetingId: undefined })
+    }
+    for (const key of favorites) {
+      if (key.endsWith(`\u0000${id}`)) favorites.delete(key)
+    }
+    for (const [speakerId, speaker] of speakers) {
+      if (speaker.meetingId === id) speakers.delete(speakerId)
+    }
+    for (const [shareId, share] of shares) {
+      if (share.meetingId === id) shares.delete(shareId)
+    }
+    for (const [recordId, record] of exportRecords) {
+      if (record.meetingId === id) exportRecords.delete(recordId)
+    }
+    for (const [runId, run] of suggestedRuns) {
+      if (run.meetingId === id) suggestedRuns.delete(runId)
+    }
+    for (const [revisionId, revision] of transcriptRevisions) {
+      if (revision.meetingId === id) transcriptRevisions.delete(revisionId)
+    }
   }
 
   return {
@@ -1366,17 +1628,7 @@ export function createInMemoryMeetingRepository(
 
       if (!meeting || meeting.transcript?.length || meeting.summary) return false
 
-      meetings.delete(id)
-      for (const [participantId, participant] of participants) {
-        if (participant.meetingId === id) participants.delete(participantId)
-      }
-      for (const [jobId, job] of jobs) {
-        if (job.meetingId === id) jobs.set(jobId, { ...job, meetingId: undefined })
-      }
-      for (const key of favorites) {
-        if (key.endsWith(`\u0000${id}`)) favorites.delete(key)
-      }
-
+      removeMeetingRows(id)
       return true
     },
 
@@ -1390,10 +1642,10 @@ export function createInMemoryMeetingRepository(
       return { meetings: full.map(toMeetingListItem), page }
     },
 
-    async getMeeting(id: string): Promise<MeetingRecord | undefined> {
+    async getMeeting(id: string, options: GetMeetingOptions = {}) {
       const meeting = visibleMeeting(id)
 
-      return meeting ? hydrate(meeting) : undefined
+      return meeting ? hydrate(meeting, options.includeTranscript !== false) : undefined
     },
 
     async createMeeting(input: CreateMeetingInput): Promise<MeetingRecord> {
@@ -1449,10 +1701,11 @@ export function createInMemoryMeetingRepository(
         durationMs: input.durationMs,
         createdAt: new Date().toISOString(),
       }
-      const updated = {
+      const updated: MeetingRecord = {
         ...meeting,
         mediaAssets: [...(meeting.mediaAssets ?? []), asset],
-        status: "media_uploaded" as const,
+        // A derived playback rendition never changes the meeting status.
+        ...(asset.kind === "original" ? { status: "media_uploaded" as const } : {}),
       }
 
       meetings.set(meeting.id, updated)
@@ -1481,17 +1734,22 @@ export function createInMemoryMeetingRepository(
     ): Promise<TranscriptSegment[]> {
       const meeting = requireVisibleMeeting(meetingId)
 
+      // The same transcript re-written (cleanup): manual edits always win.
       writeTranscript(
         meeting,
         legacySegmentsToTranscript(existingSpeakerRows(meetingId), segments),
+        true,
         true
       )
       return segments
     },
 
-    async replaceTranscript(meetingId, input) {
-      // M4 Step 0: `preserveEdited` is accepted but not implemented yet.
-      return writeTranscript(requireVisibleMeeting(meetingId), input)
+    async replaceTranscript(meetingId, input, options = {}) {
+      // preserveEdited = the same transcript re-written (cleanup): it also keeps
+      // confirmed/rejected diarized speaker mappings of surviving labels.
+      const preserve = options.preserveEdited === true
+
+      return writeTranscript(requireVisibleMeeting(meetingId), input, preserve, preserve)
     },
 
     async listMeetingSpeakers(meetingId, options = {}) {
@@ -1532,6 +1790,7 @@ export function createInMemoryMeetingRepository(
       }
 
       speakers.set(speakerId, next)
+      bumpTranscriptVersion(meetingId)
       return resolveSpeaker(next)
     },
 
@@ -1571,6 +1830,7 @@ export function createInMemoryMeetingRepository(
       })
       speakers.delete(sourceId)
       speakers.set(targetId, merged)
+      bumpTranscriptVersion(meetingId)
       return resolveSpeaker(merged)
     },
 
@@ -1608,6 +1868,7 @@ export function createInMemoryMeetingRepository(
         speakers.set(row.id, next)
       }
 
+      bumpTranscriptVersion(meetingId)
       return meetingSpeakerRows(meetingId).map((row) => resolveSpeaker(row))
     },
 
@@ -1674,44 +1935,259 @@ export function createInMemoryMeetingRepository(
 
       speakerProfiles.set(profile.id, profile)
       speakers.set(speaker.id, { ...speaker, profileId: profile.id })
+      bumpTranscriptVersion(input.meetingId)
       return publicProfile(profile)
     },
 
-    // M4 Step 0: stubs that throw "not implemented (M4)".
-    async getMeetingTranscript() {
-      return notImplementedM4("getMeetingTranscript")
+    async getMeetingTranscript(meetingId) {
+      const meeting = visibleMeeting(meetingId)
+
+      if (!meeting) return undefined
+
+      const hydrated = hydrate(meeting)
+
+      return {
+        meetingId,
+        version: meeting.transcriptVersion ?? 0,
+        segments: hydrated.transcript ?? [],
+        speakers: hydrated.speakers ?? [],
+        language: meeting.language,
+      }
     },
 
-    async getTranscriptVersion() {
-      return notImplementedM4("getTranscriptVersion")
+    async getTranscriptVersion(meetingId) {
+      const meeting = visibleMeeting(meetingId)
+
+      return meeting ? (meeting.transcriptVersion ?? 0) : undefined
     },
 
-    async updateTranscriptSegment() {
-      return notImplementedM4("updateTranscriptSegment")
+    async updateTranscriptSegment(meetingId, segmentId, patch) {
+      const { meeting, transcript, current } = requireEditableSegment(
+        meetingId,
+        segmentId,
+        patch.expectedRevision
+      )
+
+      if (patch.speakerId !== undefined) {
+        const target = speakers.get(patch.speakerId)
+
+        if (!target || target.meetingId !== meetingId) {
+          throw new TranscriptSpeakerNotFoundError(patch.speakerId)
+        }
+      }
+
+      const textChanged = patch.text !== undefined && patch.text !== current.text
+      const speakerChanged =
+        patch.newSpeakerName !== undefined ||
+        (patch.speakerId !== undefined && patch.speakerId !== current.speakerId)
+
+      if (!textChanged && !speakerChanged) {
+        return { segment: resolveSegment(current), version: meeting.transcriptVersion ?? 0 }
+      }
+
+      let targetSpeaker: StoredSpeaker | undefined
+
+      if (patch.newSpeakerName !== undefined) {
+        targetSpeaker = {
+          id: createId("speaker"),
+          meetingId,
+          workspaceId: meetingWorkspaceId(meeting),
+          label: nextSpeakerLabel(meetingSpeakerRows(meetingId).map((row) => row.label)),
+          displayName: patch.newSpeakerName,
+          mappingStatus: "confirmed",
+          confirmedAt: new Date().toISOString(),
+          confirmedByUserId: patch.actorUserId,
+          source: "manual",
+          talkTimeMs: 0,
+          wordCount: 0,
+          segmentCount: 0,
+        }
+        speakers.set(targetSpeaker.id, targetSpeaker)
+      } else if (speakerChanged) {
+        targetSpeaker = speakers.get(patch.speakerId as string)
+      }
+
+      const changedIds = new Set([segmentId])
+
+      if (targetSpeaker && patch.scope === "turn" && current.turnIndex !== undefined) {
+        for (const segment of transcript) {
+          if (segment.turnIndex === current.turnIndex && segment.speakerId === current.speakerId) {
+            changedIds.add(segment.id)
+          }
+        }
+      }
+
+      const now = new Date().toISOString()
+      let next = transcript.map((segment) => {
+        if (!changedIds.has(segment.id)) return segment
+
+        storeRevision(meetingId, segment, patch.actorUserId)
+
+        const updated: TranscriptSegment = {
+          ...segment,
+          source: "edited",
+          revision: (segment.revision ?? 0) + 1,
+          editedAt: now,
+        }
+
+        if (targetSpeaker) {
+          updated.speakerId = targetSpeaker.id
+          updated.speaker = targetSpeaker.label
+        }
+        if (segment.id === segmentId && textChanged) {
+          updated.text = patch.text as string
+          updated.words =
+            patch.words ??
+            realignWords(segment.words, patch.text as string, {
+              startMs: segment.startMs,
+              endMs: segment.endMs,
+            })
+        }
+        return updated
+      })
+
+      if (speakerChanged) {
+        next = withTurnIndexes(next)
+        recomputeSpeakerStats(meetingId, next)
+      }
+
+      meetings.set(meetingId, { ...meeting, transcript: next })
+      pruneRevisions(meetingId, [...changedIds])
+
+      return mutationResult(
+        meetingId,
+        next,
+        segmentId,
+        speakerChanged,
+        bumpTranscriptVersion(meetingId)
+      )
     },
 
-    async undoTranscriptSegment() {
-      return notImplementedM4("undoTranscriptSegment")
+    async undoTranscriptSegment(meetingId, segmentId, options) {
+      const { meeting, transcript, current } = requireEditableSegment(
+        meetingId,
+        segmentId,
+        options.expectedRevision
+      )
+      const revision = segmentRevisions(meetingId, segmentId).find((item) => !item.revertedAt)
+
+      if (!revision) throw new NothingToUndoError(segmentId)
+
+      const candidate = revision.speakerId ? speakers.get(revision.speakerId) : undefined
+      // A speaker merged away since keeps the segment on its current speaker.
+      const restoredSpeaker = candidate?.meetingId === meetingId ? candidate : undefined
+      const speakerChanged = Boolean(restoredSpeaker) && restoredSpeaker?.id !== current.speakerId
+      const now = new Date().toISOString()
+      let next = transcript.map((segment) => {
+        if (segment.id !== segmentId) return segment
+
+        const restored: TranscriptSegment = {
+          ...segment,
+          text: revision.text,
+          source: revision.source,
+          revision: (segment.revision ?? 0) + 1,
+          editedAt: now,
+        }
+
+        if (revision.words) restored.words = revision.words.map((word) => ({ ...word }))
+        else delete restored.words
+        if (restoredSpeaker) {
+          restored.speakerId = restoredSpeaker.id
+          restored.speaker = restoredSpeaker.label
+        }
+        return restored
+      })
+
+      if (speakerChanged) {
+        next = withTurnIndexes(next)
+        recomputeSpeakerStats(meetingId, next)
+      }
+
+      meetings.set(meetingId, { ...meeting, transcript: next })
+      transcriptRevisions.set(revision.id, { ...revision, revertedAt: now })
+
+      return mutationResult(
+        meetingId,
+        next,
+        segmentId,
+        speakerChanged,
+        bumpTranscriptVersion(meetingId)
+      )
     },
 
-    async listTranscriptRevisions() {
-      return notImplementedM4("listTranscriptRevisions")
+    async listTranscriptRevisions(meetingId, segmentId) {
+      requireVisibleMeeting(meetingId)
+
+      return segmentRevisions(meetingId, segmentId).map((revision) => {
+        const { workspaceId: revisionWorkspace, ...rest } = revision
+
+        void revisionWorkspace
+        return rest
+      })
     },
 
-    async renameMeeting() {
-      return notImplementedM4("renameMeeting")
+    async renameMeeting(id, title) {
+      const meeting = requireVisibleMeeting(id)
+      const updated = { ...meeting, title }
+
+      meetings.set(id, updated)
+      return hydrate(updated, false)
     },
 
-    async deleteMeeting() {
-      return notImplementedM4("deleteMeeting")
+    async deleteMeeting(id) {
+      const meeting = visibleMeeting(id)
+
+      if (!meeting) return undefined
+
+      const assets = meeting.mediaAssets ?? []
+      const storageKeys = [
+        ...new Set(
+          assets.flatMap((asset) =>
+            [asset.storageKey, asset.peaksStorageKey].filter((key): key is string => Boolean(key))
+          )
+        ),
+      ]
+
+      removeMeetingRows(id)
+      return { storageKeys, title: meeting.title, assetCount: assets.length }
     },
 
-    async updateMediaAssetPreparation() {
-      return notImplementedM4("updateMediaAssetPreparation")
+    async updateMediaAssetPreparation(assetId, patch) {
+      for (const meeting of visibleMeetings()) {
+        const asset = meeting.mediaAssets?.find((candidate) => candidate.id === assetId)
+
+        if (!asset) continue
+
+        const updated: MediaAsset = { ...asset }
+
+        if (patch.durationMs !== undefined) updated.durationMs = patch.durationMs ?? undefined
+        if (patch.peaksStorageKey !== undefined) {
+          updated.peaksStorageKey = patch.peaksStorageKey ?? undefined
+        }
+        if (patch.preparedAt !== undefined) updated.preparedAt = patch.preparedAt ?? undefined
+        if (patch.prepareError !== undefined) {
+          updated.prepareError = patch.prepareError ?? undefined
+        }
+
+        meetings.set(meeting.id, {
+          ...meeting,
+          mediaAssets: meeting.mediaAssets?.map((item) => (item.id === assetId ? updated : item)),
+        })
+        return updated
+      }
+
+      throw new Error(`Media asset not found: ${assetId}`)
     },
 
-    async setMeetingDurationMs() {
-      return notImplementedM4("setMeetingDurationMs")
+    async setMeetingDurationMs(meetingId, durationMs, source) {
+      const meeting = requireVisibleMeeting(meetingId)
+
+      // A transcript end never overrides a probed media duration.
+      if (source === "transcript" && (meeting.mediaAssets ?? []).some((asset) => asset.durationMs)) {
+        return
+      }
+
+      meetings.set(meetingId, { ...meeting, durationMs: Math.round(durationMs) })
     },
 
     async upsertMeetingIntelligence(
@@ -1879,13 +2355,11 @@ export function createInMemoryMeetingRepository(
       query: string,
       options?: { limit?: number }
     ): Promise<MeetingRecord[]> {
-      return (
-        await this.listMeetingsPage({
-          query: normalize(query),
-          limit: options?.limit,
-          sort: "recent",
-        })
-      ).meetings
+      return listFullMeetingsPage({
+        query: normalize(query),
+        limit: options?.limit,
+        sort: "recent",
+      }).meetings
     },
 
     async askMeetingMemory(
@@ -1994,7 +2468,7 @@ export function createInMemoryMeetingRepository(
           (a, b) =>
             new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
         )
-        .map(hydrate)
+        .map((meeting) => hydrate(meeting))
     },
 
     async updateMeetingTags(meetingId, tags): Promise<MeetingRecord> {
@@ -2047,13 +2521,7 @@ export function createInMemoryMeetingRepository(
         revoked: false,
         expiresAt: input.expiresAt,
         passwordHash,
-        includedSections: input.includedSections ?? [
-          "summary",
-          "decisions",
-          "action_items",
-          "transcript",
-          "participants",
-        ],
+        includedSections: input.includedSections ?? [...DEFAULT_SHARE_SECTIONS],
         createdBy: input.createdBy,
         createdAt: now,
         updatedAt: now,
@@ -2155,6 +2623,8 @@ export function createInMemoryMeetingRepository(
       }
 
       participants.set(participantId, updated)
+      // Speaker names resolve through participants.
+      bumpTranscriptVersion(participant.meetingId)
       return updated
     },
 

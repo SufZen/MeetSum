@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   formatDurationLabel,
+  formatSpokenDuration,
   formatTimestamp,
   getMeetingDurationMs,
   meetingDurationLabel,
@@ -35,6 +36,22 @@ const conference = {
 }
 
 describe("getMeetingDurationMs", () => {
+  it("prefers the denormalized meeting duration (M4)", () => {
+    expect(
+      getMeetingDurationMs({
+        durationMs: 300_000,
+        mediaAssets: [asset({ durationMs: 125_000 })],
+        transcript: [segment(90_000)],
+      })
+    ).toBe(300_000)
+  })
+
+  it("uses the probed asset duration column before metadata", () => {
+    expect(
+      getMeetingDurationMs({ mediaAssets: [{ ...asset({ durationMs: 1000 }), durationMs: 61_000 }] })
+    ).toBe(61_000)
+  })
+
   it("prefers media asset duration metadata", () => {
     expect(
       getMeetingDurationMs({
@@ -78,6 +95,37 @@ describe("formatDurationLabel", () => {
     expect(formatDurationLabel(20_000)).toBe("<1m")
     expect(formatDurationLabel(5 * 60_000)).toBe("5m")
     expect(formatDurationLabel(62 * 60_000)).toBe("1h 02m")
+  })
+
+  it("formats Hebrew labels", () => {
+    expect(formatDurationLabel(45 * 60_000, "he")).toBe("45 דק׳")
+    expect(formatDurationLabel(62 * 60_000, "he")).toBe("1 שע׳ 02 דק׳")
+    expect(formatDurationLabel(20_000, "he")).toBe("פחות מדקה")
+    expect(formatDurationLabel(undefined, "he")).toBe("—")
+    expect(meetingDurationLabel({ durationMs: 45 * 60_000 }, "he-IL")).toBe("45 דק׳")
+  })
+})
+
+describe("formatSpokenDuration", () => {
+  it("speaks English durations", () => {
+    expect(formatSpokenDuration(12 * 60_000 + 34_000, "en")).toBe("12 minutes 34 seconds")
+    expect(formatSpokenDuration(3_600_000 + 60_000 + 1000)).toBe("1 hour 1 minute 1 second")
+    expect(formatSpokenDuration(0)).toBe("0 seconds")
+    expect(formatSpokenDuration(undefined)).toBe("—")
+  })
+
+  it("speaks Hebrew durations with vav-maqaf before the last part", () => {
+    expect(formatSpokenDuration(12 * 60_000 + 34_000, "he")).toBe("12 דקות ו־34 שניות")
+    expect(formatSpokenDuration(60_000, "he")).toBe("דקה אחת")
+    expect(formatSpokenDuration(2 * 3_600_000 + 5_000, "he")).toBe("שעתיים ו־5 שניות")
+    expect(formatSpokenDuration(3_600_000 + 2 * 60_000 + 1000, "he")).toBe(
+      "שעה אחת, 2 דקות ו־שנייה אחת"
+    )
+    expect(formatSpokenDuration(400, "he")).toBe("0 שניות")
+  })
+
+  it("falls back to English for other locales without Intl.DurationFormat output", () => {
+    expect(formatSpokenDuration(65_000, "xx-invalid-locale-$$")).toBe("1 minute 5 seconds")
   })
 })
 

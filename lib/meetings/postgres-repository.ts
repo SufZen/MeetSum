@@ -4,7 +4,9 @@ import type {
   ActionItem,
   CreateContextInput,
   CreateMeetingInput,
+  DeletedMeeting,
   ExportRecord,
+  GetMeetingOptions,
   JobRecord,
   JobStatus,
   MediaAsset,
@@ -13,9 +15,11 @@ import type {
   AiRunRecord,
   MeetingAnswer,
   MeetingContext,
+  MeetingListItem,
   MeetingListOptions,
   MeetingListPage,
   MeetingListSortMode,
+  MeetingTranscript,
   MeetingParticipant,
   MeetingRecord,
   MeetingRepository,
@@ -28,13 +32,17 @@ import type {
   SpeakerSuggestion,
   SuggestedAgentRun,
   MeetingSpeaker,
+  SegmentMutationResult,
+  TranscriptRevision,
   TranscriptSegment,
 } from "@/lib/meetings/repository"
 import {
   MeetingExternalIdConflictError,
   MeetingScopeError,
-  notImplementedM4,
-  toMeetingListItem,
+  NothingToUndoError,
+  SegmentNotFoundError,
+  TranscriptConflictError,
+  TranscriptSpeakerNotFoundError,
 } from "@/lib/meetings/repository"
 import {
   computeTurnIndexes,
@@ -47,10 +55,21 @@ import {
   planTranscriptReplacement,
   type ExistingSpeakerRow,
 } from "@/lib/meetings/speakers/transcript-plan"
+import {
+  nextSpeakerLabel,
+  preserveEditedSegments,
+  realignWords,
+  transcriptRevisionsKeep,
+} from "@/lib/meetings/transcript-edit"
 import { decodeWords, encodeWords } from "@/lib/meetings/transcript-words"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
+import { DEFAULT_SHARE_SECTIONS } from "@/lib/sharing/share-sections"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
-import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
+import { getMeetingDurationMs } from "@/lib/meetings/duration"
+import {
+  deriveMeetingQualityWarnings,
+  type TranscriptQualityStats,
+} from "@/lib/meetings/quality"
 import {
   buildMeetingIntelligence,
   type MeetingIntelligence,
@@ -73,6 +92,9 @@ type MeetingRow = {
   workspace_id?: string | null
   owner_user_id?: string | null
   visibility?: MeetingVisibility | null
+  /** M4 (021). */
+  duration_ms?: number | null
+  transcript_version?: number | null
 }
 
 type TranscriptRow = {
@@ -87,6 +109,33 @@ type TranscriptRow = {
   words?: unknown
   turn_index?: number | null
   source?: string | null
+  /** M4 (021). */
+  revision?: number | string | null
+  edited_at?: string | Date | null
+}
+
+type SegmentStatsRow = {
+  segment_count: number | string | null
+  edited_count: number | string | null
+  edited_at: string | Date | null
+  average_confidence: number | string | null
+  max_end_ms: number | string | null
+  all_smart_notes: boolean | null
+  all_generic: boolean | null
+}
+
+type RevisionRow = {
+  id: string
+  meeting_id: string
+  segment_id: string
+  revision: number | string
+  text: string
+  words: unknown
+  speaker_id: string | null
+  source: string
+  created_by_user_id: string | null
+  created_at: string | Date
+  reverted_at: string | Date | null
 }
 
 type SpeakerRow = {
@@ -220,9 +269,14 @@ type MediaAssetRow = {
   source: string | null
   source_file_id: string | null
   checksum_sha256: string | null
-  metadata: Record<string, unknown> | null
-  /** M4 (021); not selected yet, so absent rows read as `original`. */
+  metadata?: Record<string, unknown> | null
+  /** M4 (021). */
   kind?: MediaAsset["kind"] | null
+  derived_from_asset_id?: string | null
+  duration_ms?: number | null
+  peaks_storage_key?: string | null
+  prepared_at?: string | Date | null
+  prepare_error?: string | null
   created_at: string | Date
 }
 
@@ -446,6 +500,10 @@ function mapMeetingRow(row: MeetingRow): MeetingRecord {
     workspaceId: row.workspace_id ?? undefined,
     ownerUserId: row.owner_user_id ?? undefined,
     visibility: row.visibility ?? undefined,
+    ...(typeof row.duration_ms === "number" ? { durationMs: row.duration_ms } : {}),
+    ...(row.transcript_version !== undefined && row.transcript_version !== null
+      ? { transcriptVersion: Number(row.transcript_version) }
+      : {}),
   }
 }
 
@@ -525,7 +583,52 @@ function mapMediaAsset(row: MediaAssetRow): MediaAsset {
     checksumSha256: row.checksum_sha256 ?? undefined,
     metadata: row.metadata ?? undefined,
     kind: row.kind ?? "original",
+    derivedFromAssetId: row.derived_from_asset_id ?? undefined,
+    durationMs: row.duration_ms ?? undefined,
+    peaksStorageKey: row.peaks_storage_key ?? undefined,
+    preparedAt: row.prepared_at ? toIso(row.prepared_at) : undefined,
+    prepareError: row.prepare_error ?? undefined,
     createdAt: toIso(row.created_at),
+  }
+}
+
+/** List-item media asset: no metadata (M4 lightweight list). */
+function mapListMediaAsset(row: MediaAssetRow): MediaAsset {
+  const { metadata, ...asset } = mapMediaAsset(row)
+
+  void metadata
+  return asset
+}
+
+function mapRevision(row: RevisionRow): TranscriptRevision {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    segmentId: row.segment_id,
+    revision: Number(row.revision),
+    text: row.text,
+    ...(row.words !== null && row.words !== undefined ? { words: decodeWords(row.words) } : {}),
+    speakerId: row.speaker_id ?? undefined,
+    source: row.source,
+    createdByUserId: row.created_by_user_id ?? undefined,
+    createdAt: toIso(row.created_at),
+    revertedAt: row.reverted_at ? toIso(row.reverted_at) : undefined,
+  }
+}
+
+function mapSegmentStats(row: SegmentStatsRow | undefined): TranscriptQualityStats & {
+  editedCount: number
+  editedAt?: string
+  maxEndMs?: number
+} {
+  return {
+    segmentCount: optionalNumber(row?.segment_count) ?? 0,
+    averageConfidence: optionalNumber(row?.average_confidence),
+    allSmartNotesSpeakers: row?.all_smart_notes === true,
+    allGenericSpeakers: row?.all_generic === true,
+    editedCount: optionalNumber(row?.edited_count) ?? 0,
+    editedAt: row?.edited_at ? toIso(row.edited_at) : undefined,
+    maxEndMs: optionalNumber(row?.max_end_ms),
   }
 }
 
@@ -632,8 +735,115 @@ function mapTranscriptRow(segment: TranscriptRow): TranscriptSegment {
   }
   if (typeof segment.turn_index === "number") mapped.turnIndex = segment.turn_index
   if (segment.source) mapped.source = segment.source
+  if (segment.revision !== undefined && segment.revision !== null) {
+    mapped.revision = Number(segment.revision)
+  }
+  if (segment.edited_at) mapped.editedAt = toIso(segment.edited_at)
   return mapped
 }
+
+/** Segments with resolved speaker names (`ts` + speaker `s` + participant `p`). */
+const TRANSCRIPT_SELECT = `
+  select
+    ts.id,
+    ts.speaker_id,
+    coalesce(p.name, s.display_name, s.label) as speaker_label,
+    ts.start_ms,
+    ts.end_ms,
+    ts.text,
+    ts.confidence,
+    ts.language,
+    ts.words,
+    ts.turn_index,
+    ts.source,
+    ts.revision,
+    ts.edited_at
+  from transcript_segments ts
+  left join speakers s on s.id = ts.speaker_id
+  left join meeting_participants p
+    on p.id = s.participant_id and p.meeting_id = ts.meeting_id
+`
+
+/** Transcript facts of one meeting without loading it ($1 = meeting id). */
+const SEGMENT_STATS_SQL = `
+  select
+    count(*)::int as segment_count,
+    (count(*) filter (where ts.source = 'edited'))::int as edited_count,
+    max(ts.edited_at) filter (where ts.source = 'edited') as edited_at,
+    avg(ts.confidence) as average_confidence,
+    max(ts.end_ms) as max_end_ms,
+    bool_and(coalesce(p.name, s.display_name, s.label, 'Speaker') ~* 'google meet smart notes')
+      as all_smart_notes,
+    bool_and(
+      coalesce(p.name, s.display_name, s.label, 'Speaker')
+        ~* '^(speaker[[:space:]]+[0-9]+|speaker|google meet smart notes)$'
+    ) as all_generic
+  from transcript_segments ts
+  left join speakers s on s.id = ts.speaker_id
+  left join meeting_participants p
+    on p.id = s.participant_id and p.meeting_id = ts.meeting_id
+  where ts.meeting_id = $1
+`
+
+/** Recomputes `turn_index` of a meeting's segments by (start_ms, id) ($1 = meeting id). */
+const RECOMPUTE_TURNS_SQL = `
+  update transcript_segments ts
+  set turn_index = ordered.turn_index
+  from (
+    select
+      id,
+      (sum(case when rn = 1 or speaker_id is distinct from previous_speaker then 1 else 0 end)
+        over (order by start_ms, id rows unbounded preceding) - 1)::int as turn_index
+    from (
+      select
+        id,
+        start_ms,
+        speaker_id,
+        lag(speaker_id) over (order by start_ms, id) as previous_speaker,
+        row_number() over (order by start_ms, id) as rn
+      from transcript_segments
+      where meeting_id = $1
+    ) changes
+  ) ordered
+  where ts.id = ordered.id
+    and ts.meeting_id = $1
+    and ts.turn_index is distinct from ordered.turn_index
+`
+
+/** Recomputes talk time / words / segments / first start of a meeting's speakers ($1). */
+const RECOMPUTE_SPEAKER_STATS_SQL = `
+  update speakers s
+  set talk_time_ms = coalesce(stats.talk_time_ms, 0),
+      word_count = coalesce(stats.word_count, 0),
+      segment_count = coalesce(stats.segment_count, 0),
+      first_start_ms = stats.first_start_ms,
+      updated_at = now()
+  from (
+    select
+      sp.id,
+      sum(greatest(0, ts.end_ms - ts.start_ms))::int as talk_time_ms,
+      sum(
+        case
+          when jsonb_typeof(ts.words) = 'array' and jsonb_array_length(ts.words) > 0
+            then jsonb_array_length(ts.words)
+          else coalesce(array_length(regexp_split_to_array(btrim(ts.text), '[[:space:]]+'), 1), 0)
+        end
+      )::int as word_count,
+      count(ts.id)::int as segment_count,
+      min(ts.start_ms) as first_start_ms
+    from speakers sp
+    left join transcript_segments ts
+      on ts.speaker_id = sp.id and ts.meeting_id = sp.meeting_id
+    where sp.meeting_id = $1
+    group by sp.id
+  ) stats
+  where s.id = stats.id and s.meeting_id = $1
+`
+
+const REVISION_COLUMNS = `
+  id, meeting_id, segment_id, revision, text, words, speaker_id, source,
+  created_by_user_id, created_at, reverted_at
+`
 
 /** Columns of `speakers s` joined to its participant `p` (name resolution). */
 function speakerColumns(includeEmbeddings: boolean) {
@@ -727,6 +937,8 @@ function meetingColumns(alias = "m") {
     "workspace_id",
     "owner_user_id",
     "visibility",
+    "duration_ms",
+    "transcript_version",
   ]
     .map((column) => `${alias}.${column}`)
     .join(", ")
@@ -812,6 +1024,22 @@ export async function withTransaction<T>(
   }
 }
 
+/** Participants derived from `meetings.participants` when no rows exist yet. */
+function derivedParticipants(base: MeetingRecord): MeetingParticipant[] {
+  return base.participants.map((participant, index) => ({
+    id: `derived_${base.id}_${index}`,
+    meetingId: base.id,
+    name: participant.includes("@") ? participant.split("@")[0] : participant,
+    email: participant.includes("@") ? participant : undefined,
+    role: index === 0 ? "organizer" : "attendee",
+    source: "calendar",
+    attendanceStatus: "unknown",
+    confidence: 0.4,
+    createdAt: base.startedAt,
+    updatedAt: base.startedAt,
+  }))
+}
+
 function mapSuggestedAgentRun(row: SuggestedAgentRunRow): SuggestedAgentRun {
   return {
     id: row.id,
@@ -845,8 +1073,12 @@ const JOB_COLUMNS = `
 const MEDIA_ASSET_COLUMNS = `
   id, meeting_id, storage_key, filename, content_type,
   size_bytes, retention, source, source_file_id,
-  checksum_sha256, metadata, created_at
+  checksum_sha256, metadata, kind, derived_from_asset_id,
+  duration_ms, peaks_storage_key, prepared_at, prepare_error, created_at
 `
+
+/** Media columns of list items (no metadata, M4). */
+const LIST_MEDIA_ASSET_COLUMNS = MEDIA_ASSET_COLUMNS.replace("metadata, ", "")
 
 const PARTICIPANT_COLUMNS = `
   id, meeting_id, name, email, role, source, attendance_status,
@@ -950,7 +1182,11 @@ export function createPostgresMeetingRepository(
     )
   }
 
-  async function hydrateMeeting(base: MeetingRecord): Promise<MeetingRecord> {
+  async function hydrateMeeting(
+    base: MeetingRecord,
+    options: GetMeetingOptions = {}
+  ): Promise<MeetingRecord> {
+    const includeTranscript = options.includeTranscript !== false
     const meetArtifactValues: unknown[] = [base.id]
     const meetArtifactScope = scoped("m2", meetArtifactValues)
     const [
@@ -968,29 +1204,12 @@ export function createPostgresMeetingRepository(
       favoriteResult,
       speakersResult,
     ] = await Promise.all([
-      client.query(
-        `
-          select
-            ts.id,
-            ts.speaker_id,
-            coalesce(p.name, s.display_name, s.label) as speaker_label,
-            ts.start_ms,
-            ts.end_ms,
-            ts.text,
-            ts.confidence,
-            ts.language,
-            ts.words,
-            ts.turn_index,
-            ts.source
-          from transcript_segments ts
-          left join speakers s on s.id = ts.speaker_id
-          left join meeting_participants p
-            on p.id = s.participant_id and p.meeting_id = ts.meeting_id
-          where ts.meeting_id = $1
-          order by ts.start_ms asc
-        `,
-        [base.id]
-      ),
+      includeTranscript
+        ? client.query(
+            `${TRANSCRIPT_SELECT} where ts.meeting_id = $1 order by ts.start_ms asc, ts.id asc`,
+            [base.id]
+          )
+        : client.query(SEGMENT_STATS_SQL, [base.id]),
       client.query(
         `
           select id, overview, language, model_provider
@@ -1133,7 +1352,33 @@ export function createPostgresMeetingRepository(
       ),
     ])
 
-    const transcript = (transcriptResult.rows as TranscriptRow[]).map(mapTranscriptRow)
+    const transcript = includeTranscript
+      ? (transcriptResult.rows as TranscriptRow[]).map(mapTranscriptRow)
+      : undefined
+    const stats = includeTranscript
+      ? undefined
+      : mapSegmentStats(transcriptResult.rows[0] as SegmentStatsRow | undefined)
+    const mediaAssets = (mediaAssetsResult.rows as MediaAssetRow[]).map(mapMediaAsset)
+    const editedSegments = transcript?.filter((segment) => segment.source === "edited") ?? []
+    const editedTimes = editedSegments
+      .map((segment) => segment.editedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+    const transcriptFacts = stats
+      ? {
+          transcriptSegmentCount: stats.segmentCount,
+          editedSegmentCount: stats.editedCount,
+          transcriptEditedAt: stats.editedAt,
+          // Without segments: stored duration, media duration, else last segment end.
+          durationMs:
+            getMeetingDurationMs({ durationMs: base.durationMs, mediaAssets }) ?? stats.maxEndMs,
+        }
+      : {
+          transcriptSegmentCount: transcript?.length ?? 0,
+          editedSegmentCount: editedSegments.length,
+          transcriptEditedAt: editedTimes[editedTimes.length - 1],
+          durationMs: base.durationMs,
+        }
     const speakers = (speakersResult.rows as SpeakerRow[])
       .filter((row) => typeof row.id === "string" && typeof row.label === "string")
       .map((row) => mapSpeaker(row))
@@ -1170,8 +1415,10 @@ export function createPostgresMeetingRepository(
 
     const hydrated: MeetingRecord = {
       ...base,
+      ...transcriptFacts,
+      transcriptVersion: base.transcriptVersion ?? 0,
       isFavorite: favoriteResult.rows.length > 0,
-      transcript,
+      ...(transcript ? { transcript } : {}),
       summary: latestSummary
         ? {
             overview: latestSummary.overview,
@@ -1185,41 +1432,165 @@ export function createPostgresMeetingRepository(
       suggestedAgentRuns: (suggestedRunsResult.rows as SuggestedAgentRunRow[]).map(
         mapSuggestedAgentRun
       ),
-      mediaAssets: (mediaAssetsResult.rows as MediaAssetRow[]).map(mapMediaAsset),
+      mediaAssets,
       meetConferenceRecords: mapMeetConferenceRecords(
         meetArtifactsResult.rows as MeetArtifactRow[]
       ),
       aiRuns: (aiRunsResult.rows as AiRunRow[]).map(mapAiRun),
       ...(speakers.length ? { speakers } : {}),
       participantDetails:
-        participantDetails.length > 0
-          ? participantDetails
-          : base.participants.map((participant, index) => ({
-              id: `derived_${base.id}_${index}`,
-              meetingId: base.id,
-              name: participant.includes("@")
-                ? participant.split("@")[0]
-                : participant,
-              email: participant.includes("@") ? participant : undefined,
-              role: index === 0 ? "organizer" : "attendee",
-              source: "calendar",
-              attendanceStatus: "unknown",
-              confidence: 0.4,
-              createdAt: base.startedAt,
-              updatedAt: base.startedAt,
-            })),
+        participantDetails.length > 0 ? participantDetails : derivedParticipants(base),
     }
+
+    if (hydrated.durationMs === undefined) delete hydrated.durationMs
 
     return {
       ...hydrated,
-      qualityWarnings: deriveMeetingQualityWarnings(hydrated),
+      qualityWarnings: deriveMeetingQualityWarnings(hydrated, stats),
     }
   }
 
-  async function getScopedMeeting(id: string) {
+  async function getScopedMeeting(id: string, options: GetMeetingOptions = {}) {
     const row = await selectMeeting(client, "m.id = $1", [id])
 
-    return row ? hydrateMeeting(mapMeetingRow(row)) : undefined
+    return row ? hydrateMeeting(mapMeetingRow(row), options) : undefined
+  }
+
+  /**
+   * Batched hydration of list items (M4): one statement per relation for the
+   * whole page (`meeting_id = any($1)`), so the query count is constant in
+   * the page size. No transcript, words, summary or media metadata.
+   */
+  async function hydrateListItems(bases: MeetingRecord[]): Promise<MeetingListItem[]> {
+    if (!bases.length) return []
+
+    const ids = bases.map((meeting) => meeting.id)
+    const [
+      participantsResult,
+      tagsResult,
+      contextsResult,
+      mediaResult,
+      actionCountsResult,
+      segmentCountsResult,
+      favoritesResult,
+    ] = await Promise.all([
+      client.query(
+        `
+          select ${PARTICIPANT_COLUMNS}
+          from meeting_participants
+          where meeting_id = any($1::text[])
+          order by
+            meeting_id,
+            case role when 'organizer' then 0 when 'attendee' then 1 else 2 end,
+            name asc
+        `,
+        [ids]
+      ),
+      client.query(
+        `
+          select mt.meeting_id, t.name
+          from meeting_tags mt
+          join tags t on t.id = mt.tag_id
+          where mt.meeting_id = any($1::text[]) and t.workspace_id = $2
+          order by t.name asc
+        `,
+        [ids, workspaceId]
+      ),
+      client.query(
+        `
+          select mc.meeting_id, c.id, c.name, c.description, c.color, c.kind, c.created_at
+          from meeting_contexts mc
+          join contexts c on c.id = mc.context_id
+          where mc.meeting_id = any($1::text[]) and c.workspace_id = $2
+          order by c.name asc
+        `,
+        [ids, workspaceId]
+      ),
+      client.query(
+        `
+          select ${LIST_MEDIA_ASSET_COLUMNS}
+          from media_assets
+          where meeting_id = any($1::text[]) and workspace_id = $2
+          order by created_at desc
+        `,
+        [ids, workspaceId]
+      ),
+      client.query(
+        `
+          select meeting_id, count(*)::int as count
+          from action_items
+          where meeting_id = any($1::text[])
+          group by meeting_id
+        `,
+        [ids]
+      ),
+      client.query(
+        `
+          select meeting_id, count(*)::int as count
+          from transcript_segments
+          where meeting_id = any($1::text[])
+          group by meeting_id
+        `,
+        [ids]
+      ),
+      favoriteUserId
+        ? client.query(
+            `
+              select meeting_id
+              from meeting_favorites
+              where user_id = $1 and meeting_id = any($2::text[])
+            `,
+            [favoriteUserId, ids]
+          )
+        : Promise.resolve({ rows: [] as unknown[] }),
+    ])
+
+    const group = <T extends { meeting_id: string }>(rows: unknown[]) => {
+      const byMeeting = new Map<string, T[]>()
+
+      for (const row of rows as T[]) {
+        const list = byMeeting.get(row.meeting_id) ?? []
+
+        list.push(row)
+        byMeeting.set(row.meeting_id, list)
+      }
+      return byMeeting
+    }
+    const counts = (rows: unknown[]) =>
+      new Map(
+        (rows as Array<{ meeting_id: string; count: number | string }>).map((row) => [
+          row.meeting_id,
+          Number(row.count),
+        ])
+      )
+    const participantsByMeeting = group<ParticipantRow>(participantsResult.rows)
+    const tagsByMeeting = group<TagRow & { meeting_id: string }>(tagsResult.rows)
+    const contextsByMeeting = group<ContextRow & { meeting_id: string }>(contextsResult.rows)
+    const mediaByMeeting = group<MediaAssetRow>(mediaResult.rows)
+    const actionCounts = counts(actionCountsResult.rows)
+    const segmentCounts = counts(segmentCountsResult.rows)
+    const favoriteIds = new Set(
+      (favoritesResult.rows as Array<{ meeting_id: string }>).map((row) => row.meeting_id)
+    )
+
+    return bases.map((base) => {
+      const participantDetails = (participantsByMeeting.get(base.id) ?? []).map(mapParticipant)
+      const mediaAssets = (mediaByMeeting.get(base.id) ?? []).map(mapListMediaAsset)
+
+      return {
+        ...base,
+        isFavorite: favoriteIds.has(base.id),
+        participantDetails: participantDetails.length
+          ? participantDetails
+          : derivedParticipants(base),
+        tags: (tagsByMeeting.get(base.id) ?? []).map((row) => row.name),
+        contexts: (contextsByMeeting.get(base.id) ?? []).map(mapContext),
+        mediaAssets,
+        transcriptSegmentCount: segmentCounts.get(base.id) ?? 0,
+        actionItemCount: actionCounts.get(base.id) ?? 0,
+        hasMedia: mediaAssets.length > 0,
+      }
+    })
   }
 
   async function requireScopedMeeting(id: string) {
@@ -1347,7 +1718,128 @@ export function createPostgresMeetingRepository(
     const row = result.rows[0] as ParticipantRow | undefined
 
     if (!row) throw new Error(`Participant not found: ${participantId}`)
+    // Speaker names resolve through participants: transcript ETags change.
+    await bumpTranscriptVersion(client, row.meeting_id)
     return mapParticipant(row)
+  }
+
+  /**
+   * Bumps `meetings.transcript_version` (the transcript ETag) of a visible
+   * meeting; optionally sets the transcript-derived duration when no media
+   * duration exists. Returns the new version.
+   */
+  async function bumpTranscriptVersion(
+    db: Queryable,
+    meetingId: string,
+    transcriptDurationMs?: number
+  ): Promise<number> {
+    const values: unknown[] = [meetingId]
+    const durationSql =
+      transcriptDurationMs !== undefined && transcriptDurationMs > 0
+        ? `, duration_ms = case
+             when exists (
+               select 1 from media_assets a
+               where a.meeting_id = m.id and a.workspace_id = m.workspace_id
+                 and a.duration_ms is not null
+             ) then m.duration_ms
+             else ${pushValue(values, Math.round(transcriptDurationMs))}::int
+           end`
+        : ""
+    const result = await db.query(
+      `
+        update meetings m
+        set transcript_version = m.transcript_version + 1${durationSql}
+        where m.id = $1 and ${scoped("m", values)}
+        returning m.transcript_version
+      `,
+      values
+    )
+
+    return Number((result.rows[0] as { transcript_version?: number } | undefined)?.transcript_version ?? 0)
+  }
+
+  /**
+   * Locks a visible meeting for a transcript edit and returns its version; an
+   * invisible meeting reads as a missing segment.
+   */
+  async function lockMeetingForEdit(db: Queryable, meetingId: string, segmentId: string) {
+    const values: unknown[] = [meetingId]
+    const result = await db.query(
+      `
+        select m.id, m.transcript_version
+        from meetings m
+        where m.id = $1 and ${scoped("m", values)}
+        for update of m
+      `,
+      values
+    )
+    const row = result.rows[0] as { transcript_version?: number } | undefined
+
+    if (!row) throw new SegmentNotFoundError(segmentId)
+    return Number(row.transcript_version ?? 0)
+  }
+
+  /** Locks one segment of a meeting (call after lockMeetingForEdit). */
+  async function lockSegment(db: Queryable, meetingId: string, segmentId: string) {
+    const result = await db.query(
+      `${TRANSCRIPT_SELECT} where ts.id = $1 and ts.meeting_id = $2 for update of ts`,
+      [segmentId, meetingId]
+    )
+    const row = result.rows[0] as TranscriptRow | undefined
+
+    if (!row) throw new SegmentNotFoundError(segmentId)
+    return mapTranscriptRow(row)
+  }
+
+  async function readSegment(db: Queryable, meetingId: string, segmentId: string) {
+    const result = await db.query(
+      `${TRANSCRIPT_SELECT} where ts.id = $1 and ts.meeting_id = $2`,
+      [segmentId, meetingId]
+    )
+
+    return mapTranscriptRow(result.rows[0] as TranscriptRow)
+  }
+
+  /** Turn indexes and speaker stats after a speaker change (one statement each). */
+  async function recomputeSpeakerDerived(db: Queryable, meetingId: string) {
+    await db.query(RECOMPUTE_TURNS_SQL, [meetingId])
+    await db.query(RECOMPUTE_SPEAKER_STATS_SQL, [meetingId])
+  }
+
+  async function pruneRevisions(db: Queryable, meetingId: string, segmentIds: string[]) {
+    await db.query(
+      `
+        delete from transcript_segment_revisions r
+        using (
+          select id,
+                 row_number() over (
+                   partition by segment_id order by revision desc, created_at desc
+                 ) as rank
+          from transcript_segment_revisions
+          where meeting_id = $1 and workspace_id = $2 and segment_id = any($3::text[])
+        ) ranked
+        where r.id = ranked.id and ranked.rank > $4
+      `,
+      [meetingId, workspaceId, segmentIds, transcriptRevisionsKeep()]
+    )
+  }
+
+  async function mutationResult(
+    db: Queryable,
+    meetingId: string,
+    segmentId: string,
+    speakerChanged: boolean,
+    version: number
+  ): Promise<SegmentMutationResult> {
+    const segment = await readSegment(db, meetingId, segmentId)
+
+    return {
+      segment,
+      ...(speakerChanged
+        ? { speakers: (await selectSpeakers(db, meetingId)).map((row) => mapSpeaker(row)) }
+        : {}),
+      version,
+    }
   }
 
   /** Scoped meeting check that also serializes transcript writes (row lock). */
@@ -1444,8 +1936,8 @@ export function createPostgresMeetingRepository(
    * left without segments, insert the new segments. Never touches
    * meeting_participants.
    */
-  async function listFullMeetingsPage(options: MeetingListOptions = {}): Promise<{
-    meetings: MeetingRecord[]
+  async function selectMeetingPage(options: MeetingListOptions): Promise<{
+    bases: MeetingRecord[]
     page: MeetingListPage["page"]
   }> {
     const limit = normalizeLimit(options.limit)
@@ -1487,40 +1979,69 @@ export function createPostgresMeetingRepository(
     )
 
     const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
-    const meetings = await Promise.all(
-      bases.map((meeting) => hydrateMeeting(meeting))
-    )
 
     return {
-      meetings,
+      bases,
       page: {
         limit,
         offset,
         total,
-        hasMore: offset + meetings.length < total,
+        hasMore: offset + bases.length < total,
       },
     }
+  }
+
+  /** Fully hydrated page (search, timeline, memory: they read transcripts). */
+  async function listFullMeetingsPage(options: MeetingListOptions = {}): Promise<{
+    meetings: MeetingRecord[]
+    page: MeetingListPage["page"]
+  }> {
+    const { bases, page } = await selectMeetingPage(options)
+    const meetings = await Promise.all(bases.map((meeting) => hydrateMeeting(meeting)))
+
+    return { meetings, page }
   }
 
   async function writeTranscript(
     meetingId: string,
     input: ReplaceTranscriptInput,
-    preserveDiarizedMappings = false
+    preserveDiarizedMappings = false,
+    preserveEdited = false
   ) {
     return withTransaction(client, async (tx) => {
       await lockMeetingInScope(tx, meetingId)
 
       const existing = await selectSpeakers(tx, meetingId, { forUpdate: true })
+      // Edited segments that match the new transcript keep their row (and so
+      // their revisions) with the edited text and words.
+      const edited = preserveEdited
+        ? (
+            await tx.query(
+              `${TRANSCRIPT_SELECT} where ts.meeting_id = $1 and ts.source = 'edited'`,
+              [meetingId]
+            )
+          ).rows.map((row) => mapTranscriptRow(row as TranscriptRow))
+        : []
+      const { segments: incoming, preservedIds } = preserveEditedSegments(input.segments, edited)
       const plan = planTranscriptReplacement({
         existing: existingSpeakerRows(existing),
-        segments: input.segments,
+        segments: incoming,
         speakers: input.speakers,
         createId,
         preserveDiarizedMappings,
       })
+      const kept = [...preservedIds]
 
-      await tx.query(`delete from transcript_segments where meeting_id = $1`, [meetingId])
-      if (plan.deleteIds.length) {
+      if (kept.length) {
+        await tx.query(
+          `delete from transcript_segments where meeting_id = $1 and not (id = any($2::text[]))`,
+          [meetingId, kept]
+        )
+      } else {
+        await tx.query(`delete from transcript_segments where meeting_id = $1`, [meetingId])
+      }
+      // Stale speakers are deleted after the kept segments are repointed.
+      if (plan.deleteIds.length && !kept.length) {
         await tx.query(`delete from speakers where meeting_id = $1 and id = any($2::text[])`, [
           meetingId,
           plan.deleteIds,
@@ -1578,7 +2099,43 @@ export function createPostgresMeetingRepository(
         )
       }
 
-      await insertSegments(tx, meetingId, plan.segments, input.asrRunId)
+      await insertSegments(
+        tx,
+        meetingId,
+        plan.segments.filter((segment) => !preservedIds.has(segment.id)),
+        input.asrRunId
+      )
+
+      if (kept.length) {
+        const preserved = plan.segments.filter((segment) => preservedIds.has(segment.id))
+
+        await tx.query(
+          `
+            update transcript_segments ts
+            set speaker_id = u.speaker_id, turn_index = u.turn_index
+            from unnest($2::text[], $3::text[], $4::int[]) as u(id, speaker_id, turn_index)
+            where ts.id = u.id and ts.meeting_id = $1
+          `,
+          [
+            meetingId,
+            preserved.map((segment) => segment.id),
+            preserved.map((segment) => segment.speakerId),
+            preserved.map((segment) => segment.turnIndex),
+          ]
+        )
+        if (plan.deleteIds.length) {
+          await tx.query(`delete from speakers where meeting_id = $1 and id = any($2::text[])`, [
+            meetingId,
+            plan.deleteIds,
+          ])
+        }
+      }
+
+      await bumpTranscriptVersion(
+        tx,
+        meetingId,
+        plan.segments.reduce((end, segment) => Math.max(end, segment.endMs), 0)
+      )
 
       return {
         segments: plan.segments as TranscriptSegment[],
@@ -1694,13 +2251,13 @@ export function createPostgresMeetingRepository(
     },
 
     async listMeetingsPage(options: MeetingListOptions = {}) {
-      const { meetings, page } = await listFullMeetingsPage(options)
+      const { bases, page } = await selectMeetingPage(options)
 
-      return { meetings: meetings.map(toMeetingListItem), page }
+      return { meetings: await hydrateListItems(bases), page }
     },
 
-    async getMeeting(id: string) {
-      return getScopedMeeting(id)
+    async getMeeting(id: string, options: GetMeetingOptions = {}) {
+      return getScopedMeeting(id, options)
     },
 
     async createMeeting(input: CreateMeetingInput) {
@@ -1721,8 +2278,8 @@ export function createPostgresMeetingRepository(
 
     async createMediaAsset(input) {
       // The asset inherits the workspace of a meeting this scope can see; a
-      // foreign meeting id inserts nothing. M4 Step 0: kind/derivedFromAssetId/
-      // durationMs are accepted but not persisted yet (Package A/B).
+      // foreign meeting id inserts nothing.
+      const kind = input.kind ?? "original"
       const values: unknown[] = [
         createId("asset"),
         input.meetingId,
@@ -1735,15 +2292,19 @@ export function createPostgresMeetingRepository(
         input.sourceFileId ?? null,
         input.checksumSha256 ?? null,
         JSON.stringify(input.metadata ?? {}),
+        kind,
+        input.derivedFromAssetId ?? null,
+        input.durationMs === undefined ? null : Math.round(input.durationMs),
       ]
       const result = await client.query(
         `
           insert into media_assets (
             id, meeting_id, storage_key, filename, content_type, size_bytes,
             retention, source, source_file_id, checksum_sha256, metadata,
-            workspace_id
+            kind, derived_from_asset_id, duration_ms, workspace_id
           )
-          select $1, m.id, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, m.workspace_id
+          select $1, m.id, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
+                 $12, $13, $14::int, m.workspace_id
           from meetings m
           where m.id = $2 and ${scoped("m", values)}
           returning ${MEDIA_ASSET_COLUMNS}
@@ -1754,7 +2315,10 @@ export function createPostgresMeetingRepository(
 
       if (!row) throw new Error(`Meeting not found: ${input.meetingId}`)
 
-      await updateScopedMeeting(client, input.meetingId, "status = 'media_uploaded'", [])
+      // A derived playback rendition never changes the meeting status.
+      if (kind === "original") {
+        await updateScopedMeeting(client, input.meetingId, "status = 'media_uploaded'", [])
+      }
 
       return mapMediaAsset(row)
     },
@@ -1794,17 +2358,22 @@ export function createPostgresMeetingRepository(
 
       const existing = await selectSpeakers(client, meetingId)
 
+      // The same transcript re-written (cleanup): manual edits always win.
       await writeTranscript(
         meetingId,
         legacySegmentsToTranscript(existingSpeakerRows(existing), segments),
+        true,
         true
       )
       return segments
     },
 
-    async replaceTranscript(meetingId, input) {
-      // M4 Step 0: `preserveEdited` is accepted but not implemented yet.
-      return writeTranscript(meetingId, input)
+    async replaceTranscript(meetingId, input, options = {}) {
+      // preserveEdited = the same transcript re-written (cleanup): it also keeps
+      // confirmed/rejected diarized speaker mappings of surviving labels.
+      const preserve = options.preserveEdited === true
+
+      return writeTranscript(meetingId, input, preserve, preserve)
     },
 
     async listMeetingSpeakers(meetingId, options = {}) {
@@ -1881,6 +2450,7 @@ export function createPostgresMeetingRepository(
       )
 
       if (!result.rows.length) throw new Error(`Speaker not found: ${speakerId}`)
+      await bumpTranscriptVersion(client, meetingId)
       return mapSpeaker(await requireSpeakerRow(client, meetingId, speakerId))
     },
 
@@ -1957,6 +2527,7 @@ export function createPostgresMeetingRepository(
           )
         }
 
+        await bumpTranscriptVersion(tx, meetingId)
         return mapSpeaker(await requireSpeakerRow(tx, meetingId, targetId))
       })
     },
@@ -1997,6 +2568,7 @@ export function createPostgresMeetingRepository(
         )
       }
 
+      if (items.length) await bumpTranscriptVersion(client, meetingId)
       return (await selectSpeakers(client, meetingId)).map((row) => mapSpeaker(row))
     },
 
@@ -2126,46 +2698,412 @@ export function createPostgresMeetingRepository(
           `update speakers set profile_id = $1, updated_at = now() where id = $2 and meeting_id = $3`,
           [profile.id, input.speakerId, input.meetingId]
         )
+        await bumpTranscriptVersion(tx, input.meetingId)
 
         return profile
       })
     },
 
-    // M4 Step 0: stubs that throw "not implemented (M4)".
-    async getMeetingTranscript() {
-      return notImplementedM4("getMeetingTranscript")
+    async getMeetingTranscript(meetingId): Promise<MeetingTranscript | undefined> {
+      // Version first: a concurrent edit can only make the segments newer
+      // than the ETag (the next conditional request then refetches).
+      const values: unknown[] = [meetingId]
+      const meetingResult = await client.query(
+        `
+          select m.id, m.language, m.transcript_version
+          from meetings m
+          where m.id = $1 and ${scoped("m", values)}
+        `,
+        values
+      )
+      const meeting = meetingResult.rows[0] as
+        | { language: string | null; transcript_version: number | null }
+        | undefined
+
+      if (!meeting) return undefined
+
+      const [segmentsResult, speakerRows] = await Promise.all([
+        client.query(
+          `${TRANSCRIPT_SELECT} where ts.meeting_id = $1 order by ts.start_ms asc, ts.id asc`,
+          [meetingId]
+        ),
+        selectSpeakers(client, meetingId),
+      ])
+
+      return {
+        meetingId,
+        version: Number(meeting.transcript_version ?? 0),
+        segments: (segmentsResult.rows as TranscriptRow[]).map(mapTranscriptRow),
+        speakers: speakerRows
+          .filter((row) => typeof row.id === "string" && typeof row.label === "string")
+          .map((row) => mapSpeaker(row)),
+        language: meeting.language ?? undefined,
+      }
     },
 
-    async getTranscriptVersion() {
-      return notImplementedM4("getTranscriptVersion")
+    async getTranscriptVersion(meetingId) {
+      const values: unknown[] = [meetingId]
+      const result = await client.query(
+        `select m.transcript_version from meetings m where m.id = $1 and ${scoped("m", values)}`,
+        values
+      )
+      const row = result.rows[0] as { transcript_version: number | null } | undefined
+
+      return row ? Number(row.transcript_version ?? 0) : undefined
     },
 
-    async updateTranscriptSegment() {
-      return notImplementedM4("updateTranscriptSegment")
+    async updateTranscriptSegment(meetingId, segmentId, patch) {
+      return withTransaction(client, async (tx) => {
+        const currentVersion = await lockMeetingForEdit(tx, meetingId, segmentId)
+        const current = await lockSegment(tx, meetingId, segmentId)
+
+        if ((current.revision ?? 0) !== patch.expectedRevision) {
+          throw new TranscriptConflictError(current)
+        }
+
+        let targetSpeakerId: string | undefined
+
+        if (patch.speakerId !== undefined) {
+          const found = await tx.query(
+            `select id from speakers where id = $1 and meeting_id = $2`,
+            [patch.speakerId, meetingId]
+          )
+
+          if (!found.rows.length) throw new TranscriptSpeakerNotFoundError(patch.speakerId)
+          targetSpeakerId = patch.speakerId
+        }
+
+        const textChanged = patch.text !== undefined && patch.text !== current.text
+        const speakerChanged =
+          patch.newSpeakerName !== undefined ||
+          (targetSpeakerId !== undefined && targetSpeakerId !== current.speakerId)
+
+        if (!textChanged && !speakerChanged) return { segment: current, version: currentVersion }
+
+        if (patch.newSpeakerName !== undefined) {
+          const labels = (
+            await tx.query(`select label from speakers where meeting_id = $1`, [meetingId])
+          ).rows.map((row) => String((row as { label: string }).label))
+
+          targetSpeakerId = createId("speaker")
+          await tx.query(
+            `
+              insert into speakers (
+                id, meeting_id, label, workspace_id, source, display_name,
+                mapping_status, confirmed_at, confirmed_by_user_id,
+                talk_time_ms, word_count, segment_count
+              )
+              values ($1, $2, $3, $4, 'manual', $5, 'confirmed', now(), $6, 0, 0, 0)
+            `,
+            [
+              targetSpeakerId,
+              meetingId,
+              nextSpeakerLabel(labels),
+              workspaceId,
+              patch.newSpeakerName,
+              patch.actorUserId ?? null,
+            ]
+          )
+        }
+
+        let segmentIds = [segmentId]
+
+        if (speakerChanged && patch.scope === "turn" && current.turnIndex !== undefined) {
+          const turn = await tx.query(
+            `
+              select id from transcript_segments
+              where meeting_id = $1 and turn_index = $2 and speaker_id is not distinct from $3
+            `,
+            [meetingId, current.turnIndex, current.speakerId ?? null]
+          )
+
+          segmentIds = [
+            ...new Set([segmentId, ...turn.rows.map((row) => (row as { id: string }).id)]),
+          ]
+        }
+
+        // Prior state of every changed segment (undo).
+        await tx.query(
+          `
+            insert into transcript_segment_revisions (
+              id, workspace_id, meeting_id, segment_id, revision, text, words,
+              speaker_id, source, created_by_user_id
+            )
+            select u.revision_id, $1, ts.meeting_id, ts.id, ts.revision, ts.text, ts.words,
+                   ts.speaker_id, ts.source, $3
+            from unnest($4::text[], $5::text[]) as u(revision_id, segment_id)
+            join transcript_segments ts on ts.id = u.segment_id and ts.meeting_id = $2
+          `,
+          [
+            workspaceId,
+            meetingId,
+            patch.actorUserId ?? null,
+            segmentIds.map(() => createId("rev")),
+            segmentIds,
+          ]
+        )
+
+        const words = textChanged
+          ? (patch.words ??
+            realignWords(current.words, patch.text as string, {
+              startMs: current.startMs,
+              endMs: current.endMs,
+            }))
+          : undefined
+
+        await tx.query(
+          `
+            update transcript_segments
+            set text = case when id = $3 and $4::boolean then $5 else text end,
+                words = case when id = $3 and $4::boolean then $6::jsonb else words end,
+                speaker_id = coalesce($7, speaker_id),
+                source = 'edited',
+                revision = revision + 1,
+                edited_at = now(),
+                edited_by_user_id = $8
+            where meeting_id = $1 and id = any($2::text[])
+          `,
+          [
+            meetingId,
+            segmentIds,
+            segmentId,
+            textChanged,
+            textChanged ? patch.text : null,
+            words ? JSON.stringify(encodeWords(words, current.language)) : null,
+            speakerChanged ? (targetSpeakerId ?? null) : null,
+            patch.actorUserId ?? null,
+          ]
+        )
+
+        if (speakerChanged) await recomputeSpeakerDerived(tx, meetingId)
+        await pruneRevisions(tx, meetingId, segmentIds)
+
+        const version = await bumpTranscriptVersion(tx, meetingId)
+
+        return mutationResult(tx, meetingId, segmentId, speakerChanged, version)
+      })
     },
 
-    async undoTranscriptSegment() {
-      return notImplementedM4("undoTranscriptSegment")
+    async undoTranscriptSegment(meetingId, segmentId, options) {
+      return withTransaction(client, async (tx) => {
+        await lockMeetingForEdit(tx, meetingId, segmentId)
+
+        const current = await lockSegment(tx, meetingId, segmentId)
+
+        if ((current.revision ?? 0) !== options.expectedRevision) {
+          throw new TranscriptConflictError(current)
+        }
+
+        const revisionResult = await tx.query(
+          `
+            select ${REVISION_COLUMNS}
+            from transcript_segment_revisions
+            where meeting_id = $1 and workspace_id = $2 and segment_id = $3
+              and reverted_at is null
+            order by revision desc, created_at desc
+            limit 1
+            for update
+          `,
+          [meetingId, workspaceId, segmentId]
+        )
+        const revision = revisionResult.rows[0] as RevisionRow | undefined
+
+        if (!revision) throw new NothingToUndoError(segmentId)
+
+        // A speaker merged away since keeps the segment on its current speaker.
+        const restoredSpeaker = revision.speaker_id
+          ? (
+              await tx.query(`select id from speakers where id = $1 and meeting_id = $2`, [
+                revision.speaker_id,
+                meetingId,
+              ])
+            ).rows.length
+            ? revision.speaker_id
+            : undefined
+          : undefined
+        const speakerChanged =
+          restoredSpeaker !== undefined && restoredSpeaker !== current.speakerId
+
+        await tx.query(
+          `
+            update transcript_segments
+            set text = $3,
+                words = $4::jsonb,
+                speaker_id = coalesce($5, speaker_id),
+                source = $6,
+                revision = revision + 1,
+                edited_at = now(),
+                edited_by_user_id = $7
+            where id = $2 and meeting_id = $1
+          `,
+          [
+            meetingId,
+            segmentId,
+            revision.text,
+            revision.words === null || revision.words === undefined
+              ? null
+              : typeof revision.words === "string"
+                ? revision.words
+                : JSON.stringify(revision.words),
+            restoredSpeaker ?? null,
+            revision.source,
+            options.actorUserId ?? null,
+          ]
+        )
+        await tx.query(
+          `
+            update transcript_segment_revisions
+            set reverted_at = now()
+            where id = $1 and meeting_id = $2 and workspace_id = $3
+          `,
+          [revision.id, meetingId, workspaceId]
+        )
+
+        if (speakerChanged) await recomputeSpeakerDerived(tx, meetingId)
+
+        const version = await bumpTranscriptVersion(tx, meetingId)
+
+        return mutationResult(tx, meetingId, segmentId, speakerChanged, version)
+      })
     },
 
-    async listTranscriptRevisions() {
-      return notImplementedM4("listTranscriptRevisions")
+    async listTranscriptRevisions(meetingId, segmentId) {
+      await assertMeetingInScope(client, meetingId)
+
+      const result = await client.query(
+        `
+          select ${REVISION_COLUMNS}
+          from transcript_segment_revisions
+          where meeting_id = $1 and workspace_id = $2 and segment_id = $3
+          order by revision desc, created_at desc
+        `,
+        [meetingId, workspaceId, segmentId]
+      )
+
+      return (result.rows as RevisionRow[]).map(mapRevision)
     },
 
-    async renameMeeting() {
-      return notImplementedM4("renameMeeting")
+    async renameMeeting(id, title) {
+      const row = await updateScopedMeeting(client, id, "title = $2", [title])
+
+      if (!row) throw new Error(`Meeting not found: ${id}`)
+      return mapMeetingRow(row)
     },
 
-    async deleteMeeting() {
-      return notImplementedM4("deleteMeeting")
+    async deleteMeeting(id): Promise<DeletedMeeting | undefined> {
+      return withTransaction(client, async (tx) => {
+        const values: unknown[] = [id]
+        const locked = await tx.query(
+          `
+            select m.id, m.title
+            from meetings m
+            where m.id = $1 and ${scoped("m", values)}
+            for update of m
+          `,
+          values
+        )
+        const meeting = locked.rows[0] as { title: string } | undefined
+
+        if (!meeting) return undefined
+
+        const assets = (
+          await tx.query(
+            `
+              select storage_key, peaks_storage_key
+              from media_assets
+              where meeting_id = $1 and workspace_id = $2
+            `,
+            [id, workspaceId]
+          )
+        ).rows as Array<{ storage_key: string | null; peaks_storage_key: string | null }>
+        const deleteValues: unknown[] = [id]
+
+        // Child rows cascade (migration 021); jobs and ai_runs keep a null meeting.
+        await tx.query(
+          `delete from meetings m where m.id = $1 and ${scoped("m", deleteValues)}`,
+          deleteValues
+        )
+
+        return {
+          storageKeys: [
+            ...new Set(
+              assets.flatMap((asset) =>
+                [asset.storage_key, asset.peaks_storage_key].filter((key): key is string =>
+                  Boolean(key)
+                )
+              )
+            ),
+          ],
+          title: meeting.title,
+          assetCount: assets.length,
+        }
+      })
     },
 
-    async updateMediaAssetPreparation() {
-      return notImplementedM4("updateMediaAssetPreparation")
+    async updateMediaAssetPreparation(assetId, patch) {
+      const values: unknown[] = [assetId, workspaceId]
+      const sets: string[] = []
+
+      if (patch.durationMs !== undefined) {
+        sets.push(
+          `duration_ms = ${pushValue(values, patch.durationMs === null ? null : Math.round(patch.durationMs))}::int`
+        )
+      }
+      if (patch.peaksStorageKey !== undefined) {
+        sets.push(`peaks_storage_key = ${pushValue(values, patch.peaksStorageKey)}`)
+      }
+      if (patch.preparedAt !== undefined) {
+        sets.push(`prepared_at = ${pushValue(values, patch.preparedAt)}::timestamptz`)
+      }
+      if (patch.prepareError !== undefined) {
+        sets.push(`prepare_error = ${pushValue(values, patch.prepareError)}`)
+      }
+      if (!sets.length) sets.push("kind = a.kind")
+
+      const result = await client.query(
+        `
+          update media_assets a
+          set ${sets.join(", ")}
+          where a.id = $1 and a.workspace_id = $2
+            and exists (
+              select 1 from meetings m
+              where m.id = a.meeting_id and ${scoped("m", values)}
+            )
+          returning ${MEDIA_ASSET_COLUMNS}
+        `,
+        values
+      )
+      const row = result.rows[0] as MediaAssetRow | undefined
+
+      if (!row) throw new Error(`Media asset not found: ${assetId}`)
+      return mapMediaAsset(row)
     },
 
-    async setMeetingDurationMs() {
-      return notImplementedM4("setMeetingDurationMs")
+    async setMeetingDurationMs(meetingId, durationMs, source) {
+      const values: unknown[] = [meetingId, Math.round(durationMs)]
+      // A transcript end never overrides a probed media duration.
+      const transcriptGuard =
+        source === "transcript"
+          ? `and not exists (
+               select 1 from media_assets a
+               where a.meeting_id = m.id and a.workspace_id = m.workspace_id
+                 and a.duration_ms is not null
+             )`
+          : ""
+      const result = await client.query(
+        `
+          update meetings m
+          set duration_ms = $2::int
+          where m.id = $1 and ${scoped("m", values)}
+          ${transcriptGuard}
+          returning m.id
+        `,
+        values
+      )
+
+      if (!result.rows.length && source === "media") {
+        throw new Error(`Meeting not found: ${meetingId}`)
+      }
     },
 
     async upsertMeetingIntelligence(
@@ -2484,7 +3422,7 @@ export function createPostgresMeetingRepository(
 
     async searchMeetings(query: string, options: { limit?: number } = {}) {
       return (
-        await this.listMeetingsPage({
+        await listFullMeetingsPage({
           query,
           limit: options.limit,
           sort: "recent",
@@ -2718,15 +3656,7 @@ export function createPostgresMeetingRepository(
           createId("share"),
           input.meetingId,
           crypto.randomUUID().replaceAll("-", ""),
-          JSON.stringify(
-            input.includedSections ?? [
-              "summary",
-              "decisions",
-              "action_items",
-              "transcript",
-              "participants",
-            ]
-          ),
+          JSON.stringify(input.includedSections ?? DEFAULT_SHARE_SECTIONS),
           input.createdBy ?? null,
         ]
       )

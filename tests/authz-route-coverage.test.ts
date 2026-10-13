@@ -138,6 +138,15 @@ describe("API route authz coverage", () => {
       "meetings/[id]/media GET": "meeting:read",
       "meetings/[id]/media HEAD": "meeting:read",
       "meetings/[id]/media/peaks GET": "meeting:read",
+      // M4 meeting detail / rename / delete (delete also checks canManageMeeting).
+      "meetings/[id] GET": "meeting:read",
+      "meetings/[id] PATCH": "meeting:write",
+      "meetings/[id] DELETE": "meeting:read",
+      // M4 transcript read, edit, undo, revisions.
+      "meetings/[id]/transcript GET": "meeting:read",
+      "meetings/[id]/transcript/segments/[segmentId] PATCH": "meeting:write",
+      "meetings/[id]/transcript/segments/[segmentId]/undo POST": "meeting:write",
+      "meetings/[id]/transcript/segments/[segmentId]/revisions GET": "meeting:read",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -156,6 +165,9 @@ describe("API route authz coverage", () => {
     const notion = routes.find((route) => route.route === "meetings/[id]/export/notion")
     expect(notion?.source).toMatch(/can\(ctx\.role, "integrations:manage"\)/)
     expect(notion?.source).not.toMatch(/process\.env\.NOTION_TOKEN/)
+    // DELETE needs owner/admin on top of meeting:read.
+    const detail = routes.find((route) => route.route === "meetings/[id]")
+    expect(detail?.source).toMatch(/canManageMeeting\(ctx, meeting\)[\s\S]*permission: "meeting:manage"/)
   })
 
   it("gates the public share media routes and never presigns media (M4)", () => {

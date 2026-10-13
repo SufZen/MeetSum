@@ -45,7 +45,8 @@ export function getMeetingCaptureReadiness(meeting: MeetingRecord): CaptureReadi
     (artifact) => artifact.artifactType === "smart_notes"
   )
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
-  const hasTranscript = Boolean(meeting.transcript?.length)
+  // M4: the meeting detail carries a segment count instead of the transcript.
+  const hasTranscript = Boolean(meeting.transcriptSegmentCount ?? meeting.transcript?.length)
   const hasSummary = Boolean(meeting.summary?.overview)
   const hasImportableSource =
     hasMedia ||

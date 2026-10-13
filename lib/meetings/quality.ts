@@ -5,7 +5,22 @@ import type {
 } from "@/lib/meetings/repository"
 import { isGenericSpeakerName } from "@/lib/meetings/speakers/names"
 
-function averageTranscriptConfidence(meeting: MeetingRecord) {
+/**
+ * Transcript facts the warnings need, computed in SQL when the transcript
+ * itself is not loaded (M4 meeting detail without segments).
+ */
+export type TranscriptQualityStats = {
+  segmentCount: number
+  averageConfidence?: number
+  /** Every segment's speaker reads "Google Meet smart notes". */
+  allSmartNotesSpeakers: boolean
+  /** Every segment's speaker is generic ("Speaker 2", "Speaker", smart notes). */
+  allGenericSpeakers: boolean
+}
+
+function averageTranscriptConfidence(meeting: MeetingRecord, stats?: TranscriptQualityStats) {
+  if (!meeting.transcript && stats) return stats.averageConfidence
+
   const values = (meeting.transcript ?? [])
     .map((segment) => segment.confidence)
     .filter((value): value is number => typeof value === "number")
@@ -19,13 +34,18 @@ function latestTranscriptionRun(meeting: MeetingRecord): AiRunRecord | undefined
   return (meeting.aiRuns ?? []).find((run) => run.task === "audio.transcribe")
 }
 
-function hasOnlySmartNotesSource(meeting: MeetingRecord) {
+function hasOnlySmartNotesSource(meeting: MeetingRecord, stats?: TranscriptQualityStats) {
   const artifacts =
     meeting.meetConferenceRecords?.flatMap((record) => record.artifacts) ?? []
   const hasSmartNotes = artifacts.some(
     (artifact) => artifact.artifactType === "smart_notes"
   )
   const hasMedia = Boolean(meeting.mediaAssets?.length)
+
+  if (!meeting.transcript && stats) {
+    return hasSmartNotes && !hasMedia && stats.segmentCount > 0 && stats.allSmartNotesSpeakers
+  }
+
   const transcript = meeting.transcript ?? []
 
   return (
@@ -39,7 +59,7 @@ function hasOnlySmartNotesSource(meeting: MeetingRecord) {
 /** Speakers holding at least this share of talk time must be named. */
 const GENERIC_SPEAKER_MIN_SHARE = 0.1
 
-function hasGenericSpeakers(meeting: MeetingRecord) {
+function hasGenericSpeakers(meeting: MeetingRecord, stats?: TranscriptQualityStats) {
   const speakers = meeting.speakers ?? []
 
   // M3: any speaker with ≥10% of talk time that is neither confirmed nor
@@ -55,6 +75,8 @@ function hasGenericSpeakers(meeting: MeetingRecord) {
     })
   }
 
+  if (!meeting.transcript && stats) return stats.segmentCount >= 2 && stats.allGenericSpeakers
+
   const transcript = meeting.transcript ?? []
 
   if (transcript.length < 2) return false
@@ -64,11 +86,16 @@ function hasGenericSpeakers(meeting: MeetingRecord) {
   )
 }
 
+/**
+ * Quality warnings of a meeting. `stats` stands in for the transcript when
+ * the record was loaded without segments.
+ */
 export function deriveMeetingQualityWarnings(
-  meeting: MeetingRecord
+  meeting: MeetingRecord,
+  stats?: TranscriptQualityStats
 ): MeetingQualityWarning[] {
   const warnings: MeetingQualityWarning[] = []
-  const confidence = averageTranscriptConfidence(meeting)
+  const confidence = averageTranscriptConfidence(meeting, stats)
   const transcriptionRun = latestTranscriptionRun(meeting)
   const fallbackUsed = transcriptionRun?.metadata.fallbackUsed === true
   const attemptedProvider =
@@ -76,7 +103,7 @@ export function deriveMeetingQualityWarnings(
       ? transcriptionRun.metadata.attemptedProvider
       : undefined
 
-  if (hasOnlySmartNotesSource(meeting)) {
+  if (hasOnlySmartNotesSource(meeting, stats)) {
     warnings.push({
       code: "smart_notes_only",
       severity: "info",
@@ -106,7 +133,7 @@ export function deriveMeetingQualityWarnings(
     })
   }
 
-  if (hasGenericSpeakers(meeting)) {
+  if (hasGenericSpeakers(meeting, stats)) {
     warnings.push({
       code: "no_speaker_diarization",
       severity: "info",

@@ -182,3 +182,41 @@ describe("speaker naming warning (M3 speakers)", () => {
     )
   })
 })
+
+describe("quality warnings from segment stats (M4 detail without transcript)", () => {
+  const base: MeetingRecord = {
+    id: "m-stats",
+    title: "Stats",
+    source: "upload",
+    language: "he",
+    status: "completed",
+    retention: "audio",
+    startedAt: "2026-10-01T10:00:00.000Z",
+    participants: [],
+  }
+
+  it("uses stats in place of the transcript", () => {
+    const codes = deriveMeetingQualityWarnings(base, {
+      segmentCount: 4,
+      averageConfidence: 0.5,
+      allSmartNotesSpeakers: false,
+      allGenericSpeakers: true,
+    }).map((warning) => warning.code)
+
+    expect(codes).toEqual(["weak_transcript_confidence", "no_speaker_diarization"])
+  })
+
+  it("ignores stats when the transcript is loaded", () => {
+    expect(
+      deriveMeetingQualityWarnings(
+        { ...base, transcript: [] },
+        {
+          segmentCount: 4,
+          averageConfidence: 0.1,
+          allSmartNotesSpeakers: false,
+          allGenericSpeakers: true,
+        }
+      )
+    ).toEqual([])
+  })
+})

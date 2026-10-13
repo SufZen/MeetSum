@@ -171,7 +171,15 @@ program
   .command("export")
   .option("--target <target>", "realizeos|json|markdown", "json")
   .action(async (options) => {
-    const { meetings } = await request("/api/meetings")
+    const { meetings: items } = await request("/api/meetings")
+    // M4: list items are lightweight; summaries come from the meeting detail.
+    const meetings = await Promise.all(
+      items.map((item) =>
+        request(`/api/meetings/${encodeURIComponent(item.id)}`).then(
+          (body) => body.meeting
+        )
+      )
+    )
 
     if (options.target === "markdown") {
       console.log(
