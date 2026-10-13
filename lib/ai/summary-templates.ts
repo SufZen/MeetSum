@@ -1,8 +1,9 @@
 /**
- * Summary template prompt addendums for different meeting types.
- * These are appended to the base summarization prompt to guide the AI
- * toward extracting domain-specific intelligence.
+ * @deprecated Compatibility shim over the M5 template registry
+ * (`lib/ai/templates`). The six legacy keys keep their English labels and
+ * addenda; new code should use `resolveTemplate` and the section specs.
  */
+import { BUILT_IN_TEMPLATES } from "@/lib/ai/templates/builtins"
 
 export type SummaryTemplate =
   | "general"
@@ -13,78 +14,15 @@ export type SummaryTemplate =
   | "legal"
 
 export const SUMMARY_TEMPLATE_LABELS: Record<SummaryTemplate, string> = {
-  general: "General Meeting",
-  sales: "Sales Call",
-  "real-estate": "Real Estate",
-  product: "Product Review",
-  operations: "Operations & Planning",
-  legal: "Legal & Compliance",
+  general: BUILT_IN_TEMPLATES.general.name.en,
+  sales: BUILT_IN_TEMPLATES.sales.name.en,
+  "real-estate": BUILT_IN_TEMPLATES["real-estate"].name.en,
+  product: BUILT_IN_TEMPLATES.product.name.en,
+  operations: BUILT_IN_TEMPLATES.operations.name.en,
+  legal: BUILT_IN_TEMPLATES.legal.name.en,
 }
 
+/** English prompt addendum of a legacy template ("" for general/unknown). */
 export function getSummaryTemplatePrompt(template: SummaryTemplate): string {
-  switch (template) {
-    case "sales":
-      return [
-        "This is a sales call. Pay special attention to:",
-        "- Lead qualification signals (budget, authority, need, timeline)",
-        "- Objections raised and responses given",
-        "- Next steps and follow-up commitments",
-        "- Pricing discussed or quoted",
-        "- Competitor mentions",
-        "- Deal stage progression or regression signals",
-        "Structure action items as sales follow-ups with clear owners and deadlines.",
-      ].join("\n")
-
-    case "real-estate":
-      return [
-        "This is a real estate meeting. Pay special attention to:",
-        "- Property details (address, price, size, condition)",
-        "- Client requirements and preferences",
-        "- Financial terms (mortgage, commission, closing costs)",
-        "- Legal obligations and deadlines (inspection, closing date)",
-        "- Regulatory or zoning considerations",
-        "- Counterparty positions and negotiation points",
-        "Preserve all monetary amounts, dates, and property identifiers exactly.",
-      ].join("\n")
-
-    case "product":
-      return [
-        "This is a product review or planning meeting. Pay special attention to:",
-        "- Feature decisions and priorities",
-        "- Technical architecture or design decisions",
-        "- Sprint/milestone commitments",
-        "- Bug reports or quality issues discussed",
-        "- User feedback referenced",
-        "- Dependencies and blockers identified",
-        "Structure action items as development tasks with assignees.",
-      ].join("\n")
-
-    case "operations":
-      return [
-        "This is an operations or planning meeting. Pay special attention to:",
-        "- Process improvements discussed",
-        "- Resource allocation decisions",
-        "- Timeline and milestone adjustments",
-        "- Risk identification and mitigation plans",
-        "- Budget or cost discussions",
-        "- Cross-team dependencies",
-        "Structure action items as operational tasks with clear deadlines.",
-      ].join("\n")
-
-    case "legal":
-      return [
-        "This is a legal or compliance meeting. Pay special attention to:",
-        "- Regulatory requirements discussed",
-        "- Contract terms and conditions",
-        "- Compliance deadlines and obligations",
-        "- Risk assessments and liability considerations",
-        "- Document review status",
-        "- Approval or sign-off requirements",
-        "Preserve all legal terms, dates, and party names exactly. Flag any uncertainty clearly.",
-      ].join("\n")
-
-    case "general":
-    default:
-      return ""
-  }
+  return BUILT_IN_TEMPLATES[template]?.promptAddendum.en ?? ""
 }

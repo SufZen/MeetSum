@@ -50,6 +50,15 @@ export type LlmStructuredRequest<T> = {
   validate?: (value: T) => string[]
   signal?: AbortSignal
   batch?: boolean
+  /**
+   * Provider preference; defaults to the workspace `llmProviderPreference`
+   * (then `MEETSUM_LLM_PROVIDER_DEFAULT`, then `auto`).
+   */
+  preference?: "auto" | "anthropic" | "gemini"
+  /** Write `ai_runs` rows (default true). */
+  record?: boolean
+  /** Extra `ai_runs.metadata` (e.g. `languageCheck`). */
+  runMetadata?: Record<string, unknown>
 }
 
 export type LlmErrorKind =
@@ -99,7 +108,7 @@ export class LlmError extends Error {
 
 export type LlmProvider = {
   id: LlmProviderId
-  isConfigured(env?: NodeJS.ProcessEnv): boolean
+  isConfigured(env?: Record<string, string | undefined>): boolean
   generate<T>(
     req: LlmStructuredRequest<T>,
     model: string
@@ -110,4 +119,12 @@ export type LlmProvider = {
 export type LlmStatus = {
   providers: Array<{ id: LlmProviderId; configured: boolean }>
   routes: Partial<Record<LlmTask, { provider: LlmProviderId; model: string }[]>>
+  /** Preference the routes were resolved with. */
+  preference?: "auto" | "anthropic" | "gemini"
+  /** `GEMINI_TIER` (free tier content may be used for training/review). */
+  geminiTier?: "free" | "paid"
+  /** Configuration warnings to show in health/ops/settings. */
+  warnings?: string[]
+  /** True when no provider is configured (heuristic summaries only). */
+  heuristicOnly?: boolean
 }

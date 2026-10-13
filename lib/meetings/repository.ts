@@ -507,6 +507,7 @@ export type MeetingQualityWarning = {
     | "weak_transcript_confidence"
     | "no_speaker_diarization"
     | "task_missing_owner_or_due_date"
+    | "summary_language_mismatch"
   severity: "info" | "warning"
   title: string
   detail: string

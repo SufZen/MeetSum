@@ -1,0 +1,28 @@
+{
+  "_synthetic": true,
+  "meeting": {
+    "id": "meet_fixture_he",
+    "title": "פגישה ללא שם",
+    "source": "upload",
+    "language": "he",
+    "status": "summarizing",
+    "retention": "audio",
+    "startedAt": "2026-10-15T07:00:00.000Z",
+    "participants": ["dana@example.com", "yoav@example.com"],
+    "workspaceId": "ws_fixture",
+    "speakers": [
+      { "id": "spk_dana", "meetingId": "meet_fixture_he", "label": "Speaker 1", "displayName": "דנה", "mappingStatus": "confirmed", "source": "asr", "talkTimeMs": 0, "wordCount": 0, "segmentCount": 0 },
+      { "id": "spk_yoav", "meetingId": "meet_fixture_he", "label": "Speaker 2", "displayName": "יואב", "mappingStatus": "confirmed", "source": "asr", "talkTimeMs": 0, "wordCount": 0, "segmentCount": 0 }
+    ],
+    "transcript": [
+      { "id": "seg_01", "speaker": "Speaker 1", "speakerId": "spk_dana", "startMs": 2000, "endMs": 15000, "text": "בוקר טוב, נתחיל בעדכון על המעבר ל-Supabase." },
+      { "id": "seg_02", "speaker": "Speaker 2", "speakerId": "spk_yoav", "startMs": 16000, "endMs": 40000, "text": "ה-API כמעט מוכן, נשארו שתי בדיקות ב-staging." },
+      { "id": "seg_03", "speaker": "Speaker 1", "speakerId": "spk_dana", "startMs": 300000, "endMs": 330000, "text": "סיכמנו שמעבירים את כל הלקוחות עד סוף החודש." },
+      { "id": "seg_04", "speaker": "Speaker 2", "speakerId": "spk_yoav", "startMs": 600000, "endMs": 640000, "text": "אני אשלח את הצעת המחיר ללקוח עד יום ראשון." },
+      { "id": "seg_05", "speaker": "Speaker 1", "speakerId": "spk_dana", "startMs": 900000, "endMs": 930000, "text": "התקציב לרבעון הוא 120,000 ש״ח." },
+      { "id": "seg_06", "speaker": "Speaker 2", "speakerId": "spk_yoav", "startMs": 1200000, "endMs": 1240000, "text": "יש סיכון שהספק לא יעמוד בזמנים." },
+      { "id": "seg_07", "speaker": "Speaker 1", "speakerId": "spk_dana", "startMs": 1800000, "endMs": 1830000, "text": "עוד לא ברור מי בודק את ה-PR של ה-billing." },
+      { "id": "seg_08", "speaker": "Speaker 2", "speakerId": "spk_yoav", "startMs": 2400000, "endMs": 2430000, "text": "טוב, נסכם ונקבע פגישת המשך בשבוע הבא." }
+    ]
+  }
+}

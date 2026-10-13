@@ -13,8 +13,30 @@ export type SectionSpec = {
   title: LocalizedText
   kind: SectionKind
   instructions: string
+  /** Built-ins: instructions per output language (fallback `instructions`). */
+  localizedInstructions?: LocalizedText
   maxItems?: number
   required: boolean
+}
+
+/**
+ * Section keys filled from the core summary fields rather than by the model:
+ * `overview` (text), the item lists, and `action_items` (the meeting's tasks).
+ */
+export const RESERVED_SECTION_KEYS = [
+  "overview",
+  "decisions",
+  "risks",
+  "open_questions",
+  "commitments",
+  "next_steps",
+  "action_items",
+] as const
+
+export type ReservedSectionKey = (typeof RESERVED_SECTION_KEYS)[number]
+
+export function isReservedSectionKey(key: string): key is ReservedSectionKey {
+  return (RESERVED_SECTION_KEYS as readonly string[]).includes(key)
 }
 
 export type SummaryTemplateDef = {
