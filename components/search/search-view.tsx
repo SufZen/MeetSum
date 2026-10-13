@@ -216,7 +216,15 @@ function SearchResultsArea({
   if (status === "error") {
     return (
       <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger-text">
-        <span>{t.searchError}</span>
+        <span>
+          {results.error?.kind === "rate_limited"
+            ? results.error.retryAfterSec
+              ? formatMessage(t.searchRateLimitedWait, { seconds: results.error.retryAfterSec })
+              : t.searchRateLimited
+            : results.error?.kind === "unavailable"
+              ? t.searchUnavailable
+              : t.searchError}
+        </span>
         <Button size="sm" variant="secondary" onClick={onRetry}>
           {t.searchRetry}
         </Button>

@@ -12,8 +12,42 @@ import type { SearchMeetingGroup, SearchResponse } from "@/lib/search/types"
 
 export type SearchStatus = "idle" | "loading" | "ready" | "error"
 
+/** Why the search failed: shown as a localized message (429 is not a connection problem). */
+export type SearchError = { kind: "rate_limited"; retryAfterSec?: number } | { kind: "unavailable" } | { kind: "failed" }
+
+export class SearchHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfterSec: number | undefined
+  ) {
+    super(`search ${status}`)
+    this.name = "SearchHttpError"
+  }
+}
+
+function retryAfterSeconds(value: string | null): number | undefined {
+  if (!value) return undefined
+
+  const seconds = Number(value)
+
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds)
+
+  const date = Date.parse(value)
+
+  return Number.isNaN(date) ? undefined : Math.max(0, Math.ceil((date - Date.now()) / 1000))
+}
+
+export function searchErrorOf(error: unknown): SearchError {
+  if (error instanceof SearchHttpError) {
+    if (error.status === 429) return error.retryAfterSec !== undefined ? { kind: "rate_limited", retryAfterSec: error.retryAfterSec } : { kind: "rate_limited" }
+    if (error.status === 503) return { kind: "unavailable" }
+  }
+  return { kind: "failed" }
+}
+
 export type SearchResultsState = {
   status: SearchStatus
+  error?: SearchError
   groups: SearchMeetingGroup[]
   response?: SearchResponse
   nextCursor: string | null
@@ -38,7 +72,7 @@ export async function fetchSearch(
   })
   const response = await fetch(`/api/search?${params}`, { signal: options.signal })
 
-  if (!response.ok) throw new Error(`search ${response.status}`)
+  if (!response.ok) throw new SearchHttpError(response.status, retryAfterSeconds(response.headers.get("retry-after")))
 
   return (await response.json()) as SearchResponse
 }
@@ -85,8 +119,8 @@ export function useSearch(state: SearchUrlState) {
           loadMoreFailed: false,
         })
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setResults({ ...IDLE, status: "error" })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setResults({ ...IDLE, status: "error", error: searchErrorOf(error) })
       })
 
     return () => controller.abort()

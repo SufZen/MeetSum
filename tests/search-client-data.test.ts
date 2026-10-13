@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { threadsQuery } from "@/components/ask/use-threads"
 import { EMPTY_FACETS, readFacets } from "@/components/search/use-facets"
-import { appendGroups, fetchSearch } from "@/components/search/use-search"
+import { appendGroups, fetchSearch, SearchHttpError, searchErrorOf } from "@/components/search/use-search"
 import { EMPTY_SEARCH_STATE } from "@/lib/client/search-url"
 import type { SearchMeetingGroup } from "@/lib/search/types"
 
@@ -38,6 +38,18 @@ describe("search client data", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 400 })))
 
     await expect(fetchSearch({ ...EMPTY_SEARCH_STATE, q: "x" }, {})).rejects.toThrow()
+  })
+
+  it("reports a 429 as rate_limited with the Retry-After seconds (not a connection problem)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 429, headers: { "Retry-After": "12" } })))
+
+    const error = await fetchSearch({ ...EMPTY_SEARCH_STATE, q: "x" }, {}).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(SearchHttpError)
+    expect(searchErrorOf(error)).toEqual({ kind: "rate_limited", retryAfterSec: 12 })
+    expect(searchErrorOf(new SearchHttpError(429, undefined))).toEqual({ kind: "rate_limited" })
+    expect(searchErrorOf(new SearchHttpError(503, undefined))).toEqual({ kind: "unavailable" })
+    expect(searchErrorOf(new TypeError("fetch failed"))).toEqual({ kind: "failed" })
   })
 
   it("appends the next page without repeating meetings", () => {
