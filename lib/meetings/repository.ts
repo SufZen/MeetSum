@@ -23,6 +23,15 @@ import { getMeetingDurationMs } from "@/lib/meetings/duration"
 import { canViewMeeting } from "@/lib/meetings/visibility"
 import { DEFAULT_SHARE_SECTIONS } from "@/lib/sharing/share-sections"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
+import { parseDueDate, dueDateFromDueOn } from "@/lib/tasks/due-date"
+import {
+  hasOwnerPatch,
+  isContentPatch,
+  isDateOnly,
+  ownerTextOf,
+  resolveDuePatch,
+} from "@/lib/tasks/patch"
+import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 import {
   buildMeetingIntelligence,
   type MeetingIntelligence,
@@ -64,9 +73,14 @@ export type ActionItem = {
   /** Raw due phrase, e.g. "עד יום ראשון" (M5). */
   dueText?: string
   dueSource?: ActionItemDueSource
+  /** Confidence of `dueOn` (parser rule or capped AI date); not a column. */
+  dueConfidence?: number
   sourceSegmentId?: string
   meetingId?: string
   workspaceId?: string
+  /** Who created a user task (M5 `created_by_user_id`). */
+  createdByUserId?: string
+  createdAt?: string
 }
 
 export type ActionItemDueSource = "parser" | "ai" | "user"
@@ -376,6 +390,12 @@ export type MeetingShare = {
   createdBy?: string
   createdAt: string
   updatedAt: string
+  /**
+   * M5: `meeting` (default) or `clip`. A clip token never resolves as a
+   * meeting share and never makes the meeting link-visible.
+   */
+  scope?: "meeting" | "clip"
+  clipId?: string
 }
 
 export type ExportRecord = {
@@ -1133,6 +1153,11 @@ export function createInMemoryMeetingDatabase(
   }
 }
 
+/** True for meeting-scope shares; clip tokens never open a meeting (M5). */
+export function isMeetingScopeShare(share: Pick<MeetingShare, "scope">): boolean {
+  return (share.scope ?? "meeting") === "meeting"
+}
+
 function favoriteKey(userId: string, meetingId: string) {
   return `${userId}\u0000${meetingId}`
 }
@@ -1621,12 +1646,36 @@ export function createInMemoryMeetingRepository(
     return contextWorkspaces.get(id) === workspaceId ? contexts.get(id) : undefined
   }
 
+  /** Latest meeting-scope share (clip shares are Package C's and never count). */
   function latestShare(meetingId: string, activeOnly: boolean) {
     return [...shares.values()]
       .filter(
-        (share) => share.meetingId === meetingId && (!activeOnly || !share.revoked)
+        (share) =>
+          share.meetingId === meetingId &&
+          isMeetingScopeShare(share) &&
+          (!activeOnly || !share.revoked)
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  }
+
+  /** Writes a meeting's action items to its summary and intelligence. */
+  function writeActionItems(meeting: MeetingRecord, actionItems: ActionItem[]) {
+    const current = meetings.get(meeting.id) ?? meeting
+
+    meetings.set(meeting.id, {
+      ...current,
+      summary: {
+        overview: current.summary?.overview ?? "",
+        decisions: current.summary?.decisions ?? [],
+        actionItems,
+      },
+      intelligence: current.intelligence
+        ? {
+            ...current.intelligence,
+            actionItems: actionItems as MeetingIntelligence["actionItems"],
+          }
+        : undefined,
+    })
   }
 
   function setLinkVisibility(meeting: MeetingRecord) {
@@ -2268,17 +2317,28 @@ export function createInMemoryMeetingRepository(
       intelligence: MeetingIntelligence
     ): Promise<MeetingIntelligence> {
       const meeting = requireVisibleMeeting(meetingId)
+      const meetingWorkspace = meetingWorkspaceId(meeting)
       const existing = meeting.summary?.actionItems ?? []
       const plan = mergeActionItems(existing, intelligence.actionItems, () =>
         createId("act")
       )
+      const stamp = (item: ActionItem): ActionItem => ({
+        ...item,
+        meetingId,
+        workspaceId: meetingWorkspace,
+        createdAt: item.createdAt ?? new Date().toISOString(),
+      })
       const updates = new Map(plan.update.map((item) => [item.id, item]))
       const kept = new Set(plan.keep.map((item) => item.id))
       const actionItems = [
         ...existing.flatMap((item) =>
-          kept.has(item.id) ? [item] : updates.has(item.id) ? [updates.get(item.id)!] : []
+          kept.has(item.id)
+            ? [item]
+            : updates.has(item.id)
+              ? [stamp({ ...updates.get(item.id)!, createdAt: item.createdAt })]
+              : []
         ),
-        ...plan.insert,
+        ...plan.insert.map(stamp),
       ]
       const persisted: MeetingIntelligence = {
         ...intelligence,
@@ -2306,76 +2366,158 @@ export function createInMemoryMeetingRepository(
         const actionItems = meeting.summary?.actionItems ?? []
         const index = actionItems.findIndex((item) => item.id === id)
 
-        if (index >= 0) {
-          const current = actionItems[index]
-          // M5 Step 0: only the legacy fields are applied (Package B adds the rest).
-          const legacyPatch: Partial<ActionItem> = {}
+        if (index < 0) continue
 
-          if (patch.title !== undefined) legacyPatch.title = patch.title
-          if (patch.owner !== undefined) legacyPatch.owner = patch.owner
-          if (patch.status !== undefined) legacyPatch.status = patch.status
-          if (patch.dueDate !== undefined) legacyPatch.dueDate = patch.dueDate
-          if (patch.priority !== undefined) legacyPatch.priority = patch.priority
-
-          const contentEdited =
-            patch.title !== undefined ||
-            patch.owner !== undefined ||
-            patch.dueDate !== undefined ||
-            patch.priority !== undefined
-          const updatedItem: ActionItem = {
-            ...current,
-            ...legacyPatch,
-            editedByUser: current.editedByUser === true || contentEdited,
-            completedAt:
-              patch.status === "done"
-                ? (current.completedAt ?? new Date().toISOString())
-                : patch.status === "open"
-                  ? undefined
-                  : current.completedAt,
-          }
-          const updatedActionItems = [...actionItems]
-
-          updatedActionItems[index] = updatedItem
-          meetings.set(meeting.id, {
-            ...meeting,
-            summary: meeting.summary
-              ? { ...meeting.summary, actionItems: updatedActionItems }
-              : undefined,
-            intelligence: meeting.intelligence
-              ? {
-                  ...meeting.intelligence,
-                  actionItems: meeting.intelligence.actionItems.map((item) =>
-                    item.id === id ? { ...item, ...updatedItem } : item
-                  ),
-                }
-              : undefined,
-          })
-          return updatedItem
+        const current = actionItems[index]
+        const updatedItem: ActionItem = {
+          ...current,
+          meetingId: meeting.id,
+          workspaceId: meetingWorkspaceId(meeting),
         }
+
+        if (patch.title !== undefined) updatedItem.title = patch.title
+        if (patch.priority !== undefined) updatedItem.priority = patch.priority
+        if (patch.status !== undefined) {
+          updatedItem.status = patch.status
+          updatedItem.completedAt =
+            patch.status === "done"
+              ? (current.completedAt ?? new Date().toISOString())
+              : undefined
+        }
+
+        if (hasOwnerPatch(patch)) {
+          const participant = patch.ownerParticipantId
+            ? ensureParticipants(meeting).find(
+                (candidate) => candidate.id === patch.ownerParticipantId
+              )
+            : undefined
+          const ownerText = ownerTextOf(patch)
+          const speaker = participant
+            ? meetingSpeakerRows(meeting.id).find(
+                (row) => row.participantId === participant.id
+              )
+            : undefined
+
+          updatedItem.ownerText = ownerText ?? undefined
+          updatedItem.ownerParticipantId = participant?.id
+          updatedItem.ownerSpeakerId = speaker?.id
+          updatedItem.ownerUserId = patch.ownerUserId ?? undefined
+          updatedItem.owner = ownerText ?? participant?.name
+        }
+
+        const due = resolveDuePatch(patch, meeting.startedAt, getTaskTimeZone())
+
+        if (due) {
+          updatedItem.dueOn = due.dueOn ?? undefined
+          updatedItem.dueText = due.dueText ?? undefined
+          updatedItem.dueSource = due.dueSource ?? undefined
+          updatedItem.dueDate = due.dueDate ?? undefined
+          updatedItem.dueConfidence = undefined
+        }
+
+        updatedItem.editedByUser = current.editedByUser === true || isContentPatch(patch)
+
+        const updatedActionItems = [...actionItems]
+
+        updatedActionItems[index] = updatedItem
+        writeActionItems(meeting, updatedActionItems)
+        return updatedItem
       }
 
       throw new Error(`Action item not found: ${id}`)
     },
 
-    // M5 Step 0: stubs that throw "not implemented (M5)".
-    async createActionItem() {
-      return notImplementedM5("createActionItem")
+    async createActionItem(meetingId, input, actor): Promise<ActionItem> {
+      const meeting = requireVisibleMeeting(meetingId)
+      const title = input.title.trim()
+
+      if (!title) throw new Error("Action item title is required")
+
+      const participant = input.ownerParticipantId
+        ? ensureParticipants(meeting).find(
+            (candidate) => candidate.id === input.ownerParticipantId
+          )
+        : undefined
+      const speaker = participant
+        ? meetingSpeakerRows(meeting.id).find((row) => row.participantId === participant.id)
+        : undefined
+      const dueText = input.dueText?.trim() || undefined
+      const dueOn =
+        input.dueOn && isDateOnly(input.dueOn)
+          ? input.dueOn
+          : dueText
+            ? parseDueDate(dueText, { anchor: meeting.startedAt, timeZone: getTaskTimeZone() })?.date
+            : undefined
+      const ownerText = input.ownerText?.trim() || undefined
+      const item: ActionItem = {
+        id: createId("act"),
+        title,
+        status: "open",
+        priority: input.priority ?? "normal",
+        kind: "explicit",
+        origin: "user",
+        editedByUser: true,
+        originalTitle: title,
+        owner: ownerText ?? participant?.name,
+        ownerText,
+        ownerParticipantId: participant?.id,
+        ownerSpeakerId: speaker?.id,
+        ownerUserId: input.ownerUserId,
+        dueOn,
+        dueText,
+        dueSource: dueOn || dueText ? "user" : undefined,
+        dueDate: dueOn ? dueDateFromDueOn(dueOn) : undefined,
+        sourceSegmentId: input.sourceSegmentId,
+        sourceStartMs: input.sourceStartMs,
+        meetingId,
+        workspaceId: meetingWorkspaceId(meeting),
+        createdByUserId: actor.userId,
+        createdAt: new Date().toISOString(),
+      }
+
+      writeActionItems(meeting, [...(meeting.summary?.actionItems ?? []), item])
+      return item
     },
 
-    async deleteActionItem() {
-      return notImplementedM5("deleteActionItem")
+    async deleteActionItem(id) {
+      for (const meeting of visibleMeetings()) {
+        const actionItems = meeting.summary?.actionItems ?? []
+
+        if (!actionItems.some((item) => item.id === id)) continue
+
+        writeActionItems(
+          meeting,
+          actionItems.filter((item) => item.id !== id)
+        )
+        return true
+      }
+
+      return false
     },
 
-    async setMeetingTemplate() {
-      return notImplementedM5("setMeetingTemplate")
+    async setMeetingTemplate(id, templateKey) {
+      const meeting = requireVisibleMeeting(id)
+      const updated: MeetingRecord = { ...meeting, templateKey: templateKey ?? undefined }
+
+      meetings.set(id, updated)
+      return hydrate(updated, false)
     },
 
-    async applyAiTitle() {
-      return notImplementedM5("applyAiTitle")
+    async applyAiTitle(id, title) {
+      const meeting = visibleMeeting(id)
+
+      if (!meeting || meeting.titleSource === "user") return false
+
+      meetings.set(id, { ...meeting, title, titleSource: "ai" })
+      return true
     },
 
-    async setMeetingTitle() {
-      return notImplementedM5("setMeetingTitle")
+    async setMeetingTitle(id, title, source) {
+      const meeting = requireVisibleMeeting(id)
+      const updated: MeetingRecord = { ...meeting, title, titleSource: source }
+
+      meetings.set(id, updated)
+      return hydrate(updated, false)
     },
 
     async createJob(input): Promise<JobRecord> {
@@ -2640,12 +2782,17 @@ export function createInMemoryMeetingRepository(
 
       meetings.set(meetingId, updated)
 
-      // Leaving `link` revokes every active share.
+      // Leaving `link` revokes the meeting-scope shares; going `private`
+      // also revokes clip shares (M5).
       if (visibility !== "link") {
         const now = new Date().toISOString()
 
         for (const share of shares.values()) {
-          if (share.meetingId === meetingId && !share.revoked) {
+          if (
+            share.meetingId === meetingId &&
+            !share.revoked &&
+            (isMeetingScopeShare(share) || visibility === "private")
+          ) {
             shares.set(share.id, { ...share, revoked: true, updatedAt: now })
           }
         }
@@ -2695,7 +2842,7 @@ export function createInMemoryMeetingRepository(
 
     async getShareByToken(token) {
       const share = [...shares.values()].find(
-        (item) => item.token === token && !item.revoked
+        (item) => item.token === token && !item.revoked && isMeetingScopeShare(item)
       )
       const expired =
         share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
@@ -2839,7 +2986,7 @@ export function createInMemoryShareLookup(db: InMemoryMeetingDatabase): {
   return {
     async getShareMediaByToken(token) {
       const share = [...db.shares.values()].find(
-        (item) => item.token === token && !item.revoked
+        (item) => item.token === token && !item.revoked && isMeetingScopeShare(item)
       )
       const expired =
         share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
@@ -2860,7 +3007,7 @@ export function createInMemoryShareLookup(db: InMemoryMeetingDatabase): {
 
     async getShareByToken(token) {
       const share = [...db.shares.values()].find(
-        (item) => item.token === token && !item.revoked
+        (item) => item.token === token && !item.revoked && isMeetingScopeShare(item)
       )
       const meeting = share ? db.meetings.get(share.meetingId) : undefined
 

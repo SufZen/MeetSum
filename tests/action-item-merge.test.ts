@@ -132,3 +132,50 @@ describe("mergeActionItems", () => {
     expect(plan.insert.map((entry) => entry.id)).toEqual(["generated_1", "generated_2"])
   })
 })
+
+describe("mergeActionItems with M5 owner/due fields", () => {
+  it("keeps a user-edited owner and due date when the AI regenerates the task", () => {
+    const existing = [
+      item({
+        id: "act_1",
+        title: "לשלוח הצעה",
+        originalTitle: "לשלוח הצעה",
+        editedByUser: true,
+        ownerText: "דנה",
+        ownerUserId: "user_dana",
+        dueOn: "2026-10-18",
+        dueText: "עד יום ראשון",
+        dueSource: "user",
+      }),
+    ]
+    const incoming = [
+      item({
+        id: "task_new",
+        title: "לשלוח הצעה",
+        ownerText: "יוסי",
+        dueOn: "2026-11-01",
+        dueSource: "ai",
+      }),
+    ]
+
+    const plan = mergeActionItems(existing, incoming, idFactory())
+
+    expect(plan.keep).toEqual(existing)
+    expect(plan.update).toEqual([])
+    expect(plan.insert).toEqual([])
+    expect(plan.remove).toEqual([])
+  })
+
+  it("refreshes owner and due fields of an untouched AI task", () => {
+    const existing = [item({ id: "act_1", title: "Book venue", ownerText: "Yossi", dueOn: "2026-10-20" })]
+    const incoming = [
+      item({ id: "task_x", title: "Book venue", ownerText: "Dana", dueOn: "2026-10-22", dueSource: "parser" }),
+    ]
+
+    const plan = mergeActionItems(existing, incoming, idFactory())
+
+    expect(plan.update).toEqual([
+      expect.objectContaining({ id: "act_1", ownerText: "Dana", dueOn: "2026-10-22", dueSource: "parser" }),
+    ])
+  })
+})
