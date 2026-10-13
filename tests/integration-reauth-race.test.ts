@@ -7,7 +7,7 @@ import { markConnectionNeedsReauth } from "@/lib/integrations/core/reauth"
 import type { IntegrationStore } from "@/lib/integrations/core/store"
 import { createMemoryIntegrationStore } from "@/lib/integrations/core/store-memory"
 import { getAccessToken } from "@/lib/integrations/core/tokens"
-import { ProviderError, type DeliverInput, type DeliverResult } from "@/lib/integrations/core/types"
+import { ProviderError, type DeliverResult } from "@/lib/integrations/core/types"
 import { createTestRuntime, testMeetingRecord, testRule } from "@/lib/integrations/testing/harness"
 
 vi.mock("@/lib/audit", () => ({ recordAuditLog: vi.fn(async () => undefined) }))
@@ -99,7 +99,7 @@ describe("needs_reauth generation CAS", () => {
 describe("deliver does not flag reauth for connection-state errors", () => {
   it.each(["connection_changed", "connection_inactive"])("leaves the connection active for %s", async (providerCode) => {
     const rt = createTestRuntime({ meetings: [testMeetingRecord({ id: "m_a" })] })
-    const deliver = vi.fn(async (_input: DeliverInput): Promise<DeliverResult> => {
+    const deliver = vi.fn(async (): Promise<DeliverResult> => {
       throw new ProviderError("auth", "connection changed", { providerCode })
     })
 

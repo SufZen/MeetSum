@@ -9,6 +9,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
+import { resetPrivateOptInForVisibilityChange } from "@/lib/integrations/core/prefs-reset"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
 import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
@@ -53,6 +54,10 @@ export const PATCH = withAuthz<{ id: string }>(
     const previous = meeting.visibility ?? "workspace"
 
     try {
+      // M8: an integrations opt-in given while the meeting was shared does
+      // not carry over to a private meeting (cleared before the write).
+      await resetPrivateOptInForVisibilityChange({ workspaceId: ctx.workspace.id, meetingId: id, from: previous, to: visibility })
+
       const updated = await ctx.meetings.updateMeetingVisibility(id, visibility)
 
       await recordAuditLog({
