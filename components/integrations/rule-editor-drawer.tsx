@@ -4,19 +4,21 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { integrationsApi } from "@/components/integrations/api"
+import { im } from "@/components/integrations/messages"
 import { ContentFields } from "@/components/integrations/content-fields"
 import { HubspotFields } from "@/components/integrations/providers/hubspot-fields"
 import { NotionFields } from "@/components/integrations/providers/notion-fields"
 import { SlackFields } from "@/components/integrations/providers/slack-fields"
 import {
-  PROVIDER_LABEL_KEYS,
-  TRIGGER_KEYS,
-  emptyDestination,
-  ruleRequestFromDraft,
-  validateRuleDraft,
   type DomainMode,
+  emptyDestination,
+  PROVIDER_LABEL_KEYS,
   type RuleDraft,
   type RuleDraftErrors,
+  ruleRequestFromDraft,
+  sourceLabelKey,
+  TRIGGER_KEYS,
+  validateRuleDraft,
 } from "@/components/integrations/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -263,7 +265,11 @@ export function RuleEditorDrawer({
             />
             <CheckboxGroup
               legend={t.integrationsRuleFilterSources}
-              options={SOURCES.map((value) => ({ value, label: value.replaceAll("_", " ") }))}
+              options={SOURCES.map((value) => {
+                const key = sourceLabelKey(value)
+
+                return { value, label: key ? im(t, key) : value }
+              })}
               selected={draft.sources}
               onToggle={(value) => update({ sources: toggle(draft.sources, value) })}
             />

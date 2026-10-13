@@ -312,7 +312,8 @@ describe("delivery log", () => {
 
   it("maps skip reasons, with a generic fallback", () => {
     expect(skipReasonKey("private_meeting")).toBe("integrationsSkipPrivateMeeting")
-    expect(skipReasonKey("no_crm_target")).toBe("integrationsSkipOther")
+    expect(skipReasonKey("no_crm_target")).toBe("integrationsSkipNoCrmTarget")
+    expect(skipReasonKey("some_future_reason")).toBe("integrationsSkipOther")
     expect(skipReasonKey(undefined)).toBeNull()
   })
 
@@ -367,5 +368,35 @@ describe("meeting integration controls", () => {
     ])
 
     expect(targets.map((item) => item.id)).toEqual(["s"])
+  })
+})
+
+describe("review fixes: localized codes and default destination names", () => {
+  it("maps skip reasons, error kinds, picker hints, sources and send errors to message keys", async () => {
+    const state = await import("@/components/integrations/state")
+
+    expect(state.skipReasonKey("no_recipients")).toBe("integrationsSkipNoRecipients")
+    expect(state.skipReasonKey("recap_not_opted_in")).toBe("integrationsSkipNotOptedIn")
+    expect(state.deliveryErrorKey("code=unknown kind=retryable")).toBe("integrationsErrorKindRetryable")
+    expect(state.deliveryErrorKey("code=forbidden kind=auth provider=slack")).toBe("integrationsErrorKindAuth")
+    expect(state.deliveryErrorKey(undefined)).toBeNull()
+    expect(state.pickerHintKey("not_member")).toBe("integrationsHintNotMember")
+    expect(state.pickerHintKey("appointmentscheduled")).toBe("integrationsDealStageAppointmentScheduled")
+    expect(state.pickerHintKey("custom-stage-123")).toBeNull()
+    expect(state.sourceLabelKey("outlook_calendar")).toBe("integrationsSourceOutlookCalendar")
+    expect(state.sendErrorKey("private_meeting_not_opted_in")).toBe("integrationsSendPrivateNotOptedIn")
+    expect(state.sendErrorKey("queue_unavailable")).toBe("integrationsSendQueueUnavailable")
+  })
+
+  it("keeps the default destination's name in the connection config", async () => {
+    const { pickConfig } = await import("@/components/integrations/state")
+    const { validateConfigPatch } = await import("@/lib/integrations/core/connections")
+
+    expect(pickConfig("slack", { defaultChannelId: "C1", defaultChannelName: "#general" })).toEqual({ defaultChannelId: "C1", defaultChannelName: "#general" })
+    expect(validateConfigPatch("notion", { defaultDatabaseId: "db", defaultDatabaseTitle: "פגישות" })).toEqual({
+      ok: true,
+      config: { defaultDatabaseId: "db", defaultDatabaseTitle: "פגישות" },
+    })
+    expect(validateConfigPatch("hubspot", { defaultDealName: "Renewal" })).toMatchObject({ ok: true })
   })
 })

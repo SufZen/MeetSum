@@ -143,9 +143,10 @@ export async function upsertConnectionFromOAuth(
 
 /** Non-secret, per-provider config keys a PATCH may set (A2). */
 export const CONFIG_ALLOWLIST: Readonly<Record<ProviderId, Readonly<Record<string, "string" | "boolean">>>> = {
-  slack: { defaultChannelId: "string", allowManualSend: "boolean" },
-  notion: { defaultDatabaseId: "string", allowManualSend: "boolean" },
-  hubspot: { defaultDealId: "string", allowManualSend: "boolean" },
+  // The *Name/*Title keys store the picked label, so the UI shows names, not ids.
+  slack: { defaultChannelId: "string", defaultChannelName: "string", allowManualSend: "boolean" },
+  notion: { defaultDatabaseId: "string", defaultDatabaseTitle: "string", allowManualSend: "boolean" },
+  hubspot: { defaultDealId: "string", defaultDealName: "string", allowManualSend: "boolean" },
   microsoft: { calendarSyncEnabled: "boolean" },
   google_drive: {},
 }

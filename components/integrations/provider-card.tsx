@@ -180,7 +180,7 @@ export function ProviderCard({
                   label={t[defaultDestination.labelMessage]}
                   value={typeof defaultId === "string" ? { id: defaultId, label: String(defaultLabel ?? "") } : undefined}
                   disabled={busy}
-                  onChange={(item) => void saveConfig({ [defaultDestination.idKey]: item.id })}
+                  onChange={(item) => void saveConfig({ [defaultDestination.idKey]: item.id, [defaultDestination.labelKey]: item.label })}
                 />
               </div>
             </details>

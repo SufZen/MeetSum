@@ -121,7 +121,7 @@ function card(page: Page, provider: string) {
 
 /** Connect / Reconnect is a full-page navigation; the fake authorize page auto-approves. */
 async function connect(page: Page, provider: string) {
-  await card(page, provider).getByRole("link", { name: new RegExp(he.integrationsConnect) }).click()
+  await card(page, provider).getByRole("button", { name: new RegExp(he.integrationsConnect) }).click()
   await page.waitForURL(/section=integrations/, { timeout: 30_000 })
   await expect(page.getByTestId("integrations-settings")).toBeVisible()
   await expect(card(page, provider).getByTestId("integration-account").locator("bdi")).toBeVisible()
@@ -383,7 +383,7 @@ test.describe.serial("M8 integrations with fake providers", () => {
     await openIntegrations(page, "he")
     const section = page.locator("section", { has: page.locator("#integrations-webhooks-title") })
 
-    await section.getByLabel(he.integrationsSectionWebhooks).fill(`${FAKE}/__fake/webhook`)
+    await section.getByLabel(he.integrationsWebhookUrlLabel).fill(`${FAKE}/__fake/webhook`)
     await section.getByRole("button", { name: he.integrationsWebhookAdd }).click()
     const secret = await section.locator("code").first().textContent()
 
@@ -484,7 +484,7 @@ test.describe.serial("M8 integrations with fake providers", () => {
     await openIntegrations(page, "en")
     await expect(page.getByText(en.integrationsMembersSeeStatusOnly)).toBeVisible()
     for (const provider of ["slack", "notion", "hubspot"]) {
-      await expect(card(page, provider).getByRole("link", { name: new RegExp(en.integrationsConnect) })).toHaveCount(0)
+      await expect(card(page, provider).getByRole("button", { name: new RegExp(en.integrationsConnect) })).toHaveCount(0)
       await expect(card(page, provider).getByRole("button", { name: en.integrationsDisconnect })).toHaveCount(0)
     }
   })

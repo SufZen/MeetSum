@@ -19,6 +19,7 @@ import {
   formatWhen,
   isDeliveryRetryable,
   isWebhookDeliveryRetryable,
+  deliveryErrorKey,
   skipReasonKey,
   type DeliveryFilters,
 } from "@/components/integrations/state"
@@ -263,10 +264,8 @@ function IntegrationDeliveries({
               {detail.status === "skipped" && skipReasonKey(detail.skipReason) ? (
                 <div className="text-fg-2">{im(t, skipReasonKey(detail.skipReason)!, { reason: detail.skipReason })}</div>
               ) : null}
-              {detail.lastError ? (
-                <div className="rounded-md bg-danger-soft p-2 text-xs text-danger-text">
-                  <bdi>{detail.lastError}</bdi>
-                </div>
+              {deliveryErrorKey(detail.lastError) ? (
+                <div className="rounded-md bg-danger-soft p-2 text-xs text-danger-text">{im(t, deliveryErrorKey(detail.lastError)!)}</div>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2 px-4">

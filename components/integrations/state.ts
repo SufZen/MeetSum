@@ -142,9 +142,9 @@ export function takeIntegrationError(href: string): { code: string; cleanHref: s
 
 /** Per-provider config keys the PATCH route accepts (A2 allowlist). */
 export const CONFIG_ALLOWLIST: Record<ProviderId, readonly string[]> = {
-  slack: ["defaultChannelId", "allowManualSend"],
-  notion: ["defaultDatabaseId", "allowManualSend"],
-  hubspot: ["defaultDealId", "allowManualSend"],
+  slack: ["defaultChannelId", "defaultChannelName", "allowManualSend"],
+  notion: ["defaultDatabaseId", "defaultDatabaseTitle", "allowManualSend"],
+  hubspot: ["defaultDealId", "defaultDealName", "allowManualSend"],
   microsoft: ["calendarSyncEnabled"],
   google_drive: [],
 }
@@ -488,6 +488,75 @@ const SKIP_KEYS: Partial<Record<DeliverySkipReason, IntegrationsMessageKey>> = {
   recap_off: "integrationsSkipRecapOff",
   needs_reauth: "integrationsSkipNeedsReauth",
   hourly_cap: "integrationsSkipHourlyCap",
+  recap_not_opted_in: "integrationsSkipNotOptedIn",
+  no_recipients: "integrationsSkipNoRecipients",
+  connection_inactive: "integrationsSkipConnectionInactive",
+  no_crm_target: "integrationsSkipNoCrmTarget",
+  unchanged: "integrationsSkipUnchanged",
+  manual_send_disabled: "integrationsSkipManualSendDisabled",
+}
+
+const ERROR_KIND_KEYS: Record<string, IntegrationsMessageKey> = {
+  auth: "integrationsErrorKindAuth",
+  forbidden: "integrationsErrorKindForbidden",
+  not_found: "integrationsErrorKindNotFound",
+  invalid: "integrationsErrorKindInvalid",
+  rate_limited: "integrationsErrorKindRateLimited",
+  retryable: "integrationsErrorKindRetryable",
+  config: "integrationsErrorKindConfig",
+}
+
+/**
+ * A stored delivery error (`code=… kind=<kind> …`) as a localized message
+ * key: the UI never shows the raw typed string.
+ */
+export function deliveryErrorKey(lastError: string | undefined): IntegrationsMessageKey | null {
+  if (!lastError) return null
+
+  const kind = /\bkind=([a-z_]+)/.exec(lastError)?.[1]
+
+  return (kind && ERROR_KIND_KEYS[kind]) || "integrationsErrorKindRetryable"
+}
+
+const HINT_KEYS: Record<string, IntegrationsMessageKey> = {
+  not_member: "integrationsHintNotMember",
+  private: "integrationsHintPrivateChannel",
+  // HubSpot default pipeline stage ids.
+  appointmentscheduled: "integrationsDealStageAppointmentScheduled",
+  qualifiedtobuy: "integrationsDealStageQualifiedToBuy",
+  presentationscheduled: "integrationsDealStagePresentationScheduled",
+  decisionmakerboughtin: "integrationsDealStageDecisionMakerBoughtIn",
+  contractsent: "integrationsDealStageContractSent",
+  closedwon: "integrationsDealStageClosedWon",
+  closedlost: "integrationsDealStageClosedLost",
+}
+
+/** A picker hint code (`not_member`, a HubSpot stage id) as a message key; null hides an unknown code. */
+export function pickerHintKey(hint: string | undefined): IntegrationsMessageKey | null {
+  return hint ? (HINT_KEYS[hint.toLowerCase()] ?? null) : null
+}
+
+const SOURCE_KEYS: Record<string, IntegrationsMessageKey> = {
+  google_meet: "integrationsSourceGoogleMeet",
+  teams: "integrationsSourceTeams",
+  zoom: "integrationsSourceZoom",
+  meeting_bot: "integrationsSourceMeetingBot",
+  outlook_calendar: "integrationsSourceOutlookCalendar",
+  upload: "integrationsSourceUpload",
+  pwa_recorder: "integrationsSourcePwaRecorder",
+  desktop_recorder: "integrationsSourceDesktopRecorder",
+}
+
+/** A meeting source (rule filter checkbox) as a message key. */
+export function sourceLabelKey(source: string): IntegrationsMessageKey | null {
+  return SOURCE_KEYS[source] ?? null
+}
+
+/** The manual-send error code as a message key (generic "failed" otherwise). */
+export function sendErrorKey(code: string | undefined): IntegrationsMessageKey {
+  if (code === "private_meeting_not_opted_in") return "integrationsSendPrivateNotOptedIn"
+  if (code === "queue_unavailable") return "integrationsSendQueueUnavailable"
+  return "integrationsStatusFailed"
 }
 
 /** The skip reason's message key, or `integrationsSkipOther` (rendered with `{reason}`). */

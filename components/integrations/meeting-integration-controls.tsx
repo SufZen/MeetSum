@@ -6,13 +6,15 @@ import { SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { integrationsApi, type MeetingPrefsResponse } from "@/components/integrations/api"
+import { im } from "@/components/integrations/messages"
 import {
   DELIVERY_STATUS_KEYS,
-  PROVIDER_LABEL_KEYS,
   isTerminalDelivery,
   manualSendTargets,
   meetingControlsState,
   newIdempotencyKey,
+  PROVIDER_LABEL_KEYS,
+  sendErrorKey,
 } from "@/components/integrations/state"
 import { useWorkspace } from "@/components/workspace-context"
 import {
@@ -114,7 +116,7 @@ export function MeetingIntegrationControls({
     const result = await integrationsApi.sendMeeting(meetingId, connection.id, newIdempotencyKey())
 
     if (!result.ok) {
-      toast.error(`${providerName}: ${t.integrationsStatusFailed}`)
+      toast.error(`${providerName}: ${im(t, sendErrorKey(result.code))}`)
       return
     }
     toast.info(`${providerName}: ${t.integrationsStatusQueued}`)

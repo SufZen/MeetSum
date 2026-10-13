@@ -152,7 +152,7 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
             dir="ltr"
             type="url"
             value={url}
-            aria-label={t.integrationsSectionWebhooks}
+            aria-label={t.integrationsWebhookUrlLabel}
             placeholder="https://hooks.zapier.com/… · https://n8n.example/webhook/meetsum"
             onChange={(event) => setUrl(event.target.value)}
           />

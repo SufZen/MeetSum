@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react"
 import { CheckIcon } from "lucide-react"
 
 import { integrationsApi } from "@/components/integrations/api"
+import { pickerHintKey } from "@/components/integrations/state"
 import { im } from "@/components/integrations/messages"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -116,7 +117,9 @@ export function DestinationPicker({
               >
                 <CheckIcon aria-hidden="true" className={cn("size-3.5 shrink-0", selected ? "opacity-100" : "opacity-0")} />
                 <bdi className="min-w-0 truncate">{item.label}</bdi>
-                {item.hint ? <bdi className="ms-auto shrink-0 text-xs text-fg-3">{item.hint}</bdi> : null}
+                {pickerHintKey(item.hint) ? (
+                  <span className="ms-auto shrink-0 text-xs text-fg-3">{im(t, pickerHintKey(item.hint)!)}</span>
+                ) : null}
               </button>
             </li>
           )

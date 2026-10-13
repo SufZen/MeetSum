@@ -28,15 +28,16 @@ function defaultDestination(provider: string, config: Record<string, unknown>): 
   const value = (key: string) => (typeof config[key] === "string" && config[key] ? String(config[key]) : undefined)
 
   if (provider === "slack" && value("defaultChannelId")) {
-    return { provider: "slack", channelId: value("defaultChannelId")!, channelName: "" }
+    return { provider: "slack", channelId: value("defaultChannelId")!, channelName: value("defaultChannelName") ?? "" }
   }
   if (provider === "notion" && value("defaultDatabaseId")) {
-    return { provider: "notion", databaseId: value("defaultDatabaseId")!, databaseTitle: "" }
+    return { provider: "notion", databaseId: value("defaultDatabaseId")!, databaseTitle: value("defaultDatabaseTitle") ?? "" }
   }
   if (provider === "hubspot") {
     return {
       provider: "hubspot",
       ...(value("defaultDealId") ? { dealId: value("defaultDealId") } : {}),
+      ...(value("defaultDealName") ? { dealName: value("defaultDealName") } : {}),
       logAs: "meeting",
       createTasks: true,
       createMissingContacts: false,
