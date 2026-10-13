@@ -193,6 +193,7 @@ No real keys are needed. This is Acceptance 14 (`tests/e2e/m8-integrations.spec.
    - `MEETSUM_OAUTH_REDIRECT_BASE=http://localhost:3000`
    - `MEETSUM_WEBHOOK_ALLOWED_HOSTS=127.0.0.1` (the fake webhook receiver, `POST http://127.0.0.1:4010/__fake/webhook`, is loopback; the SSRF guard refuses it otherwise)
    - `MEETSUM_MS_CALENDAR_SYNC_MINUTES=1` (the Outlook sync runs every minute, so step 6 sees the fake Teams event quickly)
+   - Note: `next dev` prints every request URL, including the OAuth callback's one-time `code`. That log is dev-only (production does not log query strings); the callback redirects immediately, the single-use state makes a replayed code fail, and it sends `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 6. `E2E_BASE_URL=http://localhost:3000 npm run test:e2e -- m8`
 7. `npm run integrations:e2e-seed -- --complete <meetingId>` runs the real dispatch path for a seeded meeting without ASR (the spec calls it itself; it is also useful by hand).
 

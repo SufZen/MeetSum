@@ -21,6 +21,13 @@ export const GET = withSession<{ provider: string }>(async (request, session, ro
 
   return new Response(null, {
     status: 302,
-    headers: { location: result.location, "set-cookie": clearOAuthStateCookie(), "cache-control": "no-store" },
+    // Immediate redirect (the state nonce is single-use, so a replayed code
+    // fails); never cached, and no Referer carrying the code to the next page.
+    headers: {
+      location: result.location,
+      "set-cookie": clearOAuthStateCookie(),
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    },
   })
 })

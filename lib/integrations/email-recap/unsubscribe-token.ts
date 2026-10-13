@@ -1,21 +1,38 @@
 /**
- * Signed email-recap unsubscribe token (docs/parity/m8.md A10). Owner:
- * Package A. `base64url(json{v:1, ws, e, iat}) + "." + HMAC-SHA256`, keyed
- * by HKDF(MEETSUM_SESSION_SECRET, "meetsum:email-unsubscribe"). No expiry;
- * verified timing-safe. Bound to one workspace and one address.
+ * Email-recap unsubscribe token (docs/parity/m8.md A10). Owner: Package A.
+ *
+ * v2 (M8 e2e fix #9): OPAQUE. `u2.` + base64url(iv | AES-256-GCM(json{v:1,
+ * ws, e, iat}) | tag), keyed by HKDF(MEETSUM_SESSION_SECRET,
+ * "meetsum:email-unsubscribe-enc"). The address is encrypted (GCM also
+ * authenticates it), so a link, a proxy log or a forwarded email never
+ * reveals it. No expiry; bound to one workspace and one address.
+ *
+ * v1 (`base64url(json) + "." + HMAC`) still verifies for links already sent.
  */
-import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto"
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto"
 
 import { getSessionSecret } from "@/lib/auth/session"
 
 export type UnsubscribePayload = { v: 1; ws: string; e: string; iat: number }
 
+const V2_PREFIX = "u2."
+
 function key(env: NodeJS.ProcessEnv): Buffer {
   return Buffer.from(hkdfSync("sha256", getSessionSecret(env), Buffer.alloc(0), "meetsum:email-unsubscribe", 32))
 }
 
+function encryptionKey(env: NodeJS.ProcessEnv): Buffer {
+  return Buffer.from(hkdfSync("sha256", getSessionSecret(env), Buffer.alloc(0), "meetsum:email-unsubscribe-enc", 32))
+}
+
 function mac(body: string, env: NodeJS.ProcessEnv): string {
   return createHmac("sha256", key(env)).update(body).digest("base64url")
+}
+
+function validPayload(payload: unknown): payload is UnsubscribePayload {
+  const value = payload as UnsubscribePayload | undefined
+
+  return value?.v === 1 && typeof value.ws === "string" && typeof value.e === "string" && value.e.includes("@")
 }
 
 export function signUnsubscribeToken(
@@ -28,14 +45,36 @@ export function signUnsubscribeToken(
     e: input.email.trim().toLowerCase(),
     iat: Math.floor((input.now ?? Date.now()) / 1000),
   }
-  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(env), iv)
+  const sealed = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()])
 
-  return `${body}.${mac(body, env)}`
+  return `${V2_PREFIX}${Buffer.concat([iv, sealed, cipher.getAuthTag()]).toString("base64url")}`
+}
+
+function verifyV2(token: string, env: NodeJS.ProcessEnv): UnsubscribePayload | undefined {
+  try {
+    const raw = Buffer.from(token.slice(V2_PREFIX.length), "base64url")
+
+    if (raw.length < 12 + 16 + 2) return undefined
+
+    const decipher = createDecipheriv("aes-256-gcm", encryptionKey(env), raw.subarray(0, 12))
+
+    decipher.setAuthTag(raw.subarray(raw.length - 16))
+
+    const plain = Buffer.concat([decipher.update(raw.subarray(12, raw.length - 16)), decipher.final()]).toString("utf8")
+    const payload = JSON.parse(plain) as unknown
+
+    return validPayload(payload) ? payload : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** The payload, or undefined for any malformed or tampered token. */
 export function verifyUnsubscribeToken(token: string | null | undefined, env: NodeJS.ProcessEnv = process.env): UnsubscribePayload | undefined {
   if (!token || token.length > 2048) return undefined
+  if (token.startsWith(V2_PREFIX)) return verifyV2(token, env)
 
   const [body, signature, extra] = token.split(".")
 
@@ -54,10 +93,9 @@ export function verifyUnsubscribeToken(token: string | null | undefined, env: No
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return undefined
 
   try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as UnsubscribePayload
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown
 
-    if (payload?.v !== 1 || typeof payload.ws !== "string" || typeof payload.e !== "string" || !payload.e.includes("@")) return undefined
-    return payload
+    return validPayload(payload) ? payload : undefined
   } catch {
     return undefined
   }
