@@ -21,6 +21,53 @@ import { verifyVexaSignature } from "@/lib/bot/webhook-verify"
 
 export const VEXA_WEBHOOK_MAX_BYTES = 256 * 1024
 
+export type CappedBodyResult = { ok: true; text: string } | { ok: false; reason: "too_large" }
+
+/**
+ * Reads a request body as UTF-8 while counting bytes, BEFORE any JSON parse
+ * or HMAC: a declared Content-Length above `maxBytes` is refused without
+ * reading, and the stream is cancelled as soon as the bytes actually read
+ * exceed `maxBytes` (a missing or lying Content-Length cannot make the
+ * server buffer more than the cap plus one chunk).
+ */
+export async function readBodyCapped(
+  request: Request,
+  maxBytes: number = VEXA_WEBHOOK_MAX_BYTES
+): Promise<CappedBodyResult> {
+  const declaredHeader = request.headers.get("content-length")
+
+  if (declaredHeader !== null && declaredHeader.trim() !== "") {
+    const declared = Number(declaredHeader)
+
+    if (!Number.isFinite(declared) || declared < 0 || declared > maxBytes) {
+      await request.body?.cancel().catch(() => undefined)
+      return { ok: false, reason: "too_large" }
+    }
+  }
+
+  if (!request.body) return { ok: true, text: "" }
+
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+
+  for (;;) {
+    const { done, value } = await reader.read()
+
+    if (done) break
+    if (!value) continue
+
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined)
+      return { ok: false, reason: "too_large" }
+    }
+    chunks.push(value)
+  }
+
+  return { ok: true, text: Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8") }
+}
+
 export type ParsedVexaWebhook = {
   eventType: string
   eventId?: string

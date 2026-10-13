@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withPublicRoute } from "@/lib/auth/authz"
 import { redactBotError } from "@/lib/bot/redact"
-import { processVexaWebhook, VEXA_WEBHOOK_MAX_BYTES } from "@/lib/bot/webhook-handler"
+import { processVexaWebhook, readBodyCapped, VEXA_WEBHOOK_MAX_BYTES } from "@/lib/bot/webhook-handler"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -21,15 +21,13 @@ export const POST = withPublicRoute(
 )
 
 async function handleVexaWebhook(request: Request) {
-  const declared = Number(request.headers.get("content-length") ?? "")
-
-  if (Number.isFinite(declared) && declared > VEXA_WEBHOOK_MAX_BYTES) {
-    return NextResponse.json({ error: "payload_too_large" }, { status: 413 })
-  }
-
   try {
-    const rawBody = await request.text()
-    const result = await processVexaWebhook({ headers: request.headers, rawBody })
+    // Size is enforced while reading, before HMAC and JSON parse.
+    const body = await readBodyCapped(request, VEXA_WEBHOOK_MAX_BYTES)
+
+    if (!body.ok) return NextResponse.json({ error: "payload_too_large" }, { status: 413 })
+
+    const result = await processVexaWebhook({ headers: request.headers, rawBody: body.text })
 
     return NextResponse.json(result.body, { status: result.status })
   } catch (error) {

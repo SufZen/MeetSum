@@ -120,6 +120,40 @@ describe("POST /api/integrations/vexa/webhook", () => {
     ).toBe(413)
   })
 
+  it("caps the bytes actually read when Content-Length is missing, before HMAC or JSON parse", async () => {
+    const chunk = new TextEncoder().encode("a".repeat(64 * 1024))
+    let pulled = 0
+    let cancelled = false
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1
+        // An endless body: the reader must stop on its own.
+        controller.enqueue(chunk)
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    const ts = String(Math.floor(Date.now() / 1000))
+    const request = new Request(URL_, {
+      method: "POST",
+      headers: { "x-webhook-timestamp": ts, "x-webhook-signature": "sha256=00" },
+      body: stream,
+      duplex: "half",
+    } as RequestInit)
+    // 413 (not 401 for the bogus signature): rejected before the HMAC check.
+    expect((await POST(request, route)).status).toBe(413)
+    expect(cancelled).toBe(true)
+    // 256 KB cap / 64 KB chunks: stops right after the 5th chunk.
+    expect(pulled).toBeLessThanOrEqual(6)
+  })
+
+  it("refuses a malformed Content-Length without reading the body", async () => {
+    expect(
+      (await POST(signed("{}", { headers: { "content-length": "-1" } }), route)).status
+    ).toBe(413)
+  })
+
   it("answers an unknown meeting with a 200 no-op and records nothing", async () => {
     const result = await send("status-joining")
 
