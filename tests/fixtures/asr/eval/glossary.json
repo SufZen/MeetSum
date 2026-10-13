@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "terms": [
+    {
+      "term": "Supabase",
+      "aliases": [
+        "סופבייס",
+        "סופרבייס"
+      ],
+      "hotword": true
+    },
+    {
+      "term": "MCP",
+      "aliases": [
+        "אם סי פי"
+      ],
+      "hotword": true
+    },
+    {
+      "term": "Claude Code",
+      "aliases": [
+        "קלוד קוד"
+      ],
+      "hotword": true
+    }
+  ]
+}

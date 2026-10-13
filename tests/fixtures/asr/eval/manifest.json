@@ -1,0 +1,42 @@
+{
+  "_synthetic": true,
+  "_note": "SYNTHETIC fixtures for the ASR eval harness. Not real recordings: the audio files do not exist; run with --replay.",
+  "version": 2,
+  "samples": [
+    {
+      "id": "he-intro-01",
+      "audioPath": "audio/he-intro-01.wav",
+      "referencePath": "references/he-intro-01.txt",
+      "referenceTurnsPath": "references/he-intro-01.rttm",
+      "language": "he",
+      "tags": [
+        "hebrew",
+        "meeting",
+        "2-speakers"
+      ]
+    },
+    {
+      "id": "mixed-tech-01",
+      "audioPath": "audio/mixed-tech-01.wav",
+      "referencePath": "references/mixed-tech-01.txt",
+      "referenceTurnsPath": "references/mixed-tech-01.turns.json",
+      "language": "he",
+      "tags": [
+        "mixed",
+        "latin-terms",
+        "2-speakers"
+      ],
+      "glossaryPath": "glossary.json"
+    },
+    {
+      "id": "he-short-01",
+      "audioPath": "audio/he-short-01.wav",
+      "referencePath": "references/he-short-01.txt",
+      "language": "he",
+      "tags": [
+        "hebrew",
+        "short"
+      ]
+    }
+  ]
+}

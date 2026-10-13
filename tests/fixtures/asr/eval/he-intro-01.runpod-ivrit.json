@@ -1,0 +1,64 @@
+{
+  "_synthetic": true,
+  "provider": "runpod-ivrit",
+  "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+  "language": "he",
+  "durationMs": 11000,
+  "segments": [
+    {
+      "startMs": 0,
+      "endMs": 4200,
+      "text": "שלום לכולם, אני דנה מהשיווק.",
+      "speaker": "Speaker 1",
+      "turnIndex": 0,
+      "language": "he",
+      "words": []
+    },
+    {
+      "startMs": 4200,
+      "endMs": 8100,
+      "text": "היי דנה, כאן אבי מהפיתוח.",
+      "speaker": "Speaker 2",
+      "turnIndex": 1,
+      "language": "he",
+      "words": []
+    },
+    {
+      "startMs": 8100,
+      "endMs": 11000,
+      "text": "בואו נתחיל בעדכון סטטוס.",
+      "speaker": "Speaker 1",
+      "turnIndex": 2,
+      "language": "he",
+      "words": []
+    }
+  ],
+  "speakers": [
+    {
+      "label": "Speaker 1",
+      "talkTimeMs": 7100,
+      "wordCount": 8,
+      "segmentCount": 2,
+      "firstStartMs": 0
+    },
+    {
+      "label": "Speaker 2",
+      "talkTimeMs": 3900,
+      "wordCount": 5,
+      "segmentCount": 1,
+      "firstStartMs": 4200
+    }
+  ],
+  "diarization": "provider",
+  "cost": {
+    "usd": 0.00095,
+    "basis": "gpu_seconds",
+    "billedSeconds": 5,
+    "unitPrice": 0.00019
+  },
+  "timings": {
+    "totalMs": 5000
+  },
+  "glossaryReplacements": 0,
+  "warnings": []
+}

@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "samples": [
+    {
+      "id": "he-meeting-01",
+      "audioPath": "audio/he-meeting-01.wav",
+      "referencePath": "references/he-meeting-01.txt",
+      "referenceTurnsPath": "references/he-meeting-01.rttm",
+      "language": "he",
+      "tags": ["hebrew", "meeting", "3-speakers"],
+      "glossaryPath": "glossary.json",
+      "notes": "Copy to .secrets/asr-eval/manifest.json; paths are relative to the manifest. Never commit real audio or references."
+    },
+    {
+      "id": "mixed-standup-01",
+      "audioPath": "audio/mixed-standup-01.m4a",
+      "referencePath": "references/mixed-standup-01.txt",
+      "referenceTurnsPath": "references/mixed-standup-01.labels.txt",
+      "language": "he",
+      "tags": ["mixed", "code-switching", "standup"]
+    }
+  ]
+}

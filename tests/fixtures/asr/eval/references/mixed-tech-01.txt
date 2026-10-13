@@ -1,0 +1,1 @@
+העברנו את ה-database ל-Supabase והגדרנו MCP server. אחר כך בדקנו את Claude Code על ה-repo.
