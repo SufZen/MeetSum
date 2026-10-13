@@ -145,6 +145,12 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     )
   }
 
+  // The same atomic claim as the delivery worker: only the request that wins
+  // it calls Notion; a concurrent replay or a worker holding it never does.
+  const claimed = await runtime.claimManualDelivery(workspaceId, delivery.id)
+
+  if (!claimed) return NextResponse.json({ error: "export_in_progress", deliveryId: delivery.id }, { status: 409 })
+
   const content = { ...DEFAULT_RULE_CONTENT, openQuestions: true, transcript: true }
   const recap = buildMeetingRecap(meeting, {
     content,
@@ -155,7 +161,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   try {
     result = await notionProvider.deliver({
       workspaceId,
-      delivery,
+      delivery: claimed,
       connection,
       getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
       destination,

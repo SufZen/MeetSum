@@ -61,6 +61,7 @@ function runtime(
   const finished: Finish[] = []
   const tokens: string[] = []
   const deliveries = new Map<string, { status: string; externalRef: Record<string, unknown> }>()
+  const claimed = new Set<string>()
   const value: ManualExportRuntime = {
     providerFetch: api.fetch,
     findActiveConnection: vi.fn(async (_workspaceId, provider) =>
@@ -81,6 +82,11 @@ function runtime(
       deliveries.set(input.idempotencyKey, { status: "running", externalRef: {} })
 
       return { delivery: deliveryDto("notion", { id: `intd_${deliveries.size}` }), replayed: false }
+    }),
+    claimManualDelivery: vi.fn(async (_workspaceId: string, deliveryId: string) => {
+      if (claimed.has(deliveryId)) return undefined
+      claimed.add(deliveryId)
+      return deliveryDto("notion", { id: deliveryId, status: "running" })
     }),
     saveDeliveryProgress: vi.fn(async () => {}),
     getPrefs: vi.fn(async () => options.prefs),

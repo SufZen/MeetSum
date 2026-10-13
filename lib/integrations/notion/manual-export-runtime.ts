@@ -72,6 +72,12 @@ export type ManualExportRuntime = {
   startManualDelivery(
     input: StartManualDeliveryInput
   ): Promise<{ delivery: IntegrationDeliveryDTO; replayed: boolean; progress?: DeliveryProgress }>
+  /**
+   * The atomic delivery claim (the same lease as the worker's): the export
+   * calls the provider only when it won it; undefined means another request
+   * or worker holds this delivery (or it is terminal).
+   */
+  claimManualDelivery(workspaceId: string, deliveryId: string): Promise<IntegrationDeliveryDTO | undefined>
   saveDeliveryProgress(workspaceId: string, deliveryId: string, progress: DeliveryProgress): Promise<void>
   finishManualDelivery(
     workspaceId: string,
@@ -156,7 +162,7 @@ const defaultRuntime: ManualExportRuntime = {
       meetingId: input.meetingId,
       // Scoped to provider and requester: another user's key never replays.
       idempotencyKey: `manual:export:${input.provider}:${input.requestedByUserId ?? "system"}:${clientKey}`,
-      status: "running",
+      status: "queued",
       maxAttempts: integrationMaxAttempts(),
       ...(input.requestedByUserId ? { requestedByUserId: input.requestedByUserId } : {}),
     })
@@ -165,6 +171,13 @@ const defaultRuntime: ManualExportRuntime = {
     if (!created && !sameTarget) throw new Error("idempotency key reused for another target")
 
     return { delivery: deliveryDTO(delivery), replayed: !created, progress: { ...delivery.progress } }
+  },
+
+  async claimManualDelivery(workspaceId, deliveryId) {
+    const [db, { deliveryDTO }] = await Promise.all([store(), import("@/lib/integrations/core/deliver")])
+    const claimed = await db.claimDelivery(workspaceId, deliveryId)
+
+    return claimed ? deliveryDTO(claimed) : undefined
   },
 
   async saveDeliveryProgress(workspaceId, deliveryId, progress) {
@@ -178,6 +191,7 @@ const defaultRuntime: ManualExportRuntime = {
     if ("result" in outcome) {
       await db.updateDelivery(workspaceId, deliveryId, {
         status: outcome.result.status,
+        leaseUntil: null,
         completedAt: now,
         externalRef: outcome.result.externalRef,
         ...(outcome.result.skipReason ? { skipReason: outcome.result.skipReason } : {}),
@@ -197,6 +211,7 @@ const defaultRuntime: ManualExportRuntime = {
     // Typed fields only: the message is never stored.
     await db.updateDelivery(workspaceId, deliveryId, {
       status: "failed",
+      leaseUntil: null,
       completedAt: now,
       lastError: storedIntegrationError(new ProviderError(kind, "manual export failed"), row?.provider),
     })
