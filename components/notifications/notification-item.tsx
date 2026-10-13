@@ -25,6 +25,11 @@ import { notificationSentence } from "@/lib/notifications/render"
 import type { NotificationDTO, NotificationKind } from "@/lib/notifications/types"
 import { cn } from "@/lib/utils"
 
+/** A content language usable as `lang` ("he", "en-US"); "mixed"/"unknown" are not BCP 47 tags. */
+export function bcp47Lang(lang: string | null | undefined): string | undefined {
+  return lang && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(lang) && lang !== "mixed" ? lang : undefined
+}
+
 const ICONS: Record<NotificationKind, LucideIcon> = {
   mention: AtSignIcon,
   reply: MessageSquareIcon,
@@ -59,7 +64,8 @@ export function NotificationItem({
         "text" in part ? (
           <span key={index}>{part.text}</span>
         ) : (
-          <bdi key={index} lang={part.slot === "meeting" ? part.lang ?? undefined : undefined}>
+          // A real BCP 47 tag only ("mixed" is not one); dir="auto" isolates either way.
+          <bdi key={index} dir="auto" lang={part.slot === "meeting" ? bcp47Lang(part.lang) : undefined}>
             {part.slot === "meeting" ? i18n.text(part.value, part.lang) : part.value}
           </bdi>
         )

@@ -3,6 +3,7 @@
 import {
   type CSSProperties,
   type ChangeEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -1433,13 +1434,27 @@ export function CommandCenterShell({
     await botSessions.refresh()
   }
 
+  // A deep-linked meeting that is gone or hidden: an inline notice at the top
+  // of the reading column; the meeting list stays (it used to be a grid row
+  // that took the whole content area).
+  const unavailableNotice =
+    unavailableId && unavailableId === urlMeetingId ? (
+      <p role="status" className="border-b border-line bg-warn-soft px-4 py-2 text-sm text-warn-text">
+        {dictionary.shellMeetingUnavailable}
+      </p>
+    ) : null
+  const withUnavailableNotice = (column: ReactNode) =>
+    unavailableNotice ? (
+      <div className="flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-y-auto">
+        {unavailableNotice}
+        {column}
+      </div>
+    ) : (
+      column
+    )
+
   const defaultMeetingsView = (
     <div className={defaultMeetingsViewClass}>
-      {unavailableId && unavailableId === urlMeetingId ? (
-        <p role="status" className="col-span-full border-b border-line bg-warn-soft px-4 py-2 text-sm text-warn-text">
-          {dictionary.shellMeetingUnavailable}
-        </p>
-      ) : null}
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
@@ -1474,6 +1489,7 @@ export function CommandCenterShell({
         onSelectMeeting={selectMeeting}
         botSessions={botEnabled ? botSessions.byMeetingId : undefined}
       />
+      {withUnavailableNotice(
       <MeetingWorkspace
         dictionary={dictionary}
         locale={locale}
@@ -1505,6 +1521,7 @@ export function CommandCenterShell({
         onAddToRoom={addToDefaultRoom}
         onCopyText={copyText}
       />
+      )}
       <MeetingRightRail
         meeting={selectedMeeting}
         jobs={jobs}

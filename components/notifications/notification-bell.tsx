@@ -10,7 +10,7 @@
  * the latest notifications, marks one read on open and offers "mark all read".
  */
 import { BellIcon } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { useI18n } from "@/components/i18n-provider"
@@ -26,6 +26,7 @@ const PAGE = 20
 
 export function NotificationBell({ locale }: { locale: string }) {
   const i18n = useI18n()
+  const titleId = useId()
   const [count, setCount] = useState<number | null>(null)
   const [announcement, setAnnouncement] = useState("")
   const [open, setOpen] = useState(false)
@@ -207,9 +208,11 @@ export function NotificationBell({ locale }: { locale: string }) {
             </span>
           ) : null}
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-80 gap-2 p-2">
+        <PopoverContent align="end" className="w-80 gap-2 p-2" aria-labelledby={titleId}>
           <div className="flex items-center justify-between gap-2 px-1">
-            <h2 className="text-sm font-semibold text-fg">{i18n.t("notifTitle")}</h2>
+            <h2 id={titleId} className="text-sm font-semibold text-fg">
+              {i18n.t("notifTitle")}
+            </h2>
             <Button variant="ghost" size="sm" disabled={unread === 0} onClick={() => void markAllRead()}>
               {i18n.t("notifMarkAllRead")}
             </Button>
