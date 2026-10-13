@@ -174,6 +174,25 @@ describe("retrieval context", () => {
     expect(context.aliases.s3.segmentId).toBe("seg_9")
   })
 
+  it("skips a transcript chunk whose own segments no longer exist (never the stale chunk text)", () => {
+    const stale = passage({
+      chunk: chunk({
+        id: "c_stale",
+        meetingId: "m1",
+        segmentIds: ["seg_old_1", "seg_old_2"],
+        segmentStartMs: [1_000, 2_000],
+        text: "דנה: טקסט ישן שנמחק מהתמלול",
+        startMs: 1_000,
+      }),
+      segmentTexts: {},
+    })
+    const context = retrieval([stale, transcriptPassage])
+
+    expect(context.retrieval?.chunkIds).toEqual(["c1"])
+    expect(context.messages.at(-1)!.content).not.toContain("טקסט ישן")
+    expect(Object.values(context.aliases).some((alias) => alias.alias.startsWith("a"))).toBe(false)
+  })
+
   it("uses [aN] for intelligence chunks", () => {
     const summary = passage({
       chunk: chunk({ id: "c3", meetingId: "m2", kind: "item", text: "החלטה: לגייס שני מפתחים", segmentIds: ["seg_x"], startMs: 3_000 }),

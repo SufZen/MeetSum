@@ -223,6 +223,10 @@ function renderPassage(passage: RetrievedPassage, state: AliasState): string {
       lines.push(`[${alias} ${formatTimestamp(startMs)} ${sanitizeName(speakerName ?? "?") || "?"}] ${sanitizeLine(text)}`)
     })
   }
+  // A transcript chunk is cited only through its own live segments: when
+  // none of them still exist (edited/deleted since indexing), skip it rather
+  // than fall back to the stale indexed chunk text.
+  if (chunk.kind === "transcript") return lines.length ? wrapPassage(passage, lines) : ""
   if (!lines.length && chunk.text.trim()) {
     const alias = `a${state.nextA++}`
     const segmentId = chunk.segmentIds[0]
@@ -241,8 +245,12 @@ function renderPassage(passage: RetrievedPassage, state: AliasState): string {
   }
   if (!lines.length) return ""
 
+  return wrapPassage(passage, lines)
+}
+
+function wrapPassage(passage: RetrievedPassage, lines: string[]): string {
   return [
-    `<passage meeting="${sanitizeAttribute(passage.meetingTitle)}" date="${formatPassageDate(passage.meetingStartedAt)}" kind="${chunk.kind}">`,
+    `<passage meeting="${sanitizeAttribute(passage.meetingTitle)}" date="${formatPassageDate(passage.meetingStartedAt)}" kind="${passage.chunk.kind}">`,
     ...lines,
     "</passage>",
   ].join("\n")
