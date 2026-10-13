@@ -72,12 +72,13 @@ export async function reapplyMigration025(db: PgliteSearchDb, root = process.cwd
 
 /**
  * Seeds users, workspaces, meetings (participants, rooms, tags, speakers,
- * segments) and `meeting_chunks` built by `chunkMeeting`.
+ * segments) and, when `chunkMeeting` is given, `meeting_chunks`. Works on any
+ * Queryable (PGlite here, a real pool in the e2e seed).
  */
 export async function seedPgliteMeetings(
-  db: PgliteSearchDb,
+  db: { client: Queryable },
   meetings: MeetingRecord[],
-  chunkMeeting: (meeting: MeetingRecord) => ChunkDraft[]
+  chunkMeeting?: (meeting: MeetingRecord) => ChunkDraft[]
 ): Promise<void> {
   const q = db.client.query
   const workspaces = new Set(meetings.map((meeting) => meeting.workspaceId ?? "ws_default"))
@@ -94,7 +95,8 @@ export async function seedPgliteMeetings(
     await q(
       `insert into meetings (id, title, source, language, status, started_at, workspace_id, owner_user_id, visibility,
          meeting_type, transcript_version, duration_ms, search_index_state, search_index_mode)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'ready', 'lexical')`,
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       on conflict (id) do nothing`,
       [
         meeting.id,
         meeting.title,
@@ -108,6 +110,8 @@ export async function seedPgliteMeetings(
         meeting.intelligence?.meetingType ?? null,
         meeting.transcriptVersion ?? 0,
         meeting.durationMs ?? null,
+        chunkMeeting ? "ready" : "pending",
+        chunkMeeting ? "lexical" : null,
       ]
     )
 
@@ -157,7 +161,7 @@ export async function seedPgliteMeetings(
       )
     }
 
-    for (const chunk of chunkMeeting(meeting)) {
+    for (const chunk of chunkMeeting?.(meeting) ?? []) {
       await q(
         `insert into meeting_chunks (id, workspace_id, meeting_id, kind, chunk_index, source_id, segment_ids, segment_start_ms,
            segment_offsets, overlap_count, speaker_ids, start_ms, end_ms, language, text, text_norm, text_stem,
