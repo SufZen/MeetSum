@@ -4,10 +4,13 @@
  * Client data layer for M5 comments, reactions and clips. One shared,
  * per-meeting comments snapshot (useSyncExternalStore) so many
  * CommentAnchors / ReactionBars on a page share a single request; it
- * refetches on window focus and every 30 s while anything is subscribed.
+ * refetches on window focus and every 15 s while anything is subscribed and
+ * the tab is visible. The subscribe function is stable per meeting, so a
+ * re-render never resubscribes (an inline subscribe used to refetch on
+ * every render: a request storm).
  */
 import { useParams } from "next/navigation"
-import { useEffect, useMemo, useSyncExternalStore } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 
 import type { ClipWire, CreateClipInput } from "@/lib/clips/types"
 import type {
@@ -22,7 +25,10 @@ import { formatMessage } from "@/lib/i18n/workspace-messages"
 import { clipsMessagesEn, clipsMessagesHe } from "@/lib/i18n/m5/clips"
 import { commentsMessagesEn, commentsMessagesHe } from "@/lib/i18n/m5/comments"
 
-export const COLLAB_REFRESH_MS = 30_000
+/** Poll interval while subscribed and the tab is visible. */
+export const COLLAB_REFRESH_MS = 15_000
+/** A first subscriber reuses a snapshot younger than this. */
+const FRESH_MS = 5_000
 
 /* ------------------------------------------------------------ strings */
 
@@ -129,6 +135,9 @@ type Entry = {
   error?: CollabRequestError
   listeners: Set<() => void>
   timer?: ReturnType<typeof setInterval>
+  onFocus?: () => void
+  /** Last successful load (ms). */
+  loadedAt?: number
   inflight?: Promise<void>
   state: CommentsState
 }
@@ -170,6 +179,7 @@ export function refreshComments(meetingId: string): Promise<void> {
     .then((snapshot) => {
       entry.snapshot = snapshot
       entry.error = undefined
+      entry.loadedAt = Date.now()
     })
     .catch((error: unknown) => {
       entry.error =
@@ -183,6 +193,10 @@ export function refreshComments(meetingId: string): Promise<void> {
   return entry.inflight
 }
 
+function isVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
+}
+
 function subscribe(meetingId: string, listener: () => void) {
   const entry = entryFor(meetingId)
   const first = entry.listeners.size === 0
@@ -190,37 +204,64 @@ function subscribe(meetingId: string, listener: () => void) {
   entry.listeners.add(listener)
 
   if (first) {
-    void refreshComments(meetingId)
+    const fresh = entry.loadedAt !== undefined && Date.now() - entry.loadedAt < FRESH_MS
+
+    if (!fresh) void refreshComments(meetingId)
     entry.timer = setInterval(() => {
-      if (document.visibilityState === "visible") void refreshComments(meetingId)
+      // Paused while the tab is hidden.
+      if (isVisible()) void refreshComments(meetingId)
     }, COLLAB_REFRESH_MS)
+    entry.onFocus = () => void refreshComments(meetingId)
+    if (typeof window !== "undefined") window.addEventListener("focus", entry.onFocus)
   }
 
   return () => {
     entry.listeners.delete(listener)
-    if (entry.listeners.size === 0 && entry.timer) {
-      clearInterval(entry.timer)
-      entry.timer = undefined
-    }
+    if (entry.listeners.size > 0) return
+    if (entry.timer) clearInterval(entry.timer)
+    entry.timer = undefined
+    if (entry.onFocus && typeof window !== "undefined") window.removeEventListener("focus", entry.onFocus)
+    entry.onFocus = undefined
   }
 }
 
-/** Shared comments snapshot of a meeting (refetch on focus / every 30 s). */
+const subscribers = new Map<string, (listener: () => void) => () => void>()
+const getSnapshots = new Map<string, () => CommentsState>()
+
+/** Stable `useSyncExternalStore` subscribe function of a meeting. */
+export function commentsSubscriber(meetingId: string): (listener: () => void) => () => void {
+  let subscriber = subscribers.get(meetingId)
+
+  if (!subscriber) {
+    subscriber = (listener) => subscribe(meetingId, listener)
+    subscribers.set(meetingId, subscriber)
+  }
+  return subscriber
+}
+
+function commentsSnapshotGetter(meetingId: string): () => CommentsState {
+  let getter = getSnapshots.get(meetingId)
+
+  if (!getter) {
+    getter = () => entryFor(meetingId).state
+    getSnapshots.set(meetingId, getter)
+  }
+  return getter
+}
+
+const serverSnapshot = () => LOADING
+
+/** Shared comments snapshot of a meeting (refetch on focus / every 15 s). */
 export function useMeetingComments(meetingId: string): CommentsState {
-  const state = useSyncExternalStore(
-    (listener) => subscribe(meetingId, listener),
-    () => entryFor(meetingId).state,
-    () => LOADING
-  )
+  return useSyncExternalStore(commentsSubscriber(meetingId), commentsSnapshotGetter(meetingId), serverSnapshot)
+}
 
-  useEffect(() => {
-    const onFocus = () => void refreshComments(meetingId)
-
-    window.addEventListener("focus", onFocus)
-    return () => window.removeEventListener("focus", onFocus)
-  }, [meetingId])
-
-  return state
+/** Tests: forget every meeting's snapshot, timers and subscribers. */
+export function resetCommentsStoreForTesting() {
+  for (const entry of entries.values()) if (entry.timer) clearInterval(entry.timer)
+  entries.clear()
+  subscribers.clear()
+  getSnapshots.clear()
 }
 
 export function threadsFor(
