@@ -35,6 +35,9 @@
     "search:vector-setup": "tsx scripts/search-vector-setup.ts",
     "search:eval": "tsx scripts/search-eval.ts",
     "search:e2e-seed": "tsx scripts/search-e2e-seed.ts",
+    "integrations:fake": "tsx scripts/fake-providers.ts",
+    "integrations:e2e-seed": "tsx scripts/integrations-e2e-seed.ts",
+    "webhooks:schemas": "tsx scripts/generate-webhook-schemas.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
   },
