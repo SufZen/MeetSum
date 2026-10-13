@@ -132,8 +132,8 @@ export async function seedM9Analytics(db: PgLike): Promise<void> {
     insert into action_items (id, meeting_id, title, status, workspace_id, owner_user_id, created_at, completed_at, due_on) values
       ('ai_1', 'm_a1', 'Send deck', 'done', '${W1}', 'usr_owner', '2026-10-05T08:00:00Z', '2026-10-06T08:00:00Z', null),
       ('ai_2', 'm_a1', 'Book room', 'open', '${W1}', 'usr_admin', '2026-10-05T08:00:00Z', null, null),
-      ('ai_3', 'm_a3', 'Prepare board', 'open', '${W1}', 'usr_owner', '2026-10-20T09:00:00Z', null, '2026-10-21'),
-      ('ai_p1', 'm_priv', 'P1', 'open', '${W1}', 'usr_member', '2026-10-15T10:00:00Z', null, '2026-10-16'),
+      ('ai_3', 'm_a3', 'Prepare board', 'open', '${W1}', 'usr_owner', '2026-10-20T09:00:00Z', null, '2026-10-02'),
+      ('ai_p1', 'm_priv', 'P1', 'open', '${W1}', 'usr_member', '2026-10-15T10:00:00Z', null, '2026-10-03'),
       ('ai_p2', 'm_priv', 'P2', 'open', '${W1}', 'usr_member', '2026-10-15T10:00:00Z', null, null),
       ('ai_p3', 'm_priv', 'P3', 'done', '${W1}', 'usr_member', '2026-10-15T10:00:00Z', '2026-10-15T11:00:00Z', null),
       ('ai_p4', 'm_priv', 'P4', 'done', '${W1}', 'usr_member', '2026-10-15T10:00:00Z', '2026-10-15T12:00:00Z', null),
