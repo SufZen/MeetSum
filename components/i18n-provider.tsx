@@ -85,6 +85,11 @@ export function I18nProvider({
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 
+/** The i18n context, or null outside an `I18nProvider` (shared primitives, tests). */
+export function useOptionalI18n(): I18nValue | null {
+  return useContext(I18nContext)
+}
+
 /** Throws outside an `I18nProvider` (every app layout mounts one). */
 export function useI18n(): I18nValue {
   const value = useContext(I18nContext)
