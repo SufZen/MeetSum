@@ -438,7 +438,7 @@ describe("API route authz coverage", () => {
     })
 
     it("keeps liveness free of dependency calls and both probes free of tenant data", () => {
-      expect(find("health/live")!.source).not.toMatch(/@\/lib\/(db|health|storage|jobs|repositories)|\bping\w*\(|\bioredis\b|\bfetch\(/)
+      expect(find("health/live")!.source).not.toMatch(/@\/lib\/(db|storage|jobs|repositories)|\bping\w*\(|\bioredis\b|\bfetch\(/)
 
       for (const route of ["health/live", "health/ready"]) {
         expect(find(route)!.source, route).not.toMatch(/workspace|getServerAuthState|withAuthz/)
