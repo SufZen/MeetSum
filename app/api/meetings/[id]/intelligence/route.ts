@@ -6,7 +6,12 @@ import {
 } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
+import { normalizeIntelligence } from "@/lib/intelligence/normalize"
 
+/**
+ * GET /api/meetings/:id/intelligence: the latest intelligence, normalized to
+ * the V2 shape (legacy v1 rows get stable item ids and derived items).
+ */
 export const GET = withAuthz<{ id: string }>(
   "meeting:read",
   async (_request, ctx, { params }) => {
@@ -22,6 +27,6 @@ export const GET = withAuthz<{ id: string }>(
       return jsonError("Meeting intelligence has not been generated", 404)
     }
 
-    return NextResponse.json({ intelligence })
+    return NextResponse.json({ intelligence: normalizeIntelligence(intelligence) })
   }
 )

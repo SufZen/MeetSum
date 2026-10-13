@@ -1,0 +1,96 @@
+# Hebrew summary eval (M5 D8)
+
+> **SYNTHETIC replay — pending live run.** Every meeting is a synthetic fixture and every candidate
+> output and judge verdict is a hand-written recording, not a model run. The numbers below exercise
+> the harness and the decision rule; they are **not** evidence for a routing decision. Re-run with keys
+> (`npm run llm:evaluate -- --live --batch --output-md docs/parity/llm-eval.md`) to replace this file.
+
+## Run
+
+| Field | Value |
+|---|---|
+| Date | 2026-10-13T08:33:17.045Z |
+| Git SHA | `08395676f73714c261908ed605fb3d70866f4339` |
+| Mode | replay |
+| Fixture SHA-256 | `5ee5200825eed4df34764b5c86f354049c1fedf6f12fcf379e4236121c2ffffa` |
+| Meetings | 6 (6 synthetic, 0 real) |
+| Baseline | `gemini:gemini-3.5-flash-lite` |
+| Candidates | `gemini:gemini-3.8-flash`, `gemini:gemini-3.5-flash-lite` |
+| Judges | `gemini:gemini-3.5-pro` |
+
+Provider policy: Gemini is the default provider. By default the harness compares `gemini-3.8-flash`
+against the cheaper `gemini-3.5-flash-lite` baseline; Claude Haiku and Sonnet are added only when
+`ANTHROPIC_API_KEY` is set. The judge is Claude Opus with a Claude key, otherwise a Gemini Pro model
+(`MEETSUM_EVAL_JUDGES` overrides).
+
+## Meetings
+
+| Meeting | Synthetic | Language | Segments | Reference tasks | Tags |
+|---|---|---|---|---|---|
+| `he-board-update` | yes | he | 7 | 1 | board, finance, explicit-dates |
+| `he-deal-review` | yes | he | 9 | 3 | deal, numbers, relative-dates |
+| `he-one-on-one` | yes | he | 7 | 2 | one-on-one, gender-neutral, sentiment |
+| `he-sales-call` | yes | he | 8 | 3 | sales, pricing, objections |
+| `he-standup-codeswitch` | yes | mixed | 8 | 3 | standup, code-switched, tech-terms |
+| `mixed-product-planning` | yes | mixed | 8 | 3 | product, code-switched, english-speaker |
+
+## Prices (USD per million tokens)
+
+| Model | Input | Output | Cache read | Cache write |
+|---|---|---|---|---|
+| `gemini-3.8-flash` | unset | unset | — | — |
+| `gemini-3.5-flash-lite` | unset | unset | — | — |
+| `gemini-3.5-pro` | unset | unset | — | — |
+
+Gemini prices come from `GOOGLE_GEMINI_PRICE_*` (summary model) or `MEETSUM_LLM_PRICES_JSON`; unset
+prices make cost unknown, and an unknown cost blocks the decision rule.
+
+## Pairwise win rates
+
+Each pair is judged in both orders; inconsistent verdicts count as a tie. Win rate counts a tie as
+half a win; intervals are Wilson 95%.
+
+### `gemini:gemini-3.8-flash` vs `gemini:gemini-3.5-flash-lite` — judge `gemini:gemini-3.5-pro`
+
+| Criterion | Wins / ties / losses | Win rate | 95% CI | n |
+|---|---|---|---|---|
+| Faithfulness | 4 / 2 / 0 | 83.3% | 43.6% – 97.0% | 6 |
+| Coverage | 5 / 1 / 0 | 91.7% | 51.7% – 99.1% | 6 |
+| Hebrew fluency | 4 / 1 / 1 | 75.0% | 36.5% – 94.0% | 6 |
+| Action-item recall | 3 / 3 / 0 | 75.0% | 36.5% – 94.0% | 6 |
+
+Order consistency (both orders agree): 95.8%.
+
+Judge agreement: n/a (one judge).
+
+## Deterministic metrics
+
+| Candidate | Task recall | Task precision | Owner match | Due match | Language check | Citation validity | Chapters | Latency p50 | Cost / meeting | Errors |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `gemini:gemini-3.8-flash` | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 2.7 | 4420 ms | unknown | 0 |
+| `gemini:gemini-3.5-flash-lite` (baseline) | 86.7% | 100.0% | 100.0% | 90.0% | 83.3% | 96.2% | 1.7 | 2400 ms | unknown | 0 |
+
+Task matching: greedy one-to-one by normalized title-token overlap ≥ 0.5 (Hebrew one-letter
+prefixes peeled); owner by full or first name; `dueOn` exact. Citation validity: cited segment ids
+that exist in the transcript.
+
+## Decision
+
+Rule (docs/parity/m5.md D8, applied to each challenger against the baseline): adopt when the
+faithfulness + fluency win rate is ≥ 55% with the CI lower bound > 45%, task recall is non-inferior
+(Δ ≥ −0.05) and cost is ≤ 3× the baseline.
+
+- `gemini:gemini-3.8-flash` vs `gemini:gemini-3.5-flash-lite`: **insufficient data** (SYNTHETIC — not a decision)
+  - quality win rate 79.2% (CI low 50.9%) meets ≥55% / >45%
+  - recall Δ +0.133 non-inferior (≥ −0.05)
+  - cost unknown (set provider prices)
+
+The orchestrator records a live outcome in the router defaults (`lib/ai/llm/router.ts`).
+
+## Reproduce
+
+```sh
+npm run llm:evaluate                       # replay tests/fixtures/llm-eval/recorded (no keys)
+npm run llm:evaluate -- --live --batch     # needs GOOGLE_GEMINI_API_KEY (and ANTHROPIC_API_KEY for Claude)
+npm run llm:evaluate -- --live --record tests/fixtures/llm-eval/recorded-live
+```

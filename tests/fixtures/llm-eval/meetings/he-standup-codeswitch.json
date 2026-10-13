@@ -1,0 +1,27 @@
+{
+  "_synthetic": true,
+  "id": "he-standup-codeswitch",
+  "title": "סטנדאפ צוות פלטפורמה",
+  "language": "mixed",
+  "startedAt": "2026-10-12T07:30:00.000Z",
+  "tags": ["standup", "code-switched", "tech-terms"],
+  "segments": [
+    { "id": "s1", "speaker": "אבי", "startMs": 0, "endMs": 8000, "text": "אתמול סגרתי את ה-PR של ה-migration ל-Supabase, מחכה ל-review." },
+    { "id": "s2", "speaker": "נועה", "startMs": 8500, "endMs": 17000, "text": "אני עשיתי review חלקי, יש בעיה ב-RLS policy של טבלת ה-meetings." },
+    { "id": "s3", "speaker": "אבי", "startMs": 17500, "endMs": 23000, "text": "אוקיי, אני אתקן את ה-policy היום ואעדכן אותך." },
+    { "id": "s4", "speaker": "יוסי", "startMs": 23500, "endMs": 34000, "text": "ה-CI נופל על ה-e2e tests בגלל timeout. אני חושב שזה ה-runner החדש." },
+    { "id": "s5", "speaker": "נועה", "startMs": 34500, "endMs": 42000, "text": "בוא נחזור ל-runner הישן עד שנבין. מסכימים?" },
+    { "id": "s6", "speaker": "אבי", "startMs": 42500, "endMs": 45000, "text": "מסכים." },
+    { "id": "s7", "speaker": "יוסי", "startMs": 45500, "endMs": 54000, "text": "אז אני אעשה revert לקונפיגורציה של ה-runner ואפתח issue לבדיקה עד מחר." },
+    { "id": "s8", "speaker": "נועה", "startMs": 54500, "endMs": 63000, "text": "ואני מכינה את ה-release notes לגרסה 2.4, יוצא ביום רביעי." }
+  ],
+  "reference": {
+    "actionItems": [
+      { "title": "לתקן את ה-RLS policy של טבלת meetings", "owner": "אבי", "dueOn": "2026-10-12" },
+      { "title": "לעשות revert לקונפיגורציית ה-runner ולפתוח issue", "owner": "יוסי", "dueOn": "2026-10-13" },
+      { "title": "להכין release notes לגרסה 2.4", "owner": "נועה", "dueOn": "2026-10-14" }
+    ],
+    "decisions": ["חוזרים ל-runner הישן עד לבירור"],
+    "keyTopics": ["migration", "RLS", "CI"]
+  }
+}

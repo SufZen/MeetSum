@@ -147,6 +147,21 @@ describe("API route authz coverage", () => {
       "meetings/[id]/transcript/segments/[segmentId] PATCH": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/undo POST": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/revisions GET": "meeting:read",
+      // M5 Package D: analytics, prep, follow-up, templates, intelligence runs.
+      "meetings/[id]/analytics GET": "meeting:read",
+      "meetings/[id]/analytics/sentiment POST": "meeting:write",
+      "meetings/[id]/prep GET": "meeting:read",
+      "meetings/[id]/prep POST": "meeting:read",
+      "meetings/[id]/follow-up GET": "meeting:read",
+      "meetings/[id]/follow-up POST": "meeting:read",
+      "meetings/[id]/template PATCH": "meeting:write",
+      "meetings/[id]/intelligence GET": "meeting:read",
+      "meetings/[id]/intelligence/run POST": "meeting:write",
+      "templates GET": "workspace:read",
+      "templates POST": "settings:write",
+      "templates/[id] GET": "workspace:read",
+      "templates/[id] PATCH": "settings:write",
+      "templates/[id] DELETE": "settings:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(

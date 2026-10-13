@@ -1,0 +1,219 @@
+{
+  "candidate": "gemini:gemini-3.5-flash-lite",
+  "synthetic": true,
+  "outputs": {
+    "he-board-update": {
+      "meetingId": "he-board-update",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "דחיית סבב הגיוס לרבעון השני של 2027"
+      ],
+      "actionItems": [
+        {
+          "title": "להכין תרחיש שמרני עם קיצוץ של 15%",
+          "owner": "עמית",
+          "dueOn": "2026-11-15"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7"
+      ],
+      "chapterCount": 1,
+      "languageCheck": "passed",
+      "latencyMs": 2100,
+      "usage": {
+        "inputTokens": 4200,
+        "outputTokens": 610,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    },
+    "he-deal-review": {
+      "meetingId": "he-deal-review",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "מאשרים מחיר של 4.2 מיליון אירו ומתקדמים ל-due diligence"
+      ],
+      "actionItems": [
+        {
+          "title": "להביא נסח טאבו והיתר בנייה מעורך הדין של המוכר",
+          "owner": "רון"
+        },
+        {
+          "title": "להכין טיוטת term sheet",
+          "owner": "מיכל",
+          "dueOn": "2026-10-20"
+        },
+        {
+          "title": "לקבוע פגישת המשך",
+          "owner": "דנה",
+          "dueOn": "2026-10-29"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7",
+        "s9"
+      ],
+      "chapterCount": 2,
+      "languageCheck": "passed",
+      "latencyMs": 2250,
+      "usage": {
+        "inputTokens": 4580,
+        "outputTokens": 630,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    },
+    "he-one-on-one": {
+      "meetingId": "he-one-on-one",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "הדוחות השבועיים יועברו לצוות אחר"
+      ],
+      "actionItems": [
+        {
+          "title": "לדבר עם ראש צוות הדאטה על העברת הדוחות השבועיים",
+          "owner": "מנהל",
+          "dueOn": "2026-10-06"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7"
+      ],
+      "chapterCount": 1,
+      "languageCheck": "passed",
+      "latencyMs": 2400,
+      "usage": {
+        "inputTokens": 4960,
+        "outputTokens": 650,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    },
+    "he-sales-call": {
+      "meetingId": "he-sales-call",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "פיילוט בשתי מרפאות בכפוף לאישור אבטחה"
+      ],
+      "actionItems": [
+        {
+          "title": "לשלוח מסמך אבטחה",
+          "owner": "שירה"
+        },
+        {
+          "title": "להכין הצעת מחיר לשמונה מרפאות",
+          "owner": "שירה",
+          "dueOn": "2026-10-13"
+        },
+        {
+          "title": "להעביר את מסמך האבטחה לבדיקת ה-CISO",
+          "owner": "ד\"ר כהן"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7",
+        "s99"
+      ],
+      "chapterCount": 2,
+      "languageCheck": "passed",
+      "latencyMs": 2550,
+      "usage": {
+        "inputTokens": 5340,
+        "outputTokens": 670,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    },
+    "he-standup-codeswitch": {
+      "meetingId": "he-standup-codeswitch",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "חוזרים ל-runner הישן עד לבירור"
+      ],
+      "actionItems": [
+        {
+          "title": "לתקן את ה-RLS policy של טבלת meetings",
+          "owner": "אבי",
+          "dueOn": "2026-10-12"
+        },
+        {
+          "title": "לעשות revert לקונפיגורציית ה-runner ולפתוח issue",
+          "owner": "יוסי",
+          "dueOn": "2026-10-13"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7"
+      ],
+      "chapterCount": 2,
+      "languageCheck": "failed",
+      "latencyMs": 2700,
+      "usage": {
+        "inputTokens": 5720,
+        "outputTokens": 690,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    },
+    "mixed-product-planning": {
+      "meetingId": "mixed-product-planning",
+      "overview": "סיכום קצר (סינתטי).",
+      "decisions": [
+        "Offline recording ב-MVP לאנדרואיד בלבד, iOS נדחה לינואר"
+      ],
+      "actionItems": [
+        {
+          "title": "לכתוב design doc ל-offline mode",
+          "owner": "עידו",
+          "dueOn": "2026-10-22"
+        },
+        {
+          "title": "Update the customers about the calendar sync date",
+          "owner": "Sarah",
+          "dueOn": "2026-10-16"
+        },
+        {
+          "title": "לעדכן את ה-roadmap ולשתף עם הצוות",
+          "owner": "ליאת"
+        }
+      ],
+      "citations": [
+        "s1",
+        "s3",
+        "s5",
+        "s7"
+      ],
+      "chapterCount": 2,
+      "languageCheck": "passed",
+      "latencyMs": 2850,
+      "usage": {
+        "inputTokens": 6100,
+        "outputTokens": 710,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "costUsd": null
+    }
+  }
+}

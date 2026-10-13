@@ -74,6 +74,7 @@ export function MeetingRightRail({
   onSuggestAgents,
   onApproveAgentRun,
   talkTime,
+  analytics,
 }: {
   meeting: MeetingRecord | null
   jobs: JobRecord[]
@@ -88,6 +89,8 @@ export function MeetingRightRail({
   onApproveAgentRun: (run: SuggestedAgentRun) => void
   /** Talk-time panel (2xl rail). */
   talkTime?: ReactNode
+  /** M5 conversation analytics card. */
+  analytics?: ReactNode
 }) {
   const confidence = computeConfidence(meeting)
   const percent = confidence ? Math.round(confidence * 100) : undefined
@@ -111,6 +114,8 @@ export function MeetingRightRail({
       <PipelineTimeline meeting={meeting} jobs={jobs} />
 
       {talkTime ? <section className="ms-card p-4">{talkTime}</section> : null}
+
+      {analytics}
 
       <section className="ms-card p-4">
         <h3 className="mb-4 text-sm font-semibold">AI Confidence</h3>

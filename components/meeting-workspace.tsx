@@ -6,21 +6,38 @@
  * secondary tabs. The player provider wraps everything so citations, action
  * items, quotes and the transcript all seek the same clock.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentType,
+  type UIEvent,
+} from "react"
 import dynamic from "next/dynamic"
 import {
   CalendarSyncIcon,
   FileAudioIcon,
   ListTodoIcon,
+  MessageSquareIcon,
   SettingsIcon,
   UploadIcon,
 } from "lucide-react"
 
-import { ActionItemList } from "@/components/action-item-list"
 import { AskMeetingPanel, type AskCitation } from "@/components/ask-meeting-panel"
+import { ClipList } from "@/components/clips/clip-list"
+import { CommentsDrawer } from "@/components/comments/comments-drawer"
+import { FollowUpPanel } from "@/components/intelligence/follow-up-panel"
+import { PrepPanel } from "@/components/intelligence/prep-panel"
+import { useJson } from "@/components/intelligence/use-json"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
-import { LazyMeetingPlayer, LazyTranscriptView } from "@/components/player/lazy"
+import { LazyMeetingPlayer } from "@/components/player/lazy"
+import type { TranscriptView } from "@/components/transcript/transcript-view"
+import { TranscriptSkeleton } from "@/components/transcript/transcript-skeleton"
+import { ActionItemEditor } from "@/components/tasks/action-item-editor"
 import {
   MeetingPlayerProvider,
   useMeetingPlayer,
@@ -44,11 +61,28 @@ import type {
 import { buildActionItemMarkers } from "@/lib/player/citations"
 import { buildTranscriptIndex } from "@/lib/player/word-index"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
+import type { Chapter } from "@/lib/intelligence"
+import { normalizeIntelligence } from "@/lib/intelligence/normalize"
+import type { TaskMember } from "@/lib/tasks/types"
 
 // Only rendered on the transcript tab / when confirming; loaded on demand.
 const SpeakerMappingPanel = dynamic(
   () => import("@/components/speaker-mapping-panel").then((mod) => mod.SpeakerMappingPanel),
   { ssr: false, loading: () => <Skeleton className="h-14 w-full rounded-lg" /> }
+)
+/**
+ * M5 transcript (Package C's `TranscriptTimeline`: chapter headings,
+ * comment anchors, clip ranges, reactions over M4's TranscriptView), code
+ * split like M4's LazyTranscriptView. Typed against TranscriptView's props
+ * plus `chapters` until C's export lands at integration.
+ */
+type TranscriptTimelineProps = ComponentProps<typeof TranscriptView> & { chapters?: readonly Chapter[] }
+const LazyTranscriptTimeline = dynamic(
+  () =>
+    import("@/components/transcript-timeline").then(
+      (mod) => mod.TranscriptTimeline as ComponentType<TranscriptTimelineProps>
+    ),
+  { ssr: false, loading: () => <TranscriptSkeleton /> }
 )
 const ReprocessConfirmDialog = dynamic(
   () => import("@/components/meeting-dialogs").then((mod) => mod.ReprocessConfirmDialog),
@@ -60,7 +94,34 @@ const COMPACT_AT_PX = 24
 const EXPAND_BELOW_PX = 4
 
 type ReprocessMode = "full" | "summary" | "tasks" | "transcript-cleanup"
-type TabValue = "summary" | "transcript" | "ask" | "tasks" | "prep" | "followup"
+type TabValue = "summary" | "transcript" | "ask" | "tasks" | "clips" | "prep" | "followup"
+
+type MembersResponse = { members: Array<{ userId: string; email: string; name: string | null }> }
+
+/** Tasks tab: Package B's editor with workspace members as owner options. */
+function TasksTab({ meeting }: { meeting: MeetingRecord }) {
+  const { data } = useJson<MembersResponse>("/api/workspaces/current/members")
+  const members = useMemo<TaskMember[]>(
+    () =>
+      (data?.members ?? []).map((member) => ({
+        userId: member.userId,
+        email: member.email,
+        name: member.name ?? undefined,
+      })),
+    [data?.members]
+  )
+
+  return (
+    <ActionItemEditor
+      meetingId={meeting.id}
+      items={meeting.summary?.actionItems ?? []}
+      participants={meeting.participantDetails ?? []}
+      speakers={meeting.speakers ?? []}
+      members={members}
+      meetingStartedAt={meeting.startedAt}
+    />
+  )
+}
 
 export type MeetingPermissions = { canWrite: boolean; canManage: boolean }
 
@@ -169,6 +230,12 @@ export function MeetingWorkspace({
   const compact = paneCompact || columnCompact
   const [confirmReprocess, setConfirmReprocess] = useState(false)
   const [confirmRequested, setConfirmRequested] = useState(false)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const rawIntelligence = meeting?.intelligence
+  const chapters = useMemo(
+    () => (rawIntelligence ? (normalizeIntelligence(rawIntelligence).chapters ?? []) : []),
+    [rawIntelligence]
+  )
   const segments = useMemo(() => transcript?.data?.segments ?? [], [transcript?.data?.segments])
   const speakers = useMemo(
     () => transcript?.data?.speakers ?? meeting?.speakers ?? [],
@@ -294,6 +361,14 @@ export function MeetingWorkspace({
           onDelete={onDelete}
         />
 
+        <div className="flex justify-end px-4 md:px-6">
+          <Button size="sm" variant="ghost" onClick={() => setCommentsOpen(true)}>
+            <MessageSquareIcon data-icon="inline-start" className="size-4" />
+            {dictionary.intelComments}
+          </Button>
+        </div>
+        <CommentsDrawer meetingId={meeting.id} open={commentsOpen} onOpenChange={setCommentsOpen} />
+
         <div className="sticky top-0 z-(--z-sticky) shrink-0 bg-surface px-4 pt-3 md:px-6">
           <LazyMeetingPlayer
             dictionary={dictionary}
@@ -314,18 +389,19 @@ export function MeetingWorkspace({
         >
           <TabsList
             variant="line"
-            className="mx-auto mt-3 grid min-h-9 w-full max-w-172 shrink-0 grid-cols-3 border-b border-line bg-transparent p-0 px-5 md:grid-cols-6"
+            className="mx-auto mt-3 grid min-h-9 w-full max-w-172 shrink-0 grid-cols-4 border-b border-line bg-transparent p-0 px-5 md:grid-cols-7"
           >
             <TabsTrigger value="summary">{dictionary.summary}</TabsTrigger>
             <TabsTrigger value="transcript">{dictionary.transcript}</TabsTrigger>
             <TabsTrigger value="ask">{dictionary.ask}</TabsTrigger>
             <TabsTrigger value="tasks">
-              Tasks
+              {dictionary.intelTasks}
               <span className="ms-1 rounded-full bg-surface-2 px-2 text-xs text-muted-foreground">
                 {meeting.summary?.actionItems.length ?? 0}
               </span>
             </TabsTrigger>
-            <TabsTrigger value="prep">Prep</TabsTrigger>
+            <TabsTrigger value="clips">{dictionary.intelClips}</TabsTrigger>
+            <TabsTrigger value="prep">{dictionary.intelPrep}</TabsTrigger>
             <TabsTrigger value="followup">{dictionary.followUp}</TabsTrigger>
           </TabsList>
 
@@ -343,6 +419,9 @@ export function MeetingWorkspace({
               onSyncMeetArtifacts={onSyncMeetArtifacts}
               onCopyText={onCopyText}
               talkTime={<div className="2xl:hidden">{talkTime}</div>}
+              directory={directory}
+              locale={locale}
+              canWrite={permissions.canWrite}
             />
           </TabsContent>
 
@@ -350,7 +429,8 @@ export function MeetingWorkspace({
             value="transcript"
             className="ms-scrollbar mt-0 flex min-h-0 flex-col overflow-y-auto px-5 pt-4 pb-2 md:px-8"
           >
-            <LazyTranscriptView
+            <LazyTranscriptTimeline
+              chapters={chapters}
               className="mx-auto h-full w-full max-w-5xl"
               fill
               dictionary={dictionary}
@@ -403,27 +483,28 @@ export function MeetingWorkspace({
                 <ListTodoIcon aria-hidden="true" className="size-4 text-primary" />
                 <h3 className="text-sm font-semibold">{dictionary.actionItems}</h3>
               </div>
-              <ActionItemList
-                items={meeting.summary?.actionItems}
-                unassigned={dictionary.unassigned}
-                onToggle={onToggleActionItem}
-                dictionary={dictionary}
-              />
+              <TasksTab meeting={meeting} />
+            </section>
+          </TabsContent>
+
+          <TabsContent value="clips" className={scrollPane} onScroll={trackCompact}>
+            <section className="mx-auto max-w-5xl">
+              <ClipList meetingId={meeting.id} />
             </section>
           </TabsContent>
 
           <TabsContent value="prep" className={scrollPane}>
-            <section className="ms-card mx-auto max-w-3xl p-4 text-sm leading-6 text-muted-foreground">
-              Gmail-aware prep, linked Drive docs, and previous context packets will
-              land here after the Calendar/Drive spine is running.
-            </section>
+            <PrepPanel meetingId={meeting.id} dictionary={dictionary} locale={locale} />
           </TabsContent>
 
           <TabsContent value="followup" className={scrollPane}>
-            <section className="ms-card mx-auto max-w-3xl p-4 text-sm leading-6 text-muted-foreground">
-              {meeting.intelligence?.followUpDraft ??
-                "Follow-up draft will appear after structured intelligence runs."}
-            </section>
+            <FollowUpPanel
+              meetingId={meeting.id}
+              dictionary={dictionary}
+              draft={meeting.intelligence?.followUpDraft}
+              defaultLanguage={directionForLanguage(meeting.language) === "ltr" ? "en" : "he"}
+              onCopyText={onCopyText}
+            />
           </TabsContent>
         </Tabs>
       </div>

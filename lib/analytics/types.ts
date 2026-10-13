@@ -39,11 +39,32 @@ export type SentimentAggregate = {
   turns: number
 }
 
+/**
+ * One classified speaker turn, cached by the sha1 of its (truncated) text so
+ * re-runs only send changed turns. Carries no transcript text.
+ */
+export type SentimentTurn = {
+  hash: string
+  speakerKey: string
+  startMs: number
+  label: SentimentLabel
+  score: number
+}
+
 export type MeetingSentiment = {
-  bySpeaker: Array<{ speakerId?: string; label: string } & SentimentAggregate>
+  /** `label` is the sentiment label; the speaker is `speakerLabel`. */
+  bySpeaker: Array<
+    { speakerKey: string; speakerId?: string; speakerLabel: string; displayName?: string } & SentimentAggregate
+  >
   byChapter: Array<{ chapterId: string } & SentimentAggregate>
+  /** Overall meeting aggregate. */
+  overall?: SentimentAggregate
+  turns?: SentimentTurn[]
+  /** Turns that could not be classified (a failed batch). */
+  failedTurns?: number
   provider?: string
   model?: string
+  computedAt?: string
 }
 
 export type MeetingAnalyticsRecord = {

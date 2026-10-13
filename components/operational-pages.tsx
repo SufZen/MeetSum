@@ -42,6 +42,15 @@ const AsrGlossaryEditor = dynamic(
   () => import("@/components/asr-glossary-editor").then((mod) => mod.AsrGlossaryEditor),
   { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
 )
+// M5: AI model settings and workspace summary templates (AI settings section).
+const LlmSettings = dynamic(
+  () => import("@/components/intelligence/llm-settings").then((mod) => mod.LlmSettings),
+  { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
+const TemplatesSettings = dynamic(
+  () => import("@/components/intelligence/template-editor").then((mod) => mod.TemplatesSettings),
+  { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
 
 type MemorySearchResult = {
   id: string
@@ -2460,6 +2469,12 @@ export function OperationalPage({
                 </div>
               </div>
             </OpsCard>
+          ) : null}
+          {settingsSection === "AI settings" ? (
+            <>
+              <LlmSettings dictionary={t} locale={settings.defaultLocale} readOnly={settingsReadOnly} />
+              <TemplatesSettings dictionary={t} locale={settings.defaultLocale} readOnly={settingsReadOnly} />
+            </>
           ) : null}
           {settingsSection === "AI settings" ? <AsrGlossaryEditor dictionary={t} /> : null}
           {settingsSection === "Live meeting" ? (
