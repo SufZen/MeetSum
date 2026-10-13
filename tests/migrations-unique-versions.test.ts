@@ -9,13 +9,35 @@ import { listMigrationFiles } from "@/lib/db/migrations"
  * compose image runs `db/migrations` from docker-entrypoint-initdb.d too).
  */
 
-/**
- * Versions that may be missing on a branch because another branch owns them:
- * 024 is M7 (`024_meeting_bot.sql`, PR #23). Any other gap is a mistake.
- */
-const RESERVED_GAPS = new Set(["024"])
-
 const migrations = listMigrationFiles("db/migrations")
+
+type MigrationRef = { version: string; name: string }
+
+/** `version: a.sql, b.sql` for every version used by more than one file. */
+function duplicateVersions(files: readonly MigrationRef[]): string[] {
+  const seen = new Map<string, string[]>()
+
+  for (const file of files) {
+    seen.set(file.version, [...(seen.get(file.version) ?? []), file.name])
+  }
+
+  return [...seen.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([version, names]) => `${version}: ${names.join(", ")}`)
+}
+
+/** Zero-padded versions missing between 001 and the highest version. */
+function versionGaps(files: readonly MigrationRef[]): string[] {
+  const versions = new Set(files.map((file) => Number(file.version)))
+  const max = Math.max(...versions)
+  const gaps: string[] = []
+
+  for (let version = 1; version < max; version += 1) {
+    if (!versions.has(version)) gaps.push(String(version).padStart(3, "0"))
+  }
+
+  return gaps
+}
 
 /** SQL without `--` line comments, whitespace collapsed, lower case. */
 function flatSql(sql: string): string {
@@ -43,37 +65,27 @@ function doBlocks(sql: string): [number, number][] {
 }
 
 describe("migration versions (M6 Step 0)", () => {
-  it("finds the migrations, including 025", () => {
+  it("finds the migrations, including M7's 024 and M6's 025", () => {
+    const names = migrations.map((file) => file.name)
+
     expect(migrations.length).toBeGreaterThan(20)
-    expect(migrations.map((file) => file.name)).toContain("025_search_ask.sql")
+    expect(names).toContain("024_meeting_bot.sql")
+    expect(names).toContain("025_search_ask.sql")
   })
 
   it("never reuses a version number", () => {
-    const seen = new Map<string, string[]>()
-
-    for (const file of migrations) {
-      seen.set(file.version, [...(seen.get(file.version) ?? []), file.name])
-    }
-
-    const duplicates = [...seen.entries()]
-      .filter(([, names]) => names.length > 1)
-      .map(([version, names]) => `${version}: ${names.join(", ")}`)
-
-    expect(duplicates).toEqual([])
+    expect(duplicateVersions(migrations)).toEqual([])
   })
 
-  it("has no gaps other than versions reserved by other branches", () => {
-    const versions = new Set(migrations.map((file) => Number(file.version)))
-    const max = Math.max(...versions)
-    const gaps: string[] = []
+  it("flags a reused version number", () => {
+    const withDuplicate = [...migrations, { version: "025", name: "025_other_branch.sql" }]
 
-    for (let version = 1; version < max; version += 1) {
-      const padded = String(version).padStart(3, "0")
+    expect(duplicateVersions(withDuplicate)).toEqual(["025: 025_search_ask.sql, 025_other_branch.sql"])
+  })
 
-      if (!versions.has(version) && !RESERVED_GAPS.has(padded)) gaps.push(padded)
-    }
-
-    expect(gaps).toEqual([])
+  it("numbers the migrations contiguously from 001", () => {
+    expect(versionGaps(migrations)).toEqual([])
+    expect(versionGaps(migrations.filter((file) => file.version !== "024"))).toEqual(["024"])
   })
 
   it("marks every create/add statement idempotent (static check)", () => {
