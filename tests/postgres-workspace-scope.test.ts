@@ -697,6 +697,11 @@ describe("postgres meeting repository workspace scoping", () => {
     expect(user.statements[0].text).toContain("set title = $2, title_source = $3")
     expect(user.statements[0].values.slice(0, 3)).toEqual(["meet_1", "Budget sync", "user"])
 
+    const rename = recordingClient()
+
+    await invocations.renameMeeting(createPostgresMeetingRepository(rename.client, scopes.member)).catch(() => {})
+    expect(rename.statements[0].text).toContain("set title = $2, title_source = 'user'")
+
     const template = recordingClient()
 
     await invocations.setMeetingTemplate(

@@ -3079,7 +3079,8 @@ export function createPostgresMeetingRepository(
     },
 
     async renameMeeting(id, title) {
-      const row = await updateScopedMeeting(client, id, "title = $2", [title])
+      // A user rename: AI titles never overwrite it (M5).
+      const row = await updateScopedMeeting(client, id, "title = $2, title_source = 'user'", [title])
 
       if (!row) throw new Error(`Meeting not found: ${id}`)
       return mapMeetingRow(row)

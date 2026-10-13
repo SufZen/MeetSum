@@ -438,6 +438,15 @@ describe("meeting repository", () => {
       expect((await repository.getMeeting("meet_m5"))?.title).toBe("השם שלי")
       expect(await repository.applyAiTitle("missing", "x")).toBe(false)
     })
+
+    it("treats a rename as a user title that AI titles never overwrite", async () => {
+      const repository = createInMemoryMeetingRepository([meetingInput], system)
+
+      expect(await repository.applyAiTitle("meet_m5", "כותרת AI")).toBe(true)
+      expect((await repository.renameMeeting("meet_m5", "שם ידני")).titleSource).toBe("user")
+      expect(await repository.applyAiTitle("meet_m5", "כותרת AI חדשה")).toBe(false)
+      expect((await repository.getMeeting("meet_m5"))?.title).toBe("שם ידני")
+    })
   })
 
   it("creates externally sourced meetings idempotently", async () => {

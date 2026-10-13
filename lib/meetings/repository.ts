@@ -119,11 +119,6 @@ export type ActionItemActor = { userId?: string }
 
 export type MeetingTitleSource = "source" | "ai" | "user"
 
-/** Thrown by M5 Step 0 contract stubs until their package lands. */
-export function notImplementedM5(method: string): never {
-  throw new Error(`${method}: not implemented (M5)`)
-}
-
 export type TranscriptSegment = {
   id: string
   speaker: string
@@ -818,7 +813,10 @@ export type MeetingRepository = {
     meetingId: string,
     segmentId: string
   ) => Promise<TranscriptRevision[]>
-  /** M4: renames a visible meeting. */
+  /**
+   * M4: renames a visible meeting (a user rename: M5 sets
+   * `title_source='user'`, so AI titles never overwrite it).
+   */
   renameMeeting: (id: string, title: string) => Promise<MeetingRecord>
   /**
    * M4: hard-deletes a visible meeting (rows cascade) and returns the object
@@ -2251,7 +2249,7 @@ export function createInMemoryMeetingRepository(
 
     async renameMeeting(id, title) {
       const meeting = requireVisibleMeeting(id)
-      const updated = { ...meeting, title }
+      const updated: MeetingRecord = { ...meeting, title, titleSource: "user" }
 
       meetings.set(id, updated)
       return hydrate(updated, false)
