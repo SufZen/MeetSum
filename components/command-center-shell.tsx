@@ -21,6 +21,8 @@ import {
 import { dockEntriesFrom, type DockStopAction } from "@/components/bot/recorder-dock-state"
 import { useBotSessions } from "@/components/bot/use-bot-sessions"
 import { useBrowserRecorder, type RecordingMeta } from "@/components/bot/use-browser-recorder"
+import { preloadRecorderChunks } from "@/components/bot/recorder-preload"
+import { LocalizedError, planBrowserRecording, uploadErrorText } from "@/components/bot/recording-target"
 import { CommandPaletteHost } from "@/components/command-palette"
 import { useWorkspace } from "@/components/workspace-context"
 import type { DriveImportResult } from "@/components/drive-recording-picker-drawer"
@@ -109,8 +111,16 @@ const DriveRecordingPickerDrawer = dynamic(
   () => import("@/components/drive-recording-picker-drawer").then((mod) => mod.DriveRecordingPickerDrawer),
   { ssr: false }
 )
+// Preloaded when the recorder sheet opens (recorder-preload.ts). If the chunk
+// still can't load (opened offline), the dock is skipped instead of crashing
+// the shell; the sheet keeps its own Stop control.
 const RecorderDock = dynamic(
-  () => import("@/components/bot/recorder-dock").then((mod) => mod.RecorderDock),
+  () =>
+    import("@/components/bot/recorder-dock")
+      .then((mod) => mod.RecorderDock)
+      .catch(() => function RecorderDockUnavailable() {
+        return null
+      }),
   { ssr: false }
 )
 const StopBotDialog = dynamic(
@@ -337,6 +347,12 @@ export function CommandCenterShell({
     window.history.replaceState(null, "", `${window.location.pathname}${withoutParams(window.location.search, ["record"])}`)
     queueMicrotask(() => setRecordSheetOpen(true))
   }, [recordRequested])
+
+  // Load the recorder's lazy chunks while still online, so Record works if
+  // the connection drops after the sheet opened.
+  useEffect(() => {
+    if (recordSheetOpen) void preloadRecorderChunks()
+  }, [recordSheetOpen])
   function openDrivePicker() {
     setDrivePickerReady(true)
     setDrivePickerOpen(true)
@@ -679,7 +695,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(dictionary.shellErrorCreateMeeting)
+      throw new LocalizedError(dictionary.shellErrorCreateMeeting)
     }
 
     setMeetingRecords((current) =>
@@ -689,7 +705,12 @@ export function CommandCenterShell({
     return body.meeting as MeetingRecord
   }
 
-  async function uploadFile(file: File, meeting = selectedMeeting) {
+  /**
+   * Uploads to `meeting`; `null` (a new recording) always creates a new
+   * meeting. Only an omitted argument falls back to the selected meeting
+   * (the Upload drawer).
+   */
+  async function uploadFile(file: File, meeting: Pick<MeetingRecord, "id"> | null = selectedMeeting) {
     const targetMeeting = meeting ?? (await createMeetingForFile(file))
     const formData = new FormData()
 
@@ -702,7 +723,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(dictionary.shellErrorUploadMedia)
+      throw new LocalizedError(dictionary.shellErrorUploadMedia)
     }
 
     setJobs((current) => [body.job, ...current])
@@ -742,7 +763,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(dictionary.shellErrorImportDesktop)
+      throw new LocalizedError(dictionary.shellErrorImportDesktop)
     }
 
     if (body.meeting) {
@@ -762,9 +783,7 @@ export function CommandCenterShell({
     if (!file) return
     toast.info(fillMessage(dictionary.shellToastUploading, { name: file.name }))
     startTransition(() =>
-      void uploadFile(file).catch((error) => {
-        toast.error(error.message)
-      })
+      void uploadFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorUploadMedia))
     )
     event.target.value = ""
   }
@@ -775,42 +794,52 @@ export function CommandCenterShell({
     if (!file) return
     toast.info(fillMessage(dictionary.shellToastImportingDesktop, { name: file.name }))
     startTransition(() =>
-      void importDesktopFile(file).catch((error) => {
-        toast.error(error.message)
-      })
+      void importDesktopFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorImportDesktop))
     )
     event.target.value = ""
   }
 
+  function uploadToastError(error: unknown, fallback: string) {
+    toast.error(uploadErrorText(error, { offline: dictionary.pwaOffline, fallback }))
+  }
+
   /**
-   * M9 D5: a recording for a meeting keeps the M7 path (upload to that
-   * meeting); its offline-queue copy is dropped after success and, if the
-   * direct upload fails, uploads through the idempotent ingest route with
+   * M9 D5: a recording started for a meeting (the explicit "record into this
+   * meeting" action) keeps the M7 path (upload to that meeting); its
+   * offline-queue copy is dropped after success and, if the direct upload
+   * fails, uploads through the idempotent ingest route with
    * `targetMeetingId`, so it attaches to the same meeting (never a second
-   * one). A recording without a meeting (`?record=1`) goes through the queue
-   * directly.
+   * one). A new recording (the recorder sheet, `?record=1`) never targets
+   * the selected meeting: it goes through the queue, which creates its own
+   * meeting, or without a queue uploads to a new meeting.
    */
   function handleBrowserRecording(file: File, meta: RecordingMeta) {
-    const { meetingId, captureId } = meta
-    const target =
-      (meetingId ? meetingRecords.find((meeting) => meeting.id === meetingId) : undefined) ??
-      (meetingId && selectedMeeting?.id === meetingId ? selectedMeeting : undefined)
+    const plan = planBrowserRecording(meta)
+    const { captureId } = meta
     const queue = () =>
       user?.id && workspaceId
-        ? import("@/lib/client/upload-queue/browser").then((browser) => browser.getUploadQueue(user.id as string, workspaceId))
+        ? import("@/lib/client/upload-queue/browser")
+            .then((browser) => browser.getUploadQueue(user.id as string, workspaceId))
+            .catch(() => null)
         : Promise.resolve(null)
 
     toast.info(dictionary.shellToastRecordingSaved)
-    if (captureId && !target) {
+    if (plan.kind === "queue") {
       void queue().then((uploadQueue) => uploadQueue?.flush({ force: true }))
       return
     }
     startTransition(() =>
-      void uploadFile(file, target ?? selectedMeeting ?? undefined)
+      void uploadFile(file, plan.kind === "meeting" ? { id: plan.meetingId } : null)
         .then(() => (captureId ? queue().then((uploadQueue) => uploadQueue?.remove(captureId)) : undefined))
         .catch((error) => {
-          toast.error(error.message)
-          if (captureId) void queue().then((uploadQueue) => uploadQueue?.flush({ force: true }))
+          if (captureId) {
+            // The queued copy uploads once the connection is back.
+            if (!navigator.onLine) toast.info(dictionary.pwaOffline)
+            else uploadToastError(error, dictionary.shellErrorUploadMedia)
+            void queue().then((uploadQueue) => uploadQueue?.flush({ force: true }))
+            return
+          }
+          uploadToastError(error, dictionary.shellErrorUploadMedia)
         })
     )
   }
@@ -818,9 +847,7 @@ export function CommandCenterShell({
   function handleRecordingReady(file: File) {
     toast.info(dictionary.shellToastRecordingSaved)
     startTransition(() =>
-      void uploadFile(file, selectedMeeting ?? undefined).catch((error) => {
-        toast.error(error.message)
-      })
+      void uploadFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorUploadMedia))
     )
   }
 
@@ -1555,7 +1582,7 @@ export function CommandCenterShell({
             aiStatus={aiStatus}
             onInvite={() => setActivePanel("admin")}
             recorder={browserRecorder}
-            recordingMeetingId={selectedMeeting?.id ?? null}
+            recordingMeetingId={null}
             recordOpen={recordSheetOpen}
             onRecordOpenChange={setRecordSheetOpen}
             desktopOpen={desktopOpen}
