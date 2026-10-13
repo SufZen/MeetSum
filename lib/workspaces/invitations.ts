@@ -1,4 +1,5 @@
 import { getEmailSender, type EmailSender } from "@/lib/email"
+import { notifyInvited } from "@/lib/notifications/notify"
 import {
   buildInvitationEmail,
   type InvitationEmailLocale,
@@ -54,6 +55,8 @@ export async function deliverInvitation(input: {
   origin: string
   sender?: EmailSender
 }): Promise<InvitationDelivery> {
+  // M9: in-app `invited` notification for an existing user (dedupe inv:<id>).
+  await notifyInvited({ invitationId: input.invitation.id }).catch(() => {})
   const inviteUrl = buildInviteUrl(input.origin, input.locale, input.token)
   const sender = input.sender ?? getEmailSender()
 

@@ -5,6 +5,7 @@ import { NoWorkspaceState } from "@/components/no-workspace-state"
 import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { shouldRedirectToOnboarding } from "@/lib/onboarding/redirect"
 import { selectRecentRooms } from "@/lib/rooms"
 
 export default async function Page({
@@ -36,6 +37,11 @@ export default async function Page({
 
   const { ctx } = auth
   const user = auth.session.user
+
+  // M9 onboarding (Package C): fresh owner/admin workspaces go to the wizard.
+  if (await shouldRedirectToOnboarding(ctx).catch(() => false)) {
+    redirect(`/${supportedLocale}/onboarding`)
+  }
   // Lightweight inbox rows; the selected meeting's detail and transcript are
   // fetched client-side.
   const [meetingPage, rooms] = await Promise.all([

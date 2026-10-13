@@ -17,6 +17,7 @@ import {
   type BotStatusReason,
 } from "@/lib/bot/types"
 import type { VexaMeeting, VexaServiceProvenance } from "@/lib/bot/vexa/types"
+import { notifyBotBlocked } from "@/lib/notifications/notify"
 import { emitPlatformEvent } from "@/lib/platform/emit"
 
 /**
@@ -281,6 +282,9 @@ export async function runBotSideEffects(
 
   if (sideEffects.includes("notify")) {
     await emitPlatformEvent({ workspaceId: session.workspaceId }, "bot.status_changed", { sessionId: session.id, meetingId: session.meetingId ?? null, status: session.status ?? null, reason: session.statusReason ?? null }).catch(() => {})
+    if (session.status === "blocked" && session.meetingId) {
+      await notifyBotBlocked({ workspaceId: session.workspaceId, meetingId: session.meetingId, sessionId: session.id }).catch(() => {})
+    }
   }
 
   if (sideEffects.includes("enqueue_consent")) {
