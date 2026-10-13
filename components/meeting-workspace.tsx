@@ -494,7 +494,7 @@ export function MeetingWorkspace({
           </TabsContent>
 
           <TabsContent value="prep" className={scrollPane}>
-            <PrepPanel meetingId={meeting.id} dictionary={dictionary} locale={locale} />
+            <PrepPanel meetingId={meeting.id} dictionary={dictionary} locale={locale} canWrite={permissions.canWrite} />
           </TabsContent>
 
           <TabsContent value="followup" className={scrollPane}>
@@ -504,6 +504,7 @@ export function MeetingWorkspace({
               draft={meeting.intelligence?.followUpDraft}
               defaultLanguage={directionForLanguage(meeting.language) === "ltr" ? "en" : "he"}
               onCopyText={onCopyText}
+              canWrite={permissions.canWrite}
             />
           </TabsContent>
         </Tabs>

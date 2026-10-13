@@ -20,6 +20,8 @@ export type PrepPanelProps = {
   meetingId: string
   dictionary: Dictionary
   locale?: string
+  /** `meeting:write`: may regenerate (overwrite) the shared cached brief. */
+  canWrite?: boolean
 }
 
 function meetingHref(meetingId: string) {
@@ -33,7 +35,7 @@ function errorMessage(error: unknown, t: Dictionary): string {
   return t.intelLoadFailed
 }
 
-export function PrepPanel({ meetingId, dictionary: t, locale }: PrepPanelProps) {
+export function PrepPanel({ meetingId, dictionary: t, locale, canWrite = false }: PrepPanelProps) {
   const [language, setLanguage] = useState<"" | "he" | "en">("")
   const base = `/api/meetings/${encodeURIComponent(meetingId)}/prep`
   const { data, setData, error, loading } = useJson<PrepBriefResult>(language ? `${base}?language=${language}` : base)
@@ -50,7 +52,7 @@ export function PrepPanel({ meetingId, dictionary: t, locale }: PrepPanelProps) 
       setData(
         await requestJson<PrepBriefResult>(base, {
           method: "POST",
-          body: { ...(language ? { language } : {}), force: Boolean(data?.brief) },
+          body: { ...(language ? { language } : {}), ...(data?.brief && canWrite ? { force: true } : {}) },
         })
       )
     } catch (caught) {
@@ -82,10 +84,12 @@ export function PrepPanel({ meetingId, dictionary: t, locale }: PrepPanelProps) 
             <NativeSelectOption value="he">{t.intelLanguageHe}</NativeSelectOption>
             <NativeSelectOption value="en">{t.intelLanguageEn}</NativeSelectOption>
           </NativeSelect>
-          <Button size="sm" variant="ai" disabled={generating || loading} onClick={() => void generate()}>
-            <RefreshCwIcon data-icon="inline-start" className="size-4" />
-            {generating ? t.intelGenerating : brief ? t.intelRegenerate : t.intelPrepGenerate}
-          </Button>
+          {!brief || canWrite || data?.stale ? (
+            <Button size="sm" variant="ai" disabled={generating || loading} onClick={() => void generate()}>
+              <RefreshCwIcon data-icon="inline-start" className="size-4" />
+              {generating ? t.intelGenerating : brief ? t.intelRegenerate : t.intelPrepGenerate}
+            </Button>
+          ) : null}
         </div>
       </div>
 

@@ -24,16 +24,28 @@ export type FollowUpPanelProps = {
   /** Default email language (meeting language). */
   defaultLanguage?: "he" | "en"
   onCopyText?: (text: string, label: string) => void
+  /** `meeting:write`: may regenerate (overwrite) a shared cached draft. */
+  canWrite?: boolean
 }
 
 const MAILTO_MAX_BODY_CHARS = 1800
 
-export function FollowUpPanel({ meetingId, dictionary: t, draft, defaultLanguage = "he", onCopyText }: FollowUpPanelProps) {
+export function FollowUpPanel({
+  meetingId,
+  dictionary: t,
+  draft,
+  defaultLanguage = "he",
+  onCopyText,
+  canWrite = false,
+}: FollowUpPanelProps) {
   const url = `/api/meetings/${encodeURIComponent(meetingId)}/follow-up`
-  const { data, setData } = useJson<{ variants: FollowUpVariant[] }>(url)
+  const [includeActionItems, setIncludeActionItems] = useState(true)
+  // The action-item list is applied per response, so toggling it refetches.
+  const { data, setData } = useJson<{ variants: FollowUpVariant[] }>(
+    `${url}?includeActionItems=${includeActionItems ? "1" : "0"}`
+  )
   const [language, setLanguage] = useState<"he" | "en">(defaultLanguage)
   const [tone, setTone] = useState<FollowUpTone>("formal")
-  const [includeActionItems, setIncludeActionItems] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
   const variant = useMemo(
@@ -53,7 +65,7 @@ export function FollowUpPanel({ meetingId, dictionary: t, draft, defaultLanguage
     try {
       const body = await requestJson<{ variant: FollowUpVariant }>(url, {
         method: "POST",
-        body: { language, tone, includeActionItems, force: Boolean(variant) },
+        body: { language, tone, includeActionItems, ...(variant && canWrite ? { force: true } : {}) },
       })
 
       setData((previous) => ({
@@ -89,10 +101,12 @@ export function FollowUpPanel({ meetingId, dictionary: t, draft, defaultLanguage
     <section className="ms-card mx-auto grid max-w-3xl gap-4 p-4" aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">{t.intelFollowUpEmail}</h3>
-        <Button size="sm" variant="ai" disabled={busy} onClick={() => void generate()}>
-          <RefreshCwIcon data-icon="inline-start" className="size-4" />
-          {busy ? t.intelGenerating : variant ? t.intelRegenerate : t.intelFollowUpGenerate}
-        </Button>
+        {!variant || canWrite ? (
+          <Button size="sm" variant="ai" disabled={busy} onClick={() => void generate()}>
+            <RefreshCwIcon data-icon="inline-start" className="size-4" />
+            {busy ? t.intelGenerating : variant ? t.intelRegenerate : t.intelFollowUpGenerate}
+          </Button>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
