@@ -6,6 +6,7 @@
  * template. Stored through `PATCH /api/settings` (Package A owns the keys).
  */
 import { useState } from "react"
+import { TriangleAlertIcon } from "lucide-react"
 
 import { requestJson, useJson } from "@/components/intelligence/use-json"
 import { Button } from "@/components/ui/button"
@@ -84,6 +85,29 @@ export function configuredProviders(payload: unknown): Record<string, boolean> {
   return result
 }
 
+/**
+ * Warnings from the provider status payload: whether the Gemini free-tier
+ * privacy warning is on (shown localized), plus any other warning text.
+ */
+export function providerWarnings(payload: unknown): { geminiFreeTier: boolean; other: string[] } {
+  const FREE = /GEMINI_TIER=free:[\s\S]*?(?:confidential meetings\.|$)/g
+  let geminiFreeTier = false
+  const other = new Set<string>()
+
+  for (const entry of Array.isArray(payload) ? payload : []) {
+    const warning = entry && typeof entry === "object" ? (entry as { warning?: unknown }).warning : undefined
+
+    if (typeof warning !== "string" || !warning.trim()) continue
+    if (warning.includes("GEMINI_TIER=free")) geminiFreeTier = true
+
+    const rest = warning.replace(FREE, "").trim()
+
+    if (rest) other.add(rest)
+  }
+
+  return { geminiFreeTier, other: [...other] }
+}
+
 export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSettingsProps) {
   const settings = useJson<SettingsResponse>("/api/settings")
   const providers = useJson<ProvidersResponse>("/api/ai/providers/status")
@@ -91,6 +115,7 @@ export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSett
   const [edits, setEdits] = useState<Partial<LlmSettingsValues>>({})
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   const configured = configuredProviders(providers.data?.providers)
+  const warnings = providerWarnings(providers.data?.providers)
   const he = locale !== "en"
   const values: LlmSettingsValues = {
     ...(settings.data ? fromSettings(settings.data.settings) : DEFAULTS),
@@ -131,6 +156,26 @@ export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSett
     <section className="ms-card grid gap-4 p-4">
       <h3 className="text-sm font-semibold">{t.intelLlmSettings}</h3>
       {readOnly ? <p className="text-xs text-fg-3">{t.intelReadOnly}</p> : null}
+      {warnings.geminiFreeTier || warnings.other.length ? (
+        <div
+          role="status"
+          aria-label={t.intelProviderWarnings}
+          className="grid gap-1 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text"
+        >
+          {warnings.geminiFreeTier ? (
+            <p className="flex items-start gap-1.5">
+              <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <span>{t.intelGeminiFreeTierWarning}</span>
+            </p>
+          ) : null}
+          {warnings.other.map((warning) => (
+            <p key={warning} dir="ltr" className="flex items-start gap-1.5">
+              <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <span className="break-words">{warning}</span>
+            </p>
+          ))}
+        </div>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-1 text-sm">
           <span className="text-xs text-fg-3">{t.intelProviderPreference}</span>

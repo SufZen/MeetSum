@@ -22,7 +22,11 @@ import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
 import { JobRecoveryPanel } from "@/components/job-recovery-panel"
-import { ProviderHealthPanel, type ProviderStatusView } from "@/components/provider-health-panel"
+import {
+  ProviderHealthPanel,
+  ProviderWarning,
+  type ProviderStatusView,
+} from "@/components/provider-health-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
@@ -2458,12 +2462,12 @@ export function OperationalPage({
                 </SettingRow>
                 <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
                   {providers.map((provider) => (
-                    <div
-                      key={provider.id}
-                      className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                    >
-                      <span className="font-medium text-foreground">{provider.label}</span>
-                      <span className="text-muted-foreground">{provider.detail}</span>
+                    <div key={provider.id} className="grid gap-1 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">{provider.label}</span>
+                        <span className="text-muted-foreground">{provider.detail}</span>
+                      </div>
+                      <ProviderWarning warning={provider.warning} />
                     </div>
                   ))}
                 </div>
