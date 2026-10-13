@@ -17,6 +17,9 @@ const auditActions = [...auditSource.slice(auditSource.indexOf("ACTION_OPTIONS =
   (match) => match[1]
 )
 
+const he: Readonly<Record<string, string>> = dictionaries.he
+const en: Readonly<Record<string, string>> = dictionaries.en
+
 describe("admin label keys", () => {
   it("derives keys from ids", () => {
     expect(auditActionKey("meeting.share.created")).toBe("auditActionMeetingShareCreated")
@@ -27,20 +30,20 @@ describe("admin label keys", () => {
   it("every webhook event has a Hebrew description and the English one matches the catalog", () => {
     expect(WEBHOOK_EVENTS_V2).toHaveLength(10)
     for (const name of WEBHOOK_EVENTS_V2) {
-      const key = webhookEventDescriptionKey(name) as keyof typeof dictionaries.he
+      const key = webhookEventDescriptionKey(name)
 
-      expect(dictionaries.he[key], name).toMatch(/[֐-׿]/)
-      expect(dictionaries.en[key], name).toBe(webhookEventDescription(name))
+      expect(he[key], name).toMatch(/[֐-׿]/)
+      expect(en[key], name).toBe(webhookEventDescription(name))
     }
   })
 
   it("every audit-log filter action has he and en names", () => {
     expect(auditActions.length).toBeGreaterThan(20)
     for (const action of auditActions) {
-      const key = auditActionKey(action) as keyof typeof dictionaries.he
+      const key = auditActionKey(action)
 
-      expect(dictionaries.he[key], action).toMatch(/[֐-׿]/)
-      expect(dictionaries.en[key], action).toBeTruthy()
+      expect(he[key], action).toMatch(/[֐-׿]/)
+      expect(en[key], action).toBeTruthy()
     }
   })
 })

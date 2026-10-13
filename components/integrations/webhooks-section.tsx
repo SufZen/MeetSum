@@ -165,7 +165,7 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
         <fieldset className="flex flex-wrap gap-1.5">
           <legend className="sr-only">{t.integrationsWebhooksTestEvent}</legend>
           {v2Events.map((event) => (
-            <label key={event.name} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-fg" title={labelOr(t, webhookEventDescriptionKey(event.name), event.description)}>
+            <label key={event.name} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-fg" title={labelOr(t, webhookEventDescriptionKey(event.name), event.description ?? "")}>
               <input
                 type="checkbox"
                 className="size-3.5 accent-brand"
