@@ -164,3 +164,33 @@ export async function loadBotSpeakerTimeline(
 
   return undefined
 }
+
+/**
+ * Speaker-suggestion timeline loader for the job processor (M7 wiring).
+ *
+ * The bot-observed timeline (Vexa speaker events) is only a suggestion
+ * signal; our own ASR transcript stays the final source. It is used for
+ * bot-recorded meetings and for calendar meetings a bot attended, whenever
+ * the primary (Google Meet transcript) timeline is absent or empty.
+ */
+export function speakerTimelineLoaderWithBot(input: {
+  meetingId: string
+  workspaceId: string
+  meetingSource?: string
+  primary?: () => Promise<MeetTimelineEntry[] | undefined>
+  /** Default: MEETSUM_BOT_ENABLED, or always for `meeting_bot` meetings. */
+  botEnabled?: boolean
+  store?: BotSessionStore
+}): (() => Promise<MeetTimelineEntry[] | undefined>) | undefined {
+  const useBot = input.meetingSource === "meeting_bot" || (input.botEnabled ?? getBotConfig().enabled)
+
+  if (!input.primary && !useBot) return undefined
+
+  return async () => {
+    const primary = input.primary ? await input.primary().catch(() => undefined) : undefined
+
+    if (primary?.length || !useBot) return primary
+
+    return loadBotSpeakerTimeline(input.meetingId, input.workspaceId, { store: input.store })
+  }
+}

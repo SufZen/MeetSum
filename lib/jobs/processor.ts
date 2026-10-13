@@ -13,7 +13,7 @@ import {
   getSummaryRunMetadata,
   TranscriptionUnavailableError,
 } from "@/lib/ai/providers"
-import { loadBotSpeakerTimeline } from "@/lib/bot/speaker-timeline"
+import { speakerTimelineLoaderWithBot } from "@/lib/bot/speaker-timeline"
 import { importPlatformRecording } from "@/lib/capture/recording-import"
 import { renewTeamsSubscriptions } from "@/lib/capture/teams-subscriptions"
 import type { CaptureEvent } from "@/lib/capture/types"
@@ -621,8 +621,10 @@ export function wordWeightedConfidence(segments: readonly TranscriptSegment[]) {
 }
 
 /**
- * Best-effort Meet transcript timeline for speaker suggestions on meetings
- * with a Meet transcript artifact (Postgres + Google subject required).
+ * Best-effort speaker timeline for suggestions: the Meet transcript timeline
+ * (Postgres + Google subject required) when the meeting has one, falling back
+ * to the bot-observed timeline (M7) for bot-recorded meetings and calendar
+ * meetings a bot attended. Suggestions only; the ASR transcript stays final.
  */
 function meetTimelineLoader(
   scope: JobScope,
@@ -632,29 +634,29 @@ function meetTimelineLoader(
   const hasMeetTranscript = (meeting.meetConferenceRecords ?? []).some((record) =>
     record.artifacts.some((artifact) => artifact.artifactType === "transcript")
   )
+  const primary =
+    hasMeetTranscript && process.env.MEETSUM_STORAGE === "postgres"
+      ? async () => {
+          const explicit =
+            typeof payload.subject === "string" ? payload.subject.trim().toLowerCase() : ""
+          const subject = explicit || (await loadWorkspaceGoogleSubject(scope.workspaceId))
 
-  if (!hasMeetTranscript || process.env.MEETSUM_STORAGE !== "postgres") {
-    // M7: bot-recorded meetings fall back to the bot-observed speaker timeline.
-    if (meeting.source === "meeting_bot") {
-      return () => loadBotSpeakerTimeline(meeting.id, scope.workspaceId)
-    }
+          if (!subject) return undefined
 
-    return undefined
-  }
+          return loadMeetTimelineForMeeting({
+            meetingId: meeting.id,
+            workspaceId: scope.workspaceId,
+            subject,
+          })
+        }
+      : undefined
 
-  return async () => {
-    const explicit =
-      typeof payload.subject === "string" ? payload.subject.trim().toLowerCase() : ""
-    const subject = explicit || (await loadWorkspaceGoogleSubject(scope.workspaceId))
-
-    if (!subject) return undefined
-
-    return loadMeetTimelineForMeeting({
-      meetingId: meeting.id,
-      workspaceId: scope.workspaceId,
-      subject,
-    })
-  }
+  return speakerTimelineLoaderWithBot({
+    meetingId: meeting.id,
+    workspaceId: scope.workspaceId,
+    meetingSource: meeting.source,
+    primary,
+  })
 }
 
 /** Suggestion refresh must never fail the pipeline. */

@@ -5,6 +5,7 @@ import {
   botTimelineOffsetMs,
   buildBotSpeakerTimeline,
   loadBotSpeakerTimeline,
+  speakerTimelineLoaderWithBot,
 } from "@/lib/bot/speaker-timeline"
 import { createMemoryBotSessionStore } from "@/lib/bot/store-memory"
 import type { VexaTranscriptSegment } from "@/lib/bot/vexa/types"
@@ -109,5 +110,64 @@ describe("loadBotSpeakerTimeline", () => {
       { name: "Dana", startMs: 0, endMs: 1000 },
     ])
     expect(await loadBotSpeakerTimeline("meet_1", "ws_3", { store })).toBeUndefined()
+  })
+})
+
+describe("speakerTimelineLoaderWithBot (processor wiring)", () => {
+  async function seeded() {
+    const store = createMemoryBotSessionStore()
+    const session = await store.create({
+      workspaceId: "ws_1",
+      meetingId: "cal_meet",
+      origin: "calendar_rule",
+      platform: "google_meet",
+      nativeMeetingId: "abc-defg-hij",
+      botName: "MeetSum Notetaker",
+    })
+
+    await store.update(session.id, { speakerTimeline: [{ name: "Dana", startMs: 0, endMs: 900 }] }, { workspaceId: "ws_1" })
+    return store
+  }
+
+  it("uses the bot timeline for a bot-attended calendar meeting without a Meet timeline", async () => {
+    const store = await seeded()
+    const loader = speakerTimelineLoaderWithBot({
+      meetingId: "cal_meet",
+      workspaceId: "ws_1",
+      meetingSource: "google_calendar",
+      botEnabled: true,
+      store,
+    })
+
+    expect(await loader?.()).toEqual([{ name: "Dana", startMs: 0, endMs: 900 }])
+  })
+
+  it("prefers a non-empty Meet timeline and falls back when it is empty or fails", async () => {
+    const store = await seeded()
+    const meet = [{ name: "From Meet", startMs: 0, endMs: 10 }]
+    const base = { meetingId: "cal_meet", workspaceId: "ws_1", meetingSource: "google_calendar", botEnabled: true, store }
+
+    expect(await speakerTimelineLoaderWithBot({ ...base, primary: async () => meet })?.()).toEqual(meet)
+    expect(await speakerTimelineLoaderWithBot({ ...base, primary: async () => [] })?.()).toEqual([
+      { name: "Dana", startMs: 0, endMs: 900 },
+    ])
+    expect(
+      await speakerTimelineLoaderWithBot({ ...base, primary: async () => Promise.reject(new Error("google")) })?.()
+    ).toEqual([{ name: "Dana", startMs: 0, endMs: 900 }])
+  })
+
+  it("is workspace-scoped and absent when the bot is off and there is no Meet timeline", async () => {
+    const store = await seeded()
+
+    expect(
+      await speakerTimelineLoaderWithBot({ meetingId: "cal_meet", workspaceId: "ws_2", botEnabled: true, store })?.()
+    ).toBeUndefined()
+    expect(
+      speakerTimelineLoaderWithBot({ meetingId: "cal_meet", workspaceId: "ws_1", meetingSource: "upload", botEnabled: false, store })
+    ).toBeUndefined()
+    // Bot-recorded meetings always consult the bot timeline.
+    expect(
+      await speakerTimelineLoaderWithBot({ meetingId: "cal_meet", workspaceId: "ws_1", meetingSource: "meeting_bot", botEnabled: false, store })?.()
+    ).toHaveLength(1)
   })
 })
