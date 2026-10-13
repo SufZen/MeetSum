@@ -1,0 +1,15 @@
+{
+  "object": "database",
+  "id": "8a1f0c2e-1d6b-4b8e-9b37-1f2d3c4b5a60",
+  "title": [{ "type": "text", "text": { "content": "Meeting notes" }, "plain_text": "Meeting notes" }],
+  "archived": false,
+  "url": "https://www.notion.so/8a1f0c2e1d6b4b8e9b371f2d3c4b5a60",
+  "properties": {
+    "Meeting": { "id": "title", "name": "Meeting", "type": "title", "title": {} },
+    "Date": { "id": "a%3Bc", "name": "Date", "type": "date", "date": {} },
+    "Participants": { "id": "b%40d", "name": "Participants", "type": "multi_select", "multi_select": { "options": [] } },
+    "Language": { "id": "c%3Ae", "name": "Language", "type": "select", "select": { "options": [] } },
+    "Status": { "id": "d%3Ef", "name": "Status", "type": "status", "status": { "options": [] } },
+    "Duration": { "id": "e%3Fg", "name": "Duration", "type": "number", "number": { "format": "number" } }
+  }
+}

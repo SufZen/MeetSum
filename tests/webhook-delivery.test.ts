@@ -22,7 +22,11 @@ vi.mock("@/lib/webhooks/url-guard", async (importOriginal) => ({
 }))
 
 import { encryptSecret } from "@/lib/auth/secret-crypto"
-import { signWebhookPayload, type PlatformEvent } from "@/lib/platform/events"
+import {
+  signWebhookPayload,
+  verifyWebhookSignatureV2,
+  type PlatformEvent,
+} from "@/lib/platform/events"
 import {
   deliverWebhookEvent,
   getWebhookDeliverySlotStats,
@@ -366,9 +370,16 @@ describe("processWebhookDeliveryJob", () => {
     expect(init.headers).toEqual({
       "content-type": "application/json",
       "x-meetsum-signature": signWebhookPayload(event, secret),
+      "x-meetsum-timestamp": expect.stringMatching(/^\d+$/),
+      "x-meetsum-signature-v2": expect.stringMatching(/^t=\d+,v1=[0-9a-f]{64}$/),
       "x-meetsum-event": "summary.created",
+      "x-meetsum-event-version": "1",
       "x-meetsum-delivery": "whdel_1",
     })
+    // M8 C4: the v2 signature covers the timestamp and the exact body.
+    expect(
+      verifyWebhookSignatureV2(init.headers["x-meetsum-signature-v2"], init.body, secret)
+    ).toMatchObject({ ok: true, timestamp: Number(init.headers["x-meetsum-timestamp"]) })
     expect(init.headers["x-meetsum-signature"]).not.toBe(
       signWebhookPayload(event, "global-legacy-secret")
     )

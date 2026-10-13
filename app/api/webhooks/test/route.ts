@@ -5,31 +5,43 @@ import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
+  isWebhookEventName,
   sendWebhookTest,
-  WEBHOOK_EVENT_NAMES,
   WebhookNotFoundError,
-  type WebhookEventName,
+  WebhookValidationError,
 } from "@/lib/webhooks/management"
 
+/**
+ * POST /api/webhooks/test `{subscriptionId | url, eventName?, payloadVersion?}`
+ * (M8 C4): sends the catalog example payload of `eventName` (schema-valid,
+ * flagged `test: true`) in the subscription's payload version, with the
+ * production headers and both signatures.
+ */
 export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.webhookTest)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
   const body = (await request.json().catch(() => ({}))) as {
     url?: string
     subscriptionId?: string
-    eventName?: string
+    eventName?: unknown
+    payloadVersion?: unknown
   }
-  const eventName = WEBHOOK_EVENT_NAMES.includes(body.eventName as WebhookEventName)
-    ? (body.eventName as WebhookEventName)
-    : undefined
+
+  if (body.eventName !== undefined && !isWebhookEventName(body.eventName)) {
+    return NextResponse.json(
+      { error: "unknown_event", message: "Unknown webhook event" },
+      { status: 400 }
+    )
+  }
 
   try {
     const result = await sendWebhookTest(ctx.workspace.id, {
       url: body.url,
       subscriptionId: body.subscriptionId,
-      eventName,
+      eventName: body.eventName,
+      payloadVersion: body.payloadVersion,
     })
     await recordAuditLog({
       ...ctx.audit,
@@ -39,13 +51,21 @@ export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
       metadata: {
         url: result.url,
         eventName: result.event.name,
+        payloadVersion: result.payloadVersion,
         status: result.status,
         responseStatus: result.responseStatus,
       },
     })
 
-    return NextResponse.json(result, { status: result.status === "sent" ? 200 : 502 })
+    return NextResponse.json(result, {
+      status: result.status === "sent" ? 200 : 502,
+      headers: { "cache-control": "no-store", ...rateLimit.headers },
+    })
   } catch (error) {
+    if (error instanceof WebhookValidationError) {
+      return NextResponse.json({ error: error.code, message: error.message }, { status: 400 })
+    }
+
     return jsonError(
       error instanceof Error ? error.message : "Unable to send webhook test",
       error instanceof WebhookNotFoundError ? 404 : 400

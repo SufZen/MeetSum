@@ -2,9 +2,17 @@ import { UnrecoverableError } from "bullmq"
 
 import { getDatabasePool } from "@/lib/db/client"
 import { getMeetSumQueue } from "@/lib/jobs/queue"
+import { WEBHOOK_EVENTS_V1, type WebhookPayloadVersion } from "@/lib/platform/event-catalog"
+import {
+  isWebhookEventV2,
+  minimalPrivatePayload,
+  resolveWebhookPayloadV2,
+} from "@/lib/platform/event-payloads"
 import {
   createPlatformEvent,
   signWebhookPayload,
+  signWebhookPayloadV2,
+  toPlatformEventV2,
   type PlatformEvent,
   type PlatformEventName,
 } from "@/lib/platform/events"
@@ -27,12 +35,15 @@ type WebhookSubscriptionRow = {
   id: string
   url: string
   events: string[] | string
+  /** 027: absent on rows read before the migration → 1. */
+  payload_version?: number | null
 }
 
 type DeliveryJobRow = {
   id: string
   event_name: string
   event_payload: PlatformEvent<Record<string, unknown>> | string
+  payload_version?: number | null
   status: string
   attempts?: number | null
   subscription_id: string | null
@@ -138,10 +149,20 @@ export const QUEUE_UNAVAILABLE_ERROR =
  * retried for the remaining subscriptions, at most
  * MEETSUM_WEBHOOK_INLINE_FALLBACK_MAX deliveries get one concurrent inline
  * attempt, and the rest are marked failed for a manual retry.
+ *
+ * Versioning (M8 C4): a subscription's `payload_version` picks the payload.
+ * v1 subscriptions get today's envelope and data, byte-for-byte, and never
+ * an event outside the v1 catalog. v2 subscriptions get the catalog envelope
+ * `{id, name, version: 2, occurredAt, workspace_id, data}` with the v2 data
+ * (`dataV2`, or rebuilt from `data` by re-reading the meeting; any failure
+ * falls back to the minimal private payload).
  */
 export async function deliverWebhookEvent(options: {
   eventName: PlatformEventName
+  /** v1 data (already privacy-filtered by the caller). */
   data: Record<string, unknown>
+  /** Pre-built v2 data; otherwise resolved from `data` when a v2 subscription matches. */
+  dataV2?: Record<string, unknown>
   /**
    * Owning workspace. Only that workspace's subscriptions are considered
    * (`workspace_id = $1`), so a W1 event never reaches a W2 subscription; an
@@ -170,7 +191,7 @@ export async function deliverWebhookEvent(options: {
   const fanOutLimit = getWebhookMaxSubscriptionsPerEvent()
   const subscriptions = await pool.query(
     `
-      select id, url, events
+      select id, url, events, payload_version
       from webhook_subscriptions
       where enabled = true
         and workspace_id = $1
@@ -180,9 +201,22 @@ export async function deliverWebhookEvent(options: {
     `,
     [workspaceId, options.eventName, fanOutLimit + 1]
   )
+  const inV1 = (WEBHOOK_EVENTS_V1 as readonly string[]).includes(options.eventName)
   const matching = (subscriptions.rows as WebhookSubscriptionRow[]).filter(
-    (subscription) => parseEvents(subscription.events).includes(options.eventName)
+    (subscription) =>
+      parseEvents(subscription.events).includes(options.eventName) &&
+      // A v1 subscription never receives an event outside the v1 catalog.
+      (subscriptionVersion(subscription) === 2 || inV1)
   )
+  let eventV2: ReturnType<typeof toPlatformEventV2> | undefined
+
+  const payloadFor = async (version: WebhookPayloadVersion) => {
+    if (version === 1) return event
+
+    eventV2 ??= toPlatformEventV2(event, workspaceId, await v2DataFor(options, workspaceId))
+
+    return eventV2
+  }
   const truncated = matching.length > fanOutLimit
 
   if (truncated) {
@@ -199,20 +233,22 @@ export async function deliverWebhookEvent(options: {
 
   for (const subscription of matching.slice(0, fanOutLimit)) {
     const deliveryId = createId("whdel")
+    const version = subscriptionVersion(subscription)
     await pool.query(
       `
         insert into webhook_deliveries (
           id, webhook_subscription_id, event_name, status, attempts,
-          max_attempts, event_payload
+          max_attempts, event_payload, payload_version
         )
-        values ($1, $2, $3, 'queued', 0, $4, $5::jsonb)
+        values ($1, $2, $3, 'queued', 0, $4, $5::jsonb, $6)
       `,
       [
         deliveryId,
         subscription.id,
         options.eventName,
         maxAttempts,
-        JSON.stringify(event),
+        JSON.stringify(await payloadFor(version)),
+        version,
       ]
     )
 
@@ -252,6 +288,56 @@ export async function deliverWebhookEvent(options: {
     failed: inlineResults.length - delivered + deferred.length,
     truncated,
     eventId: event.id,
+  }
+}
+
+/**
+ * Headers of every webhook request (deliveries and test-fire):
+ * - `x-meetsum-signature`: hex HMAC-SHA256 over the body (v1, kept for
+ *   existing receivers);
+ * - `x-meetsum-timestamp` + `x-meetsum-signature-v2: t=<unix>,v1=<hex
+ *   HMAC-SHA256(secret, t + "." + body)>` (replay-safe; receivers reject a
+ *   skew over 5 minutes), signed at send time so each retry is fresh;
+ * - `x-meetsum-event`, `x-meetsum-delivery` (dedupe key), `x-meetsum-event-version`.
+ */
+export function webhookRequestHeaders(input: {
+  body: string
+  secret: string
+  v1Signature: string
+  eventName: string
+  deliveryId: string
+  version: WebhookPayloadVersion
+  timestamp?: number
+}): Record<string, string> {
+  const v2 = signWebhookPayloadV2(input.body, input.secret, input.timestamp)
+
+  return {
+    "content-type": "application/json",
+    "x-meetsum-signature": input.v1Signature,
+    "x-meetsum-timestamp": String(v2.timestamp),
+    "x-meetsum-signature-v2": v2.header,
+    "x-meetsum-event": input.eventName,
+    "x-meetsum-event-version": String(input.version),
+    "x-meetsum-delivery": input.deliveryId,
+  }
+}
+
+function subscriptionVersion(subscription: Pick<WebhookSubscriptionRow, "payload_version">): WebhookPayloadVersion {
+  return Number(subscription.payload_version) === 2 ? 2 : 1
+}
+
+/** v2 data: given, or rebuilt from the v1 data; never throws (fails closed). */
+async function v2DataFor(
+  options: { eventName: PlatformEventName; data: Record<string, unknown>; dataV2?: Record<string, unknown> },
+  workspaceId: string
+): Promise<Record<string, unknown>> {
+  if (options.dataV2) return options.dataV2
+  if (!isWebhookEventV2(options.eventName)) return minimalPrivatePayload(workspaceId, options.data)
+
+  try {
+    return await resolveWebhookPayloadV2(options.eventName, options.data, { workspaceId })
+  } catch {
+    return minimalPrivatePayload(workspaceId, options.data)
   }
 }
 
@@ -375,7 +461,7 @@ export async function processWebhookDeliveryJob(input: {
   const pool = getDatabasePool()
   const result = await pool.query(
     `
-      select d.id, d.event_name, d.event_payload, d.status, d.attempts,
+      select d.id, d.event_name, d.event_payload, d.payload_version, d.status, d.attempts,
              s.id as subscription_id, s.url, s.enabled, s.secret_ciphertext,
              s.workspace_id as subscription_workspace_id
       from webhook_deliveries d
@@ -439,13 +525,18 @@ export async function processWebhookDeliveryJob(input: {
     [deliveryId]
   )
 
+  let secret: string
   let signature: string
   try {
-    signature = signWebhookPayload(event, resolveSubscriptionSecret(row))
+    secret = resolveSubscriptionSecret(row)
+    signature = signWebhookPayload(event, secret)
   } catch (error) {
     await markDelivery(deliveryId, { status: "failed", lastError: errorMessage(error) })
     throw new UnrecoverableError(errorMessage(error))
   }
+
+  const body = JSON.stringify(event)
+  const version = Number(row.payload_version) === 2 || (event as { version?: unknown }).version === 2 ? 2 : 1
 
   let response: Awaited<ReturnType<typeof guardedWebhookFetch>>
   try {
@@ -453,13 +544,15 @@ export async function processWebhookDeliveryJob(input: {
     response = await withDeliverySlot(hostKey(url), () =>
       guardedWebhookFetch(url, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-meetsum-signature": signature,
-          "x-meetsum-event": row.event_name,
-          "x-meetsum-delivery": deliveryId,
-        },
-        body: JSON.stringify(event),
+        headers: webhookRequestHeaders({
+          body,
+          secret,
+          v1Signature: signature,
+          eventName: row.event_name,
+          deliveryId,
+          version,
+        }),
+        body,
         timeoutMs: getWebhookFetchTimeoutMs(),
       })
     )

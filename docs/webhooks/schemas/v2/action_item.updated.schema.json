@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "number",
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 timestamp"
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test": {
+      "type": "boolean",
+      "const": true
+    },
+    "name": {
+      "type": "string",
+      "const": "action_item.updated"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actionItemId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "changed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "title": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "open",
+                "done"
+              ]
+            },
+            "dueDate": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "low",
+                "normal",
+                "high",
+                "urgent"
+              ]
+            },
+            "url": {
+              "type": "string"
+            },
+            "visibility": {
+              "type": "string",
+              "enum": [
+                "workspace",
+                "link"
+              ],
+              "description": "Meeting visibility (private meetings get the minimal payload)"
+            }
+          },
+          "required": [
+            "meetingId",
+            "actionItemId",
+            "changed",
+            "title",
+            "status",
+            "url",
+            "visibility"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string"
+            },
+            "actionItemId": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "visibility": {
+              "type": "string",
+              "const": "private"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "visibility"
+          ],
+          "additionalProperties": false,
+          "description": "Private meeting: identifiers only"
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "occurredAt",
+    "workspace_id",
+    "name",
+    "data"
+  ],
+  "additionalProperties": false,
+  "description": "MeetSum webhook action_item.updated (payload v2)"
+}

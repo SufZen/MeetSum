@@ -237,6 +237,164 @@ Send a test webhook event. Body: `{ subscriptionId }` (signed with that subscrip
 
 ---
 
+## Event catalog
+
+Webhooks for Zapier, n8n, Make or your own receiver (M8). The machine-readable catalog is `GET /api/webhooks/catalog` (`webhooks:manage`): `{ version: 2, events: [{ name, versions, description, example, schemaUrl }] }`. JSON Schemas (draft 2020-12) for every v2 event live in [`docs/webhooks/schemas/v2/`](webhooks/schemas/v2/) and are regenerated with `npm run webhooks:schemas`.
+
+### Payload versions
+
+Every subscription has a `payloadVersion`:
+
+| Version | Who gets it | Envelope |
+|---|---|---|
+| `1` | subscriptions created before M8 (unchanged, frozen) | `{ id, name, occurredAt, workspace_id, data }` |
+| `2` | new subscriptions (default) and upgraded ones | `{ id, name, version: 2, occurredAt, workspace_id, data }` |
+
+- `POST /api/webhooks/subscriptions` accepts `payloadVersion: 1 | 2` (default `2`). Without `events`, a subscription gets every event of its version.
+- `PATCH /api/webhooks/subscriptions/:id` with `{ "payloadVersion": 2 }` upgrades a v1 subscription. The upgrade is one-way (`payload_version_downgrade`, 400).
+- Subscribing to an event that is not in the subscription's version (for example `clip.created` on v1), or to an unknown event, answers 400 `event_not_in_version`.
+- A v1 subscription never receives a v2-only event, and its payloads stay exactly as before.
+
+### Events
+
+| Event | Versions | When |
+|---|---|---|
+| `meeting.completed` | 1, 2 | A meeting finished processing (transcript, summary, action items ready). |
+| `summary.created` | 1, 2 | A summary was generated or regenerated. The name stays `summary.created` (no rename to `summary.ready`). |
+| `action_item.created` | 1, 2 | An action item was extracted (one event per new item). |
+| `meeting.process_failed` | 1, 2 | A processing job failed (`permanent: true` means no more retries). |
+| `realizeos.export.sent` / `realizeos.export.failed` | 1, 2 | A RealizeOS export succeeded or failed. |
+| `action_item.updated` | 2 | An action item was edited; `changed` lists the field names. |
+| `clip.created` | 2 | A clip was cut from a meeting. |
+| `bot.status_changed` | 2 | The meeting bot changed status. |
+| `integration.delivery.failed` | 2 | An integration delivery (Slack, Notion, HubSpot, email recap) failed for good. |
+
+### Headers
+
+| Header | Value |
+|---|---|
+| `content-type` | `application/json` |
+| `x-meetsum-event` | the event name |
+| `x-meetsum-event-version` | `1` or `2` |
+| `x-meetsum-delivery` | delivery id: the same on every retry of one delivery (dedupe key) |
+| `x-meetsum-timestamp` | unix seconds when this attempt was signed |
+| `x-meetsum-signature-v2` | `t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + rawBody)>` |
+| `x-meetsum-signature` | legacy: hex HMAC-SHA256(secret, rawBody), kept for v1 receivers |
+
+### Verifying signatures
+
+Verify `x-meetsum-signature-v2` on the **raw** body (before any JSON parsing), compare in constant time, and reject a timestamp more than **5 minutes** away from your clock: the timestamp is part of the signed string, so a captured request cannot be replayed later. During a secret rotation the header may carry several `v1=` entries; accept the request when any of them matches. `x-meetsum-signature` (no timestamp) is only for receivers written before M8.
+
+Test vector: secret `whsec_test_secret_1234`, `t = 1760000000`, body `{"id":"evt_1","name":"clip.created","version":2}` → `v1=0e55d105497846c2677e19306f1917ee1eb519bb12214d54507ab2f2a79fbbaa`.
+
+**Node.js**
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto"
+
+export function verifyMeetSum(rawBody, header, secret, toleranceSec = 300) {
+  const pairs = String(header ?? "").split(",").map((part) => part.trim().split("="))
+  const t = Number(pairs.find(([key]) => key === "t")?.[1])
+  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) > toleranceSec) return false
+  const expected = createHmac("sha256", secret).update(`${t}.${rawBody}`).digest()
+  return pairs
+    .filter(([key]) => key === "v1")
+    .some(([, sig]) => {
+      const actual = Buffer.from(sig ?? "", "hex")
+      return actual.length === expected.length && timingSafeEqual(actual, expected)
+    })
+}
+```
+
+**Python**
+
+```python
+import hashlib, hmac, time
+
+def verify_meetsum(raw_body: bytes, header: str, secret: str, tolerance: int = 300) -> bool:
+    pairs = [p.strip().split("=", 1) for p in header.split(",") if "=" in p]
+    ts = next((v for k, v in pairs if k == "t"), None)
+    if ts is None or not ts.isdigit() or abs(time.time() - int(ts)) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f"{ts}.".encode() + raw_body, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, v) for k, v in pairs if k == "v1")
+```
+
+**n8n Code node** (Webhook node with *Raw Body* enabled; the templates in [`docs/n8n-templates/`](n8n-templates/) ship this node):
+
+```js
+const crypto = require("crypto")
+const secret = $env.MEETSUM_WEBHOOK_SECRET
+const item = $input.first()
+const headers = item.json.headers
+const raw = item.binary?.data ? Buffer.from(item.binary.data.data, "base64").toString("utf8") : JSON.stringify(item.json.body)
+const parts = Object.fromEntries(headers["x-meetsum-signature-v2"].split(",").map((p) => p.trim().split("=")))
+const t = Number(parts.t)
+if (!t || Math.abs(Date.now() / 1000 - t) > 300) throw new Error("MeetSum signature: timestamp outside the 5 minute window")
+const expected = crypto.createHmac("sha256", secret).update(`${t}.${raw}`).digest("hex")
+const given = Buffer.from(parts.v1 ?? "")
+if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), given)) throw new Error("MeetSum signature mismatch")
+return $input.all()
+```
+
+### Delivery and retries
+
+- At-least-once: a delivery is retried with exponential backoff (from `WEBHOOK_BACKOFF_MS`) up to `max_attempts` (default 6), within a lifetime budget of `MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS` (20) including manual retries.
+- 2xx means delivered. 4xx other than 408/429 stops the retries; anything else is retried.
+- Deduplicate on `x-meetsum-delivery` (one delivery to your endpoint) or the envelope `id` (one event; the same id reaches every subscription). There is **no ordering guarantee**.
+- Receivers are reached only through the SSRF guard (public addresses only, no redirects).
+- `POST /api/webhooks/test { subscriptionId | url, eventName?, payloadVersion? }` sends the catalog example of `eventName` (default `meeting.completed`) for the subscription's version, flagged `"test": true` in the envelope, with every production header. An ad-hoc `url` test is signed with a throwaway secret returned once as `secret`.
+
+### Private meetings
+
+Webhook subscribers (admins) never read private meetings. For a meeting whose visibility is `private`, or cannot be read, meeting events carry only identifiers:
+
+| Event | Private payload keys |
+|---|---|
+| `meeting.completed`, `summary.created` | `meetingId`, `mode`, `workspace_id`, `visibility: "private"` |
+| `action_item.created`, `action_item.updated` | `meetingId`, `actionItemId`, `workspace_id`, `visibility` |
+| `clip.created` | `meetingId`, `clipId`, `workspace_id`, `visibility` |
+| `meeting.process_failed` | `meetingId`, `jobId`, `jobName`, `attempts`, `permanent`, `workspace_id`, `visibility` |
+| `realizeos.export.*` (v2) | `meetingId`, `suggestionId`, `workspace_id`, `visibility` |
+| `bot.status_changed`, `integration.delivery.failed` | unchanged: they never carry meeting content |
+
+`clip.created` follows the clip's meeting. v2 payloads re-read the meeting right before they are built, so a visibility change made during processing is honoured.
+
+### Example payloads (v2)
+
+```json
+{ "id": "evt_…", "name": "meeting.completed", "version": 2, "occurredAt": "2026-10-12T08:02:11.000Z", "workspace_id": "ws_…",
+  "data": { "meetingId": "meet_01HZX5V8Q3", "title": "סנכרון שבועי", "startedAt": "2026-10-12T07:30:00.000Z", "durationMs": 1860000,
+            "language": "he", "participantCount": 4, "actionItemCount": 3, "overview": "הצוות סיכם את יעדי הרבעון.",
+            "url": "https://meetsum.example.com/he?meeting=meet_01HZX5V8Q3", "visibility": "workspace" } }
+```
+
+`data` of the other events:
+
+```json
+{ "summary.created": { "meetingId": "meet_01HZX5V8Q3", "title": "Weekly sync", "tags": ["planning"], "url": "https://meetsum.example.com/he?meeting=meet_01HZX5V8Q3", "visibility": "workspace" },
+  "action_item.created": { "meetingId": "meet_01HZX5V8Q3", "actionItemId": "act_1", "title": "Send the plan", "owner": "Dana", "priority": "high", "url": "https://meetsum.example.com/he?meeting=meet_01HZX5V8Q3", "visibility": "workspace" },
+  "action_item.updated": { "meetingId": "meet_01HZX5V8Q3", "actionItemId": "act_1", "changed": ["status"], "title": "Send the plan", "owner": "Dana", "status": "done", "dueDate": "2026-10-20", "priority": "high", "url": "https://meetsum.example.com/he?meeting=meet_01HZX5V8Q3", "visibility": "workspace" },
+  "clip.created": { "meetingId": "meet_01HZX5V8Q3", "clipId": "clip_1", "title": "ההחלטה על התקציב", "startMs": 125000, "endMs": 158000, "url": "https://meetsum.example.com/he?meeting=meet_01HZX5V8Q3&t=125", "visibility": "workspace" },
+  "bot.status_changed": { "sessionId": "bot_1", "meetingId": "meet_01HZX5V8Q3", "status": "in_call_recording" },
+  "integration.delivery.failed": { "deliveryId": "intd_1", "provider": "slack", "meetingId": "meet_01HZX5V8Q3", "reason": "auth" },
+  "meeting.process_failed": { "meetingId": "meet_01HZX5V8Q3", "jobId": "job_1", "jobName": "meeting.transcribe", "error": "ASR timeout", "attempts": 3, "permanent": true, "visibility": "workspace" },
+  "realizeos.export.sent": { "meetingId": "meet_01HZX5V8Q3", "suggestionId": "sug_1", "responseStatus": 200, "visibility": "workspace" },
+  "realizeos.export.failed": { "meetingId": "meet_01HZX5V8Q3", "suggestionId": "sug_1", "responseStatus": 502, "error": "RealizeOS returned 502", "visibility": "workspace" } }
+```
+
+v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.created {meetingId, title, mode?, tags?}`, `action_item.created {meetingId, actionItemId, title, owner?, priority?}`, `meeting.process_failed {meetingId, jobId, jobName, error, attempts, permanent}`, `realizeos.export.sent {meetingId, suggestionId?, responseStatus}`, `realizeos.export.failed` (+ `error`).
+
+### Zapier: "Catch Hook" recipe
+
+1. In Zapier, create a Zap with **Webhooks by Zapier → Catch Raw Hook** (raw, so the body can be verified) and copy the hook URL.
+2. In MeetSum, Settings → Integrations → Webhooks: create a v2 subscription for that URL and the events you need, and copy the secret (shown once).
+3. Add a **Code by Zapier (JavaScript)** step that runs the Node.js check above on `inputData.raw_body` and `inputData.headers["X-Meetsum-Signature-V2"]`, and stops the Zap when it returns `false`.
+4. Map fields from the parsed body: `data.title`, `data.overview`, `data.url`…
+5. Use **Test webhook** (`POST /api/webhooks/test`) to send a schema-valid example and finish the Zap mapping.
+
+---
+
 ## Rate Limits
 
 | Preset | Limit | Applies To |

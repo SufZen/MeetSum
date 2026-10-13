@@ -1,0 +1,8 @@
+{
+  "user": {
+    "kind": "drive#user",
+    "displayName": "Dana Levi",
+    "permissionId": "07158442151285376045",
+    "emailAddress": "dana@example.com"
+  }
+}

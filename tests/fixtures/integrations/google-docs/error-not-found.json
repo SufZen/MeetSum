@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 404,
+    "message": "Requested entity was not found. Internal detail: document 1AbC owned by dana@example.com",
+    "status": "NOT_FOUND"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": 403,
+    "message": "The caller does not have permission (Google Docs API has not been used in project 123456 before)",
+    "errors": [{ "message": "The caller does not have permission", "domain": "global", "reason": "forbidden" }],
+    "status": "PERMISSION_DENIED"
+  }
+}

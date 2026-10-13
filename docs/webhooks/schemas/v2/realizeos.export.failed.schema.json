@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "number",
+      "const": 2
+    },
+    "occurredAt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ISO 8601 timestamp"
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test": {
+      "type": "boolean",
+      "const": true
+    },
+    "name": {
+      "type": "string",
+      "const": "realizeos.export.failed"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "suggestionId": {
+              "type": "string"
+            },
+            "responseStatus": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "error": {
+              "type": "string"
+            },
+            "visibility": {
+              "type": "string",
+              "enum": [
+                "workspace",
+                "link"
+              ],
+              "description": "Meeting visibility (private meetings get the minimal payload)"
+            }
+          },
+          "required": [
+            "meetingId",
+            "responseStatus",
+            "error",
+            "visibility"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "meetingId": {
+              "type": "string"
+            },
+            "suggestionId": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "visibility": {
+              "type": "string",
+              "const": "private"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "visibility"
+          ],
+          "additionalProperties": false,
+          "description": "Private meeting: identifiers only"
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "occurredAt",
+    "workspace_id",
+    "name",
+    "data"
+  ],
+  "additionalProperties": false,
+  "description": "MeetSum webhook realizeos.export.failed (payload v2)"
+}

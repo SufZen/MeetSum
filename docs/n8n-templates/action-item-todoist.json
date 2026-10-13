@@ -5,26 +5,74 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "meetsum-action-item",
-        "options": {}
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
       },
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Verifies x-meetsum-signature-v2 (t=<unix>,v1=<hex HMAC-SHA256(secret, t + \".\" + rawBody)>)\n// and stops the workflow on a mismatch or a timestamp more than 5 minutes off.\nconst crypto = require('crypto')\nconst secret = $env.MEETSUM_WEBHOOK_SECRET\nif (!secret) throw new Error('Set MEETSUM_WEBHOOK_SECRET to the subscription secret')\nfor (const item of $input.all()) {\n  const headers = item.json.headers ?? {}\n  const raw = item.binary?.data ? Buffer.from(item.binary.data.data, 'base64').toString('utf8') : JSON.stringify(item.json.body)\n  const parts = Object.fromEntries(String(headers['x-meetsum-signature-v2'] ?? '').split(',').map((part) => part.trim().split('=')))\n  const t = Number(parts.t)\n  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) > 300) throw new Error('MeetSum signature: timestamp outside the 5 minute window')\n  const expected = crypto.createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex')\n  const given = Buffer.from(String(parts.v1 ?? ''))\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), given)) throw new Error('MeetSum signature mismatch')\n}\nreturn $input.all()"
+      },
+      "name": "Verify MeetSum signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.name}}",
+              "operation": "equal",
+              "value2": "action_item.created"
+            },
+            {
+              "value1": "={{$json.body.data.visibility}}",
+              "operation": "notEqual",
+              "value2": "private"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "name": "Only action_item.created",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        690,
+        300
+      ]
     },
     {
       "parameters": {
         "resource": "task",
-        "content": "={{$json.payload.title}}",
+        "content": "={{$json.body.data.title}}",
         "additionalFields": {
-          "description": "From meeting: {{$json.payload.meetingTitle}}\nOwner: {{$json.payload.owner}}\nDue: {{$json.payload.dueDate}}",
+          "description": "=From MeetSum: {{$json.body.data.url}}\nOwner: {{$json.body.data.owner}}",
           "priority": 2
         }
       },
       "name": "Todoist",
       "type": "n8n-nodes-base.todoist",
       "typeVersion": 2,
-      "position": [500, 300],
+      "position": [
+        910,
+        300
+      ],
       "credentials": {
         "todoistApi": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
@@ -35,6 +83,28 @@
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify MeetSum signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify MeetSum signature": {
+      "main": [
+        [
+          {
+            "node": "Only action_item.created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only action_item.created": {
       "main": [
         [
           {
@@ -50,13 +120,18 @@
     "saveExecutionProgress": true
   },
   "_meta": {
-    "description": "Receives MeetSum action item webhook and creates a Todoist task with meeting context.",
+    "description": "Receives the MeetSum 'action_item.created' webhook (payload v2), verifies the signature and creates a Todoist task with a link back to the meeting.",
+    "events": [
+      "action_item.created"
+    ],
+    "payloadVersion": 2,
     "setup": [
       "1. Import this workflow into n8n",
       "2. Configure your Todoist API credential",
-      "3. Copy the webhook URL from the Webhook node",
-      "4. Register the webhook URL in MeetSum: POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'] }",
-      "5. Activate the workflow"
+      "3. Copy the production webhook URL from the Webhook node",
+      "4. In MeetSum, Settings → Integrations → Webhooks (or POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['action_item.created'], payloadVersion: 2 }): create a v2 subscription and copy the secret (shown once)",
+      "5. Set the n8n environment variable MEETSUM_WEBHOOK_SECRET to the subscription secret shown once by MeetSum (allow env access in Code nodes, or paste the secret into the 'Verify MeetSum signature' node).",
+      "6. Activate the workflow"
     ]
   }
 }
