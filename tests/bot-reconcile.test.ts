@@ -158,6 +158,16 @@ describe("runBotReconcile", () => {
     expect((await ctx.store.get(recent.id, { workspaceId: "ws_a" }))?.status).toBe("requested")
   })
 
+  it("(b) stopped before Vexa ever confirmed a bot (no Vexa id) for 10+ minutes → cancelled", async () => {
+    const ctx = setup()
+    const stuck = await sessionAt(ctx, { status: "requested" }, minutesAgo(30))
+
+    await ctx.store.transition(stuck.id, { status: "stopping", reason: "user_stopped", at: minutesAgo(12), source: "api", workspaceId: "ws_a" })
+    await runBotReconcile({}, ctx.deps)
+
+    expect(await ctx.store.get(stuck.id, { workspaceId: "ws_a" })).toMatchObject({ status: "cancelled", statusReason: "user_stopped" })
+  })
+
   it("(c) awaiting admission past the timeout → stopBot → blocked/not_admitted", async () => {
     const ctx = setup()
     const waiting = await sessionAt(ctx, { status: "awaiting_admission" }, minutesAgo(16))

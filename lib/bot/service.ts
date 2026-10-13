@@ -532,7 +532,12 @@ export async function stopMeetingBot(ctx: Ctx, meetingId: string): Promise<Respo
     return NextResponse.json({ session: toBotSessionSummary(result.session) })
   }
 
-  if (isLiveBotStatus(session.status)) {
+  // A `requested` session without a Vexa id has its POST in flight (or
+  // failing): mark it stopping and let the dispatcher stop whatever bot the
+  // POST starts (runDispatch re-reads the session after requestBot).
+  const postInFlight = session.status === "requested" && !session.vexaMeetingId
+
+  if (isLiveBotStatus(session.status) && !postInFlight) {
     try {
       await getBotProvider().stopBot(session.platform, session.nativeMeetingId)
     } catch (error) {

@@ -208,6 +208,21 @@ export async function runBotReconcile(
           })
           stats.unavailable += 1
         }
+        // Stopped while its POST was in flight and no bot ever showed up: the
+        // dispatcher had nothing to stop, so the session must not stay live.
+        if (
+          session.status === "stopping" &&
+          since(session.statusChangedAt, session.updatedAt) < nowMs - REQUESTED_WITHOUT_ID_MS
+        ) {
+          await d.store.transition(session.id, {
+            status: "cancelled",
+            reason: session.statusReason ?? "user_stopped",
+            at: now,
+            source: "poll",
+            workspaceId: session.workspaceId,
+            event: { eventType: "reconcile", payload: { reason: "stopped_without_bot" } },
+          })
+        }
         return
       }
 

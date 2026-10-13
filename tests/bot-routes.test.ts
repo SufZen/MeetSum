@@ -521,6 +521,19 @@ describe("/api/meetings/[id]/bot", () => {
     expect(enqueue).not.toHaveBeenCalled()
   })
 
+  it("DELETE on a requested session with no Vexa id yet marks it stopping without calling Vexa", async () => {
+    const session = await seedSession({ status: "requested" })
+
+    mocks.stopBot.mockRejectedValue(new Error("vexa down"))
+    await ctxFor()
+
+    const response = await stopBot(new Request(meetingBotUrl("m_visible"), { method: "DELETE" }), routeParams({ id: "m_visible" }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.stopBot).not.toHaveBeenCalled()
+    expect(store.sessions.get(session.id)).toMatchObject({ status: "stopping", statusReason: "user_stopped" })
+  })
+
   it("DELETE on a terminal session is 409", async () => {
     await seedSession({ status: "completed" })
     await ctxFor()

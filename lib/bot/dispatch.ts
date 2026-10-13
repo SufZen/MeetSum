@@ -7,12 +7,13 @@ import { defaultBotQueuePort, dispatchJobId, type BotQueuePort } from "@/lib/bot
 import { botLog, redactBotError } from "@/lib/bot/redact"
 import { ensureRecordingBotName, joinWindowEnd } from "@/lib/bot/rules"
 import { BotSessionConflictError, type BotSessionStore, getBotSessionStore } from "@/lib/bot/store"
-import type {
-  BotSession,
-  BotSessionRecord,
-  BotStatus,
-  BotStatusReason,
-  ParsedMeetingLink,
+import {
+  type BotSession,
+  type BotSessionRecord,
+  type BotStatus,
+  type BotStatusReason,
+  isTerminalBotStatus,
+  type ParsedMeetingLink,
 } from "@/lib/bot/types"
 import { getBotProvider } from "@/lib/bot/vexa/client"
 import { type BotProvider, VexaError, type VexaBotRequest } from "@/lib/bot/vexa/types"
@@ -95,6 +96,8 @@ export type DispatchOutcome =
   | "cancelled"
   | "failed"
   | "blocked"
+  /** A stop/cancel landed while the bot was being requested; the bot was told to leave. */
+  | "stopped"
 
 export type DispatchResult = { outcome: DispatchOutcome; session?: BotSessionRecord }
 
@@ -246,6 +249,59 @@ async function adopt(d: DispatchDeps, session: BotSessionRecord): Promise<BotSes
   )
 }
 
+/** Tells Vexa to take the target's bot out; "already gone" is fine. */
+async function stopTargetBot(d: DispatchDeps, session: BotSessionRecord): Promise<void> {
+  try {
+    await d.provider().stopBot(session.platform, session.nativeMeetingId)
+  } catch (error) {
+    // Anything but "already gone" is retried by BullMQ (runDispatch stops a stopping session again).
+    if (!(error instanceof VexaError && error.kind === "not_found")) throw error
+  }
+}
+
+/**
+ * Re-reads the session after a bot was started (POST or adoption). A user
+ * stop or a cancel that landed meanwhile wins: the new bot is told to leave
+ * and the session is not reported as requested. The recorded Vexa id stays so
+ * Vexa's completion resolves to this session (→ cancelled/user_stopped).
+ */
+async function stopIfWithdrawn(d: DispatchDeps, session: BotSessionRecord): Promise<DispatchResult | undefined> {
+  const current = await d.store.get(session.id, { workspaceId: session.workspaceId })
+
+  if (!current || (current.status !== "stopping" && !isTerminalBotStatus(current.status))) return undefined
+
+  await stopTargetBot(d, current)
+  botLog.info(`dispatch ${session.id}: ${current.status} during dispatch, bot stopped`)
+  return { outcome: "stopped", session: current }
+}
+
+/**
+ * A dispatch job (a BullMQ retry) for a session the user stopped before its
+ * bot was confirmed: stop whatever bot runs for this target (ours only), and
+ * end a session that never got a Vexa id as cancelled.
+ */
+async function finishWithdrawn(d: DispatchDeps, session: BotSessionRecord): Promise<DispatchResult> {
+  if (session.vexaMeetingId) {
+    await stopTargetBot(d, session)
+    return { outcome: "stopped", session }
+  }
+
+  const adopted = await adopt(d, session)
+
+  if (adopted) await stopTargetBot(d, adopted)
+
+  const result = await d.store.transition(session.id, {
+    status: "cancelled",
+    reason: session.statusReason ?? "user_stopped",
+    at: d.now(),
+    source: "api",
+    workspaceId: session.workspaceId,
+    event: { eventType: "dispatch", payload: { reason: "withdrawn" } },
+  })
+
+  return { outcome: "stopped", session: result?.session ?? adopted ?? session }
+}
+
 async function request(d: DispatchDeps, session: BotSessionRecord, rev: number): Promise<DispatchResult> {
   try {
     const result = await d.provider().requestBot(buildRequest(d, session))
@@ -256,6 +312,9 @@ async function request(d: DispatchDeps, session: BotSessionRecord, rev: number):
           { workspaceId: session.workspaceId }
         )
       : await d.store.get(session.id, { workspaceId: session.workspaceId })
+    const withdrawn = await stopIfWithdrawn(d, updated ?? session)
+
+    if (withdrawn) return withdrawn
 
     botLog.info(`dispatch ${session.id}: requested ${session.platform}`)
     return { outcome: "requested", session: updated }
@@ -270,9 +329,8 @@ async function request(d: DispatchDeps, session: BotSessionRecord, rev: number):
       case "conflict": {
         const adopted = await adopt(d, session)
 
-        return adopted
-          ? { outcome: "adopted", session: adopted }
-          : terminate(d, session, "blocked", "already_in_meeting")
+        if (!adopted) return terminate(d, session, "blocked", "already_in_meeting")
+        return (await stopIfWithdrawn(d, adopted)) ?? { outcome: "adopted", session: adopted }
       }
       case "capacity":
         return redelay(d, session, rev, error)
@@ -315,9 +373,11 @@ export async function runDispatch(
   if (session.status === "requested" && !session.vexaMeetingId) {
     const adopted = await adopt(d, session)
 
-    if (adopted) return { outcome: "adopted", session: adopted }
+    if (adopted) return (await stopIfWithdrawn(d, adopted)) ?? { outcome: "adopted", session: adopted }
     return request(d, session, input.rev)
   }
+  // The user stopped it while this job's bot was being requested.
+  if (session.status === "stopping" && session.attempts > 0) return finishWithdrawn(d, session)
   if (session.status !== "scheduled") return { outcome: "skipped", session }
 
   if (d.now().getTime() > windowEnd(session, d.config)) {

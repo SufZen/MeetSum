@@ -344,6 +344,77 @@ describe("runDispatch", () => {
     expect(provider.findActiveBot).toHaveBeenCalledTimes(1)
   })
 
+  it("a user stop during the in-flight POST stops the new bot instead of recording it as requested", async () => {
+    let sessionId = ""
+    const provider = fakeProvider({
+      requestBot: vi.fn(async () => {
+        // The user presses Stop while POST /bots is in flight (service stop path).
+        await store.transition(sessionId, {
+          status: "stopping",
+          reason: "user_stopped",
+          at: new Date(),
+          source: "api",
+          workspaceId: "ws_a",
+        })
+        return { vexaMeetingId: "4242", status: "requested", raw: {} }
+      }),
+    })
+    const { store, deps } = setup({ provider })
+    const session = await store.create(sessionInput())
+
+    sessionId = session.id
+
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
+
+    expect(result.outcome).toBe("stopped")
+    expect(provider.stopBot).toHaveBeenCalledWith("google_meet", "abc-defg-hij")
+    // The id is kept so Vexa's completion resolves to this session.
+    expect(await store.get(session.id, { workspaceId: "ws_a" })).toMatchObject({
+      status: "stopping",
+      statusReason: "user_stopped",
+      vexaMeetingId: "4242",
+    })
+  })
+
+  it("a stop during a 409 adoption stops the adopted bot", async () => {
+    let sessionId = ""
+    const provider = fakeProvider({
+      requestBot: vi.fn(async () => {
+        throw new VexaError("conflict", "409", { status: 409 })
+      }),
+      findActiveBot: vi.fn(async () => {
+        await store.transition(sessionId, { status: "stopping", reason: "user_stopped", at: new Date(), source: "api", workspaceId: "ws_a" })
+        return { platform: "google_meet", nativeMeetingId: "abc-defg-hij", vexaMeetingId: "777" }
+      }),
+    })
+    const { store, deps } = setup({ provider })
+    const session = await store.create(sessionInput())
+
+    sessionId = session.id
+    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).outcome).toBe("stopped")
+    expect(provider.stopBot).toHaveBeenCalledWith("google_meet", "abc-defg-hij")
+  })
+
+  it("a retry after a failed POST for a session the user stopped stops any bot and cancels", async () => {
+    const provider = fakeProvider({
+      requestBot: vi.fn(async () => {
+        throw new VexaError("timeout", "Vexa POST /bots timed out")
+      }),
+    })
+    const { store, deps } = setup({ provider })
+    const session = await store.create(sessionInput())
+
+    await expect(runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).rejects.toMatchObject({ kind: "timeout" })
+    await store.transition(session.id, { status: "stopping", reason: "user_stopped", at: new Date(), source: "api", workspaceId: "ws_a" })
+    provider.findActiveBot.mockResolvedValueOnce({ platform: "google_meet", nativeMeetingId: "abc-defg-hij", vexaMeetingId: "4242" })
+
+    const retry = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
+
+    expect(retry.session).toMatchObject({ status: "cancelled", statusReason: "user_stopped" })
+    expect(provider.stopBot).toHaveBeenCalledWith("google_meet", "abc-defg-hij")
+    expect(provider.requestBot).toHaveBeenCalledTimes(1)
+  })
+
   it("two concurrent runs post once", async () => {
     const { store, provider, deps } = setup()
     const session = await store.create(sessionInput())
