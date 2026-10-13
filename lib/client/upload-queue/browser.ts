@@ -16,6 +16,8 @@ export const FLUSH_UPLOADS_EVENT = "meetsum:flush-uploads"
 export const SW_SYNC_TAG = "meetsum-uploads"
 /** The workspace a queued recording belongs to; the ingest route rejects a mismatch. */
 export const CAPTURE_WORKSPACE_HEADER = "x-meetsum-workspace-id"
+/** Multipart field naming the existing meeting (mirrors the ingest route's TARGET_MEETING_FIELD). */
+export const TARGET_MEETING_FIELD = "targetMeetingId"
 
 /** The multipart body for one queued recording (text fields before the file). */
 export function ingestFormData(item: StoredItem): FormData {
@@ -30,6 +32,9 @@ export function ingestFormData(item: StoredItem): FormData {
     "captureMetadata",
     JSON.stringify({ captureId: item.captureId, appVersion: "pwa", platform: "web", uploadStatus: "uploaded" })
   )
+  // A recording made for an existing meeting attaches to it (the server
+  // checks workspace and write access); it never becomes a second meeting.
+  if (item.meetingId) form.append(TARGET_MEETING_FIELD, item.meetingId)
   form.append("file", new File([item.blob], `meetsum-recording-${item.captureId}.${extension}`, { type: item.mime }))
 
   return form

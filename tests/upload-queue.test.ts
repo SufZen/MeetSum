@@ -240,6 +240,29 @@ describe("upload queue", () => {
     expect((form.get("file") as File).name).toBe("meetsum-recording-cap_1.webm")
   })
 
+  it("names the target meeting of a recording made for an existing meeting (no second meeting)", async () => {
+    const { ingestFormData } = await import("@/lib/client/upload-queue/browser")
+    const base = {
+      owner: "u_1|ws_1",
+      userId: "u_1",
+      workspaceId: "ws_1",
+      captureId: "cap_2",
+      title: "Recording",
+      startedAt: START,
+      mime: "audio/webm",
+      size: 2,
+      status: "pending" as const,
+      attempts: 0,
+      nextAttemptAt: null,
+      blob: new Blob(["aa"], { type: "audio/webm" }),
+    }
+    const form = ingestFormData({ ...base, meetingId: "meet_1" })
+
+    expect([...form.keys()]).toEqual(["meeting", "captureMetadata", "targetMeetingId", "file"])
+    expect(form.get("targetMeetingId")).toBe("meet_1")
+    expect([...ingestFormData({ ...base, meetingId: null }).keys()]).not.toContain("targetMeetingId")
+  })
+
   it("gates recording on free storage and the queue cap", async () => {
     const { storageGate, offlineQueueMaxBytes } = await import("@/lib/client/upload-queue/browser")
     const MB = 1024 * 1024

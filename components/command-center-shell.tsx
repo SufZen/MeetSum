@@ -784,10 +784,11 @@ export function CommandCenterShell({
 
   /**
    * M9 D5: a recording for a meeting keeps the M7 path (upload to that
-   * meeting); its offline-queue copy is dropped after success and uploads
-   * through the idempotent ingest route (as its own meeting) if the direct
-   * upload fails. A recording without a meeting (`?record=1`) goes through
-   * the queue directly.
+   * meeting); its offline-queue copy is dropped after success and, if the
+   * direct upload fails, uploads through the idempotent ingest route with
+   * `targetMeetingId`, so it attaches to the same meeting (never a second
+   * one). A recording without a meeting (`?record=1`) goes through the queue
+   * directly.
    */
   function handleBrowserRecording(file: File, meta: RecordingMeta) {
     const { meetingId, captureId } = meta
