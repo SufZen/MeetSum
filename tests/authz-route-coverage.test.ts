@@ -424,6 +424,28 @@ describe("API route authz coverage", () => {
     })
   })
 
+  describe("M10 health routes", () => {
+    const find = (route: string) => routes.find((candidate) => candidate.route === route)
+
+    it("exposes /api/health/live and /api/health/ready as public GET-only routes", () => {
+      for (const route of ["health/live", "health/ready"]) {
+        const found = find(route)
+
+        expect(found, route).toBeDefined()
+        expect(handlersOf(found!)).toEqual([{ route, method: "GET", wrapper: "withPublicRoute" }])
+        expect(PUBLIC_ALLOWLIST, route).toContain(`${route} GET`)
+      }
+    })
+
+    it("keeps liveness free of dependency calls and both probes free of tenant data", () => {
+      expect(find("health/live")!.source).not.toMatch(/@\/lib\/(db|health|storage|jobs|repositories)|\bping\w*\(|\bioredis\b|\bfetch\(/)
+
+      for (const route of ["health/live", "health/ready"]) {
+        expect(find(route)!.source, route).not.toMatch(/workspace|getServerAuthState|withAuthz/)
+      }
+    })
+  })
+
   describe("M8 integrations routes", () => {
     const source = (route: string) => routes.find((candidate) => candidate.route === route)?.source
     const M8_ROUTES = routes.filter(
