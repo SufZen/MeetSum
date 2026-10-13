@@ -1,7 +1,8 @@
 /**
  * Provider registry (docs/parity/m8.md, Step 0 item 7). Owner: Package A.
  * Maps every provider id to its file under lib/integrations/<provider>/;
- * each provider file is owned by its package.
+ * each provider file is owned by its package. Loading the registry wires
+ * the providers to Package A's services (core/wiring.ts).
  */
 import type { IntegrationProvider, ProviderId } from "@/lib/integrations/core/types"
 import { emailRecapProvider } from "@/lib/integrations/email-recap/provider"
@@ -10,6 +11,7 @@ import { hubspotProvider } from "@/lib/integrations/hubspot/provider"
 import { microsoftProvider } from "@/lib/integrations/microsoft/provider"
 import { notionProvider } from "@/lib/integrations/notion/provider"
 import { slackProvider } from "@/lib/integrations/slack/provider"
+import { wireIntegrationProviders } from "@/lib/integrations/core/wiring"
 
 const PROVIDERS: readonly IntegrationProvider[] = [
   slackProvider,
@@ -19,6 +21,8 @@ const PROVIDERS: readonly IntegrationProvider[] = [
   googleDocsProvider,
   emailRecapProvider,
 ]
+
+wireIntegrationProviders()
 
 /** The provider for an id, or undefined for an unknown id (→ 404). */
 export function getProvider(id: string): IntegrationProvider | undefined {

@@ -10,12 +10,14 @@
  * without a `hubspot_task` link.
  *
  * Privacy: A's privacy gate runs before `deliver` (dispatch and deliver
- * time). `deliver` calls it again through the injected `privacyGate` and,
- * if the gate is not wired, fails closed: any non-workspace/link meeting is
- * skipped as `private_meeting` without a single HubSpot call.
+ * time). `deliver` calls it again through the injected `privacyGate` (the
+ * Integration step wires A's gate with per-meeting prefs); unwired, it
+ * still calls A's `evaluatePrivacyGate`, without prefs (fails closed): a
+ * private meeting is skipped as `private_meeting` without a HubSpot call.
  */
 import { createHash } from "node:crypto"
 
+import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
 import {
   type DeliverInput,
   type DeliverResult,
@@ -125,9 +127,22 @@ function sha256(value: unknown): string {
 async function privacyAllowed(input: DeliverInput): Promise<boolean> {
   if (runtime.privacyGate) return runtime.privacyGate(input)
 
-  const visibility = input.meeting.visibility
-
-  return visibility === "workspace" || visibility === "link"
+  // Unwired: still A's single gate, without per-meeting prefs (fails closed).
+  return evaluatePrivacyGate({
+    facts: {
+      visibility: input.meeting.visibility,
+      ...(input.meeting.ownerUserId ? { ownerUserId: input.meeting.ownerUserId } : {}),
+    },
+    origin: input.delivery.origin,
+    ...(input.rule
+      ? {
+          rule: {
+            includePrivate: input.rule.includePrivate,
+            ...(input.rule.createdByUserId ? { createdByUserId: input.rule.createdByUserId } : {}),
+          },
+        }
+      : {}),
+  }).allowed
 }
 
 /** Owner email: recap → M5 resolved participant → M5 resolved member. */

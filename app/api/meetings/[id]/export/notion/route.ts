@@ -9,9 +9,11 @@ import {
 import { recordAuditLog } from "@/lib/audit"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { meetingAppUrl } from "@/lib/integrations/core/links"
-import { ProviderError, type DeliverResult } from "@/lib/integrations/core/types"
+import { checkManualPush } from "@/lib/integrations/core/manual-send"
+import { ruleDestinationSchema } from "@/lib/integrations/core/rules"
+import { ProviderError, type DeliverResult, type RuleDestination } from "@/lib/integrations/core/types"
 import { notionLocaleFor } from "@/lib/integrations/notion/blocks"
-import { getManualExportRuntime } from "@/lib/integrations/notion/manual-export-runtime"
+import { getManualExportRuntime, manualExportPrefs } from "@/lib/integrations/notion/manual-export-runtime"
 import { notionProvider } from "@/lib/integrations/notion/provider"
 import {
   isPrivateMeeting,
@@ -30,6 +32,12 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
  *   workspace's Notion OAuth connection, never from the request or a server
  *   fallback; a body carrying a token is refused (400 `token_not_accepted`).
  * - No active connection → 409 `notion_not_connected`.
+ * - The shared manual-push checks (`checkManualPush`, as the send route):
+ *   `allowManualSend === false` → 403 `manual_send_disabled`; the single
+ *   privacy gate (a private meeting needs the owner's per-meeting opt-in)
+ *   → 403 `private_meeting_not_opted_in`; a client-supplied `databaseId`
+ *   is checked with Notion (`validateDestination`) → 400
+ *   `invalid_destination`.
  * - Runs `provider.deliver` synchronously as a manual delivery (idempotency
  *   key from `Idempotency-Key`): re-exporting updates the tracked page in
  *   place. Returns `{deliveryId, pageId, url, updated}`.
@@ -64,9 +72,50 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
 
   const requested = typeof payload.databaseId === "string" ? payload.databaseId.trim() : ""
   const fallback = typeof connection.config.defaultDatabaseId === "string" ? connection.config.defaultDatabaseId : ""
-  const databaseId = (requested || fallback).slice(0, 200)
+  const databaseId = requested || fallback
 
+  if (payload.databaseId !== undefined && typeof payload.databaseId !== "string") {
+    return NextResponse.json({ error: "invalid_destination" }, { status: 400 })
+  }
   if (!databaseId) return NextResponse.json({ error: "notion_database_required" }, { status: 400 })
+
+  const parsed = ruleDestinationSchema.safeParse({ provider: "notion", databaseId, databaseTitle: "" })
+
+  if (!parsed.success) return NextResponse.json({ error: "invalid_destination" }, { status: 400 })
+
+  const destination = parsed.data
+  const validateDestination = notionProvider.validateDestination
+  // The same checks as POST /integrations/send: allowManualSend, the single
+  // privacy gate, and a client-supplied database checked with Notion.
+  const check = await checkManualPush({
+    meeting,
+    connection,
+    destination,
+    clientDestination: Boolean(requested),
+    // The client-supplied database is checked with Notion; the connection
+    // default was set by an admin and is checked when Notion is called.
+    ...(requested && validateDestination
+      ? {
+          validate: (value: RuleDestination) =>
+            validateDestination(value, {
+              workspaceId,
+              connection,
+              getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
+              fetch: runtime.providerFetch,
+            }),
+        }
+      : {}),
+    getPrefs: () => manualExportPrefs(runtime, workspaceId, meeting.id),
+    ...(ctx.user?.id ? { requestedByUserId: ctx.user.id } : {}),
+  })
+
+  if (!check.ok) {
+    if (check.providerError) return providerErrorResponse("notion", check.providerError)
+    return NextResponse.json(
+      { error: check.code, ...(check.providerCode ? { providerCode: check.providerCode } : {}) },
+      { status: check.status }
+    )
+  }
 
   const started = await runtime.startManualDelivery({
     workspaceId,
@@ -105,7 +154,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       delivery,
       connection,
       getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
-      destination: { provider: "notion", databaseId, databaseTitle: "" },
+      destination,
       content,
       recap,
       meeting,

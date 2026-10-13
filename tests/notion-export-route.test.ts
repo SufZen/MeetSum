@@ -43,7 +43,11 @@ const globalFetch = vi.fn()
 
 type Finish = Parameters<ManualExportRuntime["finishManualDelivery"]>[2]
 
-function runtime(options: { connection?: IntegrationConnectionDTO | null; routes?: Parameters<typeof scriptedFetch>[0] } = {}) {
+type Prefs = { allowPrivatePush: boolean; allowPrivateSetByUserId?: string }
+
+function runtime(
+  options: { connection?: IntegrationConnectionDTO | null; routes?: Parameters<typeof scriptedFetch>[0]; prefs?: Prefs } = {}
+) {
   const api = scriptedFetch(
     options.routes ?? [
       on("GET", `/v1/databases/${DATABASE_ID}`, () => json(fixture("database.json"))),
@@ -79,6 +83,7 @@ function runtime(options: { connection?: IntegrationConnectionDTO | null; routes
       return { delivery: deliveryDto("notion", { id: `intd_${deliveries.size}` }), replayed: false }
     }),
     saveDeliveryProgress: vi.fn(async () => {}),
+    getPrefs: vi.fn(async () => options.prefs),
     finishManualDelivery: vi.fn(async (_workspaceId, _deliveryId, outcome: Finish) => {
       finished.push(outcome)
       for (const entry of deliveries.values()) {
@@ -188,11 +193,55 @@ describe("POST /api/meetings/:id/export/notion", () => {
     expect([403, 404]).toContain(response.status)
   })
 
-  it("lets the owner export a private meeting", async () => {
-    runtime()
+  it("lets the owner export a private meeting only after the owner's per-meeting opt-in", async () => {
+    const { api } = runtime()
+    const blocked = await callExport({ meetingId: "m_private" }, { userId: "user_owner" })
+
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toEqual({ error: "private_meeting_not_opted_in" })
+    expect(api.calls).toEqual([])
+
+    runtime({ prefs: { allowPrivatePush: true, allowPrivateSetByUserId: "user_owner" } })
+    expect((await callExport({ meetingId: "m_private" }, { userId: "user_owner" })).status).toBe(200)
+  })
+
+  it("ignores a private opt-in set by someone other than the owner", async () => {
+    const { api } = runtime({ prefs: { allowPrivatePush: true, allowPrivateSetByUserId: "user_admin" } })
     const response = await callExport({ meetingId: "m_private" }, { userId: "user_owner" })
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(403)
+    expect(api.calls).toEqual([])
+  })
+
+  it("refuses with 403 manual_send_disabled when the connection disallows manual sends", async () => {
+    const { api } = runtime({
+      connection: connectionDto("notion", { config: { defaultDatabaseId: DATABASE_ID, allowManualSend: false } }),
+    })
+    const response = await callExport({})
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "manual_send_disabled" })
+    expect(api.calls).toEqual([])
+  })
+
+  it("checks a client-supplied databaseId with Notion before writing (forged id → 400, no page)", async () => {
+    const forged = "ffffffff-0000-4000-8000-000000000000"
+    const { api } = runtime({
+      routes: [
+        on("GET", `/v1/databases/${forged}`, () => json(fixture("error-object-not-found.json"), 404)),
+        on("POST", "/v1/pages", () => json(PAGE)),
+      ],
+    })
+    const response = await callExport({ databaseId: forged })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: "invalid_destination" })
+    expect(api.calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([`GET /v1/databases/${forged}`])
+
+    const malformed = await callExport({ databaseId: "../../v1/users" })
+
+    expect(malformed.status).toBe(400)
+    expect(await malformed.json()).toEqual({ error: "invalid_destination" })
   })
 
   it("answers 409 notion_not_connected without a connection or runtime", async () => {

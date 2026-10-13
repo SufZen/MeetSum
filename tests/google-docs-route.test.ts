@@ -56,7 +56,13 @@ function docsApi(extra: Parameters<typeof scriptedFetch>[0] = []) {
   ])
 }
 
-function runtime(options: { connection?: IntegrationConnectionDTO | null; extra?: Parameters<typeof scriptedFetch>[0] } = {}) {
+function runtime(
+  options: {
+    connection?: IntegrationConnectionDTO | null
+    extra?: Parameters<typeof scriptedFetch>[0]
+    prefs?: { allowPrivatePush: boolean; allowPrivateSetByUserId?: string }
+  } = {}
+) {
   const api = docsApi(options.extra)
   const links = memoryLinkStore()
   const lookups: unknown[] = []
@@ -69,6 +75,7 @@ function runtime(options: { connection?: IntegrationConnectionDTO | null; extra?
     }),
     getAccessToken: vi.fn(async () => "user_drive_token"),
     linkStore: () => links,
+    getPrefs: vi.fn(async () => options.prefs),
   } as unknown as ManualExportRuntime
 
   setManualExportRuntime(value)
@@ -196,11 +203,26 @@ describe("POST /api/meetings/:id/export/google-docs", () => {
     expect(links.rows[0].externalId).toBe(DOC.documentId)
   })
 
-  it("lets a member export a private meeting they own to their own Drive", async () => {
-    runtime()
+  it("lets a member export a private meeting they own to their own Drive after their per-meeting opt-in", async () => {
+    const { api } = runtime()
+    const blocked = await callExport({ meetingId: "m_private" })
 
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toEqual({ error: "private_meeting_not_opted_in" })
+    expect(api.calls).toEqual([])
+
+    runtime({ prefs: { allowPrivatePush: true, allowPrivateSetByUserId: "user_me" } })
     expect((await callExport({ meetingId: "m_private" })).status).toBe(200)
     expect((await callExport({ meetingId: "m_private", userId: "user_other" })).status).toBe(404)
+  })
+
+  it("refuses with 403 manual_send_disabled when the Drive connection disallows manual sends", async () => {
+    const { api } = runtime({ connection: connectionDto("google_drive", { userId: "user_me", config: { allowManualSend: false } }) })
+    const response = await callExport({})
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "manual_send_disabled" })
+    expect(api.calls).toEqual([])
   })
 
   it("uses DWD only inside the workspace domain (mismatch refused), never the user-oauth strategy", async () => {

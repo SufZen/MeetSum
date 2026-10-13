@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server"
 
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
-import { actorUserId, apiError, auditActor, idempotencyKeyOf, limitFor, readJsonBody } from "@/lib/integrations/core/api"
+import { actorUserId, apiError, auditActor, idempotencyKeyOf, limitFor, providerErrorResponse, readJsonBody } from "@/lib/integrations/core/api"
 import { auditIntegration } from "@/lib/integrations/core/audit"
 import { providerCtx } from "@/lib/integrations/core/connections"
 import { createManualDelivery } from "@/lib/integrations/core/deliveries"
-import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
+import { checkManualPush } from "@/lib/integrations/core/manual-send"
 import { getProvider } from "@/lib/integrations/core/registry"
 import { getIntegrationQueuePort } from "@/lib/integrations/core/queue"
 import { ruleContentSchema, ruleDestinationSchema } from "@/lib/integrations/core/rules"
 import { getIntegrationStore } from "@/lib/integrations/core/store"
-import { ProviderError, type RuleDestination } from "@/lib/integrations/core/types"
+import type { RuleDestination } from "@/lib/integrations/core/types"
 import { DEFAULT_RULE_CONTENT } from "@/lib/integrations/recap"
 
 /**
@@ -67,8 +67,6 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   if (!connection || connection.status === "revoked" || !["slack", "notion", "hubspot"].includes(connection.provider)) {
     return apiError("not_found", 404)
   }
-  if (connection.status !== "active") return apiError("integration_needs_reauth", 409)
-  if (connection.config.allowManualSend === false) return apiError("manual_send_disabled", 403)
 
   let destination: RuleDestination | undefined
 
@@ -81,36 +79,29 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     destination = defaultDestination(connection.provider, connection.config)
   }
   if (!destination) return apiError("destination_required", 400)
-  if (destination.provider !== connection.provider) return apiError("destination_provider_mismatch", 400)
 
   const content = ruleContentSchema.partial().safeParse(body.content ?? {})
 
   if (!content.success) return apiError("invalid_content", 400)
 
-  // The single privacy gate: a private meeting needs the owner's opt-in.
-  const prefs = await store.getPrefs(ctx.workspace.id, meeting.id)
-  const privacy = evaluatePrivacyGate({
-    facts: { visibility: meeting.visibility, ...(meeting.ownerUserId ? { ownerUserId: meeting.ownerUserId } : {}) },
-    origin: "manual",
-    ...(prefs ? { prefs } : {}),
+  // The shared manual-push checks (also used by the export routes): active
+  // connection, allowManualSend, the single privacy gate, and a destination
+  // checked with the provider (never post to an unchecked id).
+  const provider = getProvider(connection.provider)
+  const validateDestination = provider?.validateDestination
+  const check = await checkManualPush({
+    meeting,
+    connection,
+    destination,
+    clientDestination: body.destination !== undefined,
+    ...(validateDestination ? { validate: (value: RuleDestination) => validateDestination(value, providerCtx(connection, store)) } : {}),
+    getPrefs: () => store.getPrefs(ctx.workspace.id, meeting.id),
+    ...(actorUserId(ctx) ? { requestedByUserId: actorUserId(ctx) } : {}),
   })
 
-  if (!privacy.allowed) return apiError("private_meeting_not_opted_in", 403)
-
-  // Never post to an id the connection was not checked against.
-  const provider = getProvider(connection.provider)
-
-  if (provider?.validateDestination) {
-    try {
-      await provider.validateDestination(destination, providerCtx(connection, store))
-    } catch (error) {
-      if (error instanceof ProviderError && error.kind === "auth") return apiError("integration_needs_reauth", 409)
-      return apiError("invalid_destination", 400, {
-        ...(error instanceof ProviderError && /^[a-z_]{1,64}$/.test(error.providerCode ?? "") ? { providerCode: error.providerCode } : {}),
-      })
-    }
-  } else if (body.destination !== undefined) {
-    return apiError("destination_not_verifiable", 400)
+  if (!check.ok) {
+    if (check.providerError) return providerErrorResponse(check.providerError)
+    return apiError(check.code, check.status, check.providerCode ? { providerCode: check.providerCode } : {})
   }
 
   const userId = actorUserId(ctx)

@@ -9,23 +9,19 @@
  * export routes fail closed (409 "not connected"), never with a token from
  * the request or the environment.
  *
- * Integration step: register A's implementation once at boot (or replace
- * `loadDefaultRuntime` below):
- *   setManualExportRuntime({
- *     providerFetch,                                   // core/http
- *     findActiveConnection,                            // core/connection-store (DTO, no tokens)
- *     getAccessToken: (ws, id) => getAccessToken(id),  // core/tokens
- *     linkStore,                                       // core/link-store (ws + connection scoped)
- *     startManualDelivery, finishManualDelivery,       // core/delivery-store (origin "manual")
- *     saveDeliveryProgress,
- *   })
+ * Integration step: `loadDefaultRuntime` below is Package A's real
+ * implementation (`providerFetch`, the integrations store, `getAccessToken`,
+ * the scoped link store and manual delivery rows). Tests replace it with
+ * `setManualExportRuntime`.
  */
 import type {
   DeliverResult,
   DeliveryProgress,
   IntegrationConnectionDTO,
   IntegrationDeliveryDTO,
+  IntegrationLinkKey,
   LinkStore,
+  MeetingIntegrationPrefs,
   ProviderFetch,
   ProviderId,
 } from "@/lib/integrations/core/types"
@@ -70,6 +66,11 @@ export type ManualExportRuntime = {
     deliveryId: string,
     outcome: { result: DeliverResult } | { error: { kind: string; message: string } }
   ): Promise<void>
+  /** Per-meeting prefs for the single privacy gate (defaults to the integrations store). */
+  getPrefs?(
+    workspaceId: string,
+    meetingId: string
+  ): Promise<Pick<MeetingIntegrationPrefs, "allowPrivatePush" | "allowPrivateSetByUserId"> | undefined>
 }
 
 let registered: ManualExportRuntime | undefined
@@ -78,11 +79,137 @@ export function setManualExportRuntime(runtime: ManualExportRuntime | undefined)
   registered = runtime
 }
 
-/** Integration step: wire Package A here if no boot hook registers it. */
-function loadDefaultRuntime(): ManualExportRuntime | undefined {
-  return undefined
+const store = async () => (await import("@/lib/integrations/core/store")).getIntegrationStore()
+
+/** Package A's services, imported lazily (no import cycle with the registry). */
+const defaultRuntime: ManualExportRuntime = {
+  providerFetch: async (provider, url, init) => (await import("@/lib/integrations/core/http")).providerFetch(provider, url, init),
+
+  async findActiveConnection(workspaceId, provider, options = {}) {
+    const [db, { isPersonalProvider, toConnectionDTO }] = await Promise.all([
+      store(),
+      import("@/lib/integrations/core/connections"),
+    ])
+    const personal = isPersonalProvider(provider)
+
+    if (personal && !options.userId) return undefined
+
+    const row = (await db.listConnections(workspaceId)).find(
+      (candidate) =>
+        candidate.provider === provider &&
+        candidate.status === "active" &&
+        (personal ? candidate.userId === options.userId : !candidate.userId)
+    )
+
+    return row ? toConnectionDTO(row) : undefined
+  },
+
+  async getAccessToken(workspaceId, connectionId) {
+    const { getAccessToken } = await import("@/lib/integrations/core/tokens")
+
+    return getAccessToken(workspaceId, connectionId)
+  },
+
+  linkStore(workspaceId, connectionId, meetingId) {
+    const scope = { workspaceId, connectionId, meetingId }
+    const provider = async () => (await (await store()).getConnection(workspaceId, connectionId))?.provider
+
+    return {
+      get: async (key: IntegrationLinkKey) => (await store()).getLink(scope, key),
+      list: async (objectKind, destinationKey) => (await store()).listLinks(scope, objectKind, destinationKey),
+      upsert: async (key) => {
+        const owner = await provider()
+
+        if (!owner) throw new Error("connection not found")
+        return (await store()).upsertLink({ ...scope, provider: owner }, key)
+      },
+      remove: async (key) => (await store()).removeLink(scope, key),
+    }
+  },
+
+  async startManualDelivery(input) {
+    const [db, { deliveryDTO }, { integrationMaxAttempts }] = await Promise.all([
+      store(),
+      import("@/lib/integrations/core/deliver"),
+      import("@/lib/integrations/core/limits"),
+    ])
+    const clientKey = input.idempotencyKey.replace(/^manual:/, "")
+    const { delivery, created } = await db.insertDelivery({
+      id: `intd_${crypto.randomUUID()}`,
+      workspaceId: input.workspaceId,
+      connectionId: input.connectionId,
+      provider: input.provider,
+      origin: "manual",
+      eventName: input.eventName ?? "manual.export",
+      meetingId: input.meetingId,
+      // Scoped to provider and requester: another user's key never replays.
+      idempotencyKey: `manual:export:${input.provider}:${input.requestedByUserId ?? "system"}:${clientKey}`,
+      status: "running",
+      maxAttempts: integrationMaxAttempts(),
+      ...(input.requestedByUserId ? { requestedByUserId: input.requestedByUserId } : {}),
+    })
+    const sameTarget = delivery.meetingId === input.meetingId && delivery.connectionId === input.connectionId
+
+    if (!created && !sameTarget) throw new Error("idempotency key reused for another target")
+
+    return { delivery: deliveryDTO(delivery), replayed: !created, progress: { ...delivery.progress } }
+  },
+
+  async saveDeliveryProgress(workspaceId, deliveryId, progress) {
+    await (await store()).updateDelivery(workspaceId, deliveryId, { progress })
+  },
+
+  async finishManualDelivery(workspaceId, deliveryId, outcome) {
+    const db = await store()
+    const now = new Date().toISOString()
+
+    if ("result" in outcome) {
+      await db.updateDelivery(workspaceId, deliveryId, {
+        status: outcome.result.status,
+        completedAt: now,
+        externalRef: outcome.result.externalRef,
+        ...(outcome.result.skipReason ? { skipReason: outcome.result.skipReason } : {}),
+        ...(outcome.result.progress ? { progress: outcome.result.progress } : {}),
+      })
+      return
+    }
+
+    const [{ storedIntegrationError }, { ProviderError }] = await Promise.all([
+      import("@/lib/integrations/core/errors"),
+      import("@/lib/integrations/core/types"),
+    ])
+    const row = await db.getDelivery(workspaceId, deliveryId)
+    const kinds = ["auth", "forbidden", "not_found", "invalid", "rate_limited", "retryable", "config"] as const
+    const kind = (kinds as readonly string[]).includes(outcome.error.kind) ? (outcome.error.kind as (typeof kinds)[number]) : "retryable"
+
+    // Typed fields only: the message is never stored.
+    await db.updateDelivery(workspaceId, deliveryId, {
+      status: "failed",
+      completedAt: now,
+      lastError: storedIntegrationError(new ProviderError(kind, "manual export failed"), row?.provider),
+    })
+  },
+
+  async getPrefs(workspaceId, meetingId) {
+    return (await store()).getPrefs(workspaceId, meetingId)
+  },
+}
+
+function loadDefaultRuntime(): ManualExportRuntime {
+  return defaultRuntime
 }
 
 export function getManualExportRuntime(): ManualExportRuntime | undefined {
   return registered ?? loadDefaultRuntime()
+}
+
+/** Prefs for the privacy gate: the runtime's, else the integrations store's. */
+export async function manualExportPrefs(
+  runtime: ManualExportRuntime,
+  workspaceId: string,
+  meetingId: string
+): Promise<Pick<MeetingIntegrationPrefs, "allowPrivatePush" | "allowPrivateSetByUserId"> | undefined> {
+  if (runtime.getPrefs) return runtime.getPrefs(workspaceId, meetingId)
+
+  return (await store()).getPrefs(workspaceId, meetingId)
 }

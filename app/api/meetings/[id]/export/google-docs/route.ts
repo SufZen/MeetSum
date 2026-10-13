@@ -4,12 +4,13 @@ import { auditActor, loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { meetingAppUrl } from "@/lib/integrations/core/links"
+import { checkManualPush } from "@/lib/integrations/core/manual-send"
 import type { LinkStore } from "@/lib/integrations/core/types"
 import { googleDocsLocaleFor } from "@/lib/integrations/google-docs/builder"
 import type { GoogleDocsClientContext } from "@/lib/integrations/google-docs/client"
 import { googleDocsDwdAccessToken, googleDocsDwdDecision } from "@/lib/integrations/google-docs/dwd"
 import { exportRecapToGoogleDocs } from "@/lib/integrations/google-docs/export"
-import { getManualExportRuntime } from "@/lib/integrations/notion/manual-export-runtime"
+import { getManualExportRuntime, manualExportPrefs } from "@/lib/integrations/notion/manual-export-runtime"
 import { providerErrorResponse, readJsonObject } from "@/lib/integrations/notion/route-helpers"
 import { buildMeetingRecap, DEFAULT_RULE_CONTENT } from "@/lib/integrations/recap"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
@@ -17,9 +18,11 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 /**
  * POST /api/meetings/:id/export/google-docs `{includeTranscript?}` (M8 C2).
  *
- * `meeting:read` + visible (else 404); `exports` rate limit. Private
- * meetings may be exported to the requester's own Drive, like a DOCX
- * download. Auth, in order:
+ * `meeting:read` + visible (else 404); `exports` rate limit. The shared
+ * manual-push checks apply (`checkManualPush`, as the send route): a
+ * connection with `allowManualSend === false` → 403 `manual_send_disabled`,
+ * and a private meeting needs the owner's per-meeting opt-in (the single
+ * privacy gate) → 403 `private_meeting_not_opted_in`. Auth, in order:
  *   1. the requester's personal `google_drive` connection (OAuth, PKCE,
  *      `drive.file`);
  *   2. `MEETSUM_GOOGLE_DOCS_DWD=true` with a service-account DWD strategy and
@@ -61,6 +64,19 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
       client = { fetch: runtime.providerFetch, getAccessToken: () => googleDocsDwdAccessToken(decision.subject) }
       via = "dwd"
     }
+  }
+
+  if (client && runtime) {
+    // The same checks as POST /integrations/send (allowManualSend and the
+    // single privacy gate): a private meeting needs the owner's opt-in.
+    const check = await checkManualPush({
+      meeting,
+      ...(connection ? { connection } : {}),
+      getPrefs: () => manualExportPrefs(runtime, workspaceId, meeting.id),
+      ...(userId ? { requestedByUserId: userId } : {}),
+    })
+
+    if (!check.ok) return NextResponse.json({ error: check.code }, { status: check.status })
   }
 
   if (!client) {
