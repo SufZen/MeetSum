@@ -5,7 +5,7 @@ import { buildMeetingMemoryResults } from "@/lib/memory"
 import type { MemoryCitation, MemoryMatchSource, MemorySearchFilters, MemorySearchResult } from "@/lib/memory"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
-import { searchContextFrom } from "@/lib/search/context"
+import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
 import { MAX_QUERY_CHARS, TEXT_LANGUAGES } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
 import type { ChunkKind, SearchFilters, SearchHit, TextLanguage } from "@/lib/search/types"
@@ -42,7 +42,11 @@ function toCitation(meeting: MeetingRecord, hit: SearchHit): MemoryCitation {
 }
 
 export const GET = withAuthz("meeting:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search)
+  const limitKey = searchRateLimitKey(ctx)
+
+  if (!limitKey) return searchRateLimitUnavailable()
+
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

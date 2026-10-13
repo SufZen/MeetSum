@@ -4,7 +4,7 @@ import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
-import { searchContextFrom } from "@/lib/search/context"
+import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
 import { MAX_QUERY_CHARS } from "@/lib/search/filters"
 import { searchMeetingIds } from "@/lib/search/service"
 import type { SearchFilters } from "@/lib/search/types"
@@ -23,7 +23,11 @@ import type { SearchFilters } from "@/lib/search/types"
  *   limit  — Max results (default: 20, max: 100)
  */
 export const GET = withAuthz("meeting:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search)
+  const limitKey = searchRateLimitKey(ctx)
+
+  if (!limitKey) return searchRateLimitUnavailable()
+
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

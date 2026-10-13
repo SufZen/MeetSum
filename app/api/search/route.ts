@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
-import { searchContextFrom } from "@/lib/search/context"
+import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
 import { InvalidCursorError } from "@/lib/search/cursor"
 import { SearchRequestError, parseSearchParams } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
@@ -21,7 +21,11 @@ export const dynamic = "force-dynamic"
  * groups / ≤ 50 chunks), `hits` (≤ 10 per meeting), `cursor`.
  */
 export const GET = withAuthz("meeting:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search)
+  const limitKey = searchRateLimitKey(ctx)
+
+  if (!limitKey) return searchRateLimitUnavailable()
+
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
