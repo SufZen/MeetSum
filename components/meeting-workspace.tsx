@@ -12,8 +12,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
-  type ComponentType,
   type UIEvent,
 } from "react"
 import dynamic from "next/dynamic"
@@ -35,7 +33,6 @@ import { useJson } from "@/components/intelligence/use-json"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
 import { LazyMeetingPlayer } from "@/components/player/lazy"
-import type { TranscriptView } from "@/components/transcript/transcript-view"
 import { TranscriptSkeleton } from "@/components/transcript/transcript-skeleton"
 import { ActionItemEditor } from "@/components/tasks/action-item-editor"
 import {
@@ -61,7 +58,6 @@ import type {
 import { buildActionItemMarkers } from "@/lib/player/citations"
 import { buildTranscriptIndex } from "@/lib/player/word-index"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
-import type { Chapter } from "@/lib/intelligence"
 import { normalizeIntelligence } from "@/lib/intelligence/normalize"
 import type { TaskMember } from "@/lib/tasks/types"
 
@@ -73,15 +69,10 @@ const SpeakerMappingPanel = dynamic(
 /**
  * M5 transcript (Package C's `TranscriptTimeline`: chapter headings,
  * comment anchors, clip ranges, reactions over M4's TranscriptView), code
- * split like M4's LazyTranscriptView. Typed against TranscriptView's props
- * plus `chapters` until C's export lands at integration.
+ * split like M4's LazyTranscriptView.
  */
-type TranscriptTimelineProps = ComponentProps<typeof TranscriptView> & { chapters?: readonly Chapter[] }
 const LazyTranscriptTimeline = dynamic(
-  () =>
-    import("@/components/transcript-timeline").then(
-      (mod) => mod.TranscriptTimeline as ComponentType<TranscriptTimelineProps>
-    ),
+  () => import("@/components/transcript-timeline").then((mod) => mod.TranscriptTimeline),
   { ssr: false, loading: () => <TranscriptSkeleton /> }
 )
 const ReprocessConfirmDialog = dynamic(
@@ -99,7 +90,15 @@ type TabValue = "summary" | "transcript" | "ask" | "tasks" | "clips" | "prep" | 
 type MembersResponse = { members: Array<{ userId: string; email: string; name: string | null }> }
 
 /** Tasks tab: Package B's editor with workspace members as owner options. */
-function TasksTab({ meeting }: { meeting: MeetingRecord }) {
+function TasksTab({
+  meeting,
+  locale,
+  canEdit,
+}: {
+  meeting: MeetingRecord
+  locale: SupportedLocale
+  canEdit: boolean
+}) {
   const { data } = useJson<MembersResponse>("/api/workspaces/current/members")
   const members = useMemo<TaskMember[]>(
     () =>
@@ -119,6 +118,9 @@ function TasksTab({ meeting }: { meeting: MeetingRecord }) {
       speakers={meeting.speakers ?? []}
       members={members}
       meetingStartedAt={meeting.startedAt}
+      locale={locale}
+      language={meeting.languageMetadata?.primaryLanguage ?? meeting.language}
+      canEdit={canEdit}
     />
   )
 }
@@ -483,7 +485,7 @@ export function MeetingWorkspace({
                 <ListTodoIcon aria-hidden="true" className="size-4 text-primary" />
                 <h3 className="text-sm font-semibold">{dictionary.actionItems}</h3>
               </div>
-              <TasksTab meeting={meeting} />
+              <TasksTab meeting={meeting} locale={locale} canEdit={permissions.canWrite} />
             </section>
           </TabsContent>
 
