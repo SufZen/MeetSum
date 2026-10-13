@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { getBotConfig, type BotConfig } from "@/lib/bot/config"
 import { applyVexaSnapshot, runBotSideEffects } from "@/lib/bot/lifecycle"
 import type { enqueueBotJob } from "@/lib/bot/queue"
@@ -18,7 +20,9 @@ import { verifyVexaSignature } from "@/lib/bot/webhook-verify"
  * (workspace, vexa_meeting_id, event type, status, previous status) — the
  * previous status is Vexa's when the envelope has it, else the session's at
  * receipt — so awaiting_admission → needs_help → awaiting_admission are three
- * events. An event whose apply fails is deleted again so Vexa's retry is
+ * events; a delivery without an event id is keyed by a hash of its signed
+ * body, so a byte-identical replay is always a duplicate. An event whose apply
+ * or side-effect enqueue fails is deleted again (500) so Vexa's retry is
  * reprocessed. No Vexa call happens inside the request.
  */
 
@@ -80,6 +84,8 @@ export type ParsedVexaWebhook = {
   status?: string
   /** Vexa's status before this change, when the envelope carries it. */
   previousStatus?: string
+  /** Vexa's event time, when the envelope carries a parseable one. */
+  occurredAt?: Date
   reason?: string
   provenance?: VexaServiceProvenance
 }
@@ -139,6 +145,16 @@ function provenanceFrom(value: unknown): VexaServiceProvenance | undefined {
 
 const PLATFORMS: ReadonlySet<string> = new Set(BOT_PLATFORMS)
 
+/** ISO string or epoch seconds/milliseconds → Date; undefined when unusable. */
+function eventTime(value: string | undefined): Date | undefined {
+  if (!value) return undefined
+
+  const numeric = /^\d+(\.\d+)?$/.test(value) ? Number(value) : Number.NaN
+  const ms = Number.isFinite(numeric) ? (numeric < 1e12 ? numeric * 1000 : numeric) : Date.parse(value)
+
+  return Number.isFinite(ms) ? new Date(ms) : undefined
+}
+
 /** Tolerant envelope parsing (the envelope is undocumented in 0.12.28). */
 export function parseVexaWebhook(body: unknown): ParsedVexaWebhook | undefined {
   const root = object(body)
@@ -174,6 +190,9 @@ export function parseVexaWebhook(body: unknown): ParsedVexaWebhook | undefined {
     nativeMeetingId: first(meeting.native_meeting_id, data.native_meeting_id, root.native_meeting_id)
       ?.slice(0, 300),
     status: status?.toLowerCase().slice(0, 50),
+    occurredAt: eventTime(
+      first(root.timestamp, root.created_at, root.occurred_at, data.timestamp, data.changed_at, data.updated_at)
+    ),
     previousStatus: first(
       data.old_status,
       data.previous_status,
@@ -277,7 +296,9 @@ export async function processVexaWebhook(
     workspaceId: session.workspaceId,
     source: "webhook",
     vexaMeetingId: parsed.vexaMeetingId ?? session.vexaMeetingId,
-    vexaEventId: parsed.eventId,
+    // Strict per-delivery dedupe: Vexa's event id, else a hash of the signed
+    // body, so a byte-identical replay (captured or retried) never re-applies.
+    vexaEventId: parsed.eventId ?? `sha256:${createHash("sha256").update(input.rawBody).digest("hex")}`,
     eventType: parsed.eventType,
     vexaStatus: parsed.status ?? null,
     prevStatus: parsed.previousStatus ?? session.status,
@@ -289,8 +310,15 @@ export async function processVexaWebhook(
   if (recorded.duplicate) return { status: 200, body: { duplicate: true } }
   if (!parsed.status) return { status: 200, body: { ok: true, applied: false } }
 
+  // Vexa's own event time (never in the future): orders lateral lobby moves.
+  const eventAt =
+    parsed.occurredAt && parsed.occurredAt.getTime() < now.getTime() ? parsed.occurredAt : undefined
   let outcome: Awaited<ReturnType<typeof applyVexaSnapshot>>
 
+  // Record + apply + side-effect enqueue succeed together, or the delivery is
+  // un-recorded and answered 500, so Vexa's retry is reprocessed (the retry
+  // re-asks for any job still owed; job ids keep that idempotent). A process
+  // crash mid-way is healed by reconcile's poll of the Vexa status.
   try {
     outcome = await applyVexaSnapshot(
       store,
@@ -302,8 +330,15 @@ export async function processVexaWebhook(
         serviceProvenance: parsed.provenance,
       },
       "webhook",
-      { event: { eventId: recorded.event?.id }, at: now }
+      { event: { eventId: recorded.event?.id }, at: eventAt ?? now, eventAt }
     )
+
+    if (outcome.sideEffects.length) {
+      await runBotSideEffects(outcome.session, outcome.sideEffects, {
+        enqueue: deps.enqueue,
+        finalizeAttempts: config.finalizeAttempts,
+      })
+    }
   } catch (error) {
     // Un-record the delivery so Vexa's retry (after our 500) is not deduped.
     if (recorded.event?.id) {
@@ -312,16 +347,6 @@ export async function processVexaWebhook(
         .catch((cleanup: unknown) => console.error("[bot] webhook event cleanup failed", redactBotError(cleanup)))
     }
     throw error
-  }
-
-  if (outcome.sideEffects.length) {
-    // The event is recorded either way; reconcile recovers a failed enqueue.
-    await runBotSideEffects(outcome.session, outcome.sideEffects, {
-      enqueue: deps.enqueue,
-      finalizeAttempts: config.finalizeAttempts,
-    }).catch((error: unknown) => {
-      console.error("[bot] webhook side effects failed", redactBotError(error))
-    })
   }
 
   return { status: 200, body: { ok: true, applied: outcome.applied } }

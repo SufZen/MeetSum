@@ -59,6 +59,15 @@ async function seed(workspaceId: string, overrides: { vexaMeetingId?: string | n
   return session
 }
 
+/** A status event without an event id; `second` is its Vexa timestamp (10:00:SS). */
+function statusBody(status: string, second: number): string {
+  return JSON.stringify({
+    event_type: "meeting.status_change",
+    timestamp: `2026-01-14T10:00:${String(second).padStart(2, "0")}.000Z`,
+    data: { meeting: { id: 4242, status } },
+  })
+}
+
 async function send(name: string, options?: Parameters<typeof signed>[1]) {
   const response = await POST(signed(fixture(name), options), route)
 
@@ -191,12 +200,15 @@ describe("POST /api/integrations/vexa/webhook", () => {
 
   it("legitimate repeats without event ids (awaiting → needs_help → awaiting) all apply", async () => {
     const session = await seed("ws_1")
-    const status = (value: string) =>
-      JSON.stringify({ event_type: "meeting.status_change", data: { meeting: { id: 4242, status: value } } })
     const results = []
 
-    for (const value of ["awaiting_admission", "needs_help", "awaiting_admission", "awaiting_admission"]) {
-      const response = await POST(signed(status(value)), route)
+    for (const [value, second] of [
+      ["awaiting_admission", 1],
+      ["needs_help", 2],
+      ["awaiting_admission", 3],
+      ["awaiting_admission", 4],
+    ] as const) {
+      const response = await POST(signed(statusBody(value, second)), route)
 
       results.push(await response.json())
     }
@@ -209,6 +221,56 @@ describe("POST /api/integrations/vexa/webhook", () => {
       { ok: true, applied: false },
     ])
     expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("awaiting_admission")
+  })
+
+  it("a byte-identical replay without an event id is a duplicate and never re-applies", async () => {
+    const session = await seed("ws_1")
+    const awaiting = statusBody("awaiting_admission", 1)
+
+    await POST(signed(awaiting), route)
+    await POST(signed(statusBody("needs_help", 2)), route)
+
+    // A captured (or retried) delivery of the first event, freshly within tolerance.
+    const replay = await POST(signed(awaiting), route)
+
+    expect(await replay.json()).toEqual({ duplicate: true })
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("needs_help")
+    expect(store.events.filter((event) => event.applied)).toHaveLength(2)
+  })
+
+  it("an older event delivered after a newer one is not applied (lateral or lower rank)", async () => {
+    const session = await seed("ws_1")
+
+    await POST(signed(statusBody("needs_help", 10)), route)
+
+    const lateral = await POST(signed(statusBody("awaiting_admission", 5)), route)
+
+    expect(await lateral.json()).toEqual({ ok: true, applied: false })
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("needs_help")
+
+    const lower = await POST(signed(statusBody("joining", 4)), route)
+
+    expect(await lower.json()).toEqual({ ok: true, applied: false })
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("needs_help")
+  })
+
+  it("a lost side effect is not half-applied: 500, then the retry enqueues it exactly once", async () => {
+    const session = await seed("ws_1")
+
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    enqueueBotJob.mockRejectedValueOnce(new Error("redis down"))
+
+    expect((await send("status-active")).status).toBe(500)
+    // Vexa retries the same delivery.
+    expect((await send("status-active")).status).toBe(200)
+    expect((await send("status-active")).body).toEqual({ duplicate: true })
+
+    expect((await store.get(session.id, { workspaceId: "ws_1" }))?.status).toBe("active")
+    const consent = enqueueBotJob.mock.calls.filter((call) => (call as unknown[])[0] === "bot.consent")
+
+    // One failed attempt, then exactly one successful enqueue.
+    expect(consent).toHaveLength(2)
+    expect(store.events.filter((event) => event.vexaEventId === "evt_status_active")).toHaveLength(1)
   })
 
   it("enqueues finalize exactly once for the completed fixture", async () => {
@@ -226,9 +288,13 @@ describe("POST /api/integrations/vexa/webhook", () => {
 
     const finalizeCalls = enqueueBotJob.mock.calls.filter((call) => (call as unknown[])[0] === "bot.finalize")
 
-    expect(finalizeCalls).toEqual([
-      ["bot.finalize", { sessionId: session.id, workspaceId: "ws_1" }, { jobId: `bot.finalize:${session.id}`, attempts: 8 }],
-    ])
+    // The replay may re-ask (finalize has not run yet), always under the one
+    // idempotent job id, so the job runs once.
+    expect(new Set(finalizeCalls.map((call) => JSON.stringify(call)))).toEqual(
+      new Set([
+        JSON.stringify(["bot.finalize", { sessionId: session.id, workspaceId: "ws_1" }, { jobId: `bot.finalize:${session.id}`, attempts: 8 }]),
+      ])
+    )
     expect(enqueueBotJob.mock.calls.filter((call) => (call as unknown[])[0] === "bot.consent")).toHaveLength(1)
 
     const completed = await store.get(session.id, { workspaceId: "ws_1" })

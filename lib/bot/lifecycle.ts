@@ -9,6 +9,8 @@ import {
   type BotTransitionEvent,
 } from "@/lib/bot/store"
 import {
+  BOT_STATUS_RANK,
+  isTerminalBotStatus,
   type BotSession,
   type BotSessionRecord,
   type BotStatus,
@@ -146,10 +148,35 @@ export function applyBotStatus(
   return { patch, sideEffects }
 }
 
+/**
+ * Follow-up jobs still owed by a session that already has `status` (a
+ * redelivery after a failed enqueue, or a poll): consent not yet sent for an
+ * active bot, finalize not yet run for a completed one. Job ids are
+ * idempotent, so asking again never runs a job twice.
+ */
+export function pendingBotSideEffects(session: BotSession): BotSideEffect[] {
+  if (session.status === "active" && session.consentStatus === "pending") return ["enqueue_consent"]
+  if (
+    session.status === "completed" &&
+    session.recordingEnabled &&
+    session.recordingStatus === "none" &&
+    session.joinedAt
+  ) {
+    return ["enqueue_finalize"]
+  }
+  return []
+}
+
 export type ApplyVexaSnapshotOptions = {
   /** The bot_events row already recorded for this delivery (webhook). */
   event?: BotTransitionEvent
   at?: Date | string
+  /**
+   * When Vexa says the change happened (webhook payload timestamp). A lateral
+   * lobby move older than the session's last status change is stale and is
+   * not applied (higher/lower ranks are handled by the rank guard).
+   */
+  eventAt?: Date
 }
 
 /**
@@ -185,7 +212,18 @@ export async function applyVexaSnapshot(
     stoppedByUser: current.statusReason === "user_stopped",
   })
 
-  if (!next) {
+  const lateral =
+    next !== undefined &&
+    next.status !== current.status &&
+    BOT_STATUS_RANK[next.status] === BOT_STATUS_RANK[current.status] &&
+    !isTerminalBotStatus(next.status)
+  const stale =
+    lateral &&
+    options.eventAt !== undefined &&
+    current.statusChangedAt !== null &&
+    options.eventAt.getTime() < Date.parse(current.statusChangedAt)
+
+  if (!next || stale) {
     if (options.event?.eventId) {
       // Recorded but nothing to apply (idle/scheduled): keep applied=false.
       await store.transition(current.id, {
@@ -210,7 +248,13 @@ export async function applyVexaSnapshot(
   })
 
   if (!result) return { applied: false, session: current, sideEffects: [] }
-  if (!result.applied) return { applied: false, session: result.session, sideEffects: [] }
+  if (!result.applied) {
+    // Already there (e.g. Vexa's retry after our failed enqueue): re-ask for
+    // what is still owed so a lost side effect is never silently dropped.
+    const owed = result.session.status === next.status ? pendingBotSideEffects(result.session) : []
+
+    return { applied: false, session: result.session, sideEffects: owed }
+  }
 
   const { patch, sideEffects } = applyBotStatus(result.previous, next)
   const updated = Object.keys(patch).length
