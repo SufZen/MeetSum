@@ -194,7 +194,7 @@ export function buildTaskListSql(
       select ${actionItemColumns("ai")},
              ai.created_at::text as cursor_created_at,
              m.title as meeting_title,
-             m.language as meeting_language,
+             coalesce(m.language_metadata->>'primaryLanguage', m.language) as meeting_language,
              m.started_at as meeting_started_at
       from action_items ai
       join meetings m on m.id = ai.meeting_id

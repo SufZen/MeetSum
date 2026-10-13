@@ -119,7 +119,6 @@ function TasksTab({
       members={members}
       meetingStartedAt={meeting.startedAt}
       locale={locale}
-      language={meeting.languageMetadata?.primaryLanguage ?? meeting.language}
       canEdit={canEdit}
     />
   )

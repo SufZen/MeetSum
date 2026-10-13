@@ -79,13 +79,6 @@ export function groupTask(task: TaskRow, today: string, weekEnd: string): GroupK
   return "later"
 }
 
-function directionOf(language: string | undefined): "rtl" | "ltr" | undefined {
-  const code = language?.toLowerCase().split(/[-_]/)[0]
-
-  if (!code || code === "mixed" || code === "auto" || code === "unknown") return undefined
-  return code === "he" || code === "ar" || code === "fa" || code === "ur" ? "rtl" : "ltr"
-}
-
 function meetingHref(locale: string, task: TaskRow): string {
   const params = new URLSearchParams({ meeting: task.meeting.id })
 
@@ -329,7 +322,6 @@ export function TasksView({
                     item={task}
                     meetingId={task.meeting.id}
                     meetingStartedAt={task.meeting.startedAt}
-                    dir={directionOf(task.meeting.language)}
                     strings={strings}
                     members={members}
                     today={today}

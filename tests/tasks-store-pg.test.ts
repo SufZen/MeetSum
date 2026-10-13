@@ -31,6 +31,12 @@ function bound(sql: { text: string; values: unknown[] }, pattern: RegExp): unkno
 }
 
 describe("buildTaskListSql", () => {
+  it("returns the meeting language like the memory store (primaryLanguage, then language)", () => {
+    const sql = buildTaskListSql(member, { scope: "all", status: "all" }).text.replace(/\s+/g, " ")
+
+    expect(sql).toContain("coalesce(m.language_metadata->>'primaryLanguage', m.language) as meeting_language")
+  })
+
   it("puts the visibility predicate first and filters the task workspace", () => {
     const sql = buildTaskListSql(member, { scope: "all", status: "all" })
     const where = sql.text.replace(/\s+/g, " ")

@@ -64,8 +64,6 @@ export type TaskItemRowProps = {
   item: ActionItem
   meetingId: string
   meetingStartedAt: string
-  /** Direction of the task text (the meeting's language). */
-  dir?: "rtl" | "ltr"
   strings: TasksMessages
   participants?: MeetingParticipant[]
   speakers?: MeetingSpeaker[]
@@ -87,7 +85,6 @@ export function TaskItemRow({
   item,
   meetingId,
   meetingStartedAt,
-  dir,
   strings,
   participants = [],
   speakers = [],
@@ -158,7 +155,7 @@ export function TaskItemRow({
           {editingTitle ? (
             <input
               autoFocus
-              dir={dir ?? "auto"}
+              dir="auto"
               aria-label={strings.tasksTaskLabel}
               value={draftTitle}
               onChange={(event) => setDraftTitle(event.target.value)}
@@ -177,7 +174,7 @@ export function TaskItemRow({
           ) : (
             <button
               type="button"
-              dir={dir}
+              dir="auto"
               onClick={() => {
                 setDraftTitle(item.title)
                 setEditingTitle(true)
@@ -251,7 +248,7 @@ export function TaskItemRow({
         </div>
       </div>
       {item.sourceQuote ? (
-        <blockquote dir={dir} className="line-clamp-2 border-s-2 border-line ps-2 text-sm leading-5 text-fg-3">
+        <blockquote dir="auto" className="line-clamp-2 border-s-2 border-line ps-2 text-sm leading-5 text-fg-3">
           {item.sourceQuote}
         </blockquote>
       ) : null}

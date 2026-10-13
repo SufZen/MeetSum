@@ -42,17 +42,8 @@ export type ActionItemEditorProps = {
   locale?: string
   /** Any object carrying the task strings (e.g. the app `Dictionary`). */
   dictionary?: TasksMessages
-  /** The meeting's primary language: sets the task text direction. */
-  language?: string
   /** False for viewers: rows render read-only. */
   canEdit?: boolean
-}
-
-function directionOf(language: string | undefined): "rtl" | "ltr" | undefined {
-  const code = language?.toLowerCase().split(/[-_]/)[0]
-
-  if (!code || code === "mixed" || code === "auto" || code === "unknown") return undefined
-  return code === "he" || code === "ar" || code === "fa" || code === "ur" ? "rtl" : "ltr"
 }
 
 /** Optimistic local view of a patch (the server answer replaces it). */
@@ -79,11 +70,9 @@ export function ActionItemEditor({
   onChanged,
   locale,
   dictionary,
-  language,
   canEdit = true,
 }: ActionItemEditorProps) {
   const strings = dictionary ?? getTasksMessages(locale)
-  const dir = directionOf(language)
   const [items, setItems] = useState(initialItems)
   const [syncedFrom, setSyncedFrom] = useState(initialItems)
   const [error, setError] = useState<string>()
@@ -166,7 +155,6 @@ export function ActionItemEditor({
               item={item}
               meetingId={meetingId}
               meetingStartedAt={meetingStartedAt}
-              dir={dir}
               strings={strings}
               participants={participants}
               speakers={speakers}
