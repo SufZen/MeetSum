@@ -1,0 +1,13 @@
+tests/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.wav
+*.ogg
+*.mp3
+*.m4a
+*.mp4
+.env*
+README.md
+test_input.json
