@@ -38,7 +38,7 @@ export function retrievalQuery(req: Pick<RetrieveRequest, "question" | "previous
 export async function retrievePassages(
   ctx: SearchContext,
   req: RetrieveRequest,
-  deps: { engine?: SearchEngine; env?: Env } = {}
+  deps: { engine?: SearchEngine; env?: Env; signal?: AbortSignal } = {}
 ): Promise<RetrieveResult> {
   const env = deps.env ?? process.env
   const engine = deps.engine ?? (await getSearchEngine())
@@ -53,6 +53,7 @@ export async function retrievePassages(
     filters: scopeFilters(req.scope),
     task: "QUESTION_ANSWERING",
     engine,
+    signal: deps.signal,
   })
   const similarities = ranked.candidates
     .map((candidate) => candidate.legs.vector?.similarity)

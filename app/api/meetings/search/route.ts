@@ -67,6 +67,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
       const ids = await searchMeetingIds(searchContextFrom(ctx), q ?? "", {
         limit: status ? 100 : limit,
         filters,
+        signal: request.signal,
       })
       const loaded = ids.length
         ? await Promise.all(

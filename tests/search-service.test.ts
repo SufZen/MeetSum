@@ -225,6 +225,17 @@ describe("searchWorkspace", () => {
     expect(empty).toMatchObject({ mode: "empty", groups: [], nextCursor: null })
   })
 
+  it("threads the request signal into the query embedding", async () => {
+    embedQuery.mockResolvedValue([0.1, 0.2])
+    setSearchEngineForTesting(fakeEngine({ caps: { vector: true, embeddingKey: { model: "m", dimensions: 2 } } }).engine)
+
+    const controller = new AbortController()
+
+    await searchWorkspace(ctx, params(), { signal: controller.signal })
+
+    expect(embedQuery).toHaveBeenCalledWith("תקציב", expect.objectContaining({ signal: controller.signal }))
+  })
+
   it("clamps limits and hits per meeting", async () => {
     setSearchEngineForTesting(fakeEngine().engine)
 

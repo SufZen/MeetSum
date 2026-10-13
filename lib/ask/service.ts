@@ -296,13 +296,17 @@ export async function* askStream(
       context = buildFullTranscriptContext({ meeting, language, question, history, historyTurns: config.historyTurns })
     } else {
       const previousQuestion = [...history].reverse().find((turn) => turn.role === "user")?.content
-      const result = await retrieve(searchContextFrom(ctx), {
-        question,
-        ...(previousQuestion ? { previousQuestion } : {}),
-        scope: req.scope,
-        limit: config.maxPassages,
-        budgetTokens: config.contextTokens,
-      })
+      const result = await retrieve(
+        searchContextFrom(ctx),
+        {
+          question,
+          ...(previousQuestion ? { previousQuestion } : {}),
+          scope: req.scope,
+          limit: config.maxPassages,
+          budgetTokens: config.contextTokens,
+        },
+        { signal }
+      )
       const passages = await citablePassages(ctx, req.scope, result.passages)
 
       context = buildRetrievalContext({

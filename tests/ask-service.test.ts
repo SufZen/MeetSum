@@ -86,7 +86,7 @@ function passage(meetingId: string, workspaceId = "ws_a"): RetrievedPassage {
   }
 }
 
-type FakeRetrieve = (ctx: SearchContext, req: RetrieveRequest) => Promise<RetrieveResult>
+type FakeRetrieve = (ctx: SearchContext, req: RetrieveRequest, deps?: { signal?: AbortSignal }) => Promise<RetrieveResult>
 
 function retrieving(passages: RetrievedPassage[], extra: Partial<RetrieveResult> = {}): ReturnType<typeof vi.fn<FakeRetrieve>> {
   return vi.fn<FakeRetrieve>(async () => ({ passages, mode: "hybrid", topSimilarity: 0.8, lexicalHits: 2, ...extra }))
@@ -274,6 +274,16 @@ describe("askStream", () => {
     await collect(askStream(await member(), { question: QUESTION, scope: { kind: "workspace" } }, controller.signal))
 
     expect(stream.mock.calls[0][0].signal).toBe(controller.signal)
+  })
+
+  it("passes the abort signal to retrieval (query embedding)", async () => {
+    const controller = new AbortController()
+    const retrieve = retrieving([passage("m_w1")])
+
+    setAskDepsForTesting({ retrieve, stream: streaming(["התקציב אושר [s1]."]), settings: async () => ({}) })
+    await collect(askStream(await member(), { question: QUESTION, scope: { kind: "workspace" } }, controller.signal))
+
+    expect(retrieve.mock.calls[0][2]).toMatchObject({ signal: controller.signal })
   })
 
   it("turns an LLM failure after a delta into an error event without leaking text to logs", async () => {

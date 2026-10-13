@@ -92,7 +92,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
       group: "meeting",
       limit: Math.min(limit, 25),
       hitsPerMeeting: 10,
-    })
+    }, { signal: request.signal })
     const results = await Promise.all(
       (response.groups ?? []).map(async (group): Promise<MemorySearchResult | null> => {
         const meeting = await ctx.meetings.getMeeting(group.meeting.id, { includeTranscript: false })

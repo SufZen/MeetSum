@@ -31,7 +31,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
 
   try {
     const params = parseSearchParams(new URL(request.url).searchParams)
-    const response = await searchWorkspace(searchContextFrom(ctx), params)
+    const response = await searchWorkspace(searchContextFrom(ctx), params, { signal: request.signal })
 
     return NextResponse.json(response, { headers: rateLimit.headers })
   } catch (error) {

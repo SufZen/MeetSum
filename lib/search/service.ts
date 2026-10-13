@@ -71,7 +71,7 @@ export type SearchEngine = {
   kind: "pg" | "memory"
   capabilities(ctx: SearchContext): Promise<EngineCapabilities>
   /** Engine-specific query embedding (eval replay); default `embedQuery`. */
-  queryVector?(ctx: SearchContext, text: string, task: EmbeddingTask): Promise<number[] | null>
+  queryVector?(ctx: SearchContext, text: string, task: EmbeddingTask, signal?: AbortSignal): Promise<number[] | null>
   runLegs(ctx: SearchContext, request: LegRequest): Promise<{ legs: Legs; failed?: LegName[] }>
   hydrate(ctx: SearchContext, ids: string[]): Promise<HydratedChunk[]>
   listMeetings(
@@ -156,7 +156,15 @@ export type RankResult = {
  */
 export async function rankCandidates(
   ctx: SearchContext,
-  input: { q: string; filters: SearchFilters; task: EmbeddingTask; engine?: SearchEngine; config?: SearchConfig }
+  input: {
+    q: string
+    filters: SearchFilters
+    task: EmbeddingTask
+    engine?: SearchEngine
+    config?: SearchConfig
+    /** Request signal (client disconnect): cancels the query embedding. */
+    signal?: AbortSignal
+  }
 ): Promise<RankResult> {
   const engine = input.engine ?? (await getSearchEngine())
   const config = input.config ?? searchConfig()
@@ -175,8 +183,13 @@ export async function rankCandidates(
   else if (!caps.embeddingKey) degraded.push("no_embedding_provider")
   else {
     const values = await (engine.queryVector
-      ? engine.queryVector(ctx, input.q, input.task)
-      : embedQuery(input.q, { task: input.task, workspaceId: ctx.workspaceId, principalKey: ctx.principalKey })
+      ? engine.queryVector(ctx, input.q, input.task, input.signal)
+      : embedQuery(input.q, {
+          task: input.task,
+          workspaceId: ctx.workspaceId,
+          principalKey: ctx.principalKey,
+          ...(input.signal ? { signal: input.signal } : {}),
+        })
     ).catch(() => null)
 
     if (values && values.length === caps.embeddingKey.dimensions) vector = { key: caps.embeddingKey, values }
@@ -269,21 +282,25 @@ export function scopePrincipalKey(scope: SearchContext["scope"]): string {
 export async function searchMeetingIds(
   ctx: SearchContext,
   query: string,
-  options: { limit?: number; filters?: SearchFilters } = {}
+  options: { limit?: number; filters?: SearchFilters; signal?: AbortSignal } = {}
 ): Promise<string[]> {
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 20) || 20, 100))
   const ids: string[] = []
   let cursor: string | undefined
 
   do {
-    const response = await searchWorkspace(ctx, {
-      q: query,
-      filters: options.filters ?? {},
-      group: "meeting",
-      limit: 25,
-      hitsPerMeeting: 1,
-      ...(cursor ? { cursor } : {}),
-    })
+    const response = await searchWorkspace(
+      ctx,
+      {
+        q: query,
+        filters: options.filters ?? {},
+        group: "meeting",
+        limit: 25,
+        hitsPerMeeting: 1,
+        ...(cursor ? { cursor } : {}),
+      },
+      { signal: options.signal }
+    )
 
     ids.push(...(response.groups ?? []).map((group) => group.meeting.id))
     cursor = response.nextCursor ?? undefined
@@ -296,7 +313,11 @@ export async function searchMeetingIds(
  * Search the caller's visible meetings. Throws InvalidCursorError (→ 400)
  * for a cursor of another query, group or principal.
  */
-export async function searchWorkspace(ctx: SearchContext, rawParams: SearchParams): Promise<SearchResponse> {
+export async function searchWorkspace(
+  ctx: SearchContext,
+  rawParams: SearchParams,
+  opts: { signal?: AbortSignal } = {}
+): Promise<SearchResponse> {
   const started = Date.now()
   const params = clampSearchParams(rawParams)
   const binding = cursorBinding({ principalKey: ctx.principalKey, q: params.q, filters: params.filters, group: params.group })
@@ -321,7 +342,7 @@ export async function searchWorkspace(ctx: SearchContext, rawParams: SearchParam
     }
   }
 
-  const ranked = await rankCandidates(ctx, { q: params.q, filters: params.filters, task: "RETRIEVAL_QUERY", engine })
+  const ranked = await rankCandidates(ctx, { q: params.q, filters: params.filters, task: "RETRIEVAL_QUERY", engine, signal: opts.signal })
 
   if (ranked.mode === "empty") return { ...emptyResponse(params, ranked.nq, started), degraded: ranked.degraded }
 

@@ -144,6 +144,20 @@ describe("retrievePassages", () => {
     expect(hybrid.lexicalHits).toBe(1)
   })
 
+  it("passes the caller signal to the query embedding", async () => {
+    const { fake } = engine([chunk("c1", "m1", ["s1"])], { vector: true })
+    const queryVector = vi.fn(async () => [1])
+    const controller = new AbortController()
+
+    await retrievePassages(
+      ctx,
+      { question: "תקציב", scope: { kind: "workspace" } },
+      { engine: { ...fake, queryVector }, env: {}, signal: controller.signal }
+    )
+
+    expect(queryVector).toHaveBeenCalledWith(ctx, "תקציב", "QUESTION_ANSWERING", controller.signal)
+  })
+
   it("adds the previous question for follow-ups and is empty for a blank question", async () => {
     expect(retrievalQuery({ question: " ומה עם התקציב? ", previousQuestion: "מה הוחלט על הגיוס" })).toBe("ומה עם התקציב? מה הוחלט על הגיוס")
 
