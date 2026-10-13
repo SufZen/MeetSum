@@ -453,7 +453,7 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
         )
 
         if (key === "status") {
-          // `status` on the right-hand side is the pre-update value.
+          // `status` on the right side of the SET is the pre-update value.
           sets.push(
             `status_changed_at = case when status is distinct from $${values.length} then now() else status_changed_at end`
           )
