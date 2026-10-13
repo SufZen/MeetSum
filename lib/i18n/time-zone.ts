@@ -1,18 +1,16 @@
 /**
  * Time-zone resolution (M9, docs/parity/m9.md "Time zone and formatting"):
  * users.time_zone → workspace_settings.timeZone → MEETSUM_DEFAULT_TIMEZONE →
- * Asia/Jerusalem, each validated. Package A makes `getTaskTimeZone()` (M5) a
- * thin wrapper over this resolver and adds the workspace setting.
+ * Asia/Jerusalem, each validated. `getTaskTimeZone()` (M5) wraps this
+ * resolver; `getRequestI18n()` feeds it the session user's and workspace's
+ * values. Pure and client-safe.
  */
 
 export const FALLBACK_TIME_ZONE = "Asia/Jerusalem"
 
 let supportedZones: Set<string> | undefined
 
-/** Validates an IANA zone against `Intl.supportedValuesOf("timeZone")` (plus UTC). */
-export function isValidTimeZone(value: unknown): value is string {
-  if (typeof value !== "string" || !value.trim()) return false
-
+function zoneSet(): Set<string> {
   if (!supportedZones) {
     const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
 
@@ -20,7 +18,19 @@ export function isValidTimeZone(value: unknown): value is string {
     supportedZones.add("UTC")
   }
 
-  return supportedZones.has(value)
+  return supportedZones
+}
+
+/** Validates an IANA zone against `Intl.supportedValuesOf("timeZone")` (plus UTC). */
+export function isValidTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false
+
+  return zoneSet().has(value)
+}
+
+/** Every supported zone, sorted (for pickers). */
+export function listTimeZones(): string[] {
+  return [...zoneSet()].sort()
 }
 
 export function resolveTimeZone(input: {
