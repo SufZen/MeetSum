@@ -1,0 +1,11 @@
+{
+  "token": "fixture-hs-access-token-AAA",
+  "user": "admin@acme.co.il",
+  "hub_domain": "acme-crm.hubspot.com",
+  "scopes": ["oauth", "crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.deals.read", "crm.objects.owners.read"],
+  "hub_id": 24242424,
+  "app_id": 123456,
+  "expires_in": 1750,
+  "user_id": 777,
+  "token_type": "access"
+}

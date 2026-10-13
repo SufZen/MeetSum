@@ -1,0 +1,9 @@
+{
+  "status": "COMPLETE",
+  "results": [
+    { "id": "77002", "objectWriteTraceId": "ai_2", "properties": { "hs_task_status": "NOT_STARTED" }, "archived": false },
+    { "id": "77001", "objectWriteTraceId": "ai_1", "properties": { "hs_task_status": "NOT_STARTED" }, "archived": false }
+  ],
+  "startedAt": "2026-10-13T12:00:00.000Z",
+  "completedAt": "2026-10-13T12:00:01.000Z"
+}

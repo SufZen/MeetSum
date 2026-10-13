@@ -1,0 +1,28 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(event)",
+  "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=delta-token-1",
+  "value": [
+    {
+      "id": "AAMkAGzoom1",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000ZOOM1",
+      "subject": "Quarterly review",
+      "isCancelled": false,
+      "isAllDay": false,
+      "sensitivity": "private",
+      "start": { "dateTime": "2026-10-15T12:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2026-10-15T13:00:00.0000000", "timeZone": "UTC" },
+      "organizer": { "emailAddress": { "name": "Yossi", "address": "yossi@acme.co.il" } },
+      "attendees": [
+        { "type": "required", "status": { "response": "tentativelyAccepted" }, "emailAddress": { "name": "Partner", "address": "partner@other.example" } }
+      ],
+      "location": { "displayName": "" },
+      "locations": [],
+      "body": {
+        "contentType": "text",
+        "content": "Board notes (secret). Join Zoom: https://us02web.zoom.us/j/81234567890?pwd=SeCrEtPwd123 Passcode: 998877"
+      },
+      "isOnlineMeeting": false,
+      "onlineMeeting": null
+    }
+  ]
+}

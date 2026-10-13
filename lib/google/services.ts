@@ -17,6 +17,7 @@ import { redactBotError } from "@/lib/bot/redact"
 import type { CalendarEventLike } from "@/lib/bot/types"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
+import { findCanonicalMeetingId } from "@/lib/integrations/microsoft/calendar-dedupe"
 import {
   ensureGoogleIdentity,
   type GoogleWorkspaceTarget,
@@ -1331,11 +1332,15 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
               insert into calendar_events (
                 id, google_identity_id, google_event_id, calendar_id, title,
                 starts_at, ends_at, meet_link, status, organizer_email,
-                attendees, raw
+                attendees, raw, provider, workspace_id, ical_uid
               )
-              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+                'google', $13, $14)
               on conflict (google_identity_id, google_event_id)
               do update set
+                workspace_id = coalesce(calendar_events.workspace_id, excluded.workspace_id),
+                ical_uid = coalesce(excluded.ical_uid, calendar_events.ical_uid),
+                updated_at = now(),
                 calendar_id = excluded.calendar_id,
                 title = excluded.title,
                 starts_at = excluded.starts_at,
@@ -1345,6 +1350,8 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 organizer_email = excluded.organizer_email,
                 attendees = excluded.attendees,
               raw = excluded.raw
+              where calendar_events.workspace_id is null
+                 or calendar_events.workspace_id = excluded.workspace_id
               returning id, (xmax = 0) as inserted
             `,
             [
@@ -1360,12 +1367,20 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
               event.organizer?.email ?? null,
               JSON.stringify(event.attendees ?? []),
               JSON.stringify(event),
+              workspaceId,
+              event.iCalUID ?? null,
             ]
           )
           const calendarEventRow = eventResult.rows[0] as
             | { id?: string; inserted?: boolean }
             | undefined
-          const calendarEventId = calendarEventRow?.id ?? proposedCalendarEventId
+          // M8: a conflicting row of another workspace is never adopted.
+          if (!calendarEventRow?.id) {
+            stats.skipped = (stats.skipped ?? 0) + 1
+            continue
+          }
+
+          const calendarEventId = calendarEventRow.id
           const inserted = Boolean(calendarEventRow?.inserted)
 
           if (inserted) stats.created = (stats.created ?? 0) + 1
@@ -1396,9 +1411,28 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                where calendar_event_id = $1 and workspace_id = $2 limit 1`,
               [calendarEventId, workspaceId]
             )
-            const meetingId =
-              (existingMeeting.rows[0] as { id?: string } | undefined)?.id ??
-              createHashedId("meet_google", calendarEventId)
+            const ownMeetingId = (existingMeeting.rows[0] as { id?: string } | undefined)?.id
+
+            // M8 iCalUID dedupe (shared helper with the Outlook path): only a
+            // same-workspace row with the same start, bot link and either the
+            // same owner or a visible meeting with the same organizer counts.
+            if (
+              !ownMeetingId &&
+              (await findCanonicalMeetingId(pool, {
+                workspaceId,
+                icalUid: event.iCalUID,
+                startsAt,
+                calendarEventId,
+                organizerEmail: event.organizer?.email,
+                event: event as CalendarEventLike,
+                owner: { email: subject },
+              }))
+            ) {
+              stats.skipped = (stats.skipped ?? 0) + 1
+              continue
+            }
+
+            const meetingId = ownMeetingId ?? createHashedId("meet_google", calendarEventId)
             const participantRecords = calendarParticipants({
               organizer: event.organizer,
               attendees: event.attendees as CalendarAttendee[] | null | undefined,
