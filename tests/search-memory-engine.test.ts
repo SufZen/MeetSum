@@ -137,7 +137,7 @@ describe("memory engine search", () => {
       const facets = await engine.facets(ctx)
 
       expect(facets.rooms.map((room) => room.id).sort()).toEqual(["room_fin", "room_hr"])
-      expect(facets.tags).toEqual(["finance", "hr"])
+      expect(facets.tags).toEqual(["finance", "operations"])
       expect(facets.meetingTypes).toEqual(["board"])
       expect(JSON.stringify(facets)).not.toContain("שיחה פרטית")
     } finally {

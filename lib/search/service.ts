@@ -254,6 +254,44 @@ function emptyResponse(params: SearchParams, nq: NormalizedQuery, started: numbe
   }
 }
 
+/** Principal key for a bare repository scope (repository delegation). */
+export function scopePrincipalKey(scope: SearchContext["scope"]): string {
+  if (scope.kind === "member") return scope.userId
+  if (scope.kind === "api_key") return `key:${scope.ownerUserId ?? "anonymous"}`
+
+  return "system"
+}
+
+/**
+ * Ids of the best-matching visible meetings, best first (repository
+ * `searchMeetings` delegation and compat routes).
+ */
+export async function searchMeetingIds(
+  ctx: SearchContext,
+  query: string,
+  options: { limit?: number; filters?: SearchFilters } = {}
+): Promise<string[]> {
+  const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 20) || 20, 100))
+  const ids: string[] = []
+  let cursor: string | undefined
+
+  do {
+    const response = await searchWorkspace(ctx, {
+      q: query,
+      filters: options.filters ?? {},
+      group: "meeting",
+      limit: 25,
+      hitsPerMeeting: 1,
+      ...(cursor ? { cursor } : {}),
+    })
+
+    ids.push(...(response.groups ?? []).map((group) => group.meeting.id))
+    cursor = response.nextCursor ?? undefined
+  } while (cursor && ids.length < limit)
+
+  return ids.slice(0, limit)
+}
+
 /**
  * Search the caller's visible meetings. Throws InvalidCursorError (→ 400)
  * for a cursor of another query, group or principal.

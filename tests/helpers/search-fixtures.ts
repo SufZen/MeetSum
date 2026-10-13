@@ -48,7 +48,7 @@ export function searchCorpus(): MeetingRecord[] {
       startedAt: "2026-08-01T09:00:00.000Z",
       source: "google_meet",
       language: "he",
-      tags: ["hr"],
+      tags: ["operations"],
       participants: ["יעל"],
       contexts: [{ id: "room_hr", name: "משאבי אנוש", createdAt: "2026-01-01T00:00:00.000Z" }],
       transcript: [

@@ -3752,6 +3752,20 @@ export function createPostgresMeetingRepository(
     },
 
     async searchMeetings(query: string, options: { limit?: number } = {}) {
+      // M6: hybrid search first (dynamic import: lib/search reads this repository).
+      const { scopePrincipalKey, searchMeetingIds } = await import("@/lib/search/service")
+      const ids = await searchMeetingIds(
+        { scope, workspaceId: scope.workspaceId, principalKey: scopePrincipalKey(scope), meetings: this },
+        query,
+        { limit: options.limit }
+      ).catch(() => [] as string[])
+      const found = (await Promise.all(ids.map((id) => this.getMeeting(id)))).filter(
+        (meeting): meeting is MeetingRecord => Boolean(meeting)
+      )
+
+      if (found.length) return found
+
+      // Legacy scoped lookup for meetings the search index has not covered yet.
       return (
         await listFullMeetingsPage({
           query,
@@ -3761,6 +3775,7 @@ export function createPostgresMeetingRepository(
       ).meetings
     },
 
+    /** @deprecated M6: unused; see MeetingRepository.askMeetingMemory. */
     async askMeetingMemory(
       meetingId: string,
       question: string
