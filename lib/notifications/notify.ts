@@ -1,15 +1,19 @@
 /**
  * M9 notification producers (Step 0 contract, docs/parity/m9.md item 6;
- * owner: Package C). Step 0 ships no-op stubs with their call sites wired
- * (each call is followed by `.catch(() => {})`); Package C resolves the
- * recipients (owner/participants passing `canViewMeeting`, the invitee, the
- * bot session requester) and enqueues with the dedupe keys:
+ * owner: Package C). Call sites follow each with `.catch(() => {})`; the
+ * recipients and dedupe keys are resolved in `lib/notifications/producers.ts`:
  *   meeting_processed `mp:<meetingId>:<transcriptVersion>`,
  *   meeting_failed    `mf:<meetingId>:<jobId>`,
  *   invited           `inv:<invitationId>`,
  *   bot_blocked       `bb:<sessionId>`.
  * None of these may throw into the caller. Server-only.
  */
+import {
+  produceBotBlocked,
+  produceInvited,
+  produceMeetingFailed,
+  produceMeetingProcessed,
+} from "@/lib/notifications/producers"
 
 export type NotifyMeetingProcessedInput = { workspaceId: string; meetingId: string; transcriptVersion: number }
 
@@ -20,17 +24,17 @@ export type NotifyInvitedInput = { invitationId: string }
 export type NotifyBotBlockedInput = { workspaceId: string; meetingId: string; sessionId: string }
 
 export async function notifyMeetingProcessed(input: NotifyMeetingProcessedInput): Promise<void> {
-  void input
+  await produceMeetingProcessed(input)
 }
 
 export async function notifyMeetingFailed(input: NotifyMeetingFailedInput): Promise<void> {
-  void input
+  await produceMeetingFailed(input)
 }
 
 export async function notifyInvited(input: NotifyInvitedInput): Promise<void> {
-  void input
+  await produceInvited(input)
 }
 
 export async function notifyBotBlocked(input: NotifyBotBlockedInput): Promise<void> {
-  void input
+  await produceBotBlocked(input)
 }
