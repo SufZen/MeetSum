@@ -82,7 +82,7 @@ export const exportsMessagesHe: Record<keyof typeof exportsMessagesEn, string> =
   exportHeadingParticipants: "משתתפים",
   exportLabelDate: "תאריך",
   exportLabelDuration: "משך",
-  exportLabelOwner: "אחראי/ת",
+  exportLabelOwner: "אחריות",
   exportLabelDue: "עד",
 }
 
