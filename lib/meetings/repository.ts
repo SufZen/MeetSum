@@ -47,6 +47,8 @@ export type MeetingSource =
   | "meeting_bot"
   | "zoom"
   | "teams"
+  /** M8: created from an Outlook calendar event (no DB constraint). */
+  | "outlook_calendar"
 
 export type ActionItem = {
   id: string
@@ -417,7 +419,7 @@ export type MeetingShare = {
 export type ExportRecord = {
   id: string
   meetingId: string
-  format: "pdf" | "markdown" | "docx" | "notion"
+  format: "pdf" | "markdown" | "docx" | "notion" | "google_docs"
   status: "created" | "queued" | "sent" | "failed"
   metadata: Record<string, unknown>
   createdAt: string

@@ -224,6 +224,18 @@ export const RATE_LIMIT_PRESETS = {
   /** M6 Ask thread creation (POST /api/ask/threads), per user: 30 per minute */
   threads: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
 
+  /** M8 OAuth start (GET /api/integrations/[provider]/oauth/start), per user: 10 per minute */
+  integrationsOAuth: { maxRequests: 10, windowMs: 60_000 } satisfies RateLimitConfig,
+
+  /** M8 connection, rule and meeting-prefs writes: 30 per minute */
+  integrationsWrite: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
+
+  /** M8 manual sends (POST /api/meetings/[id]/integrations/send): 10 per minute */
+  integrationsSend: { maxRequests: 10, windowMs: 60_000 } satisfies RateLimitConfig,
+
+  /** M8 webhook test-fire (POST /api/webhooks/test): 10 per minute */
+  webhookTest: { maxRequests: 10, windowMs: 60_000 } satisfies RateLimitConfig,
+
   /**
    * On-demand LLM generation (M5 prep briefs and follow-up emails share one
    * budget per `${workspaceId}:${userId|apiKeyId}`): writers 3/min and

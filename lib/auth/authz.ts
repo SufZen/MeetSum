@@ -49,6 +49,8 @@ export type Permission =
   | "api_keys:manage"
   | "webhooks:manage"
   | "integrations:manage"
+  /** M8: connect a personal integration (Outlook calendar, Google Drive). */
+  | "integrations:connect"
   | "storage:manage"
   | "audit:read"
   | "ops:read"
@@ -70,6 +72,7 @@ const MEMBER_PERMISSIONS = [
   "meeting:create",
   "contexts:write",
   "jobs:write",
+  "integrations:connect",
 ] as const satisfies readonly Permission[]
 
 const ADMIN_PERMISSIONS = [

@@ -74,6 +74,26 @@ export type AuditAction =
   | "comment.resolved"
   | "search.reindex.requested"
   | "ask.thread.deleted"
+  // M8 integrations. Metadata: ids, provider, status and counts only; never
+  // titles, content, email addresses, tokens or provider messages.
+  | "integration.connection.created"
+  | "integration.connection.updated"
+  | "integration.connection.revoked"
+  | "integration.connection.needs_reauth"
+  | "integration.connection.tested"
+  | "integration.rule.created"
+  | "integration.rule.updated"
+  | "integration.rule.deleted"
+  | "integration.delivery.sent"
+  | "integration.delivery.failed"
+  | "integration.delivery.retried"
+  | "integration.manual_send"
+  | "integration.meeting_prefs.updated"
+  | "meeting.export.google_docs"
+  /** Counts only (sent/skipped/failed), no addresses. */
+  | "email.recap.sent"
+  /** Metadata carries the sha256 of the address, never the address. */
+  | "email.unsubscribed"
 
 export type RecordAuditLogInput = {
   action: AuditAction

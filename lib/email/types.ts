@@ -6,6 +6,12 @@ export type EmailMessage = {
   text: string
   html?: string
   replyTo?: string
+  /**
+   * M8: extra headers (List-Unsubscribe, List-Unsubscribe-Post,
+   * Auto-Submitted, X-MeetSum-*). Type only in Step 0; the MIME builder
+   * passes through an allowlist with sanitized values (Package A).
+   */
+  headers?: Record<string, string>
 }
 
 export type EmailSendResult = {
