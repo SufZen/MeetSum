@@ -26,6 +26,14 @@ export function json(body: unknown, status = 200, headers: Record<string, string
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } })
 }
 
+function parseBody(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch {
+    return Object.fromEntries(new URLSearchParams(body))
+  }
+}
+
 /** A providerFetch that answers from `routes` (first match wins) and records every call. */
 export function scriptedFetch(routes: Route[]): { fetch: ProviderFetch; calls: RecordedCall[] } {
   const calls: RecordedCall[] = []
@@ -36,7 +44,7 @@ export function scriptedFetch(routes: Route[]): { fetch: ProviderFetch; calls: R
       method: (init.method ?? "GET").toUpperCase(),
       url,
       path: `${parsed.pathname}${parsed.search}`,
-      body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      body: typeof init.body === "string" ? parseBody(init.body) : undefined,
       headers: Object.fromEntries(new Headers(init.headers).entries()),
     }
 
