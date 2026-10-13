@@ -18,6 +18,7 @@ vi.mock("@/lib/i18n/server", () => ({
     timeZone: i18n.timeZone,
     dictionary: {},
   })),
+  resolveScopedTimeZone: vi.fn(async () => i18n.timeZone),
 }))
 
 import { POST as exportDocx } from "@/app/api/meetings/[id]/export/docx/route"

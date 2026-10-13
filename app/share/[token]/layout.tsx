@@ -9,7 +9,7 @@ import { clipShareLocale } from "@/lib/clips/share-payload"
 import { fontVariables } from "@/lib/fonts"
 import { LOCALE_COOKIE, type SupportedLocale } from "@/lib/i18n/locales"
 import { m9ShareMessages } from "@/lib/i18n/m9/share"
-import { resolveTimeZone } from "@/lib/i18n/time-zone"
+import { getShareTimeZone } from "@/lib/i18n/server"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { resolveShareViewerLocale, shareLocaleDir } from "@/lib/sharing/share-viewer-locale"
 import { cn } from "@/lib/utils"
@@ -27,6 +27,16 @@ async function meetingLocale(token: string): Promise<SupportedLocale> {
   if (clip.kind === "clip_unavailable") return getShareDocumentLocale(undefined).lang
 
   return getShareDocumentLocale((await loadShare(token))?.meeting).lang
+}
+
+/** Workspace of the shared meeting or clip (its zone is the anonymous viewer's fallback). */
+async function shareWorkspaceId(token: string): Promise<string | undefined> {
+  const clip = await loadClipShare(token)
+
+  if (clip.kind === "clip") return clip.view.clip.workspaceId
+  if (clip.kind === "clip_unavailable") return undefined
+
+  return (await loadShare(token))?.meeting.workspaceId
 }
 
 /** Viewer chrome locale without `?lang=` (layouts get no search params). */
@@ -65,7 +75,8 @@ export default async function ShareLayout({
   children: React.ReactNode
   params: Promise<{ token: string }>
 }>) {
-  const locale = await chromeLocale((await params).token)
+  const { token } = await params
+  const [locale, timeZone] = await Promise.all([chromeLocale(token), shareWorkspaceId(token).then(getShareTimeZone)])
   const dir = shareLocaleDir(locale)
 
   return (
@@ -75,7 +86,7 @@ export default async function ShareLayout({
           <I18nProvider
             locale={locale}
             dir={dir}
-            timeZone={resolveTimeZone({ env: process.env.MEETSUM_DEFAULT_TIMEZONE })}
+            timeZone={timeZone}
             messages={m9ShareMessages[locale]}
           >
             <ThemeProvider>{children}</ThemeProvider>

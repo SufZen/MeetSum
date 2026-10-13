@@ -15,7 +15,7 @@ import { formatDate, formatDuration, type Fmt } from "@/lib/i18n/format"
 import { directionFor, fixHebrewTypography } from "@/lib/i18n/hebrew-text"
 import { LOCALE_COOKIE, type SupportedLocale } from "@/lib/i18n/locales"
 import { pluralMessage } from "@/lib/i18n/messages"
-import { resolveTimeZone } from "@/lib/i18n/time-zone"
+import { getShareTimeZone } from "@/lib/i18n/server"
 import { SHARE_ACCESS_COOKIE } from "@/lib/sharing/share-access"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { loadSharePageData, type SharePayload } from "@/lib/sharing/share-payload"
@@ -94,11 +94,17 @@ export default async function PublicMeetingSharePage({
       acceptLanguage: headerStore.get("accept-language"),
       meetingLocale,
     })
-  const timeZone = resolveTimeZone({ env: process.env.MEETSUM_DEFAULT_TIMEZONE })
-
   // M5: a clip token renders only the clip and never opens the meeting —
   // a clip token that fails any gate is a plain 404.
   const clip = await loadClipShare(token)
+  // A's zone chain: the signed-in viewer's zone, else the shared meeting's workspace zone, else env.
+  const shareWorkspaceId =
+    clip.kind === "clip"
+      ? clip.view.clip.workspaceId
+      : clip.kind === "not_clip"
+        ? (await loadShare(token))?.meeting.workspaceId
+        : undefined
+  const timeZone = await getShareTimeZone(shareWorkspaceId)
 
   if (clip.kind === "clip") {
     const locale = viewer(clipShareLocale(clip.view.meeting.language).lang)

@@ -86,3 +86,55 @@ export async function getRequestI18n(options: { locale?: string } = {}): Promise
     dictionary: getDictionary(locale),
   }
 }
+
+async function workspaceTimeZoneOf(workspaceId: string | null | undefined): Promise<string | null> {
+  if (!workspaceId) return null
+
+  try {
+    const { getAppSettings } = await import("@/lib/settings/app-settings")
+
+    return (await getAppSettings(workspaceId)).timeZone
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The zone chain for a known scope (route handlers that have an authz
+ * context, including API keys): users.time_zone → that workspace's setting →
+ * MEETSUM_DEFAULT_TIMEZONE → Asia/Jerusalem. Never throws.
+ */
+export async function resolveScopedTimeZone(scope: {
+  userId?: string | null
+  workspaceId?: string | null
+}): Promise<string> {
+  const [user, workspace] = await Promise.all([
+    (async () => {
+      if (!scope.userId) return null
+      try {
+        const { getUserPreferences } = await import("@/lib/users/preferences")
+
+        return (await getUserPreferences(scope.userId)).timeZone
+      } catch {
+        return null
+      }
+    })(),
+    workspaceTimeZoneOf(scope.workspaceId),
+  ])
+
+  return resolveTimeZone({ user, workspace, env: process.env.MEETSUM_DEFAULT_TIMEZONE })
+}
+
+/**
+ * Public share pages: the signed-in viewer's zone when there is a session,
+ * else the shared meeting's workspace zone, then MEETSUM_DEFAULT_TIMEZONE →
+ * Asia/Jerusalem. Never throws.
+ */
+export async function getShareTimeZone(meetingWorkspaceId?: string | null): Promise<string> {
+  const [{ preferences }, workspace] = await Promise.all([
+    loadSessionContext(),
+    workspaceTimeZoneOf(meetingWorkspaceId),
+  ])
+
+  return resolveTimeZone({ user: preferences?.timeZone, workspace, env: process.env.MEETSUM_DEFAULT_TIMEZONE })
+}
