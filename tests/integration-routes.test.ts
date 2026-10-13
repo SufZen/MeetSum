@@ -259,11 +259,13 @@ describe("integration routes", () => {
 
       expect(edited.rule).toMatchObject({ name: "Renamed", includePrivate: false, createdByUserId: "user_other_admin" })
 
-      // Another user can never set it on someone else's rule either.
+      // Another admin's explicit opt-in in the same save sticks, but only as
+      // THEIR rule: the creator becomes them, so it covers their own private
+      // meetings, never the previous owner's (e2e fix #7).
       await as("admin", "user_third_admin")
-      const forced = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { includePrivate: true }), routeParams({ id: rule.id }))).json()
+      const taken = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { includePrivate: true }), routeParams({ id: rule.id }))).json()
 
-      expect(forced.rule).toMatchObject({ includePrivate: false, createdByUserId: "user_third_admin" })
+      expect(taken.rule).toMatchObject({ includePrivate: true, createdByUserId: "user_third_admin" })
 
       // The (new) owner can opt their own private meetings in with their own edit.
       const own = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { includePrivate: true }), routeParams({ id: rule.id }))).json()
