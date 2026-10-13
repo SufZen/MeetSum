@@ -211,6 +211,37 @@ describe("postgres bot store (recording queryable)", () => {
     expect(statements.find((statement) => statement.text.startsWith("insert into bot_events"))?.values[8]).toBe(false)
   })
 
+  it("an unapplied poll leaves last_event_at; an applied transition stamps status_changed_at", async () => {
+    const { db, statements } = recordingDb({
+      rows: [sessionRow({ status: "awaiting_admission", status_rank: 3 })],
+    })
+    const store = createPostgresBotSessionStore(db)
+    const polled = await store.transition("bot_1", {
+      status: "awaiting_admission",
+      at: new Date("2026-10-13T10:05:00Z"),
+      source: "poll",
+      workspaceId: "ws_1",
+    })
+
+    expect(polled?.applied).toBe(false)
+    expect(statements.some((statement) => statement.text.startsWith("update bot_sessions"))).toBe(false)
+
+    await store.transition("bot_1", {
+      status: "needs_help",
+      at: new Date("2026-10-13T10:06:00Z"),
+      source: "poll",
+      workspaceId: "ws_1",
+    })
+    expect(
+      statements.find((statement) => statement.text.startsWith("update bot_sessions set status"))?.text
+    ).toContain("status_changed_at = $6")
+
+    await store.update("bot_1", { status: "scheduled", statusReason: null }, { workspaceId: "ws_1" })
+    expect(statements.at(-1)?.text).toContain(
+      "status_changed_at = case when status is distinct from $3 then now() else status_changed_at end"
+    )
+  })
+
   it("marks an already-recorded webhook event applied within the workspace", async () => {
     const { db, statements } = recordingDb()
     const store = createPostgresBotSessionStore(db)

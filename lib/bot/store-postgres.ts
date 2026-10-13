@@ -118,6 +118,7 @@ export function rowToBotSession(row: Row): BotSessionRecord {
     joinedAt: timestamp(row.joined_at),
     leftAt: timestamp(row.left_at),
     lastEventAt: timestamp(row.last_event_at),
+    statusChangedAt: timestamp(row.status_changed_at),
     recordingStatus: (text(row.recording_status) ?? "none") as BotSessionRecord["recordingStatus"],
     recordingStorageKey: text(row.recording_storage_key),
     mediaAssetId: text(row.media_asset_id),
@@ -449,6 +450,10 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
         )
 
         if (key === "status") {
+          // `status` on the right-hand side is the pre-update value.
+          sets.push(
+            `status_changed_at = case when status is distinct from $${values.length} then now() else status_changed_at end`
+          )
           values.push(BOT_STATUS_RANK[value as BotSessionRecord["status"]])
           sets.push(`status_rank = $${values.length}`)
         }
@@ -500,6 +505,7 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
                    status_rank = $4,
                    status_reason = $5,
                    last_event_at = $6,
+                   status_changed_at = $6,
                    joined_at = case when $3 = 'active' then coalesce(joined_at, $6) else joined_at end,
                    left_at = case when $7 then coalesce(left_at, $6) else left_at end,
                    updated_at = now()
@@ -515,13 +521,16 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
                   isTerminalBotStatus(input.status),
                 ]
               )
-            : await one(
-                client,
-                `update bot_sessions set last_event_at = $3, updated_at = now()
-                 where id = $1 and workspace_id = $2
-                 returning *`,
-                [id, workspaceId, at]
-              )
+            : input.source === "poll"
+              ? // A no-op poll is not a sign of life: last_event_at stays.
+                previous
+              : await one(
+                  client,
+                  `update bot_sessions set last_event_at = $3, updated_at = now()
+                   where id = $1 and workspace_id = $2
+                   returning *`,
+                  [id, workspaceId, at]
+                )
 
           const event = input.event
 

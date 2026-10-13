@@ -125,7 +125,7 @@ describe("runBotReconcile", () => {
 
     expect(stats.polled).toBe(1)
     expect(provider.getMeeting).toHaveBeenCalledWith("4242")
-    expect(ctx.applySnapshot).toHaveBeenCalledWith(ctx.store, expect.objectContaining({ id: stale.id }), meeting("completed"), "poll")
+    expect(ctx.applySnapshot).toHaveBeenCalledWith(ctx.store, expect.objectContaining({ id: stale.id }), meeting("completed"), "poll", { at: NOW })
     expect(ctx.queue.jobs).toContainEqual(
       expect.objectContaining({ name: "bot.finalize", id: `bot.finalize-${stale.id}`, payload: { sessionId: stale.id, workspaceId: "ws_a" } })
     )
@@ -273,5 +273,77 @@ describe("side effects", () => {
     expect(ctx.queue.jobs.map((job) => [job.name, job.id, job.payload])).toEqual([
       ["bot.consent", `bot.consent-${session.id}`, { sessionId: session.id, workspaceId: "ws_a" }],
     ])
+  })
+})
+
+describe("lobby timeout across real reconcile ticks", () => {
+  it.each(["awaiting_admission", "needs_help"] as const)(
+    "%s: the stale poll does not reset the timeout; the bot is stopped and blocked/not_admitted",
+    async (lobby) => {
+      const start = new Date("2026-10-14T09:00:00.000Z")
+      let clock = start
+      const store = createMemoryBotSessionStore({ now: () => clock })
+      const provider = fakeProvider({ getMeeting: vi.fn(async () => meeting(lobby)) })
+      const queue = fakeQueue()
+      const deps: Partial<ReconcileDeps> = {
+        store,
+        provider: () => provider,
+        queue: queue.port,
+        // stale 10 min < lobby timeout 15 min: the poll path runs first.
+        config: testBotConfig({
+          MEETSUM_BOT_STALE_MINUTES: "10",
+          MEETSUM_BOT_AWAITING_ADMISSION_TIMEOUT_MINUTES: "15",
+        }),
+        now: () => clock,
+        resyncRules: vi.fn(async () => undefined),
+        dispatchNow: vi.fn(async () => undefined),
+      }
+      const created = await store.create(input({ status: "requested" }))
+
+      await store.update(created.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
+      await store.transition(created.id, { status: lobby, at: start, source: "webhook", workspaceId: "ws_a" })
+
+      let blockedAt: number | undefined
+
+      for (let minute = 1; minute <= 20 && blockedAt === undefined; minute += 1) {
+        clock = new Date(start.getTime() + minute * 60_000)
+        await runBotReconcile({}, deps)
+        if ((await store.get(created.id, { workspaceId: "ws_a" }))?.status === "blocked") blockedAt = minute
+      }
+
+      expect(provider.getMeeting).toHaveBeenCalled()
+      expect(blockedAt).toBe(16)
+      expect(provider.stopBot).toHaveBeenCalledWith("google_meet", created.nativeMeetingId)
+      expect(await store.get(created.id, { workspaceId: "ws_a" })).toMatchObject({
+        status: "blocked",
+        statusReason: "not_admitted",
+      })
+    }
+  )
+
+  it("an unapplied poll does not bump last_event_at; an applied transition sets status_changed_at", async () => {
+    let clock = new Date("2026-10-14T09:00:00.000Z")
+    const store = createMemoryBotSessionStore({ now: () => clock })
+    const created = await store.create(input({ status: "requested" }))
+
+    await store.transition(created.id, { status: "awaiting_admission", at: clock, source: "webhook", workspaceId: "ws_a" })
+    clock = new Date("2026-10-14T09:12:00.000Z")
+
+    const polled = await store.transition(created.id, {
+      status: "awaiting_admission",
+      at: clock,
+      source: "poll",
+      workspaceId: "ws_a",
+    })
+
+    expect(polled?.applied).toBe(false)
+    expect(polled?.session).toMatchObject({
+      lastEventAt: "2026-10-14T09:00:00.000Z",
+      statusChangedAt: "2026-10-14T09:00:00.000Z",
+    })
+
+    const moved = await store.transition(created.id, { status: "needs_help", at: clock, source: "poll", workspaceId: "ws_a" })
+
+    expect(moved?.session).toMatchObject({ status: "needs_help", statusChangedAt: "2026-10-14T09:12:00.000Z" })
   })
 })

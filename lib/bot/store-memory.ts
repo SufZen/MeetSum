@@ -198,6 +198,7 @@ export function createMemoryBotSessionStore(
         joinedAt: null,
         leftAt: null,
         lastEventAt: null,
+        statusChangedAt: stamp,
         recordingStatus: "none",
         recordingStorageKey: null,
         mediaAssetId: null,
@@ -340,7 +341,10 @@ export function createMemoryBotSessionStore(
         updatedAt: now().toISOString(),
       }
 
-      if (patch.status) next.statusRank = BOT_STATUS_RANK[patch.status]
+      if (patch.status) {
+        next.statusRank = BOT_STATUS_RANK[patch.status]
+        if (patch.status !== session.status) next.statusChangedAt = next.updatedAt
+      }
 
       assertUnique(next)
       sessions.set(id, next)
@@ -363,6 +367,7 @@ export function createMemoryBotSessionStore(
           statusRank: BOT_STATUS_RANK[input.status],
           statusReason: input.reason ?? null,
           lastEventAt: at,
+          statusChangedAt: at,
           updatedAt: now().toISOString(),
         }
 
@@ -371,7 +376,9 @@ export function createMemoryBotSessionStore(
 
         assertUnique(next)
         session = next
-      } else {
+      } else if (input.source !== "poll") {
+        // A delivered (webhook/api) event is still a sign of life. A no-op
+        // poll is not: it must not push back stale/lobby checks.
         session = { ...previous, lastEventAt: at, updatedAt: now().toISOString() }
       }
 

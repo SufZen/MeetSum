@@ -816,6 +816,7 @@ create table if not exists bot_sessions (
   joined_at timestamptz,
   left_at timestamptz,
   last_event_at timestamptz,
+  status_changed_at timestamptz not null default now(), -- applied status changes only
   recording_status text not null default 'none'
     check (recording_status in ('none','pending','importing','imported','missing','failed')),
   recording_storage_key text,

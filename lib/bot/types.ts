@@ -144,6 +144,8 @@ export type BotSession = {
   joinedAt: string | null
   leftAt: string | null
   lastEventAt: string | null
+  /** When `status` last changed (applied transitions only, never a no-op poll). */
+  statusChangedAt: string | null
   recordingStatus: BotRecordingStatus
   recordingStorageKey: string | null
   mediaAssetId: string | null

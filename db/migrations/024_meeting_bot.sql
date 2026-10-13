@@ -33,6 +33,7 @@ create table if not exists bot_sessions (
   joined_at timestamptz,
   left_at timestamptz,
   last_event_at timestamptz,
+  status_changed_at timestamptz not null default now(), -- applied status changes only
   recording_status text not null default 'none'
     check (recording_status in ('none','pending','importing','imported','missing','failed')),
   recording_storage_key text,
@@ -45,6 +46,8 @@ create table if not exists bot_sessions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- Dev databases created before status_changed_at existed.
+alter table bot_sessions add column if not exists status_changed_at timestamptz not null default now();
 create unique index if not exists uq_bot_sessions_calendar
   on bot_sessions(workspace_id, calendar_event_id) where calendar_event_id is not null;
 -- Every unique key is workspace-scoped: a session in one workspace must never

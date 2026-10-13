@@ -34,7 +34,8 @@ export type ReconcileDeps = {
     store: BotSessionStore,
     session: BotSessionRecord,
     meeting: VexaMeeting,
-    source: BotEventSource
+    source: BotEventSource,
+    options?: { at?: Date }
   ) => Promise<{ applied: boolean; session: BotSessionRecord; sideEffects: BotSideEffect[] }>
   resyncRules: (workspaceId: string) => Promise<unknown>
   dispatchNow: (sessionId: string, workspaceId: string) => Promise<unknown>
@@ -177,10 +178,12 @@ export async function runBotReconcile(
         return
       }
 
-      // (c) Waiting in the lobby for too long.
+      // (c) Waiting in the lobby (either lobby status) for too long, measured
+      // from when the session entered it: polls and repeated events that
+      // change nothing never reset it.
       if (
-        session.status === "awaiting_admission" &&
-        since(session.lastEventAt, session.updatedAt) < admissionBefore
+        (session.status === "awaiting_admission" || session.status === "needs_help") &&
+        since(session.statusChangedAt, session.updatedAt) < admissionBefore
       ) {
         await stopAndMark(d, session, "blocked", "not_admitted")
         stats.notAdmitted += 1
@@ -228,7 +231,7 @@ export async function runBotReconcile(
         throw error
       }
 
-      const result = await d.applySnapshot(d.store, session, meeting, "poll")
+      const result = await d.applySnapshot(d.store, session, meeting, "poll", { at: now })
 
       stats.polled += 1
       await sideEffects(d, result.session, result.sideEffects)
