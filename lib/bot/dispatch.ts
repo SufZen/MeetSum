@@ -204,11 +204,25 @@ async function adopt(d: DispatchDeps, session: BotSessionRecord): Promise<BotSes
   const active = await d.provider().findActiveBot(session.platform, session.nativeMeetingId)
 
   if (!active?.vexaMeetingId) return undefined
+  // Only a bot for exactly this target.
+  if (active.platform && active.platform !== session.platform) return undefined
+  if (active.nativeMeetingId && active.nativeMeetingId !== session.nativeMeetingId) return undefined
 
-  // SYSTEM lookup: a session of any workspace that already owns this Vexa meeting.
+  // SYSTEM lookups, read-only: used to REFUSE adoption, never to mutate the
+  // returned row. (1) Another session (any workspace) already owns this Vexa
+  // meeting. (2) Another workspace has an open session for the same target,
+  // whose bot this may be before it recorded its Vexa id (getForWebhook
+  // resolves an ambiguous cross-workspace target to nothing).
   const owner = await d.store.getForWebhook({ vexaMeetingId: active.vexaMeetingId })
 
   if (owner && owner.id !== session.id) return undefined
+
+  const targetOwner = await d.store.getForWebhook({
+    platform: session.platform,
+    nativeMeetingId: session.nativeMeetingId,
+  })
+
+  if (!targetOwner || targetOwner.workspaceId !== session.workspaceId) return undefined
 
   return d.store.update(
     session.id,
@@ -275,8 +289,11 @@ export async function runDispatch(
   const d = resolveDispatchDeps(deps)
   const session = await d.store.withTransaction((tx) => d.store.getForUpdate(input.sessionId, tx, { workspaceId: input.workspaceId }))
 
-  if (!session) return { outcome: "skipped" }
-  if (session.workspaceId !== input.workspaceId) return { outcome: "skipped" }
+  // Loaded by id AND the job's workspace: a payload naming another
+  // workspace's session finds nothing and must never be retried.
+  if (!session || session.workspaceId !== input.workspaceId) {
+    throw new UnrecoverableError("bot session not found in the job's workspace")
+  }
   if (session.dispatchRev !== input.rev) return { outcome: "skipped", session }
 
   // A BullMQ retry after a retryable POST failure: adopt a bot that may exist.

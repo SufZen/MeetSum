@@ -122,11 +122,13 @@ describe("runDispatch", () => {
     expect(provider.requestBot).not.toHaveBeenCalled()
   })
 
-  it("skips another workspace's session", async () => {
+  it("refuses another workspace's session as unrecoverable", async () => {
     const { store, provider, deps } = setup()
     const session = await store.create(sessionInput())
 
-    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_b" }, deps)).outcome).toBe("skipped")
+    await expect(runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_b" }, deps)).rejects.toBeInstanceOf(
+      UnrecoverableError
+    )
     expect(provider.requestBot).not.toHaveBeenCalled()
   })
 
@@ -421,9 +423,10 @@ describe("workspace isolation (W1/W2)", () => {
     const { store, provider, queue, deps } = setup()
     const w2 = await store.create(sessionInput({ workspaceId: "ws_2", calendarEventId: "cal_w2" }))
     const before = await store.get(w2.id, { workspaceId: "ws_2" })
-    const forged = await runDispatch({ sessionId: w2.id, rev: 0, workspaceId: "ws_1" }, deps)
-
-    expect(forged).toEqual({ outcome: "skipped" })
+    // Loaded by id AND workspace: a forged payload is unrecoverable (no retries).
+    await expect(runDispatch({ sessionId: w2.id, rev: 0, workspaceId: "ws_1" }, deps)).rejects.toBeInstanceOf(
+      UnrecoverableError
+    )
     expect(provider.requestBot).not.toHaveBeenCalled()
     expect(queue.jobs).toHaveLength(0)
     expect(await store.get(w2.id, { workspaceId: "ws_2" })).toEqual(before)
@@ -455,5 +458,57 @@ describe("workspace isolation (W1/W2)", () => {
     // Vexa's own 409 stops W2's bot; it never adopts W1's Vexa meeting.
     expect(second.session).toMatchObject({ status: "blocked", statusReason: "already_in_meeting", vexaMeetingId: null })
     expect(await store.get(w1.id, { workspaceId: "ws_1" })).toMatchObject({ status: "requested", vexaMeetingId: "501" })
+  })
+})
+
+describe("adoption never crosses workspaces (W1/W2)", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-10-14T08:59:00.000Z"))
+  })
+
+  it("a 409 does not adopt a bot whose Vexa id is not yet recorded by another workspace's open session", async () => {
+    const provider = fakeProvider({
+      requestBot: vi.fn().mockRejectedValue(new VexaError("conflict", "Vexa POST /bots → 409", { status: 409 })),
+      findActiveBot: vi.fn(async () => ({ platform: "google_meet", nativeMeetingId: "abc-defg-hij", vexaMeetingId: "900" })),
+    })
+    const { store, deps } = setup({ provider })
+    // W2's bot was requested, but its POST response (with the Vexa id) was lost.
+    const w2 = await store.create(sessionInput({ workspaceId: "ws_2", status: "requested", calendarEventId: "cal_w2" }))
+    const w2Before = await store.get(w2.id, { workspaceId: "ws_2" })
+    const w1 = await store.create(sessionInput({ workspaceId: "ws_1" }))
+
+    const result = await runDispatch({ sessionId: w1.id, rev: 0, workspaceId: "ws_1" }, deps)
+
+    expect(result.session).toMatchObject({ status: "blocked", statusReason: "already_in_meeting", vexaMeetingId: null })
+    expect(await store.get(w2.id, { workspaceId: "ws_2" })).toEqual(w2Before)
+  })
+
+  it("a retry adopt never takes a bot reported for a different target", async () => {
+    const provider = fakeProvider({
+      findActiveBot: vi.fn(async () => ({ platform: "google_meet", nativeMeetingId: "zzz-zzzz-zzz", vexaMeetingId: "901" })),
+      requestBot: vi.fn(async () => ({ vexaMeetingId: "4242", status: "requested", raw: {} })),
+    })
+    const { store, deps } = setup({ provider })
+    const w1 = await store.create(sessionInput({ workspaceId: "ws_1", status: "requested" }))
+
+    const result = await runDispatch({ sessionId: w1.id, rev: 0, workspaceId: "ws_1" }, deps)
+
+    expect(result).toMatchObject({ outcome: "requested", session: { vexaMeetingId: "4242" } })
+  })
+
+  it("adopting updates only the job's own session", async () => {
+    const provider = fakeProvider({
+      requestBot: vi.fn().mockRejectedValue(new VexaError("conflict", "Vexa POST /bots → 409", { status: 409 })),
+      findActiveBot: vi.fn(async () => ({ platform: "google_meet", nativeMeetingId: "abc-defg-hij", vexaMeetingId: "902" })),
+    })
+    const { store, deps } = setup({ provider })
+    const w2Terminal = await store.create(sessionInput({ workspaceId: "ws_2", status: "completed", calendarEventId: "cal_w2" }))
+    const before = await store.get(w2Terminal.id, { workspaceId: "ws_2" })
+    const w1 = await store.create(sessionInput({ workspaceId: "ws_1" }))
+
+    const result = await runDispatch({ sessionId: w1.id, rev: 0, workspaceId: "ws_1" }, deps)
+
+    expect(result).toMatchObject({ outcome: "adopted", session: { id: w1.id, workspaceId: "ws_1", vexaMeetingId: "902" } })
+    expect(await store.get(w2Terminal.id, { workspaceId: "ws_2" })).toEqual(before)
   })
 })
