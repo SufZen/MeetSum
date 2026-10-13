@@ -99,6 +99,14 @@ export const playerMessagesEn = {
   talkTimeLongest: "Longest stretch {time}",
   talkTimeEmpty: "Talk time appears once speakers are identified.",
 
+  // Meeting header / inbox / capture
+  recordOnComputer: "Record on this computer",
+  meetingShare: "Share",
+  addToRoom: "Add to room",
+  playSourceAt: "Play source at",
+  participantCountOne: "{count} participant",
+  participantCountOther: "{count} participants",
+
   // Meeting actions
   meetingActions: "Meeting actions",
   meetingRename: "Rename",
@@ -214,6 +222,13 @@ export const playerMessagesHe: Record<keyof typeof playerMessagesEn, string> = {
   talkTimeWpm: "{count} מילים לדקה",
   talkTimeLongest: "הרצף הארוך {time}",
   talkTimeEmpty: "זמן הדיבור יופיע אחרי זיהוי הדוברים.",
+
+  recordOnComputer: "הקלטה במחשב הזה",
+  meetingShare: "שיתוף",
+  addToRoom: "הוספה לחדר",
+  playSourceAt: "ניגון המקור מ־",
+  participantCountOne: "{count} משתתף",
+  participantCountOther: "{count} משתתפים",
 
   meetingActions: "פעולות לפגישה",
   meetingRename: "שינוי שם",

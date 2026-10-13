@@ -38,6 +38,7 @@ export const clipsMessagesEn = {
   clipsShareExcerpt: "Transcript excerpt",
   clipsShareNoAudio: "The audio is still being prepared. Try again in a minute.",
   clipsChapter: "Chapter",
+  clipsPlaySourceAt: "Play source at",
 }
 
 export const clipsMessagesHe: Record<keyof typeof clipsMessagesEn, string> = {
@@ -75,4 +76,5 @@ export const clipsMessagesHe: Record<keyof typeof clipsMessagesEn, string> = {
   clipsShareExcerpt: "קטע מהתמלול",
   clipsShareNoAudio: "האודיו עדיין בהכנה. כדאי לנסות שוב בעוד דקה.",
   clipsChapter: "פרק",
+  clipsPlaySourceAt: "ניגון המקור מ־",
 }

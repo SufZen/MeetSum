@@ -77,11 +77,14 @@ function ChapterHeading({
   dir,
   meetingId,
   label,
+  playLabel,
 }: {
   chapter: Chapter
   dir?: "rtl" | "ltr"
   meetingId?: string
   label: string
+  /** Localized aria label of the chapter timecode chip. */
+  playLabel: string
 }) {
   const player = usePlayer()
 
@@ -93,6 +96,7 @@ function ChapterHeading({
       </h3>
       <CitationChip
         seconds={chapter.startMs / 1000}
+        label={playLabel}
         onClick={() => player.seek(chapter.startMs, { play: true, segmentId: chapter.startSegmentId })}
       />
       {meetingId ? (
@@ -124,7 +128,7 @@ function ChapterOnlyTranscript({
           ? (segment) => {
               const chapter = headings.get(segment.id)
 
-              return chapter ? <ChapterHeading chapter={chapter} dir={dir} label={t.clipsChapter} /> : null
+              return chapter ? <ChapterHeading chapter={chapter} dir={dir} label={t.clipsChapter} playLabel={t.clipsPlaySourceAt} /> : null
             }
           : undefined
       }
@@ -200,7 +204,7 @@ function CollaborativeTranscript({
           const chapter = headings.get(segment.id)
 
           return chapter ? (
-            <ChapterHeading chapter={chapter} dir={dir} meetingId={meetingId} label={t.clipsChapter} />
+            <ChapterHeading chapter={chapter} dir={dir} meetingId={meetingId} label={t.clipsChapter} playLabel={t.clipsPlaySourceAt} />
           ) : null
         }}
         renderSegmentBadges={(segment) => {
