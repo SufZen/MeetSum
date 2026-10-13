@@ -14,6 +14,7 @@ import type {
   MeetingAnswer,
   MeetingContext,
   MeetingListOptions,
+  MeetingListPage,
   MeetingListSortMode,
   MeetingParticipant,
   MeetingRecord,
@@ -32,6 +33,8 @@ import type {
 import {
   MeetingExternalIdConflictError,
   MeetingScopeError,
+  notImplementedM4,
+  toMeetingListItem,
 } from "@/lib/meetings/repository"
 import {
   computeTurnIndexes,
@@ -218,6 +221,8 @@ type MediaAssetRow = {
   source_file_id: string | null
   checksum_sha256: string | null
   metadata: Record<string, unknown> | null
+  /** M4 (021); not selected yet, so absent rows read as `original`. */
+  kind?: MediaAsset["kind"] | null
   created_at: string | Date
 }
 
@@ -519,6 +524,7 @@ function mapMediaAsset(row: MediaAssetRow): MediaAsset {
     sourceFileId: row.source_file_id ?? undefined,
     checksumSha256: row.checksum_sha256 ?? undefined,
     metadata: row.metadata ?? undefined,
+    kind: row.kind ?? "original",
     createdAt: toIso(row.created_at),
   }
 }
@@ -1438,6 +1444,64 @@ export function createPostgresMeetingRepository(
    * left without segments, insert the new segments. Never touches
    * meeting_participants.
    */
+  async function listFullMeetingsPage(options: MeetingListOptions = {}): Promise<{
+    meetings: MeetingRecord[]
+    page: MeetingListPage["page"]
+  }> {
+    const limit = normalizeLimit(options.limit)
+    const offset = normalizeOffset(options.offset)
+    const sort = normalizeSort(options.sort)
+    const { whereSql, values } = buildMeetingListClauses(scope, options)
+    const countResult = await client.query(
+      `
+        select count(*)::int as total
+        from meetings m
+        ${whereSql}
+      `,
+      values
+    )
+    const total = Number((countResult.rows[0] as { total?: number }).total ?? 0)
+    const limitIndex = values.length + 1
+    const offsetIndex = values.length + 2
+    const result = await client.query(
+      `
+      select ${meetingColumns("m")}
+      from meetings m
+      left join lateral (
+        select max(j.created_at) as last_job_at
+        from jobs j
+        where j.meeting_id = m.id and j.workspace_id = m.workspace_id
+      ) recent_job on true
+      left join lateral (
+        select max(df.imported_at) as imported_at
+        from meeting_drive_files mdf
+        join drive_files df on df.id = mdf.drive_file_id
+        where mdf.meeting_id = m.id
+      ) recent_import on true
+      ${whereSql}
+      order by ${meetingOrderSql(sort)}
+      limit $${limitIndex}
+      offset $${offsetIndex}
+    `,
+      [...values, limit, offset]
+    )
+
+    const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
+    const meetings = await Promise.all(
+      bases.map((meeting) => hydrateMeeting(meeting))
+    )
+
+    return {
+      meetings,
+      page: {
+        limit,
+        offset,
+        total,
+        hasMore: offset + meetings.length < total,
+      },
+    }
+  }
+
   async function writeTranscript(
     meetingId: string,
     input: ReplaceTranscriptInput,
@@ -1626,62 +1690,13 @@ export function createPostgresMeetingRepository(
     },
 
     async listMeetings(options: MeetingListOptions = {}) {
-      return (await this.listMeetingsPage(options)).meetings
+      return (await listFullMeetingsPage(options)).meetings
     },
 
     async listMeetingsPage(options: MeetingListOptions = {}) {
-      const limit = normalizeLimit(options.limit)
-      const offset = normalizeOffset(options.offset)
-      const sort = normalizeSort(options.sort)
-      const { whereSql, values } = buildMeetingListClauses(scope, options)
-      const countResult = await client.query(
-        `
-          select count(*)::int as total
-          from meetings m
-          ${whereSql}
-        `,
-        values
-      )
-      const total = Number((countResult.rows[0] as { total?: number }).total ?? 0)
-      const limitIndex = values.length + 1
-      const offsetIndex = values.length + 2
-      const result = await client.query(
-        `
-        select ${meetingColumns("m")}
-        from meetings m
-        left join lateral (
-          select max(j.created_at) as last_job_at
-          from jobs j
-          where j.meeting_id = m.id and j.workspace_id = m.workspace_id
-        ) recent_job on true
-        left join lateral (
-          select max(df.imported_at) as imported_at
-          from meeting_drive_files mdf
-          join drive_files df on df.id = mdf.drive_file_id
-          where mdf.meeting_id = m.id
-        ) recent_import on true
-        ${whereSql}
-        order by ${meetingOrderSql(sort)}
-        limit $${limitIndex}
-        offset $${offsetIndex}
-      `,
-        [...values, limit, offset]
-      )
+      const { meetings, page } = await listFullMeetingsPage(options)
 
-      const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
-      const meetings = await Promise.all(
-        bases.map((meeting) => hydrateMeeting(meeting))
-      )
-
-      return {
-        meetings,
-        page: {
-          limit,
-          offset,
-          total,
-          hasMore: offset + meetings.length < total,
-        },
-      }
+      return { meetings: meetings.map(toMeetingListItem), page }
     },
 
     async getMeeting(id: string) {
@@ -1706,7 +1721,8 @@ export function createPostgresMeetingRepository(
 
     async createMediaAsset(input) {
       // The asset inherits the workspace of a meeting this scope can see; a
-      // foreign meeting id inserts nothing.
+      // foreign meeting id inserts nothing. M4 Step 0: kind/derivedFromAssetId/
+      // durationMs are accepted but not persisted yet (Package A/B).
       const values: unknown[] = [
         createId("asset"),
         input.meetingId,
@@ -1787,6 +1803,7 @@ export function createPostgresMeetingRepository(
     },
 
     async replaceTranscript(meetingId, input) {
+      // M4 Step 0: `preserveEdited` is accepted but not implemented yet.
       return writeTranscript(meetingId, input)
     },
 
@@ -2112,6 +2129,43 @@ export function createPostgresMeetingRepository(
 
         return profile
       })
+    },
+
+    // M4 Step 0: stubs that throw "not implemented (M4)".
+    async getMeetingTranscript() {
+      return notImplementedM4("getMeetingTranscript")
+    },
+
+    async getTranscriptVersion() {
+      return notImplementedM4("getTranscriptVersion")
+    },
+
+    async updateTranscriptSegment() {
+      return notImplementedM4("updateTranscriptSegment")
+    },
+
+    async undoTranscriptSegment() {
+      return notImplementedM4("undoTranscriptSegment")
+    },
+
+    async listTranscriptRevisions() {
+      return notImplementedM4("listTranscriptRevisions")
+    },
+
+    async renameMeeting() {
+      return notImplementedM4("renameMeeting")
+    },
+
+    async deleteMeeting() {
+      return notImplementedM4("deleteMeeting")
+    },
+
+    async updateMediaAssetPreparation() {
+      return notImplementedM4("updateMediaAssetPreparation")
+    },
+
+    async setMeetingDurationMs() {
+      return notImplementedM4("setMeetingDurationMs")
     },
 
     async upsertMeetingIntelligence(

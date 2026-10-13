@@ -16,6 +16,7 @@ function asset(metadata: Record<string, unknown>): MediaAsset {
     contentType: "audio/webm",
     sizeBytes: 1,
     retention: "audio",
+    kind: "original",
     metadata,
     createdAt: "2026-01-01T00:00:00.000Z",
   }

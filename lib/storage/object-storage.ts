@@ -296,6 +296,23 @@ export async function deleteMeetingObject(key: string) {
   )
 }
 
+export type DeleteMeetingObjectsResult = {
+  deleted: string[]
+  failed: Array<{ key: string; error: string }>
+}
+
+/**
+ * Deletes many objects (M4: meeting delete, derived renditions, peaks).
+ * Step 0 stub; Package A implements DeleteObjects batches of 1000 where a
+ * missing key counts as deleted.
+ */
+export async function deleteMeetingObjects(
+  keys: readonly string[]
+): Promise<DeleteMeetingObjectsResult> {
+  void keys
+  throw new Error("deleteMeetingObjects: not implemented (M4)")
+}
+
 /**
  * Uploads a local file to an exact key (no timestamp/uuid decoration), e.g.
  * the transient `asr-handoff/<uuid>.ogg` objects handed to remote ASR.

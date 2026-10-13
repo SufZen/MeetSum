@@ -46,6 +46,7 @@ import { selectRecentRooms } from "@/lib/rooms"
 import type {
   ActionItem,
   JobRecord,
+  MeetingListItem,
   MeetingParticipant,
   MeetingRecord,
   MeetingVisibility,
@@ -274,7 +275,10 @@ export function CommandCenterShell({
     }
 
     const meetingsBody = await meetingsResponse.json()
-    const nextMeetings: MeetingRecord[] = meetingsBody.meetings ?? []
+    const listItems: MeetingListItem[] = meetingsBody.meetings ?? []
+    // M4-compat: list items still carry full records until Package C reads
+    // the selected meeting from /api/meetings/[id].
+    const nextMeetings = listItems as MeetingRecord[]
     const pinned = deepLinkedMeetingRef.current
     const keepPinned = Boolean(
       pinned && !nextMeetings.some((meeting) => meeting.id === pinned.id)

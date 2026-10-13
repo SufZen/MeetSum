@@ -20,6 +20,8 @@ export type MeetSumJobName =
   | "realizeos.export"
   | "teams.subscription.renew"
   | "media.retention"
+  | "media.prepare"
+  | "storage.delete"
 
 export type MeetSumJobPayload = {
   meetingId?: string

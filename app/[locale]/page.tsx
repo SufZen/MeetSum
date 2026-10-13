@@ -38,6 +38,7 @@ export default async function Page({
   const { ctx } = auth
   const user = auth.session.user
   const [meetingList, rooms] = await Promise.all([
+    // M4-compat: full records until Package C switches to MeetingListItem.
     ctx.meetings.listMeetings({ limit: 5 }),
     ctx.meetings.listRooms().catch(() => []),
   ])

@@ -187,6 +187,40 @@ const invocations: Record<
       participant: { name: "Dana" },
       aliases: ["דנה"],
     }),
+  // M4 Step 0: stubs that throw "not implemented (M4)" (no SQL yet).
+  getMeetingTranscript: (repo) =>
+    repo.getMeetingTranscript("meet_1").catch((error: Error) => error),
+  getTranscriptVersion: (repo) =>
+    repo.getTranscriptVersion("meet_1").catch((error: Error) => error),
+  updateTranscriptSegment: (repo) =>
+    repo
+      .updateTranscriptSegment("meet_1", "seg_1", {
+        expectedRevision: 0,
+        text: "hello",
+        actorUserId: "user_me",
+      })
+      .catch((error: Error) => error),
+  undoTranscriptSegment: (repo) =>
+    repo
+      .undoTranscriptSegment("meet_1", "seg_1", {
+        expectedRevision: 1,
+        actorUserId: "user_me",
+      })
+      .catch((error: Error) => error),
+  listTranscriptRevisions: (repo) =>
+    repo.listTranscriptRevisions("meet_1", "seg_1").catch((error: Error) => error),
+  renameMeeting: (repo) =>
+    repo.renameMeeting("meet_1", "Renamed").catch((error: Error) => error),
+  deleteMeeting: (repo) => repo.deleteMeeting("meet_1").catch((error: Error) => error),
+  updateMediaAssetPreparation: (repo) =>
+    repo
+      .updateMediaAssetPreparation("asset_1", {
+        durationMs: 1000,
+        preparedAt: "2026-05-01T09:00:00.000Z",
+      })
+      .catch((error: Error) => error),
+  setMeetingDurationMs: (repo) =>
+    repo.setMeetingDurationMs("meet_1", 1000, "media").catch((error: Error) => error),
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),

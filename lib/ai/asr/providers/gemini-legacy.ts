@@ -85,6 +85,7 @@ export function createGeminiLegacyProvider(deps: GeminiLegacyDeps = {}): AsrProv
             filename: req.media.filename,
             sizeBytes: req.media.sizeBytes ?? 0,
             retention: "audio",
+            kind: "original",
             createdAt,
           },
         ],

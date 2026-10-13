@@ -196,6 +196,7 @@ describe("ASR router adapter (deprecated TranscriptionProvider)", () => {
           contentType: "audio/mp4",
           sizeBytes: 1234,
           retention: "audio",
+          kind: "original",
           createdAt: "2026-06-10T09:00:00.000Z",
         },
       ],

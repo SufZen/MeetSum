@@ -61,8 +61,12 @@ export type TranscriptSegment = {
   words?: TranscriptWord[]
   /** Increments on every speaker change (M3). */
   turnIndex?: number
-  /** Where the segment came from, e.g. `asr` or `meet` (M3). */
+  /** Where the segment came from, e.g. `asr`, `meet` or `edited` (M3/M4). */
   source?: string
+  /** Increments on every edit/undo (M4); 0 for untouched segments. */
+  revision?: number
+  /** Last manual edit (M4). */
+  editedAt?: string
 }
 
 export type SpeakerMappingStatus = "unmapped" | "suggested" | "confirmed" | "rejected"
@@ -144,6 +148,77 @@ export type ReplaceTranscriptInput = {
   segments: TranscriptSegment[]
   speakers: TranscriptSpeakerInput[]
   asrRunId?: string
+}
+
+export type ReplaceTranscriptOptions = {
+  /**
+   * Keep existing `source='edited'` segments that match the new transcript
+   * (M4; used by transcript cleanup, never by a full re-ASR).
+   */
+  preserveEdited?: boolean
+}
+
+/** A prior state of an edited segment (`transcript_segment_revisions`, M4). */
+export type TranscriptRevision = {
+  id: string
+  meetingId: string
+  segmentId: string
+  revision: number
+  text: string
+  words?: TranscriptWord[]
+  speakerId?: string
+  source: string
+  createdByUserId?: string
+  createdAt: string
+  revertedAt?: string
+}
+
+/** Full transcript of one meeting with its speakers (M4). */
+export type MeetingTranscript = {
+  meetingId: string
+  /** `meetings.transcript_version`; bumps on every transcript mutation. */
+  version: number
+  segments: TranscriptSegment[]
+  speakers: MeetingSpeaker[]
+}
+
+/** Manual edit of one segment (M4). At most one of speakerId/newSpeakerName. */
+export type SegmentPatch = {
+  /** Revision the client edited; a mismatch raises TranscriptConflictError. */
+  expectedRevision: number
+  text?: string
+  words?: TranscriptWord[]
+  speakerId?: string
+  newSpeakerName?: string
+  /** `turn` reassigns every segment of the same turn and old speaker. */
+  scope?: "segment" | "turn"
+  actorUserId?: string
+}
+
+export type SegmentMutationResult = {
+  segment: TranscriptSegment
+  /** Present when speakers changed (reassignment, new speaker, stats). */
+  speakers?: MeetingSpeaker[]
+  version: number
+}
+
+/** The segment changed since the client read it; carries the current state. */
+export class TranscriptConflictError extends Error {
+  readonly segment: TranscriptSegment
+
+  constructor(segment: TranscriptSegment) {
+    super(`Transcript segment changed: ${segment.id}`)
+    this.name = "TranscriptConflictError"
+    this.segment = segment
+  }
+}
+
+/** The segment does not exist in a meeting visible to the scope. */
+export class SegmentNotFoundError extends Error {
+  constructor(segmentId: string) {
+    super(`Transcript segment not found: ${segmentId}`)
+    this.name = "SegmentNotFoundError"
+  }
 }
 
 export type MeetingSpeakerPatch = {
@@ -239,6 +314,9 @@ export type SuggestedAgentRun = {
   createdAt: string
 }
 
+/** `original` = captured/uploaded media; `playback` = derived rendition (M4). */
+export type MediaAssetKind = "original" | "playback"
+
 export type MediaAsset = {
   id: string
   meetingId: string
@@ -251,7 +329,25 @@ export type MediaAsset = {
   sourceFileId?: string
   checksumSha256?: string
   metadata?: Record<string, unknown>
+  /** M4: `original` unless this is a derived playback rendition. */
+  kind: MediaAssetKind
+  /** M4: original asset a playback rendition was derived from. */
+  derivedFromAssetId?: string
+  /** M4: probed duration (ffprobe at prepare time). */
+  durationMs?: number
+  /** M4: waveform peaks JSON object key (on the original). */
+  peaksStorageKey?: string
+  preparedAt?: string
+  prepareError?: string
   createdAt: string
+}
+
+/** Fields written by media preparation (M4). `null` clears a field. */
+export type MediaAssetPreparationPatch = {
+  durationMs?: number | null
+  peaksStorageKey?: string | null
+  preparedAt?: string | null
+  prepareError?: string | null
 }
 
 export type MeetArtifact = {
@@ -386,6 +482,55 @@ export type MeetingRecord = {
   workspaceId?: string
   ownerUserId?: string
   visibility?: MeetingVisibility
+  /** Denormalized duration: media, else max(segment end) (M4). */
+  durationMs?: number
+  /** Segment count without loading the transcript (M4). */
+  transcriptSegmentCount?: number
+  /** `meetings.transcript_version` (M4). */
+  transcriptVersion?: number
+  /** Latest manual segment edit (M4). */
+  transcriptEditedAt?: string
+  /** Segments with `source='edited'` (M4). */
+  editedSegmentCount?: number
+}
+
+/**
+ * Lightweight meeting row for the inbox list (M4): no transcript, words,
+ * summary, intelligence or speakers.
+ */
+export type MeetingListItem = Omit<
+  MeetingRecord,
+  | "transcript"
+  | "intelligence"
+  | "aiRuns"
+  | "suggestedAgentRuns"
+  | "meetConferenceRecords"
+  | "speakers"
+  | "summary"
+> & {
+  durationMs?: number
+  transcriptSegmentCount: number
+  actionItemCount: number
+  hasMedia: boolean
+}
+
+/**
+ * M4 Step 0 bridge: a list item derived from a fully hydrated record. The
+ * record's other fields stay present at runtime until Package B ships the
+ * lightweight list.
+ */
+export function toMeetingListItem(meeting: MeetingRecord): MeetingListItem {
+  return {
+    ...meeting,
+    transcriptSegmentCount: meeting.transcriptSegmentCount ?? meeting.transcript?.length ?? 0,
+    actionItemCount: meeting.summary?.actionItems.length ?? 0,
+    hasMedia: (meeting.mediaAssets?.length ?? 0) > 0,
+  }
+}
+
+export type GetMeetingOptions = {
+  /** M4: include transcript segments (current behaviour always does). */
+  includeTranscript?: boolean
 }
 
 export type MeetingListSortMode = "smart" | "recent" | "oldest" | "title" | "status"
@@ -407,7 +552,7 @@ export type MeetingListOptions = {
 }
 
 export type MeetingListPage = {
-  meetings: MeetingRecord[]
+  meetings: MeetingListItem[]
   page: {
     limit: number
     offset: number
@@ -440,7 +585,7 @@ export type MeetingAnswer = {
 export type MeetingRepository = {
   listMeetings: (options?: MeetingListOptions) => Promise<MeetingRecord[]>
   listMeetingsPage: (options?: MeetingListOptions) => Promise<MeetingListPage>
-  getMeeting: (id: string) => Promise<MeetingRecord | undefined>
+  getMeeting: (id: string, options?: GetMeetingOptions) => Promise<MeetingRecord | undefined>
   createMeeting: (input: CreateMeetingInput) => Promise<MeetingRecord>
   updateMeetingStatus: (
     id: string,
@@ -457,6 +602,10 @@ export type MeetingRepository = {
     sourceFileId?: string
     checksumSha256?: string
     metadata?: Record<string, unknown>
+    /** M4: defaults to `original`. */
+    kind?: MediaAssetKind
+    derivedFromAssetId?: string
+    durationMs?: number
   }) => Promise<MediaAsset>
   findMediaAssetBySourceFile?: (
     source: string,
@@ -482,7 +631,8 @@ export type MeetingRepository = {
    */
   replaceTranscript: (
     meetingId: string,
-    input: ReplaceTranscriptInput
+    input: ReplaceTranscriptInput,
+    options?: ReplaceTranscriptOptions
   ) => Promise<{ segments: TranscriptSegment[]; speakers: MeetingSpeaker[] }>
   listMeetingSpeakers: (
     meetingId: string,
@@ -505,6 +655,48 @@ export type MeetingRepository = {
   ) => Promise<MeetingSpeaker[]>
   listSpeakerProfiles: () => Promise<SpeakerProfile[]>
   recordConfirmedSpeaker: (input: RecordConfirmedSpeakerInput) => Promise<SpeakerProfile>
+  /** Transcript with speakers and version (M4); undefined when invisible. */
+  getMeetingTranscript: (meetingId: string) => Promise<MeetingTranscript | undefined>
+  /** `meetings.transcript_version` (M4); undefined when invisible. */
+  getTranscriptVersion: (meetingId: string) => Promise<number | undefined>
+  /**
+   * Edits one segment (M4): stores a revision of the prior state, realigns
+   * words, bumps segment revision and transcript version. Throws
+   * SegmentNotFoundError / TranscriptConflictError.
+   */
+  updateTranscriptSegment: (
+    meetingId: string,
+    segmentId: string,
+    patch: SegmentPatch
+  ) => Promise<SegmentMutationResult>
+  /** Restores the latest non-reverted revision of a segment (M4). */
+  undoTranscriptSegment: (
+    meetingId: string,
+    segmentId: string,
+    options: { expectedRevision: number; actorUserId?: string }
+  ) => Promise<SegmentMutationResult>
+  listTranscriptRevisions: (
+    meetingId: string,
+    segmentId: string
+  ) => Promise<TranscriptRevision[]>
+  /** M4: renames a visible meeting. */
+  renameMeeting: (id: string, title: string) => Promise<MeetingRecord>
+  /**
+   * M4: hard-deletes a visible meeting (rows cascade) and returns the object
+   * keys (media, derived renditions, peaks) to delete afterwards; undefined
+   * when the meeting is not visible.
+   */
+  deleteMeeting: (id: string) => Promise<{ storageKeys: string[]; title: string } | undefined>
+  updateMediaAssetPreparation: (
+    assetId: string,
+    patch: MediaAssetPreparationPatch
+  ) => Promise<MediaAsset>
+  /** M4: sets `meetings.duration_ms` (`transcript` never overrides media). */
+  setMeetingDurationMs: (
+    meetingId: string,
+    durationMs: number,
+    source: "media" | "transcript"
+  ) => Promise<void>
   upsertMeetingIntelligence: (
     meetingId: string,
     intelligence: MeetingIntelligence,
@@ -604,6 +796,11 @@ export type MeetingRepository = {
 
 function normalize(value: string): string {
   return value.toLowerCase()
+}
+
+/** Placeholder for M4 repository methods that are not implemented yet. */
+export function notImplementedM4(method: string): never {
+  throw new Error(`${method}: not implemented (M4)`)
 }
 
 function createId(prefix: string): string {
@@ -992,6 +1189,30 @@ export function createInMemoryMeetingRepository(
     return participant
   }
 
+  function listFullMeetingsPage(options: MeetingListOptions = {}): {
+    meetings: MeetingRecord[]
+    page: MeetingListPage["page"]
+  } {
+    const limit = normalizeListLimit(options.limit)
+    const offset = normalizeListOffset(options.offset)
+    const filtered = visibleMeetings()
+      .map(hydrate)
+      .filter((meeting) => meetingMatchesStatus(meeting, options.status))
+      .filter((meeting) => meetingMatchesQuery(meeting, options.query))
+    const sorted = sortMeetings(filtered, options.sort)
+    const pageMeetings = sorted.slice(offset, offset + limit)
+
+    return {
+      meetings: pageMeetings,
+      page: {
+        limit,
+        offset,
+        total: sorted.length,
+        hasMore: offset + pageMeetings.length < sorted.length,
+      },
+    }
+  }
+
   function writeTranscript(
     meeting: MeetingRecord,
     input: ReplaceTranscriptInput,
@@ -1160,28 +1381,13 @@ export function createInMemoryMeetingRepository(
     },
 
     async listMeetings(options?: MeetingListOptions): Promise<MeetingRecord[]> {
-      return (await this.listMeetingsPage(options)).meetings
+      return listFullMeetingsPage(options).meetings
     },
 
     async listMeetingsPage(options: MeetingListOptions = {}): Promise<MeetingListPage> {
-      const limit = normalizeListLimit(options.limit)
-      const offset = normalizeListOffset(options.offset)
-      const filtered = visibleMeetings()
-        .map(hydrate)
-        .filter((meeting) => meetingMatchesStatus(meeting, options.status))
-        .filter((meeting) => meetingMatchesQuery(meeting, options.query))
-      const sorted = sortMeetings(filtered, options.sort)
-      const pageMeetings = sorted.slice(offset, offset + limit)
+      const { meetings: full, page } = listFullMeetingsPage(options)
 
-      return {
-        meetings: pageMeetings,
-        page: {
-          limit,
-          offset,
-          total: sorted.length,
-          hasMore: offset + pageMeetings.length < sorted.length,
-        },
-      }
+      return { meetings: full.map(toMeetingListItem), page }
     },
 
     async getMeeting(id: string): Promise<MeetingRecord | undefined> {
@@ -1238,6 +1444,9 @@ export function createInMemoryMeetingRepository(
         sourceFileId: input.sourceFileId,
         checksumSha256: input.checksumSha256,
         metadata: input.metadata,
+        kind: input.kind ?? "original",
+        derivedFromAssetId: input.derivedFromAssetId,
+        durationMs: input.durationMs,
         createdAt: new Date().toISOString(),
       }
       const updated = {
@@ -1281,6 +1490,7 @@ export function createInMemoryMeetingRepository(
     },
 
     async replaceTranscript(meetingId, input) {
+      // M4 Step 0: `preserveEdited` is accepted but not implemented yet.
       return writeTranscript(requireVisibleMeeting(meetingId), input)
     },
 
@@ -1465,6 +1675,43 @@ export function createInMemoryMeetingRepository(
       speakerProfiles.set(profile.id, profile)
       speakers.set(speaker.id, { ...speaker, profileId: profile.id })
       return publicProfile(profile)
+    },
+
+    // M4 Step 0: stubs that throw "not implemented (M4)".
+    async getMeetingTranscript() {
+      return notImplementedM4("getMeetingTranscript")
+    },
+
+    async getTranscriptVersion() {
+      return notImplementedM4("getTranscriptVersion")
+    },
+
+    async updateTranscriptSegment() {
+      return notImplementedM4("updateTranscriptSegment")
+    },
+
+    async undoTranscriptSegment() {
+      return notImplementedM4("undoTranscriptSegment")
+    },
+
+    async listTranscriptRevisions() {
+      return notImplementedM4("listTranscriptRevisions")
+    },
+
+    async renameMeeting() {
+      return notImplementedM4("renameMeeting")
+    },
+
+    async deleteMeeting() {
+      return notImplementedM4("deleteMeeting")
+    },
+
+    async updateMediaAssetPreparation() {
+      return notImplementedM4("updateMediaAssetPreparation")
+    },
+
+    async setMeetingDurationMs() {
+      return notImplementedM4("setMeetingDurationMs")
     },
 
     async upsertMeetingIntelligence(
