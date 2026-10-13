@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { LlmError, type LlmStreamEvent, type LlmStreamRequest } from "@/lib/ai/llm/types"
 import { askOnce, askStream, resetAskCountersForTesting, setAskDepsForTesting } from "@/lib/ask/service"
+import { sseResponse } from "@/lib/http/sse"
 import { createThreadStore, resetMemoryThreadStoreForTesting } from "@/lib/ask/thread-store"
 import type { AskStreamEvent } from "@/lib/ask/types"
 import type { AuthContext } from "@/lib/auth/authz"
@@ -264,6 +265,73 @@ describe("askStream", () => {
     const stored = await createThreadStore(ctx)!.getThread(threadId)
 
     expect(stored?.messages[1]).toMatchObject({ role: "assistant", status: "aborted", content: "התקציב אושר [s1]" })
+  })
+
+  it("finalizes the assistant message as aborted when the consumer stops reading (iterator.return)", async () => {
+    let upstreamClosed = false
+    const stream = vi.fn(async function* (req: LlmStreamRequest): AsyncGenerator<LlmStreamEvent> {
+      void req
+      try {
+        yield { type: "start", provider: "gemini", model: "gemini-3.8-flash" }
+        yield { type: "delta", text: "התקציב אושר [s1]" }
+        yield { type: "delta", text: " ועוד" }
+      } finally {
+        upstreamClosed = true
+      }
+    })
+
+    setAskDepsForTesting({ retrieve: retrieving([passage("m_w1")]), stream, settings: async () => ({}) })
+
+    const ctx = await member()
+    const generator = askStream(ctx, { question: QUESTION, scope: { kind: "workspace" } })
+    let threadId: string | null = null
+
+    for (;;) {
+      const next = await generator.next()
+
+      if (next.done) break
+      if (next.value.type === "thread") threadId = next.value.threadId
+      if (next.value.type === "delta") break
+    }
+    await generator.return(undefined)
+
+    const stored = await createThreadStore(ctx)!.getThread(threadId!)
+
+    expect(upstreamClosed).toBe(true)
+    expect(stored?.messages[1]).toMatchObject({ role: "assistant", status: "aborted", content: "התקציב אושר [s1]" })
+  })
+
+  it("finalizes as aborted when the SSE body is cancelled", async () => {
+    const stream = vi.fn(async function* (req: LlmStreamRequest): AsyncGenerator<LlmStreamEvent> {
+      void req
+      yield { type: "start", provider: "gemini", model: "gemini-3.8-flash" }
+      yield { type: "delta", text: "חלקי [s1]" }
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      yield { type: "delta", text: " המשך" }
+    })
+
+    setAskDepsForTesting({ retrieve: retrieving([passage("m_w1")]), stream, settings: async () => ({}) })
+
+    const ctx = await member()
+    const response = sseResponse(askStream(ctx, { question: QUESTION, scope: { kind: "workspace" } }), { keepAliveMs: 0 })
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let text = ""
+
+    while (!text.includes("event: delta")) {
+      const chunk = await reader.read()
+
+      if (chunk.done) break
+      text += decoder.decode(chunk.value)
+    }
+    await reader.cancel()
+
+    const threadId = /"threadId":"([^"]+)"/.exec(text)?.[1]
+    const store = createThreadStore(ctx)!
+
+    await vi.waitFor(async () => {
+      expect((await store.getThread(threadId!))?.messages[1]).toMatchObject({ status: "aborted", content: expect.stringMatching(/^חלקי \[s1\]/) })
+    })
   })
 
   it("passes the abort signal to the LLM stream", async () => {

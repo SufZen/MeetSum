@@ -167,6 +167,17 @@ async function citablePassages(
 
 type Finalizer = (final: MessageFinal) => Promise<void>
 
+/** The run fields (provider, model, usage, cost) of a finished LLM stream. */
+function runFieldsOf(result: Extract<LlmStreamEvent, { type: "done" }>) {
+  return {
+    provider: result.provider,
+    model: result.model,
+    ...(result.aiRunId ? { aiRunId: result.aiRunId } : {}),
+    usage: result.usage,
+    costUsd: result.costUsd,
+  }
+}
+
 function errorEvent(
   code: Extract<AskStreamEvent, { type: "error" }>["code"],
   language: AskLanguage
@@ -211,6 +222,15 @@ export async function* askStream(
   const language = resolveAskLanguage(question, { override: req.language, workspaceDefault: settings.defaultLocale })
   const store = req.persist === false ? null : threadStore(ctx)
   let finalize: Finalizer = async () => {}
+  // A consumer that stops reading (`iterator.return()`, an SSE body cancel)
+  // resumes this generator at its current `yield` straight into `finally`:
+  // the assistant message must still leave `streaming` (as `aborted`).
+  let settled = false
+  const settle: Finalizer = async (final) => {
+    settled = true
+    await finalize(final)
+  }
+  let closedEarly = (): MessageFinal => ({ retrieval: null, language, content: "", status: "aborted", citations: [], grounded: null })
 
   try {
     // 1. Per-minute limit (one bucket per principal, every entry point), then the daily cap.
@@ -352,12 +372,12 @@ export async function* askStream(
     ) {
       const done = refusedDone(language)
 
-      await finalize({ ...base, content: done.content, status: "refused", citations: [], grounded: false })
+      await settle({ ...base, content: done.content, status: "refused", citations: [], grounded: false })
       yield done
       return
     }
     if (signal?.aborted) {
-      await finalize({ ...base, content: "", status: "aborted", citations: [], grounded: null })
+      await settle({ ...base, content: "", status: "aborted", citations: [], grounded: null })
       return
     }
 
@@ -365,6 +385,19 @@ export async function* askStream(
     const markers = createMarkerStream(context.aliases)
     let raw = ""
     let result: Extract<LlmStreamEvent, { type: "done" }> | undefined
+
+    closedEarly = () => {
+      const partial = normalizeMarkers(stripUnsafeMarkdown(stripSentinel(raw)), context.aliases)
+
+      return {
+        ...base,
+        ...(result ? runFieldsOf(result) : {}),
+        content: partial,
+        status: "aborted",
+        citations: buildCitations(partial, context.aliases),
+        grounded: null,
+      }
+    }
 
     try {
       for await (const event of stream({
@@ -400,7 +433,7 @@ export async function* askStream(
     } catch (error) {
       if (!signal?.aborted) {
         logFailure("stream", error)
-        await finalize({
+        await settle({
           ...base,
           content: "",
           status: "error",
@@ -416,7 +449,7 @@ export async function* askStream(
     if (signal?.aborted || !result) {
       const partial = normalizeMarkers(stripUnsafeMarkdown(stripSentinel(raw)), context.aliases)
 
-      await finalize({ ...base, content: partial, status: "aborted", citations: buildCitations(partial, context.aliases), grounded: null })
+      await settle({ ...base, content: partial, status: "aborted", citations: buildCitations(partial, context.aliases), grounded: null })
       return
     }
 
@@ -426,19 +459,13 @@ export async function* askStream(
       outputTokens: result.usage.outputTokens,
       cacheReadTokens: result.usage.cacheReadTokens,
     }
-    const runFields = {
-      provider: result.provider,
-      model: result.model,
-      ...(result.aiRunId ? { aiRunId: result.aiRunId } : {}),
-      usage: result.usage,
-      costUsd: result.costUsd,
-    }
+    const runFields = runFieldsOf(result)
     const meta = { provider: result.provider, model: result.model, usage, costUsd: result.costUsd }
 
     if (isSentinelAnswer(result.text)) {
       const done = { ...refusedDone(language), ...meta }
 
-      await finalize({ ...base, ...runFields, content: done.content, status: "refused", citations: [], grounded: false })
+      await settle({ ...base, ...runFields, content: done.content, status: "refused", citations: [], grounded: false })
       yield done
       return
     }
@@ -450,7 +477,7 @@ export async function* askStream(
     if (!claims.citedSentences || !citations.length) {
       const done = { ...refusedDone(language, claims.droppedUncitedSentences), ...meta }
 
-      await finalize({ ...base, ...runFields, content: done.content, status: "refused", citations: [], grounded: false })
+      await settle({ ...base, ...runFields, content: done.content, status: "refused", citations: [], grounded: false })
       yield done
       return
     }
@@ -466,12 +493,14 @@ export async function* askStream(
       ...meta,
     }
 
-    await finalize({ ...base, ...runFields, content: done.content, status: "complete", citations, grounded: true })
+    await settle({ ...base, ...runFields, content: done.content, status: "complete", citations, grounded: true })
     yield done
   } catch (error) {
     logFailure("request", error)
-    await finalize({ retrieval: null, language, content: "", status: "error", citations: [], grounded: null, error: "internal" })
+    await settle({ retrieval: null, language, content: "", status: "error", citations: [], grounded: null, error: "internal" })
     yield errorEvent("internal", language)
+  } finally {
+    if (!settled) await finalize(closedEarly())
   }
 }
 

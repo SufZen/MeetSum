@@ -117,46 +117,72 @@ export async function* streamText(req: LlmStreamRequest): AsyncGenerator<LlmStre
     }
     yield { type: "start", provider: route.provider, model: route.model }
 
+    // Set once this attempt ends normally (done, error or fallback). Still
+    // false in `finally` means the consumer stopped reading mid-stream
+    // (`return()`, e.g. an SSE body cancel): record the attempt as aborted.
+    let settled = false
+
     try {
-      for await (const chunk of streamers[route.provider].stream(req, route.model)) {
-        if (req.signal?.aborted) throw new LlmError("Aborted", "unknown", route.provider, false)
-        if (chunk.type === "delta") {
-          emitted = true
-          text += chunk.text
-          yield { type: "delta", text: chunk.text }
-        } else {
-          usage = chunk.usage
-          stopReason = chunk.stopReason
-          answeredModel = chunk.model ?? route.model
+      try {
+        for await (const chunk of streamers[route.provider].stream(req, route.model)) {
+          if (req.signal?.aborted) throw new LlmError("Aborted", "unknown", route.provider, false)
+          if (chunk.type === "delta") {
+            emitted = true
+            text += chunk.text
+            yield { type: "delta", text: chunk.text }
+          } else {
+            usage = chunk.usage
+            stopReason = chunk.stopReason
+            answeredModel = chunk.model ?? route.model
+          }
         }
-      }
-      if (req.signal?.aborted) throw new LlmError("Aborted", "unknown", route.provider, false)
-    } catch (caught) {
-      const error = toLlmError(caught, route.provider)
-      const aborted = Boolean(req.signal?.aborted)
+        if (req.signal?.aborted) throw new LlmError("Aborted", "unknown", route.provider, false)
+      } catch (caught) {
+        settled = true
+        const error = toLlmError(caught, route.provider)
+        const aborted = Boolean(req.signal?.aborted)
 
-      lastError = error
-      attempts.push({
-        provider: route.provider,
-        model: route.model,
-        ok: false,
-        kind: error.kind,
-        error: attemptError(error, aborted),
-        latencyMs: Date.now() - startedAt,
-      })
-      // After the first delta (or on abort) there is no fallback.
-      if (emitted || aborted || index === routes.length - 1) {
-        const chainError = new LlmChainError(
-          emitted ? "Chat stream failed after the first delta" : "All chat routes failed",
-          aborted ? "unknown" : error.kind,
-          route.provider,
-          attempts
-        )
+        lastError = error
+        attempts.push({
+          provider: route.provider,
+          model: route.model,
+          ok: false,
+          kind: error.kind,
+          error: attemptError(error, aborted),
+          latencyMs: Date.now() - startedAt,
+        })
+        // After the first delta (or on abort) there is no fallback.
+        if (emitted || aborted || index === routes.length - 1) {
+          const chainError = new LlmChainError(
+            emitted ? "Chat stream failed after the first delta" : "All chat routes failed",
+            aborted ? "unknown" : error.kind,
+            route.provider,
+            attempts
+          )
 
-        await recordLlmRun(req.ctx, "chat", chainError, { metadata: { ...metadata, aborted, emitted } })
-        throw chainError
+          await recordLlmRun(req.ctx, "chat", chainError, { metadata: { ...metadata, aborted, emitted } })
+          throw chainError
+        }
+        continue
       }
-      continue
+      settled = true
+    } finally {
+      if (!settled) {
+        attempts.push({
+          provider: route.provider,
+          model: route.model,
+          ok: false,
+          kind: "unknown",
+          error: "aborted",
+          latencyMs: Date.now() - startedAt,
+        })
+        await recordLlmRun(
+          req.ctx,
+          "chat",
+          new LlmChainError("Chat stream closed by the consumer", "unknown", route.provider, attempts),
+          { metadata: { ...metadata, aborted: true, emitted, closedByConsumer: true } }
+        ).catch(() => undefined)
+      }
     }
 
     const latencyMs = Date.now() - startedAt

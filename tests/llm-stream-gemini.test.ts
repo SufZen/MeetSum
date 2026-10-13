@@ -239,6 +239,41 @@ describe("Gemini chat streaming", () => {
     expect(db.queries.find((query) => query.values[4] === "failed")?.values[10]).toBe("aborted")
   })
 
+  it("records an aborted ai_runs attempt when the consumer stops reading (iterator.return)", async () => {
+    let upstreamClosed = false
+    const client = geminiClient(async () =>
+      (async function* () {
+        try {
+          yield { text: "חלק" }
+          yield { text: " נוסף" }
+          yield usageChunk
+        } finally {
+          upstreamClosed = true
+        }
+      })()
+    )
+
+    setChatStreamersForTesting({
+      gemini: createGeminiStreamer({ client }),
+      anthropic: createAnthropicStreamer({ client: anthropicClient([], {}) }),
+    })
+
+    const stream = streamText(request())
+
+    for (;;) {
+      const next = await stream.next()
+
+      if (next.done || next.value.type === "delta") break
+    }
+    await stream.return(undefined)
+
+    const failed = db.queries.find((query) => query.text.includes("insert into ai_runs") && query.values[4] === "failed")
+
+    expect(upstreamClosed).toBe(true)
+    expect(failed?.values[10]).toBe("aborted")
+    expect(JSON.stringify(db.queries)).not.toContain(SECRET)
+  })
+
   it("fails fast with LlmError(config) when no provider is configured", async () => {
     setChatStreamersForTesting({
       gemini: { id: "gemini", isConfigured: () => false, stream: () => chunks([]) as never },
