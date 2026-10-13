@@ -126,6 +126,79 @@ describe("createRealizeOSPayload", () => {
     expect(payload.contexts).toEqual([])
   })
 
+  it("pins the v2 outbound shape: schemaVersion and English text for quality warnings", () => {
+    const payload = createRealizeOSPayload(
+      makeMeeting({
+        qualityWarnings: [
+          { code: "transcription_fallback", severity: "warning", params: { provider: "gemini" } },
+          { code: "task_missing_owner_or_due_date", severity: "info", params: { count: 2 } },
+          { code: "smart_notes_only", severity: "info" },
+        ],
+      })
+    )
+
+    expect(payload.schemaVersion).toBe(2)
+    expect(payload.processing.qualityWarnings).toEqual([
+      {
+        code: "transcription_fallback",
+        severity: "warning",
+        params: { provider: "gemini" },
+        title: "Transcription fallback used",
+        message: "The primary transcription path failed, so MeetSum used gemini.",
+      },
+      {
+        code: "task_missing_owner_or_due_date",
+        severity: "info",
+        params: { count: 2 },
+        title: "Tasks need an owner or due date",
+        message: "2 open action items need an owner or due date before external automation.",
+      },
+      {
+        code: "smart_notes_only",
+        severity: "info",
+        title: "Smart notes source",
+        message: "This meeting was generated from Google smart notes, not a full transcript or audio recording.",
+      },
+    ])
+  })
+
+  it("pins the v2 outbound shape of suggested runs: intent code plus English title/description", () => {
+    const payload = createRealizeOSPayload(
+      makeMeeting({
+        suggestedAgentRuns: [
+          {
+            id: "sug_1",
+            meetingId: "meet_ros",
+            target: "realizeos",
+            status: "suggested",
+            payload: { intent: "export_to_realizeos", meetingId: "meet_ros" },
+            createdAt: "2026-05-27T10:05:00Z",
+          },
+          {
+            id: "sug_2",
+            meetingId: "meet_ros",
+            target: "webhook",
+            status: "sent",
+            payload: { intent: "custom_intent" },
+            createdAt: "2026-05-27T10:05:00Z",
+          },
+        ],
+      })
+    )
+
+    expect(payload.suggestedRuns).toEqual([
+      {
+        id: "sug_1",
+        target: "realizeos",
+        status: "suggested",
+        intent: "export_to_realizeos",
+        title: "Export to RealizeOS",
+        description: "Send structured meeting context into RealizeOS memory.",
+      },
+      { id: "sug_2", target: "webhook", status: "sent", intent: "custom_intent", title: "custom_intent", description: "" },
+    ])
+  })
+
   it("throws when meeting is null", () => {
     expect(() => createRealizeOSPayload(null as unknown as MeetingRecord)).toThrow(
       "Meeting is required"

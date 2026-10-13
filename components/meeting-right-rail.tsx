@@ -15,6 +15,7 @@ import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
+import { AGENT_INTENT_KEYS } from "@/lib/agents/intent-messages"
 import type {
   JobRecord,
   MeetingQualityWarning,
@@ -23,15 +24,6 @@ import type {
 } from "@/lib/meetings/repository"
 
 type I18n = ReturnType<typeof useI18n>
-
-/** Agent suggestion copy by intent (lib/agents/suggestions stores English). */
-const AGENT_INTENT_KEYS: Record<string, { title: string; description: string }> = {
-  export_to_realizeos: { title: "mtgAgentExportRealizeosTitle", description: "mtgAgentExportRealizeosDescription" },
-  draft_followup_email: { title: "mtgAgentFollowupEmailTitle", description: "mtgAgentFollowupEmailDescription" },
-  create_n8n_payload: { title: "mtgAgentN8nPayloadTitle", description: "mtgAgentN8nPayloadDescription" },
-  draft_client_recap: { title: "mtgAgentClientRecapTitle", description: "mtgAgentClientRecapDescription" },
-  extract_crm_notes: { title: "mtgAgentCrmNotesTitle", description: "mtgAgentCrmNotesDescription" },
-}
 
 const AGENT_STATUS_KEYS: Record<SuggestedAgentRun["status"], string> = {
   suggested: "mtgAgentStatusSuggested",

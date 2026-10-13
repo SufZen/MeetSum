@@ -24,7 +24,7 @@ Returns system health status. **No auth required.**
 List meetings. Query: `limit` (default 20).
 
 ### `GET /api/meetings/:id`
-Get a single meeting with full detail.
+Get a single meeting with full detail. Since M9, machine-readable codes replace English copy: `qualityWarnings[]` is `{ code, severity, params? }` (codes: `smart_notes_only`, `transcription_fallback`, `weak_transcript_confidence`, `no_speaker_diarization`, `summary_language_mismatch`, `task_missing_owner_or_due_date`), and `suggestedAgentRuns[].payload` carries an `intent` code without `title`/`description`. Clients translate the codes; the outbound RealizeOS payload below still carries English text.
 
 ### `POST /api/meetings`
 Create a meeting. Body: `{ title, source, language?, participants? }`.
@@ -126,6 +126,13 @@ Response: `{ deliveryId, pageId, url, updated }`. Re-exporting updates the track
 Create (or update in place) a Google Doc of the recap in the requester's own Drive, with RTL Hebrew paragraphs. Body: `{ includeTranscript? }`; `?new=1` forces a new document. Requires `meeting:read` and a visible meeting (else 404). Auth, in order: the requester's personal Google Drive connection (OAuth with PKCE, `drive.file` only), then service-account domain-wide delegation when `MEETSUM_GOOGLE_DOCS_DWD=true` and the requester's domain matches the workspace subject's; otherwise 409 `google_docs_not_connected` with a `connectUrl`. A private meeting needs its owner's per-meeting opt-in (403 `private_meeting_not_opted_in`), and a connection with `allowManualSend: false` is refused (403 `manual_send_disabled`). Response: `{ documentId, url, updated }`. Google's error text is never reflected. **Rate limit:** 20 req/min.
 
 ---
+
+## RealizeOS export
+
+`POST /api/integrations/realizeos/export` sends the meeting context to `REALIZEOS_API_URL` + `REALIZEOS_MEETING_CONTEXT_PATH`; `GET /api/integrations/realizeos/preview/:id` returns the same body without sending it. The body carries `schemaVersion: 2` (absent in v1). v2 changes, all additive for v1 readers:
+
+- `processing.qualityWarnings[]`: `{ code, severity, params?, title, message }`; `title` and `message` are English, rendered from the code at export time.
+- `suggestedRuns[]`: `{ id, target, status, intent, title, description }`, with English `title`/`description` from the intent code (an unknown intent repeats the code as `title`).
 
 ## Rooms
 

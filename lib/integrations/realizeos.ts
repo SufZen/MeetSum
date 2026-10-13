@@ -4,6 +4,15 @@ import type { MeetingRecord, RepoScope } from "@/lib/meetings/repository"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
+import { englishQualityWarningText, englishSuggestionText } from "@/lib/integrations/realizeos-text"
+
+/**
+ * Outbound payload version. 2 (M9): quality warnings carry
+ * `{code, severity, params}` plus English `title`/`message`, and
+ * `suggestedRuns` carry the intent code plus English `title`/`description`
+ * (dual-emitted for v1 consumers, rendered from the en dictionary).
+ */
+export const REALIZEOS_PAYLOAD_SCHEMA_VERSION = 2
 
 export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
   if (!meeting) {
@@ -11,6 +20,7 @@ export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
   }
 
   return {
+    schemaVersion: REALIZEOS_PAYLOAD_SCHEMA_VERSION,
     source: "meetsum",
     exportedAt: new Date().toISOString(),
     meeting: {
@@ -51,7 +61,10 @@ export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
         completedAt: run.completedAt,
         error: run.error,
       })),
-      qualityWarnings: meeting.qualityWarnings ?? [],
+      qualityWarnings: (meeting.qualityWarnings ?? []).map((warning) => ({
+        ...warning,
+        ...englishQualityWarningText(warning),
+      })),
       googleContext: (meeting.meetConferenceRecords ?? []).map((record) => ({
         id: record.id,
         conferenceRecordName: record.conferenceRecordName,
@@ -66,6 +79,17 @@ export function createRealizeOSPayload(meeting: MeetingRecord | undefined) {
         })),
       })),
     },
+    suggestedRuns: (meeting.suggestedAgentRuns ?? []).map((run) => {
+      const intent = typeof run.payload.intent === "string" ? run.payload.intent : ""
+
+      return {
+        id: run.id,
+        target: run.target,
+        status: run.status,
+        intent,
+        ...englishSuggestionText(intent),
+      }
+    }),
     mediaAssets: (meeting.mediaAssets ?? []).map((asset) => ({
       id: asset.id,
       filename: asset.filename,
