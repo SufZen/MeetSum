@@ -221,6 +221,9 @@ export const RATE_LIMIT_PRESETS = {
   /** M6 AskMeetSum (POST /api/ask and the compat ask routes): 20 per minute */
   ask: { maxRequests: 20, windowMs: 60_000 } satisfies RateLimitConfig,
 
+  /** M6 Ask thread creation (POST /api/ask/threads), per user: 30 per minute */
+  threads: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
+
   /**
    * On-demand LLM generation (M5 prep briefs and follow-up emails share one
    * budget per `${workspaceId}:${userId|apiKeyId}`): writers 3/min and

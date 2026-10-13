@@ -69,6 +69,8 @@ export type ThreadStore = {
   finalizeMessage(messageId: string, final: MessageFinal): Promise<void>
   setFeedback(messageId: string, rating: -1 | 1 | null): Promise<boolean>
   countUserQuestionsToday(): Promise<number>
+  /** The caller's threads that are neither archived nor deleted. */
+  countActiveThreads(): Promise<number>
 }
 
 export class InvalidThreadCursorError extends Error {
@@ -389,6 +391,15 @@ export function buildCountQuestionsSql(options: PgThreadStoreOptions) {
   }
 }
 
+export function buildCountActiveThreadsSql(options: PgThreadStoreOptions) {
+  const values: unknown[] = []
+
+  return {
+    text: `select count(*)::int as n from chat_threads t where ${ownerSql(values, options)} and t.archived_at is null`,
+    values,
+  }
+}
+
 export function buildVisibleMeetingsSql(options: PgThreadStoreOptions, meetingIds: string[]) {
   const values: unknown[] = []
   const scope = meetingScopeSql(options.scope, "m", values)
@@ -491,6 +502,11 @@ export function createPgThreadStore(db: Queryable, options: PgThreadStoreOptions
     },
     async countUserQuestionsToday() {
       const [row] = await run<{ n: number | string }>(buildCountQuestionsSql(options))
+
+      return Number(row?.n ?? 0)
+    },
+    async countActiveThreads() {
+      const [row] = await run<{ n: number | string }>(buildCountActiveThreadsSql(options))
 
       return Number(row?.n ?? 0)
     },
@@ -730,6 +746,9 @@ export function createMemoryThreadStore(options: MemoryThreadStoreOptions): Thre
           message.createdAt.slice(0, 10) === today
         )
       }).length
+    },
+    async countActiveThreads() {
+      return [...memory.threads.values()].filter((thread) => own(thread) && !thread.archivedAt).length
     },
   }
 }

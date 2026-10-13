@@ -5,6 +5,7 @@ import { createThreadStore, InvalidThreadCursorError } from "@/lib/ask/thread-st
 import type { AskScope } from "@/lib/ask/types"
 import { withAuthz } from "@/lib/auth/authz"
 import { userRequired } from "@/lib/comments/route-context"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -51,10 +52,24 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
   }
 })
 
+/** Active (not archived, not deleted) threads per user: `MEETSUM_ASK_MAX_ACTIVE_THREADS` (default 500). */
+function maxActiveThreads(): number {
+  const value = Number(process.env.MEETSUM_ASK_MAX_ACTIVE_THREADS)
+
+  return Number.isInteger(value) && value > 0 ? value : 500
+}
+
 export const POST = withAuthz("meeting:read", async (request, ctx) => {
   const store = createThreadStore(ctx)
 
   if (!store) return userRequired()
+
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.threads, `threads:${ctx.workspace.id}:${ctx.user?.id}`)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+  if ((await store.countActiveThreads()) >= maxActiveThreads()) {
+    return NextResponse.json({ error: "thread_limit" }, { status: 409, headers: rateLimit.headers })
+  }
 
   const input = (await request.json().catch(() => ({}))) as { scope?: unknown; title?: unknown }
   const scope = parseAskScope(input.scope)

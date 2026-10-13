@@ -192,6 +192,35 @@ describe("POST /api/ask", () => {
 })
 
 describe("thread routes", () => {
+  it("caps active threads per user (409) and rate-limits thread creation (429)", async () => {
+    process.env.MEETSUM_ASK_MAX_ACTIVE_THREADS = "3"
+    setRouteCtx(await member())
+
+    const create = () => createThread(jsonRequest("http://localhost/api/ask/threads", "POST", { scope: { kind: "workspace" } }), routeParams({}))
+
+    try {
+      for (let index = 0; index < 3; index += 1) expect((await create()).status).toBe(201)
+
+      const blocked = await create()
+
+      expect(blocked.status).toBe(409)
+      expect(await blocked.json()).toEqual({ error: "thread_limit" })
+
+      // Another user has their own cap.
+      setRouteCtx(await member("user_other"))
+      expect((await create()).status).toBe(201)
+    } finally {
+      delete process.env.MEETSUM_ASK_MAX_ACTIVE_THREADS
+    }
+
+    setRouteCtx(await member("user_burst"))
+    const statuses: number[] = []
+
+    for (let index = 0; index < 35; index += 1) statuses.push((await create()).status)
+    expect(statuses.filter((status) => status === 201)).toHaveLength(30)
+    expect(statuses.at(-1)).toBe(429)
+  })
+
   it("lists, reads, renames, archives, deletes (audited, ids only) and rates the caller's threads", async () => {
     const ctx = await member()
 
