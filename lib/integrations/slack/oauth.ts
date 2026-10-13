@@ -1,7 +1,10 @@
 /**
  * Slack OAuth v2 (docs/parity/m8.md A9), workspace connection. Owner:
- * Package A. Bot scopes `chat:write,chat:write.public,channels:read`
- * (`SLACK_SCOPES` overrides; `groups:read` with `SLACK_PRIVATE_CHANNELS`).
+ * Package A. Bot scopes `chat:write,chat:write.public,channels:read,
+ * channels:history` (`SLACK_SCOPES` overrides; `groups:read` and
+ * `groups:history` with `SLACK_PRIVATE_CHANNELS`). `channels:history` lets a
+ * retried delivery find the message it already posted (metadata marker)
+ * instead of posting a duplicate.
  * No PKCE (Slack does not support it for confidential clients). Token
  * rotation (`expires_in` + `refresh_token`) is supported.
  */
@@ -11,7 +14,7 @@ import type { OAuthExchangeResult, ProviderFetch, TokenSet } from "@/lib/integra
 import { slackCall, type SlackResponse } from "@/lib/integrations/slack/client"
 
 export const SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
-export const SLACK_DEFAULT_SCOPES = ["chat:write", "chat:write.public", "channels:read"]
+export const SLACK_DEFAULT_SCOPES = ["chat:write", "chat:write.public", "channels:read", "channels:history"]
 export const SLACK_COMMAND_SCOPES = ["commands", "users:read", "users:read.email"]
 
 export function slackClientConfig(env: NodeJS.ProcessEnv = process.env) {
@@ -25,7 +28,10 @@ export function slackScopes(env: NodeJS.ProcessEnv = process.env): string[] {
   const configured = env.SLACK_SCOPES?.split(",").map((scope) => scope.trim()).filter(Boolean)
   const scopes = new Set(configured?.length ? configured : SLACK_DEFAULT_SCOPES)
 
-  if (env.SLACK_PRIVATE_CHANNELS === "true") scopes.add("groups:read")
+  if (env.SLACK_PRIVATE_CHANNELS === "true") {
+    scopes.add("groups:read")
+    scopes.add("groups:history")
+  }
   if (env.SLACK_COMMANDS_ENABLED === "true") for (const scope of SLACK_COMMAND_SCOPES) scopes.add(scope)
   return [...scopes]
 }

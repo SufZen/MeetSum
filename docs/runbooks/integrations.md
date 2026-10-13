@@ -58,7 +58,8 @@ Each app ends with the "First live run" for its provider (below). Record who own
   - `chat:write` (post messages)
   - `chat:write.public` (post to public channels without an invite; remove it through `SLACK_SCOPES` if the workspace prefers explicit invites)
   - `channels:read` (channel picker)
-  - optional `groups:read` (private channels; set `SLACK_PRIVATE_CHANNELS=true` and invite the app to the channel)
+  - `channels:history` (a retried delivery looks up the message it already posted by its metadata marker instead of posting twice; connections made before this scope was added keep working but should be reconnected)
+  - optional `groups:read` and `groups:history` (private channels; set `SLACK_PRIVATE_CHANNELS=true` and invite the app to the channel)
 - **Stretch (slash command):** `commands`, `users:read`, `users:read.email`; Slash command `/meetsum` → Request URL `BASE/api/integrations/slack/commands`; then set `SLACK_COMMANDS_ENABLED=true` and `SLACK_SIGNING_SECRET` (Basic Information → App Credentials → Signing Secret).
 - **Optional:** OAuth & Permissions → Advanced token security → token rotation (refresh tokens are persisted automatically).
 - **Multi-workspace installs:** Manage Distribution → Activate Public Distribution.
@@ -150,7 +151,7 @@ All variables are in `.env.example` (M8 block). Never commit real values; produc
 |---|---|---|
 | `MEETSUM_OAUTH_REDIRECT_BASE` | `NEXT_PUBLIC_APP_URL` | Origin only; `https:` in production |
 | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | | |
-| `SLACK_SCOPES` | `chat:write,chat:write.public,channels:read` | |
+| `SLACK_SCOPES` | `chat:write,chat:write.public,channels:read,channels:history` | |
 | `SLACK_PRIVATE_CHANNELS` | `false` | Adds `groups:read` |
 | `SLACK_COMMANDS_ENABLED`, `SLACK_SIGNING_SECRET` | `false` | Stretch |
 | `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | |

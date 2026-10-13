@@ -318,7 +318,14 @@ describe("hubspot deliver", () => {
       status: "sent",
       // HubSpot reordered the batch results; objectWriteTraceId still maps each task to its item.
       externalRef: { engagementId: "88001", engagementType: "meeting", taskIds: ["77002", "77001"] },
-      progress: { contactIds: ["501", "502"], engagementId: "88001", taskIdsByActionItem: { ai_1: "77001", ai_2: "77002" } },
+      progress: {
+        contactIds: ["501", "502"],
+        engagementId: "88001",
+        taskIdsByActionItem: { ai_1: "77001", ai_2: "77002" },
+        // Pending-intent markers written before each create (review fix #4).
+        engagementIntent: { destinationKey: "meeting:9001", marker: expect.stringMatching(/^ms-[0-9a-f]{20}$/) },
+        taskIntents: { ai_1: expect.stringMatching(/^ms-[0-9a-f]{20}$/), ai_2: expect.stringMatching(/^ms-[0-9a-f]{20}$/) },
+      },
     })
     expect(h.links.rows.map((row) => [row.objectKind, row.destinationKey, row.actionItemId, row.externalId])).toEqual([
       ["hubspot_engagement", "meeting:9001", "", "88001"],
@@ -381,11 +388,19 @@ describe("hubspot deliver", () => {
 
     const progress = failing.saved.at(-1) as Record<string, unknown>
 
-    expect(progress).toEqual({ contactIds: ["501", "502"], engagementId: "88001" })
+    expect(progress).toMatchObject({ contactIds: ["501", "502"], engagementId: "88001" })
+    expect(progress.taskIdsByActionItem).toBeUndefined()
 
-    const retry = harness({ routes: ROUTES, links: failing.links, progress })
+    // The task intents were written before the failed batch: the retry looks
+    // for their markers first (none found) and then creates the tasks once.
+    const retry = harness({
+      routes: [{ match: `POST ${API}/crm/v3/objects/tasks/search`, respond: json({ total: 0, results: [] }) }, ...ROUTES],
+      links: failing.links,
+      progress,
+    })
     const result = await deliverToHubspot(retry.input)
 
+    expect(byPath(retry.calls, "/tasks/search")).toHaveLength(2)
     expect(byPath(retry.calls, "/contacts/search")).toHaveLength(0)
     expect(byPath(retry.calls, "/crm/v3/objects/meetings")).toHaveLength(0)
     expect(byPath(retry.calls, "/tasks/batch/create")).toHaveLength(1)

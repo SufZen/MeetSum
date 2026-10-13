@@ -6,7 +6,12 @@
  *   on/off is applied by the dispatcher and again at deliver time.
  * - Members only by default; `attendees` never applies to private meetings.
  * - One email per recipient (addresses are never exposed to each other).
- *   `progress.sent` holds sha256 hashes, so a retry never re-sends;
+ *   `progress.sent` holds sha256 hashes, so a retry never re-sends.
+ *   Before each SMTP/Gmail call the recipient hash is written to
+ *   `progress.pending` (its own write; a failure aborts before sending), and
+ *   the result is written right after the send, separately. A retry treats
+ *   a pending hash as already sent (at most once: a crash between the
+ *   intent and the send loses that one email instead of duplicating it);
  *   `progress.sentLog` feeds the per-workspace hourly cap (DB-counted).
  * - Hourly cap hit → `rate_limited` (`hourly_cap`): the retry resumes when
  *   the window frees; the last attempt ends `partial`.
@@ -87,11 +92,15 @@ export function createEmailRecapProvider(deps: EmailRecapDeps = {}): Integration
     const locale = destination.locale === "meeting" ? recapLocale(input.recap.language) : destination.locale
     const workspaceName = await (deps.workspaceName ?? defaultWorkspaceName)(input.workspaceId)
     const sent = new Set(Array.isArray(input.progress.sent) ? (input.progress.sent as string[]) : [])
+    // A pending intent from an earlier attempt may have been sent: never re-send it.
+    for (const hash of Array.isArray(input.progress.pending) ? (input.progress.pending as string[]) : []) sent.add(hash)
+    const pending = new Set<string>()
     const sentLog = Array.isArray(input.progress.sentLog) ? [...(input.progress.sentLog as { at: string; n: number }[])] : []
     const failedHashes: string[] = []
     const hourAgo = new Date(now().getTime() - 60 * 60_000)
     let budget = emailRecapMaxPerHour(env()) - (await store.countRecapEmailsSince(input.workspaceId, hourAgo))
     let capped = false
+    const snapshot = () => ({ ...input.progress, sent: [...sent], pending: [...pending], sentLog })
 
     for (const recipient of recipients) {
       const hash = recipientHash(recipient.email)
@@ -113,20 +122,38 @@ export function createEmailRecapProvider(deps: EmailRecapDeps = {}): Integration
         timeZone: getTaskTimeZone(env()),
       })
 
+      // 1. Intent first (its own write): no write, no send.
+      pending.add(hash)
+      await input.saveProgress(snapshot())
+
+      // 2. The external call, alone.
       try {
         await sender.send(message)
-        sent.add(hash)
-        sentLog.push({ at: now().toISOString(), n: 1 })
-        budget -= 1
-        await input.saveProgress({ ...input.progress, sent: [...sent], sentLog })
       } catch (error) {
         failedHashes.push(hash)
         integrationLog.warn("recap email send failed", error)
+        pending.delete(hash)
+        // Clear the intent so a retry sends it; if this write fails the
+        // email is skipped rather than duplicated.
+        await input.saveProgress(snapshot()).catch(() => undefined)
+        await sleep(200)
+        continue
       }
+
+      // 3. The result, separately: a failed write leaves the pending intent,
+      //    which a retry treats as sent.
+      pending.delete(hash)
+      sent.add(hash)
+      sentLog.push({ at: now().toISOString(), n: 1 })
+      budget -= 1
+      await input.saveProgress(snapshot()).catch((error: unknown) => {
+        pending.add(hash)
+        integrationLog.warn("recap email progress write failed", error)
+      })
       await sleep(200)
     }
 
-    const progress = { ...input.progress, sent: [...sent], sentLog }
+    const progress = { ...input.progress, sent: [...sent], pending: [], sentLog }
 
     await audit(input, sent.size, skipped, failedHashes.length)
 

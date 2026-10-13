@@ -5,7 +5,9 @@
  * Any database schema works: `GET /v1/databases/{id}` gives the title
  * property's real name, and the optional properties are set only when they
  * exist with a compatible type (Date → `date`; Participants →
- * `multi_select`/`rich_text`; Language → `select`/`rich_text`).
+ * `multi_select`/`rich_text`; Language → `select`/`rich_text`; an optional
+ * `MeetSum ID` rich_text gets the meeting id, so a retried create can find
+ * the page it already made).
  */
 import type { MeetingRecap } from "@/lib/integrations/recap"
 import { NOTION_MAX_TEXT_LENGTH, notionRichText } from "@/lib/integrations/notion/blocks"
@@ -23,6 +25,8 @@ export type NotionPropertyMap = {
   date?: string
   participants?: { name: string; type: "multi_select" | "rich_text" }
   language?: { name: string; type: "select" | "rich_text" }
+  /** Optional `MeetSum ID` rich_text property: the meeting id, used to find a page after a lost write. */
+  meetsumId?: string
 }
 
 /** Case-insensitive lookup of a conventional property name. */
@@ -44,6 +48,7 @@ export function resolveNotionPropertyMap(database: NotionDatabase, titleOverride
   const date = findProperty(properties, ["Date", "תאריך"])
   const participants = findProperty(properties, ["Participants", "Attendees", "משתתפים"])
   const language = findProperty(properties, ["Language", "שפה"])
+  const meetsumId = findProperty(properties, ["MeetSum ID", "MeetSum Id", "meetsum_id"])
 
   if (date?.[1].type === "date") map.date = date[0]
   if (participants && (participants[1].type === "multi_select" || participants[1].type === "rich_text")) {
@@ -52,6 +57,7 @@ export function resolveNotionPropertyMap(database: NotionDatabase, titleOverride
   if (language && (language[1].type === "select" || language[1].type === "rich_text")) {
     map.language = { name: language[0], type: language[1].type }
   }
+  if (meetsumId?.[1].type === "rich_text") map.meetsumId = meetsumId[0]
 
   return map
 }
@@ -95,6 +101,8 @@ export function buildNotionProperties(recap: MeetingRecap, map: NotionPropertyMa
         ? { select: { name: optionName(recap.language) || "unknown" } }
         : { rich_text: notionRichText(recap.language) }
   }
+
+  if (map.meetsumId) properties[map.meetsumId] = { rich_text: notionRichText(recap.meetingId) }
 
   return properties
 }

@@ -62,6 +62,8 @@ export function createFakeNotionHandlers(state: FakeNotionState = createFakeNoti
         },
       },
     }),
+    // Pending-create lookup (review fix #4): the fake never loses a write, so nothing to find.
+    "POST /v1/databases/:id/query": () => ({ body: { object: "list", results: [], has_more: false, next_cursor: null } }),
     "POST /v1/pages": (request) => {
       const body = request.body as { parent?: { database_id?: string }; properties?: unknown; children?: unknown[] }
       const id = `fake-page-${++counter}`

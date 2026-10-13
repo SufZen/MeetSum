@@ -9,10 +9,21 @@
  *   `slack_message` link. A re-send to the same channel within 24 h
  *   `chat.update`s the tracked message; an unchanged payload is a no-op.
  *   `action_item.created` posts a one-item message.
+ * - No duplicate post on retry: before `chat.postMessage` a pending intent
+ *   `progress.slackIntent = {destinationKey, marker, at}` is written (its
+ *   own write), the message carries the marker in Slack message metadata
+ *   (`event_type: meetsum_delivery`), and `progress.slackPosted` is written
+ *   right after the post, before the link. A retry with an intent but no
+ *   result searches the channel history since the intent
+ *   (`conversations.history`, `include_all_metadata`) for the marker and
+ *   adopts that message; it posts only when the marker is not found. When
+ *   the history cannot be read (an older connection without
+ *   `channels:history`, a private channel without `groups:history`) it posts
+ *   again (logged): reconnect Slack to get the scope.
  */
 import { createHash } from "node:crypto"
 
-import { ProviderHttpError } from "@/lib/integrations/core/errors"
+import { integrationLog, ProviderHttpError } from "@/lib/integrations/core/errors"
 import { recapLocale } from "@/lib/integrations/core/links"
 import type {
   DeliverInput,
@@ -66,6 +77,63 @@ async function listChannels(ctx: ProviderCtx, query: { query?: string; cursor?: 
   return { items, ...(next ? { nextCursor: next } : {}) }
 }
 
+export const SLACK_METADATA_EVENT = "meetsum_delivery"
+
+type SlackIntent = { destinationKey: string; marker: string; at: string }
+type SlackPosted = { destinationKey: string; ts: string; channel: string }
+
+function intentFor(value: unknown, destinationKey: string): SlackIntent | undefined {
+  const intent = value as Partial<SlackIntent> | undefined
+
+  return intent && intent.destinationKey === destinationKey && typeof intent.marker === "string" && typeof intent.at === "string"
+    ? (intent as SlackIntent)
+    : undefined
+}
+
+function postedFor(value: unknown, destinationKey: string): SlackPosted | undefined {
+  const posted = value as Partial<SlackPosted> | undefined
+
+  return posted && posted.destinationKey === destinationKey && typeof posted.ts === "string" && typeof posted.channel === "string"
+    ? (posted as SlackPosted)
+    : undefined
+}
+
+/** The message a previous attempt posted for `intent`, found by its metadata marker. */
+async function findPostedByMarker(
+  input: DeliverInput,
+  token: string,
+  channel: string,
+  intent: SlackIntent
+): Promise<SlackPosted | undefined> {
+  const oldest = Math.max(0, Date.parse(intent.at) / 1000 - 60).toFixed(6)
+  let history: Awaited<ReturnType<typeof slackCall>>
+
+  try {
+    history = await slackCall(
+      "conversations.history",
+      { channel, oldest, limit: 200, include_all_metadata: true },
+      { token, form: true, fetch: input.fetch }
+    )
+  } catch (error) {
+    // No history scope or access: we cannot prove the post happened.
+    if (error instanceof ProviderHttpError && (error.kind === "forbidden" || error.kind === "invalid")) {
+      integrationLog.warn("slack history unavailable; re-posting a pending message", error.providerCode)
+      return undefined
+    }
+    throw error
+  }
+
+  const messages = (Array.isArray(history.messages) ? history.messages : []) as {
+    ts?: string
+    metadata?: { event_type?: string; event_payload?: { marker?: string } }
+  }[]
+  const found = messages.find(
+    (message) => message.metadata?.event_type === SLACK_METADATA_EVENT && message.metadata.event_payload?.marker === intent.marker
+  )
+
+  return found?.ts ? { destinationKey: intent.destinationKey, ts: found.ts, channel } : undefined
+}
+
 function contentHash(message: SlackMessage): string {
   return createHash("sha256").update(JSON.stringify(message)).digest("hex")
 }
@@ -117,13 +185,48 @@ async function deliverSlack(input: DeliverInput): Promise<DeliverResult> {
     }
   }
 
-  const posted = await slackCall(
-    "chat.postMessage",
-    { channel: destination.channelId, text: message.text, blocks: message.blocks, unfurl_links: false, unfurl_media: false },
-    { token, fetch: input.fetch }
-  )
-  const ts = typeof posted.ts === "string" ? posted.ts : ""
-  const channel = typeof posted.channel === "string" ? posted.channel : destination.channelId
+  const progress = input.progress
+  let posted = postedFor(progress.slackPosted, destinationKey)
+  const pendingIntent = posted ? undefined : intentFor(progress.slackIntent, destinationKey)
+
+  if (!posted && pendingIntent) posted = await findPostedByMarker(input, token, destination.channelId, pendingIntent)
+
+  if (!posted) {
+    const intent: SlackIntent = {
+      destinationKey,
+      marker: pendingIntent?.marker ?? createHash("sha256").update(`${input.delivery.id}:${destinationKey}`).digest("hex").slice(0, 32),
+      at: new Date().toISOString(),
+    }
+
+    // 1. Intent first (its own write): no write, no post.
+    await input.saveProgress({ ...progress, slackIntent: intent })
+
+    // 2. The post, carrying the marker.
+    const response = await slackCall(
+      "chat.postMessage",
+      {
+        channel: destination.channelId,
+        text: message.text,
+        blocks: message.blocks,
+        unfurl_links: false,
+        unfurl_media: false,
+        metadata: { event_type: SLACK_METADATA_EVENT, event_payload: { marker: intent.marker } },
+      },
+      { token, fetch: input.fetch }
+    )
+
+    posted = {
+      destinationKey,
+      ts: typeof response.ts === "string" ? response.ts : "",
+      channel: typeof response.channel === "string" ? response.channel : destination.channelId,
+    }
+
+    // 3. The result, separately (a failure here is recovered by the marker search).
+    await input.saveProgress({ ...progress, slackIntent: intent, slackPosted: posted })
+  }
+
+  const ts = posted.ts
+  const channel = posted.channel
   let permalink: string | undefined
 
   try {

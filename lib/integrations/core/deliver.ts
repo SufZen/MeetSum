@@ -55,7 +55,13 @@ export class RetryableDeliveryError extends Error {
 /** Manual-send request stored with the delivery (ids and toggles only). */
 export type ManualRequest = { destination: RuleDestination; content: RuleContent }
 
-const PROGRESS_INTERNAL_KEYS = new Set(["request"])
+/**
+ * Keys that never mean "something was delivered": the manual request, and
+ * the pending intents written before an external call (review fix #4:
+ * Slack `slackIntent`, HubSpot `engagementIntent`/`taskIntents`, Notion
+ * `pendingCreate` and its `mode`, email `pending`).
+ */
+const PROGRESS_INTERNAL_KEYS = new Set(["request", "slackIntent", "engagementIntent", "taskIntents", "pendingCreate", "mode", "pending"])
 
 function hasPartialProgress(progress: DeliveryProgress): boolean {
   return Object.entries(progress).some(([key, value]) => {

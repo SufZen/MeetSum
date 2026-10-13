@@ -43,6 +43,10 @@ export const hubspotFakeHandlers: FakeProviderHandlers = {
       },
     }
   },
+  // Pending-intent marker lookups (review fix #4): the fake never loses a write.
+  "POST /crm/v3/objects/meetings/search": () => ({ body: { total: 0, results: [] } }),
+  "POST /crm/v3/objects/notes/search": () => ({ body: { total: 0, results: [] } }),
+  "POST /crm/v3/objects/tasks/search": () => ({ body: { total: 0, results: [] } }),
   "POST /crm/v3/objects/meetings": () => ({ status: 201, body: { id: nextId() } }),
   "POST /crm/v3/objects/notes": () => ({ status: 201, body: { id: nextId() } }),
   "POST /crm/v3/objects/tasks/batch/create": (request) => ({

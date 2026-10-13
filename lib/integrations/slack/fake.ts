@@ -27,7 +27,7 @@ function field(request: FakeProviderRequest, name: string): string | undefined {
 
 export function createSlackFakeHandlers(): FakeProviderHandlers {
   let counter = 0
-  const messages = new Map<string, { channel: string; text: string }>()
+  const messages = new Map<string, { channel: string; text: string; metadata?: unknown }>()
   const unauthorized = { status: 200, body: { ok: false, error: "invalid_auth" } }
 
   return {
@@ -42,7 +42,7 @@ export function createSlackFakeHandlers(): FakeProviderHandlers {
       const grant = field(request, "grant_type")
 
       if (grant === "refresh_token") {
-        return { body: { ok: true, access_token: `fake-slack-bot-${Date.now()}`, refresh_token: "fake-slack-refresh", expires_in: 43_200, scope: "chat:write,chat:write.public,channels:read" } }
+        return { body: { ok: true, access_token: `fake-slack-bot-${Date.now()}`, refresh_token: "fake-slack-refresh", expires_in: 43_200, scope: "chat:write,chat:write.public,channels:read,channels:history" } }
       }
       if (field(request, "code") !== "fake-slack-code") return { body: { ok: false, error: "invalid_code" } }
       return {
@@ -85,7 +85,7 @@ export function createSlackFakeHandlers(): FakeProviderHandlers {
       counter += 1
       const ts = `1700000000.${String(counter).padStart(6, "0")}`
 
-      messages.set(ts, { channel, text: field(request, "text") ?? "" })
+      messages.set(ts, { channel, text: field(request, "text") ?? "", metadata: (request.body as { metadata?: unknown } | undefined)?.metadata })
       return { body: { ok: true, channel, ts } }
     },
     "POST /slack.com/api/chat.update": (request) => {
@@ -95,6 +95,18 @@ export function createSlackFakeHandlers(): FakeProviderHandlers {
 
       if (!messages.has(ts)) return { body: { ok: false, error: "message_not_found" } }
       return { body: { ok: true, channel: field(request, "channel"), ts } }
+    },
+    "POST /slack.com/api/conversations.history": (request) => {
+      if (!authorized(request)) return unauthorized
+
+      const channel = field(request, "channel")
+      const withMetadata = field(request, "include_all_metadata") === "true"
+      const found = [...messages.entries()]
+        .filter(([, message]) => message.channel === channel)
+        .reverse()
+        .map(([ts, message]) => ({ type: "message", ts, ...(withMetadata && message.metadata ? { metadata: message.metadata } : {}) }))
+
+      return { body: { ok: true, messages: found, has_more: false } }
     },
     "POST /slack.com/api/chat.getPermalink": (request) => ({
       body: {
