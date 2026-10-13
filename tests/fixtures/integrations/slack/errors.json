@@ -1,0 +1,6 @@
+{
+  "oauth_invalid_code": { "ok": false, "error": "invalid_code" },
+  "not_in_channel": { "ok": false, "error": "not_in_channel" },
+  "ratelimited": { "ok": false, "error": "ratelimited" },
+  "token_revoked": { "ok": false, "error": "token_revoked" }
+}
