@@ -85,6 +85,7 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
     ]
     let selects = 0
     const { pool, connection, statements, release } = createFakePool((text) => {
+      if (/taken_id/.test(text)) return { rows: [] }
       if (/from action_items/.test(text) && /select/.test(text)) {
         selects += 1
         return selects === 1
@@ -343,5 +344,53 @@ describe("Postgres upsertMeetingIntelligence M5 columns", () => {
     )!
 
     expect((insert[1] as unknown[])[16]).toBeNull()
+  })
+})
+
+describe("Postgres upsertMeetingIntelligence action item ids", () => {
+  it("persists the same AI task id in two meetings without a primary-key collision", async () => {
+    // A tiny action_items table with a global primary key, like Postgres.
+    const table = new Map<string, { meetingId: string; title: string }>()
+    const { pool } = createFakePool((text, values) => {
+      if (/taken_id/.test(text)) {
+        const [ids, meetingId] = values as [string[], string]
+
+        return {
+          rows: ids
+            .filter((id) => table.has(id) && table.get(id)!.meetingId !== meetingId)
+            .map((id) => ({ taken_id: id })),
+        }
+      }
+      if (/insert into action_items/.test(text)) {
+        const [id, meetingId, title] = values as [string, string, string]
+
+        if (table.has(id)) throw Object.assign(new Error("duplicate key"), { code: "23505" })
+        table.set(id, { meetingId, title })
+        return { rows: [] }
+      }
+      if (/from action_items/.test(text) && /select/.test(text)) {
+        const meetingId = values[0] as string
+
+        return {
+          rows: [...table]
+            .filter(([, row]) => row.meetingId === meetingId)
+            .map(([id, row]) => actionRow({ id, title: row.title })),
+        }
+      }
+      if (/insert into summaries/.test(text)) return { rows: [{ id: "summary_1" }] }
+      return { rows: [] }
+    })
+    const repository = createPostgresMeetingRepository(pool, scope)
+    const payload = { ...intelligenceBase, tags: [], actionItems: [task("task_weekly", "Send weekly report")] }
+
+    await repository.upsertMeetingIntelligence("meet_1", payload)
+    await expect(repository.upsertMeetingIntelligence("meet_2", payload)).resolves.toBeDefined()
+
+    const rows = [...table].map(([id, row]) => ({ id, ...row }))
+
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.meetingId).sort()).toEqual(["meet_1", "meet_2"])
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2)
+    expect(rows.find((row) => row.meetingId === "meet_2")!.id).toMatch(/^act_/)
   })
 })

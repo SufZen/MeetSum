@@ -178,4 +178,12 @@ describe("mergeActionItems with M5 owner/due fields", () => {
       expect.objectContaining({ id: "act_1", ownerText: "Dana", dueOn: "2026-10-22", dueSource: "parser" }),
     ])
   })
+
+  it("gives an insert a fresh id when its id is already taken by another meeting", () => {
+    const incoming = [item({ id: "task_shared", title: "Send weekly report" })]
+
+    const plan = mergeActionItems([], incoming, idFactory(), new Set(["task_shared"]))
+
+    expect(plan.insert.map((entry) => entry.id)).toEqual(["generated_1"])
+  })
 })

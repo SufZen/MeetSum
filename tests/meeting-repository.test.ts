@@ -309,6 +309,46 @@ describe("meeting repository", () => {
     expect(persisted.actionItems.map((item) => item.id)).toEqual(["t1", "t2", "t3", "n4"])
   })
 
+  it("keeps action item ids unique when two meetings get a task with the same id", async () => {
+    const base = {
+      source: "upload" as const,
+      language: "en",
+      status: "completed" as const,
+      retention: "audio" as const,
+      startedAt: "2026-04-23T09:00:00.000Z",
+      participants: [],
+    }
+    const repository = createInMemoryMeetingRepository([
+      { ...base, id: "meet_week_1", title: "Weekly 1" },
+      { ...base, id: "meet_week_2", title: "Weekly 2" },
+    ])
+    const intelligence = buildMeetingIntelligence({ ...base, id: "meet_week_1", title: "Weekly" })
+    const shared: SmartTask = {
+      id: "task_weekly",
+      title: "Send weekly report",
+      status: "open",
+      priority: "normal",
+      confidence: 0.8,
+      sourceQuote: "Send weekly report",
+      sourceStartMs: 0,
+      kind: "explicit",
+    }
+
+    await repository.upsertMeetingIntelligence("meet_week_1", { ...intelligence, actionItems: [shared] })
+    await repository.upsertMeetingIntelligence("meet_week_2", { ...intelligence, actionItems: [shared] })
+
+    const first = (await repository.getMeeting("meet_week_1"))?.summary?.actionItems ?? []
+    const second = (await repository.getMeeting("meet_week_2"))?.summary?.actionItems ?? []
+
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(1)
+    expect(second[0].id).not.toBe(first[0].id)
+
+    const updated = await repository.updateActionItem(second[0].id, { status: "done" })
+
+    expect(updated.meetingId).toBe("meet_week_2")
+  })
+
   describe("M5 action items, template and titles (in-memory)", () => {
     const meetingInput = {
       id: "meet_m5",

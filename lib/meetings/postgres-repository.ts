@@ -3222,8 +3222,21 @@ export function createPostgresMeetingRepository(
           [meetingId]
         )
         const existing = (existingResult.rows as ActionItemRow[]).map(mapActionItem)
-        const plan = mergeActionItems(existing, intelligence.actionItems, () =>
-          createId("act")
+        // action_items.id is a global primary key: an incoming id another
+        // meeting already uses gets a fresh id instead of failing the tx.
+        const incomingIds = intelligence.actionItems.map((item) => item.id).filter(Boolean)
+        const takenResult = incomingIds.length
+          ? await tx.query(
+              `select id as taken_id from action_items where id = any($1::text[]) and meeting_id <> $2`,
+              [incomingIds, meetingId]
+            )
+          : { rows: [] }
+        const takenIds = (takenResult.rows as Array<{ taken_id: string }>).map((row) => row.taken_id)
+        const plan = mergeActionItems(
+          existing,
+          intelligence.actionItems,
+          () => createId("act"),
+          takenIds
         )
 
         if (plan.remove.length) {

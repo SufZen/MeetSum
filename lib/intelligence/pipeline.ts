@@ -315,7 +315,19 @@ function isIsoDate(value: string | undefined): value is string {
 
 type EnrichableTask = SmartTask & { ownerIsSourceSpeaker?: boolean; sourceSpeakerId?: string }
 
-function mapActionItems(output: SummaryOutput, transcript: PromptTranscript): EnrichableTask[] {
+/**
+ * Stable per-meeting task id: `action_items.id` is a global primary key, so
+ * the same title in two meetings (recurring syncs) must not share an id.
+ */
+export function actionItemIdFor(meetingId: string, key: string): string {
+  return `task_${sha1Hex(`${meetingId}\u0000${key}`).slice(0, 16)}`
+}
+
+function mapActionItems(
+  output: SummaryOutput,
+  transcript: PromptTranscript,
+  meetingId: string
+): EnrichableTask[] {
   const seen = new Set<string>()
   const tasks: EnrichableTask[] = []
 
@@ -330,7 +342,7 @@ function mapActionItems(output: SummaryOutput, transcript: PromptTranscript): En
     const ownerText = raw.ownerText?.trim() || undefined
     const dueText = raw.dueText?.trim() || undefined
     const task: EnrichableTask = {
-      id: `task_${sha1Hex(key).slice(0, 12)}`,
+      id: actionItemIdFor(meetingId, key),
       title,
       status: "open",
       priority: raw.priority ?? "normal",
@@ -625,7 +637,7 @@ export async function runIntelligencePipeline(
   const chapters = normalizeChapters(output.chapters, transcript, {
     endMs: meeting.durationMs ? segments[0].startMs + meeting.durationMs : undefined,
   })
-  const enriched = enrichActionItems(mapActionItems(output, transcript), {
+  const enriched = enrichActionItems(mapActionItems(output, transcript, meeting.id), {
     meetingStartedAt: meeting.startedAt,
     timeZone: process.env.MEETSUM_DEFAULT_TIMEZONE?.trim() || DEFAULT_TIME_ZONE,
     speakers: speakersOf(meeting),

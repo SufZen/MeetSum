@@ -2318,8 +2318,15 @@ export function createInMemoryMeetingRepository(
       const meeting = requireVisibleMeeting(meetingId)
       const meetingWorkspace = meetingWorkspaceId(meeting)
       const existing = meeting.summary?.actionItems ?? []
-      const plan = mergeActionItems(existing, intelligence.actionItems, () =>
-        createId("act")
+      // Action item ids are global (like the Postgres primary key).
+      const takenIds = [...meetings.values()].flatMap((other) =>
+        other.id === meetingId ? [] : (other.summary?.actionItems ?? []).map((item) => item.id)
+      )
+      const plan = mergeActionItems(
+        existing,
+        intelligence.actionItems,
+        () => createId("act"),
+        takenIds
       )
       const stamp = (item: ActionItem): ActionItem => ({
         ...item,

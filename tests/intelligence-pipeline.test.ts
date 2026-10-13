@@ -319,3 +319,26 @@ describe("fallbacks and routing", () => {
     expect(run).toMatchObject({ provider: "heuristic", fallbackReason: "Meeting has no transcript" })
   })
 })
+
+describe("action item ids", () => {
+  it("derives action item ids from the meeting, so the same title in two meetings never collides", async () => {
+    setLlmProvidersForTesting({
+      gemini: provider("gemini", standardHandler()),
+      anthropic: provider("anthropic", () => null, false),
+    })
+    const first = await runIntelligencePipeline(meeting(), { settings })
+    const second = await runIntelligencePipeline({ ...meeting(), id: "meet_recurring_2" }, { settings })
+    const firstIds = first.intelligence.actionItems.map((item) => item.id)
+    const secondIds = second.intelligence.actionItems.map((item) => item.id)
+
+    expect(firstIds.length).toBeGreaterThan(0)
+    expect(first.intelligence.actionItems.map((item) => item.title)).toEqual(
+      second.intelligence.actionItems.map((item) => item.title)
+    )
+    expect(secondIds.filter((id) => firstIds.includes(id))).toEqual([])
+
+    const again = await runIntelligencePipeline(meeting(), { settings })
+
+    expect(again.intelligence.actionItems.map((item) => item.id)).toEqual(firstIds)
+  })
+})
