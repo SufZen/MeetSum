@@ -186,8 +186,8 @@ describe("postgres stores", () => {
     ).rejects.toBeInstanceOf(TemplateKeyImmutableError)
   })
 
-  it("migration 022 and schema.sql enforce key uniqueness among non-archived templates only (idempotent)", () => {
-    for (const file of ["db/migrations/022_intelligence_parity.sql", "db/schema.sql"]) {
+  it("migration 023 and schema.sql enforce key uniqueness among non-archived templates only (idempotent)", () => {
+    for (const file of ["db/migrations/023_m5_fixups.sql", "db/schema.sql"]) {
       const sql = readFileSync(path.join(process.cwd(), file), "utf8").replace(/\s+/g, " ")
 
       expect(sql, file).toContain(
