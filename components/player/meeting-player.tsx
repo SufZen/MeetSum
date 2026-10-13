@@ -7,6 +7,7 @@
  * localized. Play is the meeting view's one primary action.
  */
 import { useEffect, useMemo, useState } from "react"
+import dynamic from "next/dynamic"
 import {
   KeyboardIcon,
   PauseIcon,
@@ -27,7 +28,6 @@ import {
   usePlayerState,
 } from "@/components/player/meeting-player-provider"
 import { Scrubber } from "@/components/player/scrubber"
-import { ShortcutsDialog } from "@/components/player/shortcuts-dialog"
 import { SpeakerTimelineBar, type LaneSpeaker } from "@/components/player/speaker-timeline-bar"
 import type { SpeakerDirectory } from "@/components/player/speaker-directory"
 import { useMediaPeaks } from "@/components/player/use-media-peaks"
@@ -47,6 +47,12 @@ import { buildSpeakerRuns, type SpeakerLane } from "@/lib/player/speaker-timelin
 import { segmentSpeakerKey } from "@/lib/player/transcript-search"
 import { formatClock } from "@/lib/player/time-format"
 import { cn } from "@/lib/utils"
+
+// Loaded the first time the shortcuts help is asked for.
+const ShortcutsDialog = dynamic(
+  () => import("@/components/player/shortcuts-dialog").then((mod) => mod.ShortcutsDialog),
+  { ssr: false }
+)
 
 function TimeReadout() {
   const currentMs = usePlayerState((state) => state.currentMs)
@@ -100,6 +106,8 @@ export function MeetingPlayer({
   const durationMs = usePlayerState((state) => state.durationMs)
   const activeSegmentIndex = usePlayerState((state) => state.activeSegmentIndex)
   const [helpOpen, setHelpOpen] = useState(false)
+  // Stays mounted after the first open so the close animation can run.
+  const [helpRequested, setHelpRequested] = useState(false)
   const [lanesOpen, setLanesOpen] = useState(true)
   const peaks = useMediaPeaks(player.mediaBaseUrl, Boolean(player.hasMedia && player.media?.peaks))
   const lanes = useMemo(() => buildSpeakerRuns(player.segments), [player.segments])
@@ -161,6 +169,7 @@ export function MeetingPlayer({
           emitCommand("focusSearch")
           break
         case "help":
+          setHelpRequested(true)
           setHelpOpen(true)
           break
         case "mute":
@@ -362,7 +371,10 @@ export function MeetingPlayer({
             size="icon-sm"
             aria-label={t.playerShortcuts}
             title={t.playerShortcuts}
-            onClick={() => setHelpOpen(true)}
+            onClick={() => {
+              setHelpRequested(true)
+              setHelpOpen(true)
+            }}
           >
             <KeyboardIcon />
           </Button>
@@ -397,7 +409,7 @@ export function MeetingPlayer({
         />
       </div>
 
-      {shortcuts ? <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} dictionary={t} /> : null}
+      {shortcuts && (helpOpen || helpRequested) ? <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} dictionary={t} /> : null}
     </section>
   )
 }

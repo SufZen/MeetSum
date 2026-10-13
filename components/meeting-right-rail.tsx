@@ -107,7 +107,7 @@ export function MeetingRightRail({
   const qualityWarnings = meeting?.qualityWarnings ?? []
 
   return (
-    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:h-full lg:border-s lg:border-line">
+    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:col-span-2 lg:grid-cols-2 lg:border-t lg:border-line 2xl:col-span-1 2xl:grid-cols-1 2xl:h-full 2xl:border-s 2xl:border-t-0">
       <PipelineTimeline meeting={meeting} jobs={jobs} />
 
       {talkTime ? <section className="ms-card p-4">{talkTime}</section> : null}

@@ -18,7 +18,7 @@ import { SigmaMark } from "@/components/ui/sigma-mark"
 import Link from "next/link"
 import { useRef } from "react"
 
-import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/admin-panel"
+import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/permissions"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,

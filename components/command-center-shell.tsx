@@ -9,10 +9,10 @@ import {
   useState,
   useTransition,
 } from "react"
+import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { AdminPanel } from "@/components/admin/admin-panel"
 import {
   DriveRecordingPickerDrawer,
   type DriveImportResult,
@@ -32,7 +32,6 @@ import { MeetingWorkspace, type MeetingPermissions } from "@/components/meeting-
 import { localizeSpeakerLabel } from "@/components/speaker-display"
 import { TalkTimePanel } from "@/components/talk-time-panel"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
-import { OperationalPage } from "@/components/operational-pages"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -62,6 +61,19 @@ import type {
 } from "@/lib/meetings/repository"
 import type { MeetingDetailResponse } from "@/lib/meetings/transcript-wire"
 import { parseTimeParam } from "@/lib/player/deep-link"
+
+// Secondary panels load on demand so the meetings view stays light.
+const panelLoading = () => (
+  <div aria-busy="true" className="min-h-[calc(100svh-3.5rem)] animate-pulse bg-surface-2" />
+)
+const AdminPanel = dynamic(
+  () => import("@/components/admin/admin-panel").then((mod) => mod.AdminPanel),
+  { loading: panelLoading }
+)
+const OperationalPage = dynamic(
+  () => import("@/components/operational-pages").then((mod) => mod.OperationalPage),
+  { loading: panelLoading }
+)
 
 type MeetingPageState = {
   limit: number
@@ -1379,8 +1391,14 @@ export function CommandCenterShell({
     })
   }
 
+  // lg–2xl has two columns, so the rail wraps to a second row: keep the first
+  // row a full viewport tall (inbox + meeting) and scroll down to the rail,
+  // instead of letting the implicit row halve the meeting column.
+  const defaultMeetingsViewClass =
+    "grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:grid-cols-[330px_minmax(0,1fr)] lg:grid-rows-[100%] lg:auto-rows-max lg:overflow-y-auto ms-scrollbar 2xl:grid-cols-[330px_minmax(0,1fr)_270px] 2xl:overflow-hidden"
+
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_270px]">
+    <div className={defaultMeetingsViewClass}>
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}

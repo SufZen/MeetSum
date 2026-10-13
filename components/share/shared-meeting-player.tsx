@@ -12,10 +12,9 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-import { MeetingPlayer } from "@/components/player/meeting-player"
+import { LazyMeetingPlayer, LazyTranscriptView } from "@/components/player/lazy"
 import { MeetingPlayerProvider } from "@/components/player/meeting-player-provider"
 import { useSpeakerDirectory } from "@/components/player/speaker-directory"
-import { TranscriptView } from "@/components/transcript/transcript-view"
 import { dictionaries } from "@/lib/i18n/dictionaries"
 import type { MeetingMediaSummary } from "@/lib/media/playback-select"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
@@ -74,13 +73,13 @@ export function SharedMeetingPlayer({
       <div className="grid gap-6">
         {media?.available ? (
           <div className="sticky top-0 z-(--z-sticky) bg-surface pt-2">
-            <MeetingPlayer dictionary={t} locale={locale} directory={directory} />
+            <LazyMeetingPlayer dictionary={t} locale={locale} directory={directory} />
           </div>
         ) : null}
         {showTranscript ? (
           <section className="grid gap-3">
             <h2 className="text-xl font-semibold">{t.transcript}</h2>
-            <TranscriptView
+            <LazyTranscriptView
               dictionary={t}
               locale={locale}
               shareToken={token}

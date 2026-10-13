@@ -24,10 +24,10 @@ import { useSpeakerDirectory } from "@/components/player/speaker-directory"
 import { directionForLanguage, talkTimeShare } from "@/components/speaker-display"
 import { SegmentRow } from "@/components/transcript/segment-row"
 import { SpeakerPicker, type SpeakerChoice } from "@/components/transcript/speaker-picker"
+import { TranscriptSkeleton } from "@/components/transcript/transcript-skeleton"
 import { TranscriptToolbar, type SpeakerChip } from "@/components/transcript/transcript-toolbar"
 import type { MeetingTranscriptHandle, TranscriptStatus } from "@/components/transcript/use-meeting-transcript"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 import type { TranscriptSegmentWire } from "@/lib/meetings/transcript-wire"
@@ -42,6 +42,7 @@ import {
 } from "@/lib/player/edit-history"
 import { INITIAL_FOLLOW_STATE, followReducer, isOutsideFollowBand } from "@/lib/player/follow"
 import { isEditableTarget } from "@/lib/player/keyboard"
+import { withFallbackRange } from "@/lib/player/virtual-fallback"
 import type { TokenMark } from "@/lib/player/segment-tokens"
 import {
   createSearchIndex,
@@ -571,7 +572,9 @@ export function TranscriptView({
   }, [directory, segments, speakers])
 
   const currentMatchIndex = currentMatch >= 0 ? (matches[currentMatch]?.matchIndex ?? -1) : -1
-  const items = virtualizer.getVirtualItems()
+  // getVirtualItems() refreshes measurementsCache, so read it second.
+  const virtualItems = virtualizer.getVirtualItems()
+  const items = withFallbackRange(virtualItems, virtualizer.measurementsCache, visible.length)
 
   if (status !== "ready" && !segments.length) {
     return (
@@ -587,18 +590,7 @@ export function TranscriptView({
             ) : null}
           </div>
         ) : (
-          <div aria-busy="true" aria-label={t.transcriptLoading} className="grid gap-4 p-2">
-            {[0, 1, 2, 3].map((row) => (
-              <div key={row} className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-3">
-                <Skeleton className="size-6.5 rounded-full" />
-                <div className="grid gap-2">
-                  <Skeleton className="h-3 w-32" />
-                  <Skeleton className="h-3 w-full" />
-                  <Skeleton className="h-3 w-4/5" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <TranscriptSkeleton label={t.transcriptLoading} />
         )}
       </div>
     )
@@ -651,7 +643,7 @@ export function TranscriptView({
         }
         onClearSpeakers={() => setSelectedSpeakers(new Set())}
       />
-      <div className="relative min-h-0 flex-1">
+      <div className={cn("relative min-h-0 flex-1", fill && "lg:min-h-64")}>
         <div
           ref={scrollRef}
           role="region"

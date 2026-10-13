@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import type { ComponentType, ReactNode, SVGProps } from "react"
 import { useEffect, useState } from "react"
+import dynamic from "next/dynamic"
 import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
@@ -31,11 +32,16 @@ import { Switch } from "@/components/ui/switch"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
 import { useWorkspace } from "@/components/workspace-context"
-import { AsrGlossaryEditor } from "@/components/asr-glossary-editor"
 import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
+
+// Only the AI settings section uses it; loaded when that section opens.
+const AsrGlossaryEditor = dynamic(
+  () => import("@/components/asr-glossary-editor").then((mod) => mod.AsrGlossaryEditor),
+  { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
+)
 
 type MemorySearchResult = {
   id: string

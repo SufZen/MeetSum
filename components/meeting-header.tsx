@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import dynamic from "next/dynamic"
 import {
   CalendarIcon,
   ClockIcon,
@@ -14,25 +15,8 @@ import {
 
 import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
 import { directionForLanguage } from "@/components/speaker-display"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,8 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
 import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
@@ -55,6 +38,16 @@ function sourceLabel(source: MeetingRecord["source"]) {
 }
 
 const TITLE_MAX = 200
+
+// Loaded on demand: the chunk is fetched when the actions menu first opens.
+const RenameMeetingDialog = dynamic(
+  () => import("@/components/meeting-dialogs").then((mod) => mod.RenameMeetingDialog),
+  { ssr: false }
+)
+const DeleteMeetingDialog = dynamic(
+  () => import("@/components/meeting-dialogs").then((mod) => mod.DeleteMeetingDialog),
+  { ssr: false }
+)
 
 export function MeetingHeader({
   meeting,
@@ -89,6 +82,7 @@ export function MeetingHeader({
   const [titleDraft, setTitleDraft] = useState(meeting.title)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [dialogsReady, setDialogsReady] = useState(false)
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -235,7 +229,7 @@ export function MeetingHeader({
             Share
           </Button>
           {showMenu && dictionary ? (
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={(open) => open && setDialogsReady(true)}>
               <DropdownMenuTrigger
                 render={
                   <Button
@@ -276,58 +270,26 @@ export function MeetingHeader({
         </div>
       </div>
 
-      {dictionary ? (
+      {dictionary && (dialogsReady || renameOpen || deleteOpen) ? (
         <>
-          <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-            <DialogContent>
-              <form
-                className="grid gap-4"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void submitRename()
-                }}
-              >
-                <DialogHeader>
-                  <DialogTitle>{dictionary.meetingRenameTitle}</DialogTitle>
-                </DialogHeader>
-                <label className="grid gap-1.5 text-sm font-medium">
-                  {dictionary.meetingRenameLabel}
-                  <Input
-                    dir="auto"
-                    autoFocus
-                    value={titleDraft}
-                    maxLength={TITLE_MAX}
-                    onChange={(event) => setTitleDraft(event.target.value)}
-                  />
-                </label>
-                <DialogFooter>
-                  <Button type="submit" disabled={busy || !trimmedTitle}>
-                    {dictionary.meetingRenameSave}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {formatMessage(dictionary.meetingDeleteTitle, { title: meeting.title })}
-                </AlertDialogTitle>
-                <AlertDialogDescription>{dictionary.meetingDeleteDescription}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{dictionary.cancel}</AlertDialogCancel>
-                <AlertDialogAction
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => void confirmDelete()}
-                >
-                  {dictionary.meetingDeleteConfirm}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <RenameMeetingDialog
+            dictionary={dictionary}
+            open={renameOpen}
+            onOpenChange={setRenameOpen}
+            value={titleDraft}
+            maxLength={TITLE_MAX}
+            busy={busy}
+            onValueChange={setTitleDraft}
+            onSubmit={() => void submitRename()}
+          />
+          <DeleteMeetingDialog
+            dictionary={dictionary}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={meeting.title}
+            busy={busy}
+            onConfirm={() => void confirmDelete()}
+          />
         </>
       ) : null}
     </header>

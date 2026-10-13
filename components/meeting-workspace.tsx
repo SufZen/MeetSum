@@ -7,6 +7,7 @@
  * items, quotes and the transcript all seek the same clock.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react"
+import dynamic from "next/dynamic"
 import {
   CalendarSyncIcon,
   FileAudioIcon,
@@ -19,30 +20,19 @@ import { ActionItemList } from "@/components/action-item-list"
 import { AskMeetingPanel, type AskCitation } from "@/components/ask-meeting-panel"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
-import { MeetingPlayer } from "@/components/player/meeting-player"
+import { LazyMeetingPlayer, LazyTranscriptView } from "@/components/player/lazy"
 import {
   MeetingPlayerProvider,
   useMeetingPlayer,
 } from "@/components/player/meeting-player-provider"
 import { useSpeakerDirectory } from "@/components/player/speaker-directory"
 import { directionForLanguage } from "@/components/speaker-display"
-import { SpeakerMappingPanel } from "@/components/speaker-mapping-panel"
 import { TalkTimePanel } from "@/components/talk-time-panel"
-import { TranscriptView } from "@/components/transcript/transcript-view"
 import type { MeetingTranscriptHandle } from "@/components/transcript/use-meeting-transcript"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { describeMeetingMedia } from "@/lib/media/playback-select"
 import type {
@@ -54,6 +44,20 @@ import type {
 import { buildActionItemMarkers } from "@/lib/player/citations"
 import { buildTranscriptIndex } from "@/lib/player/word-index"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
+
+// Only rendered on the transcript tab / when confirming; loaded on demand.
+const SpeakerMappingPanel = dynamic(
+  () => import("@/components/speaker-mapping-panel").then((mod) => mod.SpeakerMappingPanel),
+  { ssr: false, loading: () => <Skeleton className="h-14 w-full rounded-lg" /> }
+)
+const ReprocessConfirmDialog = dynamic(
+  () => import("@/components/meeting-dialogs").then((mod) => mod.ReprocessConfirmDialog),
+  { ssr: false }
+)
+
+/** Scroll distance that compacts the player, and the one that restores it. */
+const COMPACT_AT_PX = 24
+const EXPAND_BELOW_PX = 4
 
 type ReprocessMode = "full" | "summary" | "tasks" | "transcript-cleanup"
 type TabValue = "summary" | "transcript" | "ask" | "tasks" | "prep" | "followup"
@@ -159,8 +163,12 @@ export function MeetingWorkspace({
   onDelete?: () => Promise<boolean>
 }) {
   const [tab, setTab] = useState<TabValue>("summary")
-  const [compact, setCompact] = useState(false)
+  // Compact player: a tab pane scrolled, or (short viewports) the whole column.
+  const [paneCompact, setPaneCompact] = useState(false)
+  const [columnCompact, setColumnCompact] = useState(false)
+  const compact = paneCompact || columnCompact
   const [confirmReprocess, setConfirmReprocess] = useState(false)
+  const [confirmRequested, setConfirmRequested] = useState(false)
   const segments = useMemo(() => transcript?.data?.segments ?? [], [transcript?.data?.segments])
   const speakers = useMemo(
     () => transcript?.data?.speakers ?? meeting?.speakers ?? [],
@@ -188,6 +196,7 @@ export function MeetingWorkspace({
 
   const reprocess = (mode: ReprocessMode) => {
     if (mode === "full" && editedCount > 0) {
+      setConfirmRequested(true)
       setConfirmReprocess(true)
       return
     }
@@ -195,9 +204,20 @@ export function MeetingWorkspace({
   }
 
   const trackCompact = (event: UIEvent<HTMLElement>) => {
-    const next = event.currentTarget.scrollTop > 24
+    const next = event.currentTarget.scrollTop > COMPACT_AT_PX
 
-    if (next !== compact) setCompact(next)
+    if (next !== paneCompact) setPaneCompact(next)
+  }
+
+  // Hysteresis: compacting shrinks the column, which can clamp its scrollTop;
+  // only expanding near the very top keeps that from oscillating.
+  const trackColumnCompact = (event: UIEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return
+
+    const top = event.currentTarget.scrollTop
+
+    if (!columnCompact && top > COMPACT_AT_PX) setColumnCompact(true)
+    else if (columnCompact && top < EXPAND_BELOW_PX) setColumnCompact(false)
   }
 
   if (!meeting) {
@@ -251,7 +271,14 @@ export function MeetingWorkspace({
       speakerName={speakerName}
     >
       <TabCommandBridge tab={tab} onOpenTranscript={openTranscript} />
-      <div className="flex min-h-0 min-w-0 flex-col bg-surface lg:h-full">
+      {/*
+        On large screens the column scrolls as a whole when the viewport is too
+        short for header + player + a usable tab panel; the player stays sticky.
+      */}
+      <div
+        className="ms-scrollbar flex min-h-0 min-w-0 flex-col bg-surface lg:h-full lg:overflow-y-auto"
+        onScroll={trackColumnCompact}
+      >
         <MeetingHeader
           meeting={meeting}
           locale={locale}
@@ -268,7 +295,7 @@ export function MeetingWorkspace({
         />
 
         <div className="sticky top-0 z-(--z-sticky) shrink-0 bg-surface px-4 pt-3 md:px-6">
-          <MeetingPlayer
+          <LazyMeetingPlayer
             dictionary={dictionary}
             locale={locale}
             directory={directory}
@@ -281,9 +308,9 @@ export function MeetingWorkspace({
           value={tab}
           onValueChange={(value) => {
             setTab(value as TabValue)
-            setCompact(false)
+            setPaneCompact(false)
           }}
-          className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 lg:min-h-120"
         >
           <TabsList
             variant="line"
@@ -319,8 +346,11 @@ export function MeetingWorkspace({
             />
           </TabsContent>
 
-          <TabsContent value="transcript" className="mt-0 flex min-h-0 flex-col px-5 pt-4 pb-2 md:px-8">
-            <TranscriptView
+          <TabsContent
+            value="transcript"
+            className="ms-scrollbar mt-0 flex min-h-0 flex-col overflow-y-auto px-5 pt-4 pb-2 md:px-8"
+          >
+            <LazyTranscriptView
               className="mx-auto h-full w-full max-w-5xl"
               fill
               dictionary={dictionary}
@@ -398,28 +428,18 @@ export function MeetingWorkspace({
         </Tabs>
       </div>
 
-      <AlertDialog open={confirmReprocess} onOpenChange={setConfirmReprocess}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{dictionary.transcriptReprocessTitle}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {formatMessage(dictionary.transcriptReprocessDescription, { count: editedCount })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{dictionary.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                setConfirmReprocess(false)
-                onReprocessMeeting("full")
-              }}
-            >
-              {dictionary.transcriptReprocessConfirm}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {confirmReprocess || confirmRequested ? (
+        <ReprocessConfirmDialog
+          dictionary={dictionary}
+          open={confirmReprocess}
+          onOpenChange={setConfirmReprocess}
+          editedCount={editedCount}
+          onConfirm={() => {
+            setConfirmReprocess(false)
+            onReprocessMeeting("full")
+          }}
+        />
+      ) : null}
     </MeetingPlayerProvider>
   )
 }
