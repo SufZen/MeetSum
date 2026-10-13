@@ -14,7 +14,7 @@ import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { ruleDestinationSchema } from "@/lib/integrations/core/rules"
 import { ProviderError, type DeliverResult, type RuleDestination } from "@/lib/integrations/core/types"
 import { notionLocaleFor } from "@/lib/integrations/notion/blocks"
-import { getManualExportRuntime, manualExportPrefs } from "@/lib/integrations/notion/manual-export-runtime"
+import { getManualExportRuntime, manualExportPrefs, reauthGeneration } from "@/lib/integrations/notion/manual-export-runtime"
 import { notionProvider } from "@/lib/integrations/notion/provider"
 import {
   isPrivateMeeting,
@@ -104,7 +104,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
               getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
               fetch: runtime.providerFetch,
             }).catch(async (error: unknown) => {
-              await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
+              await flagNeedsReauthOnAuth(workspaceId, connection.id, error, reauthGeneration(connection))
               throw error
             }),
         }
@@ -168,7 +168,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       fetch: runtime.providerFetch,
     })
   } catch (error) {
-    await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
+    await flagNeedsReauthOnAuth(workspaceId, connection.id, error, reauthGeneration(connection))
     await runtime
       .finishManualDelivery(workspaceId, delivery.id, {
         error: {

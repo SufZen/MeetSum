@@ -89,24 +89,33 @@ export async function upsertConnectionFromOAuth(
   const existing = await db.findConnectionByAccount(input.workspaceId, input.provider, userId, exchange.account.externalId)
 
   if (existing) {
-    const sealed = sealTokenSet(input.workspaceId, existing.id, exchange)
-    const updated = await db.updateConnection(input.workspaceId, existing.id, {
-      status: "active",
-      accountLabel: exchange.account.label.slice(0, 200),
-      scopes: exchange.scopes,
-      accessTokenEnc: sealed.accessTokenEnc,
-      // Keep the old refresh token unless the provider returned a new one.
-      ...(sealed.refreshTokenEnc ? { refreshTokenEnc: sealed.refreshTokenEnc } : {}),
-      tokenType: exchange.tokenType,
-      expiresAt: exchange.expiresAt ?? null,
-      config: { ...existing.config, ...(exchange.config ?? {}) },
-      // A reconnect starts a new token generation (in-flight refreshes lose).
-      generation: existing.generation + 1,
-      lastError: null,
-      lastRefreshedAt: new Date().toISOString(),
+    // Under the row lock (like disconnect): a reconnect never interleaves
+    // with a disconnect or another reconnect, and a row revoked meanwhile is
+    // not resurrected (a new connection is created below instead).
+    const reconnected = await db.withConnectionLock(input.workspaceId, existing.id, async (current, update) => {
+      if (!current || current.status === "revoked") return undefined
+
+      const sealed = sealTokenSet(input.workspaceId, current.id, exchange)
+
+      return update({
+        status: "active",
+        accountLabel: exchange.account.label.slice(0, 200),
+        scopes: exchange.scopes,
+        accessTokenEnc: sealed.accessTokenEnc,
+        // Keep the old refresh token unless the provider returned a new one.
+        ...(sealed.refreshTokenEnc ? { refreshTokenEnc: sealed.refreshTokenEnc } : {}),
+        tokenType: exchange.tokenType,
+        expiresAt: exchange.expiresAt ?? null,
+        config: { ...current.config, ...(exchange.config ?? {}) },
+        // A reconnect starts a new token generation (in-flight refreshes and
+        // stale reauth marks lose their compare-and-set).
+        generation: current.generation + 1,
+        lastError: null,
+        lastRefreshedAt: new Date().toISOString(),
+      })
     })
 
-    return { ok: true, connection: updated ?? existing, created: false }
+    if (reconnected) return { ok: true, connection: reconnected, created: false }
   }
 
   const id = `intc_${randomUUID()}`
@@ -264,7 +273,7 @@ export async function testConnection(
     if (kind === "auth") {
       const { markConnectionNeedsReauth } = await import("@/lib/integrations/core/reauth")
 
-      await markConnectionNeedsReauth(row.workspaceId, row.id, error, { store: db })
+      await markConnectionNeedsReauth(row.workspaceId, row.id, error, { store: db, generation: row.generation })
     } else {
       await db.updateConnection(row.workspaceId, row.id, { lastError: storedIntegrationError(error, row.provider) })
     }

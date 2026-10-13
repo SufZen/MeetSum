@@ -138,7 +138,7 @@ async function checkDestination(
     return undefined
   } catch (error) {
     if (error instanceof ProviderError && error.kind === "auth") {
-      await flagNeedsReauthOnAuth(workspaceId, connection.id, error, { store })
+      await flagNeedsReauthOnAuth(workspaceId, connection.id, error, { store, generation: connection.generation })
       return { ok: false, status: 409, code: "integration_needs_reauth" }
     }
 

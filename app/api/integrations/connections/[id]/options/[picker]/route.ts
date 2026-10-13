@@ -44,7 +44,7 @@ export const GET = withAuthz<{ id: string; picker: string }>("meeting:write", as
 
     return NextResponse.json(page)
   } catch (error) {
-    await flagNeedsReauthOnAuth(connection.workspaceId, connection.id, error, { store })
+    await flagNeedsReauthOnAuth(connection.workspaceId, connection.id, error, { store, generation: connection.generation })
     return providerErrorResponse(error)
   }
 })

@@ -37,6 +37,18 @@ export type StartManualDeliveryInput = {
   eventName?: string
 }
 
+/**
+ * The connection DTO plus the token generation read with it (server-side
+ * only, never serialized): an `auth` failure of this export is flagged
+ * `needs_reauth` only while the connection is still at that generation.
+ */
+export type ManualExportConnection = IntegrationConnectionDTO & { generation?: number }
+
+/** `{ generation }` for `flagNeedsReauthOnAuth` when the connection carries one. */
+export function reauthGeneration(connection: ManualExportConnection): { generation?: number } {
+  return typeof connection.generation === "number" ? { generation: connection.generation } : {}
+}
+
 export type ManualExportRuntime = {
   /** Outbound provider HTTP (exact-host allowlist, no redirects, caps). */
   providerFetch: ProviderFetch
@@ -48,7 +60,7 @@ export type ManualExportRuntime = {
     workspaceId: string,
     provider: ProviderId,
     options?: { userId?: string }
-  ): Promise<IntegrationConnectionDTO | undefined>
+  ): Promise<ManualExportConnection | undefined>
   /** A fresh access token (refreshed under a row lock when needed). */
   getAccessToken(workspaceId: string, connectionId: string): Promise<string>
   /** Links of one connection and meeting (integration_links). */
@@ -101,7 +113,7 @@ const defaultRuntime: ManualExportRuntime = {
         (personal ? candidate.userId === options.userId : !candidate.userId)
     )
 
-    return row ? toConnectionDTO(row) : undefined
+    return row ? { ...toConnectionDTO(row), generation: row.generation } : undefined
   },
 
   async getAccessToken(workspaceId, connectionId) {

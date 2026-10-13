@@ -75,6 +75,11 @@ export function tokenSetForRevoke(connection: StoredConnection): TokenSet | unde
   }
 }
 
+/** The connection is revoked, flagged or gone: a state error, never a reauth trigger. */
+function connectionInactive(): ProviderError {
+  return new ProviderError("auth", "connection is not active", { providerCode: "connection_inactive" })
+}
+
 function expiring(connection: StoredConnection, now: number): boolean {
   if (!connection.expiresAt) return false
 
@@ -105,9 +110,7 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
   const now = deps.now ?? Date.now
   const current = await store.getConnection(workspaceId, connectionId)
 
-  if (!current || current.status !== "active") {
-    throw new ProviderError("auth", "connection is not active")
-  }
+  if (!current || current.status !== "active") throw connectionInactive()
   if (!expiring(current, now())) {
     const token = openToken(current, "access_token")
 
@@ -139,10 +142,11 @@ async function refreshUnderLock(
   deps: TokenDeps
 ): Promise<string> {
   let refreshFailure: unknown
+  let failedGeneration: number | undefined
   let lost: { provider: IntegrationProvider; tokens: TokenSet } | undefined
 
   const token = await store.withConnectionLock(workspaceId, connectionId, async (connection, update) => {
-    if (!connection || connection.status !== "active") throw new ProviderError("auth", "connection is not active")
+    if (!connection || connection.status !== "active") throw connectionInactive()
 
     // Another job refreshed while we waited for the lock.
     if (!expiring(connection, now())) {
@@ -171,6 +175,7 @@ async function refreshUnderLock(
     } catch (error) {
       if (isInvalidGrant(error)) {
         refreshFailure = error
+        failedGeneration = generation
         return undefined
       }
       await update({ lastError: storedIntegrationError(error, connection.provider) }, generation)
@@ -205,12 +210,13 @@ async function refreshUnderLock(
         integrationLog.warn("revoke of a discarded refresh failed", error)
       })
     }
-    throw new ProviderError("auth", "connection changed during refresh")
+    throw new ProviderError("auth", "connection changed during refresh", { providerCode: "connection_changed" })
   }
 
   if (token === undefined) {
     await markConnectionNeedsReauth(workspaceId, connectionId, refreshFailure ?? "refresh rejected", {
       store,
+      ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
       ...(deps.notify ? { notify: deps.notify } : {}),
     })
     throw new ProviderError("auth", "refresh rejected; reconnect required", { providerCode: "invalid_grant" })

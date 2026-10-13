@@ -22,7 +22,7 @@ import { providerFetch } from "@/lib/integrations/core/http"
 import { deliveryBackoffMs } from "@/lib/integrations/core/limits"
 import { createLinkStore, findActiveShareUrl, meetingAppUrl, NO_LINKS, recapLocale } from "@/lib/integrations/core/links"
 import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
-import { markConnectionNeedsReauth } from "@/lib/integrations/core/reauth"
+import { isConnectionStateError, markConnectionNeedsReauth } from "@/lib/integrations/core/reauth"
 import { meetingFactsFromRecord } from "@/lib/integrations/core/rule-filters"
 import { defaultIntegrationRuntime, type IntegrationRuntime } from "@/lib/integrations/core/runtime"
 import type { StoredDelivery } from "@/lib/integrations/core/store"
@@ -203,8 +203,10 @@ export async function runIntegrationDelivery(
 
     integrationLog.warn(`delivery ${delivery.id} attempt ${delivery.attempts} failed`, lastError)
 
-    if (error.kind === "auth" && connection) {
-      await markConnectionNeedsReauth(ws, connection.id, error, { store })
+    // CAS on the generation read before the call; connection-state errors
+    // (`connection_changed`, `connection_inactive`) are not a rejected grant.
+    if (error.kind === "auth" && connection && !isConnectionStateError(error)) {
+      await markConnectionNeedsReauth(ws, connection.id, error, { store, generation: connection.generation })
     }
 
     if (isUnrecoverableKind(error.kind) || input.finalAttempt || delivery.attempts >= delivery.maxAttempts) {

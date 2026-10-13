@@ -4,6 +4,13 @@
  * `last_error`, notifies the connection's creator (M5 `integration_reauth`)
  * and audits `integration.connection.needs_reauth`. Idempotent: an already
  * flagged connection is not re-notified.
+ *
+ * The flag is a compare-and-set on the token generation observed WITH the
+ * failure (`updateConnectionIfCurrent`: `status = 'active'` and the same
+ * generation). A failure of an older token therefore never flips a
+ * connection that was reconnected (new generation) or disconnected
+ * (`revoked`, new generation) in the meantime, and a lost CAS neither
+ * notifies nor audits.
  */
 import { auditIntegration } from "@/lib/integrations/core/audit"
 import { storedIntegrationError } from "@/lib/integrations/core/errors"
@@ -15,25 +22,45 @@ export type ReauthDeps = {
   notify?: typeof enqueueIntegrationReauthNotification
 }
 
+export type MarkReauthDeps = ReauthDeps & {
+  /**
+   * The connection generation the failing token belonged to (captured
+   * before the provider call). Omitted only by callers that hold no
+   * generation (legacy DTO paths); the current row's generation is then
+   * read here, which is best effort.
+   */
+  generation?: number
+}
+
+/** Errors about the connection's own state (not a rejected grant): never `needs_reauth`. */
+export const CONNECTION_STATE_CODES: ReadonlySet<string> = new Set(["connection_changed", "connection_inactive"])
+
+export function isConnectionStateError(error: unknown): boolean {
+  const code = error instanceof Error ? (error as { providerCode?: unknown }).providerCode : undefined
+
+  return typeof code === "string" && CONNECTION_STATE_CODES.has(code)
+}
+
 export async function markConnectionNeedsReauth(
   workspaceId: string,
   connectionId: string,
   reason: unknown,
-  deps: ReauthDeps = {}
+  deps: MarkReauthDeps = {}
 ): Promise<void> {
+  if (isConnectionStateError(reason)) return
+
   const store = deps.store ?? (await getIntegrationStore())
   const connection = await store.getConnection(workspaceId, connectionId)
 
-  if (!connection || connection.status === "revoked") return
+  if (!connection || connection.status !== "active") return
 
-  const already = connection.status === "needs_reauth"
-
-  await store.updateConnection(workspaceId, connectionId, {
+  // CAS: only the generation that produced the failure can be flagged.
+  const flagged = await store.updateConnectionIfCurrent(workspaceId, connectionId, deps.generation ?? connection.generation, {
     status: "needs_reauth",
     lastError: storedIntegrationError(reason, connection.provider),
   })
 
-  if (already) return
+  if (!flagged) return
 
   const recipient = connection.userId ?? connection.createdByUserId
 
@@ -64,7 +91,7 @@ export async function flagNeedsReauthOnAuth(
   workspaceId: string,
   connectionId: string,
   error: unknown,
-  deps: ReauthDeps = {}
+  deps: MarkReauthDeps = {}
 ): Promise<void> {
   const kind = error instanceof Error ? (error as { kind?: unknown }).kind : undefined
 

@@ -99,7 +99,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       ? {
           validate: (value: RuleDestination) =>
             validateDestination(value, providerCtx(connection, store)).catch(async (error: unknown) => {
-              await flagNeedsReauthOnAuth(ctx.workspace.id, connection.id, error, { store })
+              await flagNeedsReauthOnAuth(ctx.workspace.id, connection.id, error, { store, generation: connection.generation })
               throw error
             }),
         }

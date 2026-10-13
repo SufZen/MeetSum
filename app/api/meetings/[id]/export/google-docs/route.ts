@@ -11,7 +11,7 @@ import { googleDocsLocaleFor } from "@/lib/integrations/google-docs/builder"
 import type { GoogleDocsClientContext } from "@/lib/integrations/google-docs/client"
 import { googleDocsDwdAccessToken, googleDocsDwdDecision } from "@/lib/integrations/google-docs/dwd"
 import { exportRecapToGoogleDocs } from "@/lib/integrations/google-docs/export"
-import { getManualExportRuntime, manualExportPrefs } from "@/lib/integrations/notion/manual-export-runtime"
+import { getManualExportRuntime, manualExportPrefs, reauthGeneration } from "@/lib/integrations/notion/manual-export-runtime"
 import { providerErrorResponse, readJsonObject } from "@/lib/integrations/notion/route-helpers"
 import { buildMeetingRecap, DEFAULT_RULE_CONTENT } from "@/lib/integrations/recap"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
@@ -101,7 +101,7 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
   try {
     result = await exportRecapToGoogleDocs({ recap, client, ...(links ? { links } : {}), forceNew })
   } catch (error) {
-    if (connection) await flagNeedsReauthOnAuth(workspaceId, connection.id, error)
+    if (connection) await flagNeedsReauthOnAuth(workspaceId, connection.id, error, reauthGeneration(connection))
     return providerErrorResponse("google_docs", error)
   }
 
