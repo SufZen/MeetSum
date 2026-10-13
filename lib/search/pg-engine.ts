@@ -4,12 +4,16 @@
  * Runs the scoped SQL legs from `sql.ts` in one transaction (so `set local`
  * applies): vector (only when pgvector + the active key's HNSW index are
  * ready and a query vector exists), FTS, and trigram (only when pg_trgm
- * yields Hebrew trigrams). The vector leg runs under a savepoint: a failure
- * there degrades to lexical instead of failing the search.
+ * yields Hebrew trigrams). The transaction has a `statement_timeout`
+ * (`MEETSUM_SEARCH_STATEMENT_TIMEOUT_MS`, default 5 s) and every leg runs
+ * under its own savepoint: a failure or timeout in one leg degrades to the
+ * others; when every leg fails the engine throws `SearchUnavailableError`
+ * (routes answer 503).
  */
 import { getDatabasePool, type Queryable } from "@/lib/db/client"
 import { withTransaction } from "@/lib/meetings/postgres-repository"
 import { getSearchCapabilities } from "@/lib/search/capabilities"
+import { SearchUnavailableError } from "@/lib/search/errors"
 import type { LegName, LegRow, Legs } from "@/lib/search/rrf"
 import type { HydratedChunk, SearchEngine, SearchMeetingMeta } from "@/lib/search/service"
 import {
@@ -21,6 +25,7 @@ import {
   buildSegmentTextsQuery,
   buildTrgmLegQuery,
   buildVectorLegQuery,
+  statementTimeoutSetLocal,
   trgmSetLocal,
   vectorSetLocal,
   type ScopedInput,
@@ -127,6 +132,27 @@ export function mapHydratedRow(row: Row): HydratedChunk {
   }
 }
 
+/**
+ * Runs `fn` in a transaction (`set local` and the leg savepoints need
+ * one): a pool checks out a connection (`withTransaction`); a bare
+ * single-session client (PGlite, a checked-out connection) gets begin/commit
+ * on itself.
+ */
+async function inTransaction<T>(db: Queryable, fn: (tx: Queryable) => Promise<T>): Promise<T> {
+  if (typeof (db as { connect?: unknown }).connect === "function") return withTransaction(db, fn)
+
+  await db.query("begin")
+  try {
+    const result = await fn(db)
+
+    await db.query("commit")
+    return result
+  } catch (error) {
+    await db.query("rollback").catch(() => undefined)
+    throw error
+  }
+}
+
 function scoped(ctx: SearchContext): ScopedInput {
   return { scope: ctx.scope, workspaceId: ctx.workspaceId }
 }
@@ -153,42 +179,61 @@ export function createPgSearchEngine(options: PgEngineOptions = {}): SearchEngin
       const failed: LegName[] = []
       const base = { ...scoped(ctx), filters: request.filters }
 
-      await withTransaction(client(), async (tx) => {
-        if (request.vector) {
-          await tx.query("savepoint search_vector_leg")
+      const attempted: LegName[] = []
+
+      await inTransaction(client(), async (tx) => {
+        /** Runs one leg under a savepoint: a failure (or timeout) rolls back that leg only. */
+        const leg = async (name: LegName, run: () => Promise<LegRow[]>) => {
+          attempted.push(name)
+          await tx.query(`savepoint search_${name}_leg`)
 
           try {
-            for (const statement of vectorSetLocal(request.config.efSearch)) await tx.query(statement)
-
-            const query = buildVectorLegQuery({
-              ...base,
-              limit: request.config.vectorK,
-              key: request.vector.key,
-              vector: request.vector.values,
-            })
-
-            legs.vector = legRows((await tx.query(query.text, query.values)).rows).sort((a, b) => b.score - a.score)
-            await tx.query("release savepoint search_vector_leg")
+            legs[name] = await run()
+            await tx.query(`release savepoint search_${name}_leg`)
           } catch {
-            failed.push("vector")
-            await tx.query("rollback to savepoint search_vector_leg")
+            failed.push(name)
+            await tx.query(`rollback to savepoint search_${name}_leg`)
           }
         }
 
-        if (request.tsquery) {
-          const query = buildFtsLegQuery({ ...base, limit: request.config.ftsK, tsquery: request.tsquery })
+        await tx.query(statementTimeoutSetLocal(request.config.statementTimeoutMs))
 
-          legs.fts = legRows((await tx.query(query.text, query.values)).rows)
+        if (request.vector) {
+          const vector = request.vector
+
+          await leg("vector", async () => {
+            for (const statement of vectorSetLocal(request.config.efSearch)) await tx.query(statement)
+
+            const query = buildVectorLegQuery({ ...base, limit: request.config.vectorK, key: vector.key, vector: vector.values })
+
+            return legRows((await tx.query(query.text, query.values)).rows).sort((a, b) => b.score - a.score)
+          })
+        }
+
+        if (request.tsquery) {
+          const tsquery = request.tsquery
+
+          await leg("fts", async () => {
+            const query = buildFtsLegQuery({ ...base, limit: request.config.ftsK, tsquery })
+
+            return legRows((await tx.query(query.text, query.values)).rows)
+          })
         }
 
         if (request.trgm) {
-          await tx.query(trgmSetLocal(request.config.trgmThreshold))
+          const trgm = request.trgm
 
-          const query = buildTrgmLegQuery({ ...base, limit: request.config.trgmK, trgm: request.trgm })
+          await leg("trgm", async () => {
+            await tx.query(trgmSetLocal(request.config.trgmThreshold))
 
-          legs.trgm = legRows((await tx.query(query.text, query.values)).rows)
+            const query = buildTrgmLegQuery({ ...base, limit: request.config.trgmK, trgm })
+
+            return legRows((await tx.query(query.text, query.values)).rows)
+          })
         }
       })
+
+      if (attempted.length && failed.length === attempted.length) throw new SearchUnavailableError()
 
       return { legs, failed }
     },

@@ -48,6 +48,8 @@ export type SearchConfig = {
   efSearch: number
   trgmThreshold: number
   maxCandidates: number
+  /** `statement_timeout` of the search transaction (ms). */
+  statementTimeoutMs: number
 }
 
 export type LegRequest = {
@@ -109,6 +111,7 @@ export function searchConfig(env: Env = process.env): SearchConfig {
     efSearch: envInt(env, "MEETSUM_SEARCH_HNSW_EF_SEARCH", 100, 1, 1000),
     trgmThreshold: envFloat(env, "MEETSUM_SEARCH_TRGM_THRESHOLD", 0.45, 0, 1),
     maxCandidates: envInt(env, "MEETSUM_SEARCH_MAX_CANDIDATES", 200, 1, 2000),
+    statementTimeoutMs: envInt(env, "MEETSUM_SEARCH_STATEMENT_TIMEOUT_MS", 5000, 100, 60_000),
   }
 }
 

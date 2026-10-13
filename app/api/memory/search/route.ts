@@ -6,6 +6,7 @@ import type { MemoryCitation, MemoryMatchSource, MemorySearchFilters, MemorySear
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
+import { SearchUnavailableError } from "@/lib/search/errors"
 import { MAX_QUERY_CHARS, TEXT_LANGUAGES } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
 import type { ChunkKind, SearchFilters, SearchHit, TextLanguage } from "@/lib/search/types"
@@ -130,6 +131,9 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
       { headers }
     )
   } catch (error) {
+    if (error instanceof SearchUnavailableError) {
+      return NextResponse.json({ error: "Search unavailable" }, { status: 503, headers })
+    }
     console.error("[memory/search] failed:", error instanceof Error ? error.name : "unknown")
 
     return NextResponse.json({ error: "Search failed" }, { status: 500, headers })

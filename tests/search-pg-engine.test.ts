@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { SearchUnavailableError } from "@/lib/search/errors"
 import { createPgSearchEngine, mapHydratedRow } from "@/lib/search/pg-engine"
 import { searchConfig, type LegRequest } from "@/lib/search/service"
 import type { SearchCapabilities, SearchContext } from "@/lib/search/types"
@@ -94,6 +95,67 @@ describe("pg engine legs", () => {
     expect(legs.vector).toBeUndefined()
     expect(calls.map((call) => call.text)).toContain("rollback to savepoint search_vector_leg")
     expect(calls.some((call) => call.text.includes("ts_rank_cd"))).toBe(true)
+  })
+
+  it("sets a statement_timeout for the search transaction first (default 5000 ms, configurable)", async () => {
+    const { calls, pool } = recordingPool()
+    const engine = createPgSearchEngine({ client: pool, capabilities: async () => caps() })
+
+    await engine.runLegs(ctx, request())
+
+    expect(calls[0].text).toBe("begin")
+    expect(calls[1]).toMatchObject({ text: "set local statement_timeout = 5000", inTx: true })
+
+    const custom = recordingPool()
+
+    await createPgSearchEngine({ client: custom.pool, capabilities: async () => caps() }).runLegs(
+      ctx,
+      request({ config: searchConfig({ MEETSUM_SEARCH_STATEMENT_TIMEOUT_MS: "1500" }) })
+    )
+    expect(custom.calls[1].text).toBe("set local statement_timeout = 1500")
+    expect(searchConfig({}).statementTimeoutMs).toBe(5000)
+    expect(searchConfig({ MEETSUM_SEARCH_STATEMENT_TIMEOUT_MS: "nope" }).statementTimeoutMs).toBe(5000)
+  })
+
+  it("degrades a failing (timed-out) FTS leg to the other legs via a savepoint", async () => {
+    const { calls, pool } = recordingPool(
+      (text) => (text.includes("word_similarity") ? [{ id: "c9", score: 0.7 }] : text.includes("<=>") ? [{ id: "c1", score: 0.9 }] : []),
+      /ts_rank_cd/
+    )
+    const engine = createPgSearchEngine({ client: pool, capabilities: async () => caps() })
+    const { failed, legs } = await engine.runLegs(ctx, request())
+    const texts = calls.map((call) => call.text)
+
+    expect(failed).toEqual(["fts"])
+    expect(legs.fts).toBeUndefined()
+    expect(legs.trgm?.map((row) => row.id)).toEqual(["c9"])
+    expect(legs.vector?.map((row) => row.id)).toEqual(["c1"])
+    expect(texts).toContain("savepoint search_fts_leg")
+    expect(texts).toContain("rollback to savepoint search_fts_leg")
+    expect(texts[texts.length - 1]).toBe("commit")
+  })
+
+  it("degrades a failing trigram leg to FTS via a savepoint", async () => {
+    const { calls, pool } = recordingPool((text) => (text.includes("ts_rank_cd") ? [{ id: "c1", score: 0.3 }] : []), /word_similarity/)
+    const engine = createPgSearchEngine({ client: pool, capabilities: async () => caps() })
+    const { failed, legs } = await engine.runLegs(ctx, request({ vector: null }))
+
+    expect(failed).toEqual(["trgm"])
+    expect(legs.fts?.map((row) => row.id)).toEqual(["c1"])
+    expect(calls.map((call) => call.text)).toContain("rollback to savepoint search_trgm_leg")
+  })
+
+  it("throws SearchUnavailableError (route → 503) when every leg fails", async () => {
+    const { pool } = recordingPool(() => [], /ts_rank_cd|word_similarity|<=>/)
+    const engine = createPgSearchEngine({ client: pool, capabilities: async () => caps() })
+
+    await expect(engine.runLegs(ctx, request())).rejects.toBeInstanceOf(SearchUnavailableError)
+
+    const lexicalOnly = recordingPool(() => [], /ts_rank_cd|word_similarity/)
+
+    await expect(
+      createPgSearchEngine({ client: lexicalOnly.pool, capabilities: async () => caps() }).runLegs(ctx, request({ vector: null }))
+    ).rejects.toBeInstanceOf(SearchUnavailableError)
   })
 
   it("maps capabilities: vector needs the index, trigram needs Hebrew trigrams", async () => {

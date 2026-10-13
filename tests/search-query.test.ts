@@ -52,4 +52,15 @@ describe("trgmQuery", () => {
     expect(trgmQuery(nq([token("תקציב")]))).toBe("תקציב")
     expect(trgmQuery(nq([token("ai")]))).toBeNull()
   })
+
+  it("caps the trigram query at the first 8 tokens and 120 characters", () => {
+    const words = Array.from({ length: 20 }, (_, index) => `מילה${index}`)
+
+    expect(trgmQuery(nq([], words.join(" ")))).toBe(words.slice(0, 8).join(" "))
+
+    const long = "א".repeat(300)
+
+    expect(trgmQuery(nq([], long))).toBe("א".repeat(120))
+    expect([...(trgmQuery(nq([], `${"ב".repeat(100)} ${"ג".repeat(100)}`)) ?? "")].length).toBeLessThanOrEqual(120)
+  })
 })

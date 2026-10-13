@@ -50,9 +50,17 @@ export function buildTsQuery(nq: NormalizedQuery): string | null {
   return groups.length ? groups.join(" | ") : null
 }
 
-/** Trigram query: the folded text when it has at least 3 characters. */
-export function trgmQuery(nq: NormalizedQuery): string | null {
-  const folded = nq.folded.trim()
+/** Trigram query caps: the trigram leg's cost grows with the query length. */
+export const MAX_TRGM_TOKENS = 8
+export const MAX_TRGM_CHARS = 120
 
-  return [...folded].length >= 3 ? folded : null
+/**
+ * Trigram query: the folded text (first 8 tokens, at most 120 characters)
+ * when it has at least 3 characters.
+ */
+export function trgmQuery(nq: NormalizedQuery): string | null {
+  const words = nq.folded.trim().split(/\s+/).filter(Boolean).slice(0, MAX_TRGM_TOKENS).join(" ")
+  const capped = [...words].slice(0, MAX_TRGM_CHARS).join("").trim()
+
+  return [...capped].length >= 3 ? capped : null
 }

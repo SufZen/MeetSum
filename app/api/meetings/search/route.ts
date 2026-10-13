@@ -5,6 +5,7 @@ import { withAuthz } from "@/lib/auth/authz"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
+import { SearchUnavailableError } from "@/lib/search/errors"
 import { MAX_QUERY_CHARS } from "@/lib/search/filters"
 import { searchMeetingIds } from "@/lib/search/service"
 import type { SearchFilters } from "@/lib/search/types"
@@ -112,6 +113,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
       { headers: rateLimit.headers }
     )
   } catch (error) {
+    if (error instanceof SearchUnavailableError) return jsonError("Search unavailable", 503)
     console.error("[meetings/search] failed:", error instanceof Error ? error.name : "unknown")
 
     return jsonError("Search failed", 500)

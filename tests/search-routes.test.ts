@@ -17,7 +17,8 @@ import { GET as memorySearch } from "@/app/api/memory/search/route"
 import { GET as facets } from "@/app/api/search/facets/route"
 import { GET as search } from "@/app/api/search/route"
 import { createInMemoryMeetingDatabase, type InMemoryMeetingDatabase } from "@/lib/meetings/repository"
-import { setSearchEngineForTesting } from "@/lib/search/service"
+import { SearchUnavailableError } from "@/lib/search/errors"
+import { setSearchEngineForTesting, type SearchEngine } from "@/lib/search/service"
 import type { SearchFacets, SearchResponse } from "@/lib/search/types"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
 
@@ -75,6 +76,29 @@ describe("GET /api/search authz and validation", () => {
     ]) {
       expect((await get(search, path)).status, path).toBe(400)
     }
+  })
+
+  it("answers 503 when every search leg fails (statement timeout)", async () => {
+    await as()
+
+    const failing: SearchEngine = {
+      kind: "pg",
+      capabilities: async () => ({ vector: false, trgm: true, embeddingKey: null }),
+      runLegs: async () => {
+        throw new SearchUnavailableError()
+      },
+      hydrate: async () => [],
+      listMeetings: async () => ({ meetings: [], total: 0 }),
+      countPending: async () => undefined,
+      segmentTexts: async () => ({}),
+      facets: async () => ({ people: [], speakers: [], rooms: [], tags: [], languages: [], meetingTypes: [], sources: [] }),
+    }
+
+    setSearchEngineForTesting(failing)
+
+    expect((await get(search, "/search?q=תקציב")).status).toBe(503)
+    expect((await get(memorySearch, "/memory/search?query=תקציב")).status).toBe(503)
+    expect((await get(legacySearch, "/meetings/search?q=תקציב")).status).toBe(503)
   })
 
   it("answers 400 for a tampered or foreign cursor", async () => {

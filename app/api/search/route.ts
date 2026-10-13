@@ -4,6 +4,7 @@ import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
 import { InvalidCursorError } from "@/lib/search/cursor"
+import { SearchUnavailableError } from "@/lib/search/errors"
 import { SearchRequestError, parseSearchParams } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
 
@@ -40,6 +41,9 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
     }
     if (error instanceof InvalidCursorError) {
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400, headers: rateLimit.headers })
+    }
+    if (error instanceof SearchUnavailableError) {
+      return NextResponse.json({ error: "Search unavailable" }, { status: 503, headers: rateLimit.headers })
     }
     console.error("[search] failed:", error instanceof Error ? error.name : "unknown")
 

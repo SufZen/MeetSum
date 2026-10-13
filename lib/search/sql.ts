@@ -90,6 +90,11 @@ export function buildFtsLegQuery(input: LegInput & { tsquery: string }): SqlQuer
   }
 }
 
+/** `set local statement_timeout` for the search transaction (validated literal, ms). */
+export function statementTimeoutSetLocal(ms: number): string {
+  return `set local statement_timeout = ${intLiteral(ms, 100, 600_000, "statement_timeout")}`
+}
+
 /** `set local pg_trgm.word_similarity_threshold` (validated literal). */
 export function trgmSetLocal(threshold: number): string {
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new SearchSqlError("Invalid threshold")

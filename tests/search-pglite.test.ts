@@ -129,6 +129,36 @@ describe("search on PGlite", () => {
     expect(await meetingIds(member, "x'); drop table meetings; --")).toEqual([])
   })
 
+  it("accepts the statement_timeout and recovers from a failed FTS leg via its savepoint (real Postgres)", async () => {
+    if (!db) return
+
+    const statements: string[] = []
+    const real = db.client
+    // A real Postgres error inside the FTS leg aborts the transaction; the
+    // savepoint must bring it back so the trigram leg still runs.
+    const query = async (text: string, values?: unknown[]) => {
+      statements.push(text)
+
+      return text.includes("ts_rank_cd") ? real.query("select 1/0", []) : real.query(text, values)
+    }
+    const breaking = createPgSearchEngine({
+      client: { query },
+      capabilities: async () => ({
+        vector: { available: false, tableReady: false, indexReady: false },
+        trgm: { installed: true, hebrew: true },
+        embeddingKey: null,
+        checkedAt: "now",
+      }),
+    })
+    const ranked = await rankCandidates(ctx(member), { q: "supabse", filters: {}, task: "RETRIEVAL_QUERY", engine: breaking })
+
+    expect(statements).toContain("set local statement_timeout = 5000")
+    expect(statements).toContain("rollback to savepoint search_fts_leg")
+    expect(statements.indexOf("commit")).toBeGreaterThan(statements.indexOf("rollback to savepoint search_fts_leg"))
+    expect(statements).not.toContain("rollback")
+    if (db.hebrewTrigrams) expect(ranked.candidates.map((candidate) => candidate.chunk.meetingId)).toContain("m_budget")
+  })
+
   it("serves searchWorkspace, facets, pending counts and retrieve end to end", async () => {
     if (!db) return
 
