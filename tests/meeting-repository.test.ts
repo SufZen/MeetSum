@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { buildMeetingIntelligence, type SmartTask } from "@/lib/intelligence"
 import {
   createInMemoryMeetingRepository,
   type CreateMeetingInput,
@@ -235,5 +236,165 @@ describe("meeting repository", () => {
     expect(searched.meetings.map((meeting) => meeting.id)).toEqual([
       "meet_completed",
     ])
+  })
+
+  it("preserves user-edited and done action items when intelligence is regenerated", async () => {
+    const repository = createInMemoryMeetingRepository([
+      {
+        id: "meet_tasks",
+        title: "Tasks",
+        source: "upload",
+        language: "en",
+        status: "completed",
+        retention: "audio",
+        startedAt: "2026-04-23T09:00:00.000Z",
+        participants: [],
+      },
+    ])
+    const first = buildMeetingIntelligence({
+      id: "meet_tasks",
+      title: "Tasks",
+      source: "upload",
+      language: "en",
+      status: "completed",
+      retention: "audio",
+      startedAt: "2026-04-23T09:00:00.000Z",
+      participants: [],
+    })
+    const task = (id: string, title: string): SmartTask => ({
+      id,
+      title,
+      status: "open",
+      priority: "normal",
+      confidence: 0.8,
+      sourceQuote: title,
+      sourceStartMs: 0,
+      kind: "explicit",
+    })
+
+    await repository.upsertMeetingIntelligence("meet_tasks", {
+      ...first,
+      actionItems: [
+        task("t1", "Send proposal"),
+        task("t2", "Book venue"),
+        task("t3", "Prepare budget"),
+        task("t4", "Old idea"),
+      ],
+    })
+    const renamed = await repository.updateActionItem("t1", {
+      title: "Send signed proposal to Dana",
+    })
+    await repository.updateActionItem("t2", { status: "done" })
+
+    expect(renamed.editedByUser).toBe(true)
+
+    const persisted = await repository.upsertMeetingIntelligence("meet_tasks", {
+      ...first,
+      actionItems: [
+        task("n1", "Send proposal"),
+        task("n2", "Book venue"),
+        task("n3", "Prepare budget"),
+        task("n4", "Brand new task"),
+      ],
+    })
+    const meeting = await repository.getMeeting("meet_tasks")
+    const items = meeting?.summary?.actionItems ?? []
+
+    expect(items.map((item) => item.id)).toEqual(["t1", "t2", "t3", "n4"])
+    expect(items[0]).toMatchObject({ title: "Send signed proposal to Dana", editedByUser: true })
+    expect(items[1]).toMatchObject({ status: "done" })
+    expect(items[1].completedAt).toBeTruthy()
+    expect(persisted.actionItems.map((item) => item.id)).toEqual(["t1", "t2", "t3", "n4"])
+  })
+
+  it("creates externally sourced meetings idempotently", async () => {
+    const repository = createInMemoryMeetingRepository()
+    const input = {
+      title: "Zoom call",
+      source: "zoom" as const,
+      language: "en",
+      startedAt: "2026-04-23T09:00:00.000Z",
+      externalSource: "zoom",
+      externalId: "uuid-123",
+    }
+
+    const first = await repository.createMeetingIfAbsent(input)
+    const second = await repository.createMeetingIfAbsent(input)
+
+    expect(first.created).toBe(true)
+    expect(second.created).toBe(false)
+    expect(second.meeting.id).toBe(first.meeting.id)
+    expect((await repository.findMeetingByExternalId("zoom", "uuid-123"))?.id).toBe(
+      first.meeting.id
+    )
+    expect(await repository.findMeetingByExternalId("teams", "uuid-123")).toBeUndefined()
+  })
+
+  it("scopes media asset source lookups to a meeting when requested", async () => {
+    const repository = createInMemoryMeetingRepository()
+    const meetingA = await repository.createMeeting({
+      title: "A",
+      source: "desktop_recorder",
+      language: "en",
+      startedAt: "2026-04-23T09:00:00.000Z",
+    })
+    const meetingB = await repository.createMeeting({
+      title: "B",
+      source: "desktop_recorder",
+      language: "en",
+      startedAt: "2026-04-23T10:00:00.000Z",
+    })
+    const asset = await repository.createMediaAsset({
+      meetingId: meetingA.id,
+      storageKey: "meetings/a/audio.wav",
+      contentType: "audio/wav",
+      sizeBytes: 10,
+      source: "desktop_capture",
+      sourceFileId: "capture-1",
+    })
+
+    expect(
+      (await repository.findMediaAssetBySourceFile?.("desktop_capture", "capture-1"))?.id
+    ).toBe(asset.id)
+    expect(
+      await repository.findMediaAssetBySourceFile?.("desktop_capture", "capture-1", {
+        meetingId: meetingB.id,
+      })
+    ).toBeUndefined()
+    expect(
+      (
+        await repository.findMediaAssetBySourceFile?.("desktop_capture", "capture-1", {
+          meetingId: meetingA.id,
+        })
+      )?.id
+    ).toBe(asset.id)
+  })
+
+  it("discards only meetings without transcript or summary", async () => {
+    const repository = createInMemoryMeetingRepository()
+    const empty = await repository.createMeeting({
+      title: "Empty",
+      source: "upload",
+      language: "en",
+      startedAt: "2026-04-23T09:00:00.000Z",
+    })
+    const transcribed = await repository.createMeeting({
+      title: "Transcribed",
+      source: "upload",
+      language: "en",
+      startedAt: "2026-04-23T09:00:00.000Z",
+    })
+    const job = await repository.createJob({ name: "media.ingest", meetingId: empty.id })
+
+    await repository.replaceTranscriptSegments(transcribed.id, [
+      { id: "seg_1", speaker: "A", startMs: 0, endMs: 1000, text: "hello" },
+    ])
+
+    expect(await repository.discardMeeting(transcribed.id)).toBe(false)
+    expect(await repository.getMeeting(transcribed.id)).toBeDefined()
+    expect(await repository.discardMeeting(empty.id)).toBe(true)
+    expect(await repository.getMeeting(empty.id)).toBeUndefined()
+    expect((await repository.getJob(job.id))?.meetingId).toBeUndefined()
+    expect(await repository.discardMeeting("missing")).toBe(false)
   })
 })

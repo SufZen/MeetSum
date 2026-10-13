@@ -2,36 +2,89 @@ import { NextResponse } from "next/server"
 
 import { jsonError, requireAppAccess } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { updateWebhookSubscription } from "@/lib/webhooks/management"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import {
+  deleteWebhookSubscription,
+  updateWebhookSubscription,
+  WebhookNotFoundError,
+} from "@/lib/webhooks/management"
+
+function errorResponse(error: unknown, fallback: string) {
+  return jsonError(
+    error instanceof Error ? error.message : fallback,
+    error instanceof WebhookNotFoundError ? 404 : 400
+  )
+}
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
   const unauthorized = await requireAppAccess(request)
 
   if (unauthorized) return unauthorized
 
   const { id } = await params
-  const body = (await request.json()) as {
-    enabled?: boolean
+  const body = (await request.json().catch(() => ({}))) as {
+    url?: unknown
+    enabled?: unknown
     events?: unknown
+    rotateSecret?: unknown
   }
 
   try {
-    const subscription = await updateWebhookSubscription(id, body)
+    const { subscription, secret } = await updateWebhookSubscription(id, body)
     await recordAuditLog({
       action: "webhook.subscription.updated",
       targetType: "webhook_subscription",
       targetId: id,
-      metadata: { enabled: subscription.enabled, events: subscription.events },
+      metadata: {
+        url: subscription.url,
+        enabled: subscription.enabled,
+        events: subscription.events,
+        secretRotated: Boolean(secret),
+      },
     })
 
-    return NextResponse.json({ subscription })
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Unable to update webhook subscription",
-      404
+    return NextResponse.json(
+      secret ? { subscription, secret } : { subscription },
+      { headers: { "cache-control": "no-store" } }
     )
+  } catch (error) {
+    return errorResponse(error, "Unable to update webhook subscription")
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
+  const unauthorized = await requireAppAccess(request)
+
+  if (unauthorized) return unauthorized
+
+  const { id } = await params
+
+  try {
+    const result = await deleteWebhookSubscription(id)
+    await recordAuditLog({
+      // lib/audit.ts has no dedicated delete action; record it as an update.
+      action: "webhook.subscription.updated",
+      targetType: "webhook_subscription",
+      targetId: id,
+      metadata: { deleted: true },
+    })
+
+    return NextResponse.json(result)
+  } catch (error) {
+    return errorResponse(error, "Unable to delete webhook subscription")
   }
 }

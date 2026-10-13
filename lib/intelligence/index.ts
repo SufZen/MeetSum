@@ -20,24 +20,105 @@ export type {
 } from "./types"
 
 const HEBREW_SCRIPT = /[\u0590-\u05ff]/
+
+/**
+ * Word boundaries that understand Hebrew. JS `\b` is ASCII-only, so a term like
+ * `גמה` would match inside `דוגמה`/`מגמה`. These lookarounds treat any letter,
+ * combining mark (niqqud) or digit as part of a word. Always used with `u`.
+ */
+const WORD_START = String.raw`(?<![\p{L}\p{M}\p{N}])`
+const WORD_END = String.raw`(?![\p{L}\p{M}\p{N}])`
+
+/**
+ * Hebrew one-letter prefixes (ו ה ב כ ל מ ש) that attach directly to the next
+ * word, optionally stacked (e.g. וב, שה, וכש). Captured so a replacement can
+ * keep them, joined with a maqaf: `בסופרבייס` → `ב-Supabase`.
+ */
+const HEBREW_PREFIX = "(?<prefix>[והבכלמש]{1,3})"
+
+/**
+ * Builds a Unicode-aware, word-bounded regex for a term.
+ * `allowHebrewPrefix` lets the match start with attached Hebrew prefixes.
+ * Pass `global: true` only for replace/matchAll; `.test` callers must use the
+ * default non-global form (a global regex keeps `lastIndex` between calls).
+ */
+export function termRegex(
+  source: string,
+  options: { allowHebrewPrefix?: boolean; global?: boolean; ignoreCase?: boolean } = {}
+): RegExp {
+  const prefix = options.allowHebrewPrefix ? `${HEBREW_PREFIX}?` : ""
+  const flags = `u${options.global ? "g" : ""}${options.ignoreCase ? "i" : ""}`
+
+  return new RegExp(`${WORD_START}${prefix}(?:${source})${WORD_END}`, flags)
+}
+
 const FILLER_PATTERNS = [
-  /שומעים אותי/gi,
-  /לא שומע/gi,
-  /can you hear me/gi,
-  /this meeting is being recorded/gi,
-  /connection (is )?(bad|unstable)/gi,
+  termRegex("שומעים אותי"),
+  termRegex("לא שומע(?:ים)?"),
+  termRegex("can you hear me", { ignoreCase: true }),
+  termRegex("this meeting is being recorded", { ignoreCase: true }),
+  termRegex("connection (?:is )?(?:bad|unstable)", { ignoreCase: true }),
 ]
 
-const TECHNICAL_TERM_REPLACEMENTS: Array<[RegExp, string]> = [
-  [/סופרבייס/g, "Supabase"],
-  [/ג'מיני/g, "Gemini"],
-  [/גמיני/g, "Gemini"],
-  [/גמה/g, "Gemma"],
-  [/קלוד קוד/g, "Claude Code"],
-  [/רילייז ?אוס/g, "RealizeOS"],
-  [/ויסקוד/g, "VSCode"],
-  [/אם סי פי/g, "MCP"],
+type TermReplacement = {
+  pattern: RegExp
+  replacement: string
+}
+
+function term(
+  source: string,
+  replacement: string,
+  allowHebrewPrefix: boolean
+): TermReplacement {
+  return {
+    pattern: termRegex(source, { allowHebrewPrefix, global: true }),
+    replacement,
+  }
+}
+
+/**
+ * Hebrew transliterations of technical terms. Distinctive multi-letter terms
+ * accept attached prefixes; short/ambiguous ones (Gemma `גמה`, MCP `אם סי פי`)
+ * are strict whole words so ordinary Hebrew (`דוגמה`, `מגמה`, `ואם`) survives.
+ */
+const TECHNICAL_TERM_REPLACEMENTS: TermReplacement[] = [
+  term("סופרבייס", "Supabase", true),
+  term("ג['׳]מיני", "Gemini", true),
+  term("גמיני", "Gemini", true),
+  term("גמה", "Gemma", false),
+  term("קלוד קוד", "Claude Code", true),
+  term("רילייז ?אוס", "RealizeOS", true),
+  term("ויסקוד", "VSCode", true),
+  term("אם סי פי", "MCP", false),
 ]
+
+function replaceTechnicalTerms(text: string): string {
+  return TECHNICAL_TERM_REPLACEMENTS.reduce(
+    (value, { pattern, replacement }) =>
+      value.replace(pattern, (...args: unknown[]) => {
+        const groups = args[args.length - 1] as { prefix?: string } | undefined
+        const prefix = groups?.prefix
+
+        return prefix ? `${prefix}-${replacement}` : replacement
+      }),
+    text
+  )
+}
+
+/** Tokens that contain at least one letter (numbers and punctuation don't count). */
+function countLetterWords(text: string): number {
+  return text.split(/\s+/u).filter((token) => /\p{L}/u.test(token)).length
+}
+
+function stripFillers(text: string): string {
+  return FILLER_PATTERNS.reduce(
+    (value, pattern) => value.replace(new RegExp(pattern.source, `${pattern.flags}g`), " "),
+    text
+  )
+}
+
+/** Max silence (ms) between two identical segments for the second to count as an echo. */
+const DUPLICATE_GAP_MS = 2000
 
 const STOPWORDS: Record<Exclude<ContentLanguage, "he" | "mixed">, string[]> = {
   en: ["the", "and", "need", "follow", "client", "team", "should", "for"],
@@ -148,58 +229,124 @@ export function detectMeetingLanguages(
   }
 }
 
+/**
+ * Normalizes transliterated technical terms, drops filler-only segments
+ * ("שומעים אותי?") and removes echoes: a segment identical to the immediately
+ * previous kept segment from the same speaker within 2 s. Repeating the same
+ * sentence later in the meeting is kept — it may be intentional.
+ */
 export function cleanupTranscriptSegments(
   segments: TranscriptSegment[]
 ): TranscriptSegment[] {
-  const seen = new Set<string>()
+  const kept: TranscriptSegment[] = []
+  let previous: { segment: TranscriptSegment; normalized: string } | undefined
 
-  return segments
-    .map((segment) => {
-      const text = TECHNICAL_TERM_REPLACEMENTS.reduce(
-        (value, [pattern, replacement]) => value.replace(pattern, replacement),
-        segment.text
-      ).trim()
+  for (const segment of segments) {
+    const text = replaceTechnicalTerms(segment.text).trim()
+    const normalized = normalizeText(text).trim()
 
-      return { ...segment, text }
-    })
-    .filter((segment) => {
-      const normalized = normalizeText(segment.text).trim()
+    if (!normalized) continue
+    if (
+      FILLER_PATTERNS.some((pattern) => pattern.test(text)) &&
+      countLetterWords(stripFillers(text)) < 2
+    ) {
+      continue
+    }
+    if (
+      previous &&
+      previous.normalized === normalized &&
+      previous.segment.speaker === segment.speaker &&
+      segment.startMs - previous.segment.endMs <= DUPLICATE_GAP_MS
+    ) {
+      continue
+    }
 
-      if (!normalized) return false
-      if (FILLER_PATTERNS.some((pattern) => pattern.test(segment.text))) {
-        return false
-      }
-      if (seen.has(normalized)) return false
+    const cleaned = { ...segment, text }
+    kept.push(cleaned)
+    previous = { segment: cleaned, normalized }
+  }
 
-      seen.add(normalized)
-      return true
-    })
+  return kept
 }
+
+type TagRule = {
+  tag: MeetingTag
+  /** Latin-script words, matched as whole words (with optional plural `s`). */
+  words?: string[]
+  /**
+   * Hebrew stems: whole-word start (attached prefixes allowed), open end so
+   * inflections (לקוחות, תקציבים) still match. Matched against normalized text,
+   * where geresh/gershayim become spaces (נדל"ן → "נדל ן").
+   */
+  hebrewStems?: string[]
+}
+
+const TAG_RULES: TagRule[] = [
+  {
+    tag: "technical",
+    words: ["api", "mcp", "supabase", "vscode", "gemini", "gemma", "realizeos", "google drive"],
+  },
+  {
+    tag: "finance",
+    words: ["budget", "finance", "invoice", "cost", "orcamento", "orçamento"],
+    hebrewStems: ["תקציב", "כסף"],
+  },
+  {
+    tag: "real-estate",
+    words: ["property", "properties", "asset", "real estate"],
+    hebrewStems: [String.raw`נדל\s*ן`, "נכס"],
+  },
+  { tag: "sales", words: ["client", "customer", "sales"], hebrewStems: ["לקוח", "מכירה", "מכירות"] },
+  {
+    tag: "operations",
+    words: ["ops", "operation", "operations", "workflow"],
+    hebrewStems: ["תפעול", "אוטומציה"],
+  },
+  { tag: "legal", words: ["legal", "contract", "law"], hebrewStems: ["חוזה", "משפטי"] },
+  { tag: "product", words: ["product", "roadmap", "feature"], hebrewStems: ["מוצר", "פיצ"] },
+  {
+    tag: "follow-up-needed",
+    words: ["follow-?up", "follow up", "send", "sending", "enviar", "inviare"],
+    hebrewStems: ["שלח", "לשלוח"],
+  },
+  {
+    tag: "urgent",
+    words: ["urgent", "critico", "urgente"],
+    hebrewStems: ["דחוף", "דחופה"],
+  },
+]
+
+function compileTagRule(rule: TagRule): RegExp[] {
+  const patterns: RegExp[] = []
+
+  // Entries are regex fragments (e.g. "follow-?up"); a space matches any whitespace.
+  const toFragment = (entry: string) => entry.replace(/ /g, String.raw`\s+`)
+
+  if (rule.words?.length) {
+    patterns.push(termRegex(`(?:${rule.words.map(toFragment).join("|")})s?`))
+  }
+
+  if (rule.hebrewStems?.length) {
+    const stems = rule.hebrewStems.map(toFragment).join("|")
+    patterns.push(new RegExp(`${WORD_START}${HEBREW_PREFIX}?(?:${stems})`, "u"))
+  }
+
+  return patterns
+}
+
+const COMPILED_TAG_RULES = TAG_RULES.map((rule) => ({
+  tag: rule.tag,
+  patterns: compileTagRule(rule),
+}))
 
 export function generateAutoTags(segments: TranscriptSegment[]): MeetingTag[] {
   const text = normalizeText(segments.map((segment) => segment.text).join(" "))
   const languageMetadata = detectMeetingLanguages(segments)
   const tags: MeetingTag[] = []
 
-  if (/api|mcp|supabase|vscode|gemini|gemma|realizeos|google drive/.test(text)) {
-    tags.push("technical")
+  for (const rule of COMPILED_TAG_RULES) {
+    if (rule.patterns.some((pattern) => pattern.test(text))) tags.push(rule.tag)
   }
-  if (/budget|finance|invoice|cost|orcamento|orçamento|תקציב|כסף/.test(text)) {
-    tags.push("finance")
-  }
-  if (/property|asset|real estate|נדלן|נכס/.test(text)) {
-    tags.push("real-estate")
-  }
-  if (/client|customer|sales|לקוח|מכירה/.test(text)) tags.push("sales")
-  if (/ops|operation|workflow|תפעול|אוטומציה/.test(text)) {
-    tags.push("operations")
-  }
-  if (/legal|contract|law|חוזה|משפטי/.test(text)) tags.push("legal")
-  if (/product|roadmap|feature|מוצר|פיצ/.test(text)) tags.push("product")
-  if (/follow.?up|send|שלח|לשלוח|enviar|inviare/.test(text)) {
-    tags.push("follow-up-needed")
-  }
-  if (/urgent|דחוף|דחופה|critico|urgente/.test(text)) tags.push("urgent")
 
   for (const language of languageMetadata.secondaryLanguages.length
     ? languageMetadata.secondaryLanguages

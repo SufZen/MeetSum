@@ -1,4 +1,4 @@
-import type { CaptureAdapter } from "@/lib/capture/types"
+import type { CaptureAdapter, CaptureEvent } from "@/lib/capture/types"
 
 const adapters = new Map<string, CaptureAdapter>()
 
@@ -29,4 +29,19 @@ export function listCaptureAdapters(): CaptureAdapter[] {
  */
 export function listCapturePlatforms(): string[] {
   return [...adapters.keys()]
+}
+
+/**
+ * Parses every relevant event of a webhook payload, falling back to the
+ * single-event `parseEvent` for adapters that don't batch.
+ */
+export function parseCaptureEvents(
+  adapter: CaptureAdapter,
+  body: unknown
+): CaptureEvent[] {
+  if (adapter.parseEvents) return adapter.parseEvents(body)
+
+  const event = adapter.parseEvent(body)
+
+  return event ? [event] : []
 }

@@ -1,24 +1,34 @@
-import type {
-  CaptureAdapter,
-  CaptureEvent,
-  RecordingDownload,
-  WebhookValidation,
+import { timingSafeEqual } from "node:crypto"
+
+import { createTokenCache } from "@/lib/capture/token-cache"
+import {
+  CaptureConfigError,
+  RecordingDownloadError,
+  type CaptureAdapter,
+  type CaptureEvent,
+  type RecordingDownload,
+  type WebhookValidation,
 } from "@/lib/capture/types"
 import type { CreateMeetingInput } from "@/lib/meetings/repository"
+
+export const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 /**
  * Microsoft Graph change notification payload.
  */
 type GraphNotification = {
   value: Array<{
-    subscriptionId: string
-    changeType: "created" | "updated" | "deleted"
-    resource: string
+    subscriptionId?: string
+    changeType?: string
+    resource?: string
     clientState?: string
+    tenantId?: string
+    lifecycleEvent?: string
+    subscriptionExpirationDateTime?: string
     resourceData?: {
-      "@odata.type": string
-      "@odata.id": string
-      id: string
+      "@odata.type"?: string
+      "@odata.id"?: string
+      id?: string
     }
   }>
 }
@@ -32,15 +42,90 @@ function isGraphNotification(body: unknown): body is GraphNotification {
 }
 
 /**
- * Get a Microsoft Graph access token using client credentials flow.
+ * Graph resource paths we are willing to call `/content` on. Anything else
+ * (absolute URLs, traversal, query strings) is rejected so a notification
+ * can never steer the bearer token to another endpoint.
  */
-async function getGraphAccessToken(): Promise<string> {
-  const tenantId = process.env.AZURE_TENANT_ID ?? ""
-  const clientId = process.env.AZURE_CLIENT_ID ?? ""
-  const clientSecret = process.env.AZURE_CLIENT_SECRET ?? ""
+const TEAMS_RESOURCE_PATTERN =
+  /^(users|communications|me)\/[A-Za-z0-9_\-.:@=,'()%/]+$/
 
+export function isValidTeamsRecordingResource(resource: unknown): resource is string {
+  return (
+    typeof resource === "string" &&
+    resource.length <= 1024 &&
+    TEAMS_RESOURCE_PATTERN.test(resource) &&
+    !resource.split("/").some((segment) => segment === ".." || segment === ".") &&
+    !resource.includes("//")
+  )
+}
+
+function safeEqual(a: string, b: string) {
+  const left = Buffer.from(a)
+  const right = Buffer.from(b)
+
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+
+export function getTeamsClientState(env: NodeJS.ProcessEnv = process.env) {
+  return env.TEAMS_WEBHOOK_CLIENT_STATE?.trim() ?? ""
+}
+
+/**
+ * Validates `clientState` on every notification of a Graph batch.
+ */
+export function validateTeamsClientState(body: string): WebhookValidation {
+  const clientState = getTeamsClientState()
+
+  if (!clientState) {
+    return { valid: false, reason: "TEAMS_WEBHOOK_CLIENT_STATE not configured" }
+  }
+
+  // Validate clientState on EVERY notification in the batch, not just the
+  // first — otherwise an attacker could prepend one valid entry and smuggle
+  // unvalidated notifications behind it.
+  try {
+    const parsed = JSON.parse(body) as GraphNotification
+    const notifications = Array.isArray(parsed?.value) ? parsed.value : []
+
+    if (notifications.length === 0) {
+      return { valid: false, reason: "Teams notification batch is empty" }
+    }
+
+    if (
+      notifications.some(
+        (entry) =>
+          typeof entry?.clientState !== "string" ||
+          !safeEqual(entry.clientState, clientState)
+      )
+    ) {
+      return { valid: false, reason: "Invalid clientState in Teams notification" }
+    }
+  } catch {
+    return { valid: false, reason: "Invalid JSON in Teams webhook body" }
+  }
+
+  return { valid: true }
+}
+
+function graphCredentials(env: NodeJS.ProcessEnv = process.env) {
+  const tenantId = env.AZURE_TENANT_ID?.trim()
+  const clientId = env.AZURE_CLIENT_ID?.trim()
+  const clientSecret = env.AZURE_CLIENT_SECRET?.trim()
+
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new CaptureConfigError(
+      "Microsoft Graph access requires AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET"
+    )
+  }
+
+  return { tenantId, clientId, clientSecret }
+}
+
+/** Client-credentials Graph token, cached until shortly before expiry. */
+const graphTokenCache = createTokenCache(async () => {
+  const { tenantId, clientId, clientSecret } = graphCredentials()
   const res = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
     {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -54,11 +139,73 @@ async function getGraphAccessToken(): Promise<string> {
   )
 
   if (!res.ok) {
-    throw new Error(`Azure AD token failed: ${res.status}`)
+    throw new RecordingDownloadError("teams", res.status, `Azure AD token failed: ${res.status}`)
   }
 
-  const data = (await res.json()) as { access_token: string }
-  return data.access_token
+  const data = (await res.json()) as { access_token?: string; expires_in?: number }
+
+  if (!data.access_token) {
+    throw new RecordingDownloadError("teams", 502, "Azure AD token response had no access_token")
+  }
+
+  return { token: data.access_token, expiresInSeconds: data.expires_in }
+})
+
+export async function getGraphAccessToken(): Promise<string> {
+  return graphTokenCache.get()
+}
+
+/** Test hook / 401 recovery: forget the cached Graph token. */
+export function resetGraphTokenCache() {
+  graphTokenCache.clear()
+}
+
+/** Authenticated Graph request; refreshes the token once on 401. */
+export async function graphFetch(path: string, init: RequestInit = {}) {
+  const url = path.startsWith("https://") ? path : `${GRAPH_BASE_URL}/${path.replace(/^\//, "")}`
+  const send = async () =>
+    fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string> | undefined),
+        Authorization: `Bearer ${await getGraphAccessToken()}`,
+      },
+    })
+  let res = await send()
+
+  if (res.status === 401) {
+    await res.body?.cancel().catch(() => {})
+    resetGraphTokenCache()
+    res = await send()
+  }
+
+  return res
+}
+
+function toCaptureEvent(
+  notification: GraphNotification["value"][number]
+): CaptureEvent | null {
+  if (notification.changeType !== "created") return null
+  if (!isValidTeamsRecordingResource(notification.resource)) return null
+
+  const resource = notification.resource
+
+  return {
+    platform: "teams",
+    eventType: "recording.available",
+    externalId: notification.resourceData?.id ?? resource,
+    title: "Teams Meeting",
+    startedAt: new Date().toISOString(),
+    participants: [],
+    recordingUrl: resource,
+    recordingMimeType: "video/mp4",
+    metadata: {
+      subscriptionId: notification.subscriptionId,
+      resource,
+      changeType: notification.changeType,
+      tenantId: notification.tenantId,
+    },
+  }
 }
 
 export const teamsCaptureAdapter: CaptureAdapter = {
@@ -68,58 +215,29 @@ export const teamsCaptureAdapter: CaptureAdapter = {
     _headers: Record<string, string>,
     body: string
   ): WebhookValidation {
-    const clientState = process.env.TEAMS_WEBHOOK_CLIENT_STATE ?? ""
-
-    if (!clientState) {
-      return { valid: false, reason: "TEAMS_WEBHOOK_CLIENT_STATE not configured" }
-    }
-
-    // Validate clientState on EVERY notification in the batch, not just the
-    // first — otherwise an attacker could prepend one valid entry and smuggle
-    // unvalidated notifications behind it.
-    try {
-      const parsed = JSON.parse(body) as GraphNotification
-      const notifications = parsed.value ?? []
-
-      if (notifications.length === 0) {
-        return { valid: false, reason: "Teams notification batch is empty" }
-      }
-
-      if (notifications.some((entry) => entry.clientState !== clientState)) {
-        return { valid: false, reason: "Invalid clientState in Teams notification" }
-      }
-    } catch {
-      return { valid: false, reason: "Invalid JSON in Teams webhook body" }
-    }
-
-    return { valid: true }
+    return validateTeamsClientState(body)
   },
 
   parseEvent(body: unknown): CaptureEvent | null {
-    if (!isGraphNotification(body)) return null
+    return teamsCaptureAdapter.parseEvents?.(body)[0] ?? null
+  },
 
-    const notification = body.value[0]
+  parseEvents(body: unknown): CaptureEvent[] {
+    if (!isGraphNotification(body)) return []
 
-    if (!notification) return null
+    const seen = new Set<string>()
 
-    // We're interested in created recording files
-    if (notification.changeType !== "created") return null
-
-    return {
-      platform: "teams",
-      eventType: "recording.available",
-      externalId: notification.resourceData?.id ?? notification.resource,
-      title: `Teams Meeting`,
-      startedAt: new Date().toISOString(),
-      participants: [],
-      recordingUrl: notification.resource,
-      recordingMimeType: "video/mp4",
-      metadata: {
-        subscriptionId: notification.subscriptionId,
-        resource: notification.resource,
-        changeType: notification.changeType,
-      },
-    }
+    return body.value
+      .map((notification) =>
+        notification && typeof notification === "object"
+          ? toCaptureEvent(notification)
+          : null
+      )
+      .filter((event): event is CaptureEvent => {
+        if (!event || seen.has(event.externalId)) return false
+        seen.add(event.externalId)
+        return true
+      })
   },
 
   toMeetingInput(event: CaptureEvent): CreateMeetingInput {
@@ -129,32 +247,42 @@ export const teamsCaptureAdapter: CaptureAdapter = {
       language: "auto",
       startedAt: event.startedAt,
       participants: event.participants,
+      externalSource: "teams",
+      externalId: event.externalId,
     }
   },
 
   async downloadRecording(event: CaptureEvent): Promise<RecordingDownload> {
-    if (!event.recordingUrl) {
-      throw new Error("No recording resource in Teams event")
+    if (!isValidTeamsRecordingResource(event.recordingUrl)) {
+      throw new CaptureConfigError("Teams event has no valid recording resource")
     }
 
-    const token = await getGraphAccessToken()
-    const graphUrl = `https://graph.microsoft.com/v1.0/${event.recordingUrl}/content`
-
-    const res = await fetch(graphUrl, {
-      headers: { Authorization: `Bearer ${token}` },
+    const res = await graphFetch(`${event.recordingUrl}/content`, {
+      redirect: "follow",
     })
 
-    if (!res.ok) {
-      throw new Error(`Teams recording download failed: ${res.status}`)
+    if (!res.ok || !res.body) {
+      await res.body?.cancel().catch(() => {})
+      throw new RecordingDownloadError("teams", res.ok ? 502 : res.status)
     }
 
-    const buffer = Buffer.from(await res.arrayBuffer())
+    const declaredLength = Number(res.headers.get("content-length") ?? "")
+    const contentType =
+      res.headers.get("content-type")?.split(";")[0].trim() ||
+      event.recordingMimeType ||
+      "video/mp4"
 
     return {
-      buffer,
-      filename: `teams-${event.externalId}.mp4`,
-      contentType: event.recordingMimeType ?? "video/mp4",
-      sizeBytes: buffer.byteLength,
+      body: res.body,
+      filename: `teams-${event.externalId.replace(/[^\w.-]+/g, "_").slice(0, 120)}.mp4`,
+      contentType:
+        contentType === "application/octet-stream"
+          ? (event.recordingMimeType ?? "video/mp4")
+          : contentType,
+      sizeBytes:
+        Number.isFinite(declaredLength) && declaredLength > 0
+          ? declaredLength
+          : undefined,
     }
   },
 }

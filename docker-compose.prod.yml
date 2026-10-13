@@ -5,9 +5,14 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3005}:3000"
+      # Loopback only: public traffic must arrive through Traefik so the
+      # X-Forwarded-For chain (and therefore rate limiting) can be trusted.
+      - "127.0.0.1:${APP_PORT:-3005}:3000"
     env_file:
       - .env.local
+    environment:
+      # One trusted proxy hop (Traefik) appends the client address to XFF.
+      MEETSUM_TRUSTED_PROXY_HOPS: ${MEETSUM_TRUSTED_PROXY_HOPS:-1}
     volumes:
       - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     extra_hosts:

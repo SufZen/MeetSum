@@ -52,8 +52,18 @@ export type TranscriptionProvider = {
   getLastRun?: () => TranscriptionRunMetadata
 }
 
+export type SummaryRunMetadata = {
+  provider: string
+  model: string
+  fallbackUsed?: boolean
+  fallbackReason?: string
+}
+
 export type SummaryProvider = {
+  id: string
+  model: string
   summarize: (meeting: MeetingRecord) => Promise<ReturnType<typeof buildMeetingIntelligence>>
+  getLastRun?: () => SummaryRunMetadata
 }
 
 export type TranscriptionProviderMode = "gemini" | "local-whisper" | "auto"
@@ -207,6 +217,13 @@ export function getLocalWhisperProviderConfig(
 export function getTranscriptionRunMetadata(
   provider: TranscriptionProvider
 ): TranscriptionRunMetadata {
+  return provider.getLastRun?.() ?? {
+    provider: provider.id,
+    model: provider.model,
+  }
+}
+
+export function getSummaryRunMetadata(provider: SummaryProvider): SummaryRunMetadata {
   return provider.getLastRun?.() ?? {
     provider: provider.id,
     model: provider.model,
@@ -802,7 +819,25 @@ export class AutoTranscriptionProvider implements TranscriptionProvider {
 }
 
 export class GeminiSummaryProvider implements SummaryProvider {
+  readonly id = "gemini"
+  readonly model = process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-3.5-flash"
   private readonly fallback = new HeuristicFallbackProvider()
+  private lastRun: SummaryRunMetadata = { provider: this.id, model: this.model }
+
+  getLastRun(): SummaryRunMetadata {
+    return this.lastRun
+  }
+
+  private async summarizeWithFallback(meeting: MeetingRecord, reason: string) {
+    this.lastRun = {
+      provider: this.fallback.id,
+      model: this.fallback.model,
+      fallbackUsed: true,
+      fallbackReason: reason,
+    }
+
+    return this.fallback.summarize(meeting)
+  }
 
   private async getTemplateAddendum(): Promise<string[]> {
     try {
@@ -817,9 +852,14 @@ export class GeminiSummaryProvider implements SummaryProvider {
   }
 
   async summarize(meeting: MeetingRecord) {
-    if (!isGeminiConfigured() || !meeting.transcript?.length) {
-      return this.fallback.summarize(meeting)
+    if (!isGeminiConfigured()) {
+      return this.summarizeWithFallback(meeting, "Gemini is not configured")
     }
+    if (!meeting.transcript?.length) {
+      return this.summarizeWithFallback(meeting, "Meeting has no transcript")
+    }
+
+    this.lastRun = { provider: this.id, model: this.model }
 
     const ai = createGeminiClient()
     const transcript = meeting.transcript
@@ -829,7 +869,7 @@ export class GeminiSummaryProvider implements SummaryProvider {
       )
       .join("\n")
     const response = await ai.models.generateContent({
-      model: process.env.GOOGLE_GEMINI_SUMMARY_MODEL ?? "gemini-3.5-flash",
+      model: this.model,
       contents: [
         {
           role: "user",
@@ -936,8 +976,13 @@ export class GeminiSummaryProvider implements SummaryProvider {
         followUpDraft: parsed.followUpDraft ?? fallback.followUpDraft,
         tags: parsed.tags ?? fallback.tags,
       }
-    } catch {
-      return this.fallback.summarize(meeting)
+    } catch (error) {
+      return this.summarizeWithFallback(
+        meeting,
+        `Gemini returned unparseable output: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
     }
   }
 }
@@ -948,7 +993,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   private readonly fallback = new HeuristicFallbackProvider()
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    const asset = meeting.mediaAssets?.[0]
+    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
 
     if (!isGeminiConfigured() || !asset?.storageKey) {
       return this.fallback.transcribe(meeting)

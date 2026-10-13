@@ -43,3 +43,19 @@ export function getGoogleSyncScheduleConfig(
     },
   }
 }
+
+export type CaptureScheduleConfig = {
+  teamsSubscriptionRenew: {
+    minutes: number
+  }
+}
+
+export function getCaptureScheduleConfig(
+  env: Record<string, string | undefined> = process.env
+): CaptureScheduleConfig {
+  return {
+    teamsSubscriptionRenew: {
+      minutes: positiveNumber(env.MEETSUM_TEAMS_SUBSCRIPTION_RENEW_MINUTES, 360),
+    },
+  }
+}

@@ -20,6 +20,7 @@ import type {
   MeetingShare,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
+import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
 import {
   buildMeetingIntelligence,
@@ -39,6 +40,8 @@ type MeetingRow = {
   participants: string[] | string
   is_favorite?: boolean
   language_metadata?: MeetingRecord["languageMetadata"]
+  external_source?: string | null
+  external_id?: string | null
 }
 
 type TranscriptRow = {
@@ -74,6 +77,10 @@ type ActionItemRow = {
   source_quote: string | null
   source_start_ms: number | null
   kind: ActionItem["kind"]
+  edited_by_user?: boolean | null
+  origin?: ActionItem["origin"] | null
+  original_title?: string | null
+  completed_at?: string | Date | null
 }
 
 type TagRow = { name: MeetingTag }
@@ -352,6 +359,8 @@ function mapMeetingRow(row: MeetingRow): MeetingRecord {
     participants: parseJsonArray(row.participants),
     isFavorite: row.is_favorite ?? false,
     languageMetadata: row.language_metadata,
+    externalSource: row.external_source ?? undefined,
+    externalId: row.external_id ?? undefined,
   }
 }
 
@@ -410,6 +419,10 @@ function mapActionItem(row: ActionItemRow): ActionItem {
     sourceQuote: row.source_quote ?? undefined,
     sourceStartMs: row.source_start_ms ?? undefined,
     kind: row.kind,
+    editedByUser: row.edited_by_user ?? false,
+    origin: row.origin ?? "ai",
+    originalTitle: row.original_title ?? undefined,
+    completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
   }
 }
 
@@ -512,6 +525,51 @@ function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord
   return [...records.values()]
 }
 
+const ACTION_ITEM_COLUMNS = `
+  id, title, owner, status, due_date, priority, confidence,
+  source_quote, source_start_ms, kind, edited_by_user, origin,
+  original_title, completed_at
+`
+
+const MEETING_COLUMNS = `
+  id, title, source, language, status, retention, started_at,
+  participants, is_favorite, language_metadata, external_source, external_id
+`
+
+async function insertCalendarParticipants(
+  db: Queryable,
+  meetingId: string,
+  participants: string[]
+) {
+  const now = new Date().toISOString()
+
+  for (const [index, participant] of participants.entries()) {
+    const email = participant.includes("@") ? participant : null
+    const name = email ? participant.split("@")[0] : participant
+
+    await db.query(
+      `
+        insert into meeting_participants (
+          id, meeting_id, name, email, role, source, attendance_status,
+          confidence, created_at, updated_at
+        )
+        values ($1, $2, $3, $4, $5, 'calendar', 'unknown', 0.6, $6, $6)
+        on conflict do nothing
+      `,
+      [
+        `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
+          .toString("base64url")
+          .slice(0, 40)}`,
+        meetingId,
+        name,
+        email,
+        index === 0 ? "organizer" : "attendee",
+        now,
+      ]
+    )
+  }
+}
+
 type PoolLike = Queryable & {
   connect?: () => Promise<Queryable & { release: () => void }>
 }
@@ -519,26 +577,26 @@ type PoolLike = Queryable & {
 /**
  * Runs `fn` inside a BEGIN/COMMIT block on a dedicated connection when the
  * queryable is a real pg Pool. Test fakes (no `connect`) run without a
- * transaction. Guarantees delete+reinsert is atomic — a mid-write failure
- * never leaves a meeting with an empty/partial transcript.
+ * transaction. Guarantees multi-statement writes are atomic — a mid-write
+ * failure never leaves a meeting with a partial transcript or summary.
  */
-async function withTransaction(
+export async function withTransaction<T>(
   client: Queryable,
-  fn: (tx: Queryable) => Promise<void>
-): Promise<void> {
+  fn: (tx: Queryable) => Promise<T>
+): Promise<T> {
   const pool = client as PoolLike
 
   if (typeof pool.connect !== "function") {
-    await fn(client)
-    return
+    return fn(client)
   }
 
   const connection = await pool.connect()
 
   try {
     await connection.query("begin")
-    await fn(connection)
+    const result = await fn(connection)
     await connection.query("commit")
+    return result
   } catch (error) {
     await connection.query("rollback").catch(() => undefined)
     throw error
@@ -593,8 +651,7 @@ export function createPostgresMeetingRepository(
       ),
       client.query(
         `
-          select id, title, owner, status, due_date, priority, confidence,
-                 source_quote, source_start_ms, kind
+          select ${ACTION_ITEM_COLUMNS}
           from action_items
           where meeting_id = $1
           order by created_at asc, id asc
@@ -813,6 +870,96 @@ export function createPostgresMeetingRepository(
   }
 
   return {
+    async findMeetingByExternalId(source, externalId) {
+      const result = await client.query(
+        `
+          select ${MEETING_COLUMNS}
+          from meetings
+          where external_source = $1 and external_id = $2
+          limit 1
+        `,
+        [source, externalId]
+      )
+      const row = result.rows[0] as MeetingRow | undefined
+
+      return row ? hydrateMeeting(mapMeetingRow(row)) : undefined
+    },
+
+    async createMeetingIfAbsent(input) {
+      const result = await client.query(
+        `
+          insert into meetings (
+            id, title, source, language, status, retention, started_at, participants,
+            external_source, external_id
+          )
+          values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb, $7, $8)
+          on conflict (external_source, external_id) where external_id is not null
+            do nothing
+          returning ${MEETING_COLUMNS}
+        `,
+        [
+          input.title,
+          input.source,
+          input.language,
+          input.startedAt,
+          JSON.stringify(input.participants ?? []),
+          createId("meet"),
+          input.externalSource,
+          input.externalId,
+        ]
+      )
+      const row = result.rows[0] as MeetingRow | undefined
+
+      if (row) {
+        const meeting = mapMeetingRow(row)
+
+        await insertCalendarParticipants(client, meeting.id, input.participants ?? [])
+        return { meeting: await hydrateMeeting(meeting), created: true }
+      }
+
+      const existing = await this.findMeetingByExternalId(
+        input.externalSource,
+        input.externalId
+      )
+
+      if (!existing) {
+        throw new Error(
+          `Meeting ${input.externalSource}:${input.externalId} conflicted but could not be loaded`
+        )
+      }
+
+      return { meeting: existing, created: false }
+    },
+
+    async discardMeeting(id) {
+      return withTransaction(client, async (tx) => {
+        const guard = await tx.query(
+          `
+            select id
+            from meetings m
+            where m.id = $1
+              and not exists (select 1 from transcript_segments where meeting_id = m.id)
+              and not exists (select 1 from summaries where meeting_id = m.id)
+            for update
+          `,
+          [id]
+        )
+
+        if (!guard.rows.length) return false
+
+        await tx.query(`update jobs set meeting_id = null where meeting_id = $1`, [id])
+        await tx.query(`update ai_runs set meeting_id = null where meeting_id = $1`, [id])
+        await tx.query(`delete from media_assets where meeting_id = $1`, [id])
+        await tx.query(`delete from meeting_participants where meeting_id = $1`, [id])
+        await tx.query(`delete from meeting_tags where meeting_id = $1`, [id])
+        await tx.query(`delete from action_items where meeting_id = $1`, [id])
+        await tx.query(`delete from speakers where meeting_id = $1`, [id])
+        await tx.query(`delete from meetings where id = $1`, [id])
+
+        return true
+      })
+    },
+
     async listMeetings(options: MeetingListOptions = {}) {
       return (await this.listMeetingsPage(options)).meetings
     },
@@ -876,8 +1023,7 @@ export function createPostgresMeetingRepository(
     async getMeeting(id: string) {
       const result = await client.query(
         `
-          select id, title, source, language, status, retention, started_at,
-                 participants, is_favorite, language_metadata
+          select ${MEETING_COLUMNS}
           from meetings
           where id = $1
           limit 1
@@ -894,11 +1040,11 @@ export function createPostgresMeetingRepository(
       const result = await client.query(
         `
           insert into meetings (
-            id, title, source, language, status, retention, started_at, participants
+            id, title, source, language, status, retention, started_at, participants,
+            external_source, external_id
           )
-          values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb)
-          returning id, title, source, language, status, retention, started_at,
-                    participants, is_favorite, language_metadata
+          values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb, $7, $8)
+          returning ${MEETING_COLUMNS}
         `,
         [
           input.title,
@@ -907,37 +1053,14 @@ export function createPostgresMeetingRepository(
           input.startedAt,
           JSON.stringify(input.participants ?? []),
           createId("meet"),
+          input.externalSource ?? null,
+          input.externalId ?? null,
         ]
       )
 
       const meeting = mapMeetingRow(result.rows[0] as MeetingRow)
-      const now = new Date().toISOString()
 
-      for (const [index, participant] of (input.participants ?? []).entries()) {
-        const email = participant.includes("@") ? participant : null
-        const name = email ? participant.split("@")[0] : participant
-
-        await client.query(
-          `
-            insert into meeting_participants (
-              id, meeting_id, name, email, role, source, attendance_status,
-              confidence, created_at, updated_at
-            )
-            values ($1, $2, $3, $4, $5, 'calendar', 'unknown', 0.6, $6, $6)
-            on conflict do nothing
-          `,
-          [
-            `participant_${Buffer.from(`${meeting.id}:${email ?? name}`)
-              .toString("base64url")
-              .slice(0, 40)}`,
-            meeting.id,
-            name,
-            email,
-            index === 0 ? "organizer" : "attendee",
-            now,
-          ]
-        )
-      }
+      await insertCalendarParticipants(client, meeting.id, input.participants ?? [])
 
       return hydrateMeeting(meeting)
     },
@@ -993,7 +1116,8 @@ export function createPostgresMeetingRepository(
       return mapMediaAsset(result.rows[0] as MediaAssetRow)
     },
 
-    async findMediaAssetBySourceFile(source, sourceFileId) {
+    async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
+      const scoped = Boolean(options.meetingId)
       const result = await client.query(
         `
           select id, meeting_id, storage_key, filename, content_type,
@@ -1001,10 +1125,11 @@ export function createPostgresMeetingRepository(
                  checksum_sha256, metadata, created_at
           from media_assets
           where source = $1 and source_file_id = $2
+          ${scoped ? "and meeting_id = $3" : ""}
           order by created_at desc
           limit 1
         `,
-        [source, sourceFileId]
+        scoped ? [source, sourceFileId, options.meetingId] : [source, sourceFileId]
       )
 
       const row = result.rows[0] as MediaAssetRow | undefined
@@ -1087,109 +1212,187 @@ export function createPostgresMeetingRepository(
       provider = "local",
       model = "heuristic-v1"
     ) {
-      const runId = createId("intel")
-
-      await client.query(
-        `
-          insert into intelligence_runs (id, meeting_id, provider, model, input, output, status)
-          values ($1, $2, $3, $4, '{}'::jsonb, $5::jsonb, 'completed')
-        `,
-        [runId, meetingId, provider, model, JSON.stringify(intelligence)]
-      )
-      await client.query(
-        `
-          update meetings
-          set language_metadata = $2::jsonb, status = 'completed'
-          where id = $1
-        `,
-        [meetingId, JSON.stringify(intelligence.languageMetadata)]
-      )
-
-      const summaryResult = await client.query(
-        `
-          insert into summaries (
-            id, meeting_id, overview, language, model_provider, intelligence_run_id
-          )
-          values ($1, $2, $3, $4, $5, $6)
-          returning id
-        `,
-        [
-          createId("summary"),
-          meetingId,
-          intelligence.overview,
-          intelligence.languageMetadata.primaryLanguage,
-          provider,
-          runId,
-        ]
-      )
-      const summaryId = (summaryResult.rows[0] as { id: string }).id
-
-      await client.query(
-        `
-          insert into summary_sections (id, summary_id, kind, content)
-          values ($1, $2, 'decisions', $3::jsonb)
-        `,
-        [createId("section"), summaryId, JSON.stringify(intelligence.decisions)]
-      )
-      await client.query(`delete from action_items where meeting_id = $1`, [
-        meetingId,
-      ])
-
-      for (const item of intelligence.actionItems) {
-        await client.query(
+      return withTransaction(client, async (tx) => {
+        const existingResult = await tx.query(
           `
-            insert into action_items (
-              id, meeting_id, title, owner, status, due_date, priority,
-              confidence, source_quote, source_start_ms, kind
+            select ${ACTION_ITEM_COLUMNS}
+            from action_items
+            where meeting_id = $1
+            order by created_at asc, id asc
+            for update
+          `,
+          [meetingId]
+        )
+        const existing = (existingResult.rows as ActionItemRow[]).map(mapActionItem)
+        const plan = mergeActionItems(existing, intelligence.actionItems, () =>
+          createId("act")
+        )
+
+        if (plan.remove.length) {
+          await tx.query(
+            `delete from action_items where meeting_id = $1 and id = any($2)`,
+            [meetingId, plan.remove]
+          )
+        }
+
+        for (const item of plan.update) {
+          await tx.query(
+            `
+              update action_items
+              set title = $3,
+                  owner = $4,
+                  status = $5,
+                  due_date = $6,
+                  priority = coalesce($7, priority),
+                  confidence = $8,
+                  source_quote = $9,
+                  source_start_ms = $10,
+                  kind = coalesce($11, kind),
+                  origin = 'ai',
+                  original_title = $3,
+                  edited_by_user = false,
+                  completed_at = null,
+                  updated_at = now()
+              where id = $1 and meeting_id = $2
+            `,
+            [
+              item.id,
+              meetingId,
+              item.title,
+              item.owner ?? null,
+              item.status,
+              coerceDueDate(item.dueDate),
+              item.priority ?? null,
+              item.confidence ?? null,
+              item.sourceQuote ?? null,
+              item.sourceStartMs ?? null,
+              item.kind ?? null,
+            ]
+          )
+        }
+
+        for (const item of plan.insert) {
+          await tx.query(
+            `
+              insert into action_items (
+                id, meeting_id, title, owner, status, due_date, priority,
+                confidence, source_quote, source_start_ms, kind,
+                origin, original_title, edited_by_user
+              )
+              values (
+                $1, $2, $3, $4, $5, $6, coalesce($7, 'normal'), $8, $9, $10,
+                coalesce($11, 'explicit'), 'ai', $3, false
+              )
+            `,
+            [
+              item.id,
+              meetingId,
+              item.title,
+              item.owner ?? null,
+              item.status,
+              coerceDueDate(item.dueDate),
+              item.priority ?? null,
+              item.confidence ?? null,
+              item.sourceQuote ?? null,
+              item.sourceStartMs ?? null,
+              item.kind ?? null,
+            ]
+          )
+        }
+
+        const finalResult = await tx.query(
+          `
+            select ${ACTION_ITEM_COLUMNS}
+            from action_items
+            where meeting_id = $1
+            order by created_at asc, id asc
+          `,
+          [meetingId]
+        )
+        const actionItems = (finalResult.rows as ActionItemRow[]).map(mapActionItem)
+        const persisted: MeetingIntelligence = {
+          ...intelligence,
+          actionItems: actionItems as MeetingIntelligence["actionItems"],
+        }
+        const runId = createId("intel")
+
+        await tx.query(
+          `
+            insert into intelligence_runs (id, meeting_id, provider, model, input, output, status)
+            values ($1, $2, $3, $4, '{}'::jsonb, $5::jsonb, 'completed')
+          `,
+          [runId, meetingId, provider, model, JSON.stringify(persisted)]
+        )
+        await tx.query(
+          `
+            update meetings
+            set language_metadata = $2::jsonb, status = 'completed'
+            where id = $1
+          `,
+          [meetingId, JSON.stringify(intelligence.languageMetadata)]
+        )
+
+        const summaryResult = await tx.query(
+          `
+            insert into summaries (
+              id, meeting_id, overview, language, model_provider, intelligence_run_id
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            values ($1, $2, $3, $4, $5, $6)
+            returning id
           `,
           [
-            item.id || createId("act"),
+            createId("summary"),
             meetingId,
-            item.title,
-            item.owner ?? null,
-            item.status,
-            coerceDueDate(item.dueDate),
-            item.priority,
-            item.confidence,
-            item.sourceQuote,
-            item.sourceStartMs,
-            item.kind,
+            intelligence.overview,
+            intelligence.languageMetadata.primaryLanguage,
+            provider,
+            runId,
           ]
         )
-      }
+        const summaryId = (summaryResult.rows[0] as { id: string }).id
 
-      await client.query(`delete from meeting_tags where meeting_id = $1`, [
-        meetingId,
-      ])
-      for (const tag of intelligence.tags) {
-        const tagId = `tag_${tag}`
-        await client.query(
+        await tx.query(
           `
-            insert into tags (id, name)
-            values ($1, $2)
-            on conflict (name) do nothing
+            insert into summary_sections (id, summary_id, kind, content)
+            values ($1, $2, 'decisions', $3::jsonb)
           `,
-          [tagId, tag]
+          [createId("section"), summaryId, JSON.stringify(intelligence.decisions)]
         )
-        await client.query(
-          `
-            insert into meeting_tags (meeting_id, tag_id)
-            values (
-              $1,
-              coalesce((select id from tags where name = $2), $3)
-            )
-            on conflict do nothing
-          `,
-          [meetingId, tag, tagId]
-        )
-      }
 
-      return intelligence
+        await tx.query(`delete from meeting_tags where meeting_id = $1`, [meetingId])
+        for (const tag of intelligence.tags) {
+          const tagId = `tag_${tag}`
+          await tx.query(
+            `
+              insert into tags (id, name)
+              values ($1, $2)
+              on conflict (name) do nothing
+            `,
+            [tagId, tag]
+          )
+          await tx.query(
+            `
+              insert into meeting_tags (meeting_id, tag_id)
+              values (
+                $1,
+                coalesce((select id from tags where name = $2), $3)
+              )
+              on conflict do nothing
+            `,
+            [meetingId, tag, tagId]
+          )
+        }
+
+        return persisted
+      })
     },
 
     async updateActionItem(id, patch) {
+      const contentEdited =
+        patch.title !== undefined ||
+        patch.owner !== undefined ||
+        patch.dueDate !== undefined ||
+        patch.priority !== undefined
       const result = await client.query(
         `
           update action_items
@@ -1198,10 +1401,15 @@ export function createPostgresMeetingRepository(
               status = coalesce($4, status),
               due_date = coalesce($5, due_date),
               priority = coalesce($6, priority),
+              edited_by_user = edited_by_user or $7,
+              completed_at = case
+                when $4::text = 'done' then coalesce(completed_at, now())
+                when $4::text = 'open' then null
+                else completed_at
+              end,
               updated_at = now()
           where id = $1
-          returning id, title, owner, status, due_date, priority, confidence,
-                    source_quote, source_start_ms, kind
+          returning ${ACTION_ITEM_COLUMNS}
         `,
         [
           id,
@@ -1210,6 +1418,7 @@ export function createPostgresMeetingRepository(
           patch.status ?? null,
           coerceDueDate(patch.dueDate),
           patch.priority ?? null,
+          contentEdited,
         ]
       )
       const row = result.rows[0] as ActionItemRow | undefined
@@ -1222,11 +1431,12 @@ export function createPostgresMeetingRepository(
       const nowId = input.id ?? createId("job")
       const result = await client.query(
         `
-          insert into jobs (id, name, status, meeting_id, payload, retry_of_job_id)
-          values ($1, $2, $3, $4, $5::jsonb, $6)
+          insert into jobs (id, name, status, meeting_id, payload, retry_of_job_id, max_attempts)
+          values ($1, $2, $3, $4, $5::jsonb, $6, coalesce($7::integer, 3))
           on conflict (id) do update
             set status = excluded.status,
                 payload = excluded.payload,
+                max_attempts = excluded.max_attempts,
                 updated_at = now()
           returning id, name, status, meeting_id, payload, result, error,
                     attempts, max_attempts, retry_of_job_id, started_at,
@@ -1239,6 +1449,7 @@ export function createPostgresMeetingRepository(
           input.meetingId ?? null,
           JSON.stringify(input.payload ?? {}),
           input.retryOfJobId ?? null,
+          input.maxAttempts ?? null,
         ]
       )
 

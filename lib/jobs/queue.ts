@@ -14,6 +14,7 @@ export type MeetSumJobName =
   | "google.meet.poll"
   | "webhook.deliver"
   | "realizeos.export"
+  | "teams.subscription.renew"
 
 export type MeetSumJobPayload = {
   meetingId?: string
@@ -32,21 +33,31 @@ export function getMeetSumQueue() {
   return queue
 }
 
+export function getJobAttempts(
+  env: Record<string, string | undefined> = process.env
+) {
+  const parsed = Number(env.MEETSUM_JOB_ATTEMPTS)
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 3
+}
+
 export async function enqueueMeetSumJob(
   name: MeetSumJobName,
   payload: MeetSumJobPayload = {}
 ) {
+  const attempts = getJobAttempts()
   const record = await meetingRepository.createJob({
     name,
     meetingId: payload.meetingId,
     payload,
     retryOfJobId:
       typeof payload.retryOfJobId === "string" ? payload.retryOfJobId : undefined,
+    maxAttempts: attempts,
   })
 
   await getMeetSumQueue().add(name, { ...payload, jobRecordId: record.id }, {
     jobId: record.id,
-    attempts: 3,
+    attempts,
     backoff: { type: "exponential", delay: 3000 },
     removeOnComplete: 250,
     removeOnFail: 500,

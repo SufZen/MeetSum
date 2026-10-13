@@ -1,3 +1,4 @@
+import { Readable } from "node:stream"
 import { describe, expect, it } from "vitest"
 
 import type {
@@ -10,6 +11,7 @@ import {
   getCaptureAdapter,
   listCaptureAdapters,
   listCapturePlatforms,
+  parseCaptureEvents,
 } from "@/lib/capture/registry"
 
 // Mock adapter for testing
@@ -46,7 +48,7 @@ const mockAdapter: CaptureAdapter = {
 
   async downloadRecording() {
     return {
-      buffer: Buffer.from("test-audio"),
+      body: Readable.from([Buffer.from("test-audio")]),
       filename: "test.mp4",
       contentType: "video/mp4",
       sizeBytes: 10,
@@ -93,11 +95,14 @@ describe("capture adapter interface", () => {
     expect(input.participants).toEqual(["Alice", "Bob"])
   })
 
-  it("downloadRecording returns buffer", async () => {
+  it("downloadRecording returns a stream body", async () => {
     const event = mockAdapter.parseEvent({ type: "test" })!
     const result = await mockAdapter.downloadRecording(event)
+    const chunks: Buffer[] = []
 
-    expect(result.buffer).toBeInstanceOf(Buffer)
+    for await (const chunk of result.body as Readable) chunks.push(chunk)
+
+    expect(Buffer.concat(chunks).toString()).toBe("test-audio")
     expect(result.filename).toBe("test.mp4")
     expect(result.contentType).toBe("video/mp4")
     expect(result.sizeBytes).toBe(10)
@@ -130,5 +135,27 @@ describe("capture adapter registry", () => {
     const platforms = listCapturePlatforms()
 
     expect(platforms).toContain("test-platform")
+  })
+})
+
+describe("parseCaptureEvents", () => {
+  it("falls back to parseEvent for non-batching adapters", () => {
+    expect(parseCaptureEvents(mockAdapter, { type: "test" })).toHaveLength(1)
+    expect(parseCaptureEvents(mockAdapter, null)).toEqual([])
+  })
+
+  it("uses parseEvents when the adapter batches", () => {
+    const batching: CaptureAdapter = {
+      ...mockAdapter,
+      parseEvents: () => [
+        mockAdapter.parseEvent({})!,
+        { ...mockAdapter.parseEvent({})!, externalId: "test-456" },
+      ],
+    }
+
+    expect(parseCaptureEvents(batching, {}).map((e) => e.externalId)).toEqual([
+      "test-123",
+      "test-456",
+    ])
   })
 })

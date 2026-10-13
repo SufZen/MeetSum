@@ -131,10 +131,29 @@ type WebhookDeliveryView = {
   eventName: string
   status: string
   attempts: number
+  maxAttempts?: number
   responseStatus?: number
   responseBody?: string
   lastError?: string
+  deliveredAt?: string
+  durationMs?: number
   createdAt: string
+}
+
+type RevealedWebhookSecret = {
+  subscriptionId: string
+  url: string
+  secret: string
+  reason: "created" | "rotated"
+}
+
+const WEBHOOK_RETRYABLE_STATUSES = new Set(["failed", "cancelled"])
+
+function webhookDeliveryBadgeClass(status: string) {
+  if (status === "sent") return "rounded-md bg-[var(--selected)] text-[var(--primary)]"
+  if (status === "failed") return "rounded-md bg-destructive/10 text-destructive"
+  if (status === "retrying") return "rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300"
+  return "rounded-md bg-[var(--surface)] text-muted-foreground"
 }
 
 type MediaAssetView = {
@@ -495,6 +514,8 @@ export function OperationalPage({
     WebhookDeliveryView[]
   >([])
   const [webhookLoading, setWebhookLoading] = useState(false)
+  const [revealedWebhookSecret, setRevealedWebhookSecret] =
+    useState<RevealedWebhookSecret>()
   const [realizeOSStatus, setRealizeOSStatus] = useState<RealizeOSStatusView>()
   const [realizeOSExports, setRealizeOSExports] = useState<RealizeOSExportView[]>([])
   const [mediaAssets, setMediaAssets] = useState<MediaAssetView[]>([])
@@ -725,6 +746,14 @@ export function OperationalPage({
       }
 
       setWebhookUrl("")
+      if (body.secret && body.subscription) {
+        setRevealedWebhookSecret({
+          subscriptionId: body.subscription.id,
+          url: body.subscription.url,
+          secret: body.secret,
+          reason: "created",
+        })
+      }
       toast.success("Webhook subscription created")
       await refreshAutomations()
     } catch (error) {
@@ -755,6 +784,75 @@ export function OperationalPage({
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to update subscription"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function rotateWebhookSecret(subscription: WebhookSubscriptionView) {
+    const confirmed = window.confirm(
+      "Rotate the signing secret? Receivers must switch to the new secret; deliveries signed with the old one will stop verifying."
+    )
+
+    if (!confirmed) return
+
+    setWebhookLoading(true)
+    try {
+      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rotateSecret: true }),
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to rotate webhook secret")
+      }
+
+      setRevealedWebhookSecret({
+        subscriptionId: subscription.id,
+        url: subscription.url,
+        secret: body.secret,
+        reason: "rotated",
+      })
+      toast.success("Webhook secret rotated")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to rotate webhook secret"
+      )
+    } finally {
+      setWebhookLoading(false)
+    }
+  }
+
+  async function deleteWebhookSubscription(subscription: WebhookSubscriptionView) {
+    const confirmed = window.confirm(
+      `Delete the webhook for ${subscription.url}? Its delivery history is deleted too.`
+    )
+
+    if (!confirmed) return
+
+    setWebhookLoading(true)
+    try {
+      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
+        method: "DELETE",
+      })
+      const body = await response.json()
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to delete webhook subscription")
+      }
+
+      if (revealedWebhookSecret?.subscriptionId === subscription.id) {
+        setRevealedWebhookSecret(undefined)
+      }
+      toast.success("Webhook subscription deleted")
+      await refreshAutomations()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to delete subscription"
       )
     } finally {
       setWebhookLoading(false)
@@ -804,7 +902,7 @@ export function OperationalPage({
         throw new Error(body.error ?? "Unable to retry webhook delivery")
       }
 
-      toast.success("Webhook delivery retried")
+      toast.success("Webhook delivery queued for retry")
       await refreshAutomations()
     } catch (error) {
       toast.error(
@@ -1610,6 +1708,44 @@ export function OperationalPage({
                   </label>
                 ))}
               </div>
+              {revealedWebhookSecret ? (
+                <div className="rounded-lg border border-[var(--primary)] bg-[var(--selected)] p-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <KeyRoundIcon className="size-4 text-[var(--primary)]" />
+                    {revealedWebhookSecret.reason === "rotated"
+                      ? "New signing secret"
+                      : "Signing secret"}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Copy it now for {revealedWebhookSecret.url}. It is stored
+                    encrypted and will not be shown again. Verify the
+                    x-meetsum-signature header (HMAC-SHA256 of the body) with it.
+                  </p>
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <code className="min-w-0 flex-1 break-all rounded-md border border-[var(--divider)] bg-[var(--surface)] px-2 py-1.5 font-mono text-xs text-foreground">
+                      {revealedWebhookSecret.secret}
+                    </code>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        className="h-8"
+                        variant="outline"
+                        onClick={() =>
+                          copyAutomationText(revealedWebhookSecret.secret, "Signing secret")
+                        }
+                      >
+                        Copy
+                      </Button>
+                      <Button
+                        className="h-8"
+                        variant="outline"
+                        onClick={() => setRevealedWebhookSecret(undefined)}
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-2">
                 {webhookSubscriptions.map((subscription) => (
                   <div
@@ -1642,6 +1778,14 @@ export function OperationalPage({
                         >
                           {subscription.enabled ? "enabled" : "paused"}
                         </Badge>
+                        {subscription.secretRef === "global" ? (
+                          <Badge
+                            className="rounded-md bg-[var(--surface)] text-muted-foreground"
+                            title="Signed with the shared WEBHOOK_SIGNING_SECRET. Rotate to give this webhook its own secret."
+                          >
+                            shared secret
+                          </Badge>
+                        ) : null}
                         <Button
                           className="h-8"
                           variant="outline"
@@ -1657,6 +1801,26 @@ export function OperationalPage({
                           onClick={() => sendWebhookTest(subscription)}
                         >
                           Test
+                        </Button>
+                        <Button
+                          className="h-8"
+                          variant="outline"
+                          disabled={webhookLoading}
+                          onClick={() => rotateWebhookSecret(subscription)}
+                          title="Rotate signing secret"
+                        >
+                          <KeyRoundIcon className="size-4" />
+                          <span className="sr-only">Rotate signing secret</span>
+                        </Button>
+                        <Button
+                          className="h-8"
+                          variant="outline"
+                          disabled={webhookLoading}
+                          onClick={() => deleteWebhookSubscription(subscription)}
+                          title="Delete webhook"
+                        >
+                          <Trash2Icon className="size-4" />
+                          <span className="sr-only">Delete webhook</span>
                         </Button>
                       </div>
                     </div>
@@ -1826,15 +1990,7 @@ export function OperationalPage({
                     <div className="text-sm font-semibold text-foreground">
                       {delivery.eventName}
                     </div>
-                    <Badge
-                      className={
-                        delivery.status === "sent"
-                          ? "rounded-md bg-[var(--selected)] text-[var(--primary)]"
-                          : delivery.status === "failed"
-                            ? "rounded-md bg-destructive/10 text-destructive"
-                            : "rounded-md bg-[var(--selected)] text-[var(--primary)]"
-                      }
-                    >
+                    <Badge className={webhookDeliveryBadgeClass(delivery.status)}>
                       {delivery.status}
                       {delivery.responseStatus ? ` ${delivery.responseStatus}` : ""}
                     </Badge>
@@ -1860,11 +2016,15 @@ export function OperationalPage({
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-muted-foreground">
                       Attempts: {delivery.attempts}
+                      {delivery.maxAttempts ? ` (budget ${delivery.maxAttempts})` : ""}
+                      {delivery.durationMs !== undefined ? ` · ${delivery.durationMs} ms` : ""}
                     </span>
                     <Button
                       variant="outline"
                       className="h-7"
-                      disabled={webhookLoading || delivery.status !== "failed"}
+                      disabled={
+                        webhookLoading || !WEBHOOK_RETRYABLE_STATUSES.has(delivery.status)
+                      }
                       onClick={() => retryWebhookDelivery(delivery)}
                     >
                       Retry

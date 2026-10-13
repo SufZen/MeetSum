@@ -366,8 +366,9 @@ export function CommandCenterShell({
   async function importDesktopFile(file: File) {
     const formData = new FormData()
 
-    formData.set("file", file)
-    formData.set(
+    // Text fields go before the file: the server streams the file part to
+    // storage and resolves where to put it from the fields received so far.
+    formData.append(
       "meeting",
       JSON.stringify({
         title: file.name.replace(/\.[^.]+$/, "") || "Desktop recording",
@@ -376,7 +377,7 @@ export function CommandCenterShell({
         participants: [],
       })
     )
-    formData.set(
+    formData.append(
       "captureMetadata",
       JSON.stringify({
         appVersion: "manual-import",
@@ -384,6 +385,7 @@ export function CommandCenterShell({
         uploadStatus: "uploaded",
       })
     )
+    formData.append("file", file)
 
     const response = await fetch("/api/desktop-capture/ingest", {
       method: "POST",

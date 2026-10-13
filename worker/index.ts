@@ -1,6 +1,10 @@
+import { isTeamsSubscriptionConfigured } from "@/lib/capture/teams-subscriptions"
 import { createMeetSumWorker } from "@/lib/jobs/processor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
-import { getGoogleSyncScheduleConfig } from "@/lib/jobs/scheduler-config"
+import {
+  getCaptureScheduleConfig,
+  getGoogleSyncScheduleConfig,
+} from "@/lib/jobs/scheduler-config"
 import { getConfiguredWorkspaceSubject } from "@/lib/google/workspace-subject"
 import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 
@@ -77,5 +81,19 @@ function scheduleGoogleSync() {
   }
 }
 
+function scheduleTeamsSubscriptionRenewal() {
+  if (!isTeamsSubscriptionConfigured()) return
+
+  const { minutes } = getCaptureScheduleConfig().teamsSubscriptionRenew
+  const enqueueRenewal = () =>
+    void enqueueMeetSumJob("teams.subscription.renew", { scheduled: true }).catch(
+      (error) => console.error("Scheduled Teams subscription renewal failed", error)
+    )
+
+  enqueueRenewal()
+  scheduledTimers.push(setInterval(enqueueRenewal, minutes * 60 * 1000))
+}
+
 scheduleGoogleSync()
+scheduleTeamsSubscriptionRenewal()
 console.log("MeetSum worker started")

@@ -1,3 +1,5 @@
+import { isIP } from "node:net"
+
 /**
  * In-memory sliding window rate limiter.
  * Suitable for single-instance deployments.
@@ -127,21 +129,68 @@ export const RATE_LIMIT_PRESETS = {
   admin: { maxRequests: 30, windowMs: 60_000 } satisfies RateLimitConfig,
 } as const
 
+function trustedProxyHops(env: NodeJS.ProcessEnv) {
+  const parsed = Number(env.MEETSUM_TRUSTED_PROXY_HOPS)
+
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1
+}
+
+/** Strips brackets and an IPv4 `:port` suffix, then returns the IP or undefined. */
+function validIp(value: string | null | undefined): string | undefined {
+  if (!value) return undefined
+  let candidate = value.trim()
+
+  if (candidate.startsWith("[")) {
+    const end = candidate.indexOf("]")
+    candidate = end > 0 ? candidate.slice(1, end) : candidate
+  } else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(candidate)) {
+    candidate = candidate.slice(0, candidate.lastIndexOf(":"))
+  }
+
+  return isIP(candidate) ? candidate.toLowerCase() : undefined
+}
+
 /**
- * Extract a rate limit key from a Request.
- * Uses X-Forwarded-For (reverse proxy) or falls back to a static key.
+ * Resolves the client IP used as the rate-limit key.
+ *
+ * - `MEETSUM_CLIENT_IP_HEADER` (e.g. `cf-connecting-ip`), when set and valid,
+ *   wins: use it only when the edge proxy overwrites that header.
+ * - Otherwise X-Forwarded-For is read from the right: each trusted proxy
+ *   appends the address it received the request from, so with
+ *   `MEETSUM_TRUSTED_PROXY_HOPS` = N (default 1, Traefik) the client is
+ *   entry `len - N`. Entries further left are client-supplied and spoofable.
+ * - Then X-Real-IP. Every candidate must parse as an IP (`net.isIP`);
+ *   otherwise the key is "unknown".
  */
-export function extractRateLimitKey(request: Request, suffix?: string): string {
-  // Use the RIGHTMOST X-Forwarded-For entry — the one appended by our trusted
-  // reverse proxy (Traefik/Coolify). Leftmost entries are client-supplied and
-  // can be spoofed to mint a fresh rate-limit bucket on every request.
+export function getClientIp(
+  request: Request,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const headerName = env.MEETSUM_CLIENT_IP_HEADER?.trim()
+
+  if (headerName) {
+    const fromHeader = validIp(request.headers.get(headerName))
+    if (fromHeader) return fromHeader
+  }
+
   const forwarded = request.headers.get("x-forwarded-for")
   const parts =
     forwarded?.split(",").map((part) => part.trim()).filter(Boolean) ?? []
-  const ip =
-    parts.length > 0
-      ? parts[parts.length - 1]!
-      : request.headers.get("x-real-ip")?.trim() || "unknown"
+  const hops = trustedProxyHops(env)
+
+  if (parts.length >= hops) {
+    const fromForwarded = validIp(parts[parts.length - hops])
+    if (fromForwarded) return fromForwarded
+  }
+
+  return validIp(request.headers.get("x-real-ip")) ?? "unknown"
+}
+
+/**
+ * Extract a rate limit key from a Request (client IP, see `getClientIp`).
+ */
+export function extractRateLimitKey(request: Request, suffix?: string): string {
+  const ip = getClientIp(request)
   return suffix ? `${ip}:${suffix}` : ip
 }
 
