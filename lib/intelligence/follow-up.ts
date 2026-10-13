@@ -66,6 +66,11 @@ export type FollowUpVariant = FollowUpEmail & {
   aiRunId?: string
   /** Served from cache (same inputs). */
   cached?: boolean
+  /**
+   * Generated for this caller only and not saved: callers without
+   * `meeting:write` never write the shared cached variant.
+   */
+  ephemeral?: boolean
 }
 
 /** The meeting has nothing to follow up on (no summary, decisions or tasks). */
@@ -230,15 +235,19 @@ export async function listFollowUpVariants(
 
 /**
  * Generates a variant, or serves it from cache when the meeting inputs are
- * unchanged and `force` is not set. Callers must restrict `force` to
- * `meeting:write` (it overwrites the shared row). Throws
- * FollowUpUnavailableError when there is nothing to follow up on; LLM
+ * unchanged and `force` is not set. `meeting` must have been loaded through
+ * the caller's scope, and every docs-store call is scoped by `scope`.
+ *
+ * Only callers with `meeting:write` (`canWrite`) write or overwrite the
+ * shared row; anyone else gets a variant that is returned but not saved
+ * (`ephemeral`). Callers must still restrict `force` to `meeting:write`.
+ * Throws FollowUpUnavailableError when there is nothing to follow up on; LLM
  * errors propagate.
  */
 export async function generateFollowUpEmail(
   scope: RepoScope,
   meeting: MeetingRecord,
-  options: FollowUpOptions & { force?: boolean; actorUserId?: string }
+  options: FollowUpOptions & { force?: boolean; actorUserId?: string; canWrite: boolean }
 ): Promise<FollowUpVariant> {
   const hasContent =
     Boolean(meeting.summary?.overview ?? meeting.intelligence?.overview) ||
@@ -274,6 +283,18 @@ export async function generateFollowUpEmail(
     body: result.value.body,
     closing: result.value.closing,
   }
+
+  if (!options.canWrite) {
+    return {
+      ...toVariant(
+        meeting,
+        { variant, content, createdAt: new Date().toISOString(), aiRunId: result.aiRunId },
+        assembly
+      )!,
+      ephemeral: true,
+    }
+  }
+
   const saved = await upsertGeneratedDoc<FollowUpContent>(scope, {
     meetingId: meeting.id,
     kind: "follow_up_email",

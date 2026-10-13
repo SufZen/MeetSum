@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { llmErrorResponse } from "@/app/api/_lib/llm-errors"
-import { loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/meeting-access"
+import { creatorUserId, loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { can, toRepoScope, withAuthz } from "@/lib/auth/authz"
 import {
@@ -38,8 +38,9 @@ export const GET = withAuthz<{ id: string }>("meeting:read", async (request, ctx
  * The cached variant is shared by everyone who can see the meeting, so only
  * the language/tone enums select it and only meeting data feeds the model.
  * `recipients` (validated emails) only build the response's `mailto:`;
- * `includeActionItems` only shapes the response. `force` overwrites the
- * shared row and needs `meeting:write`.
+ * `includeActionItems` only shapes the response. Only `meeting:write` writes
+ * or overwrites the shared row (`force` needs it too); viewers get a variant
+ * that is returned but not saved (`ephemeral`).
  */
 export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ctx, { params }) => {
   const { id } = await params
@@ -74,7 +75,8 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
       tone: tone as FollowUpTone,
       includeActionItems,
       force: body?.force === true,
-      actorUserId: ctx.user?.id,
+      actorUserId: creatorUserId(ctx),
+      canWrite: can(ctx.role, "meeting:write"),
     })
 
     return NextResponse.json({

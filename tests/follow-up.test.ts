@@ -89,6 +89,7 @@ describe("generateFollowUpEmail", () => {
       language: "he",
       tone: "formal",
       includeActionItems: true,
+      canWrite: true,
     })
     const request = generateStructured.mock.calls[0][0] as LlmStructuredRequest<FollowUpOutput>
 
@@ -111,7 +112,7 @@ describe("generateFollowUpEmail", () => {
   it("covers he/en and all three tones as separate cached variants", async () => {
     for (const language of ["he", "en"] as const) {
       for (const tone of ["formal", "friendly", "concise"] as const) {
-        await generateFollowUpEmail(scope, meeting, { language, tone, includeActionItems: false })
+        await generateFollowUpEmail(scope, meeting, { language, tone, includeActionItems: false, canWrite: true })
       }
     }
 
@@ -134,7 +135,7 @@ describe("generateFollowUpEmail", () => {
   })
 
   it("caches by meeting data and language/tone only; force regenerates", async () => {
-    const options = { language: "he" as const, tone: "concise" as const, includeActionItems: true }
+    const options = { language: "he" as const, tone: "concise" as const, includeActionItems: true, canWrite: true }
 
     await generateFollowUpEmail(scope, meeting, options)
     const hit = await generateFollowUpEmail(scope, meeting, options)
@@ -156,7 +157,7 @@ describe("generateFollowUpEmail", () => {
 
   it("refuses a meeting with nothing to follow up on", async () => {
     await expect(
-      generateFollowUpEmail(scope, testMeeting({ id: "m_empty" }), { language: "he", tone: "formal", includeActionItems: true })
+      generateFollowUpEmail(scope, testMeeting({ id: "m_empty" }), { language: "he", tone: "formal", includeActionItems: true, canWrite: true })
     ).rejects.toBeInstanceOf(FollowUpUnavailableError)
   })
 })
@@ -175,7 +176,7 @@ describe("/api/meetings/:id/follow-up", () => {
     )
   }
 
-  it("generates for a viewer and lists variants", async () => {
+  it("generates for a viewer without saving, and lists variants a member saved", async () => {
     await ctx()
 
     const response = await POST(
@@ -186,10 +187,17 @@ describe("/api/meetings/:id/follow-up", () => {
 
     expect(response.status).toBe(200)
     expect(body.variant.variant).toBe("en:friendly")
+    expect(body.variant.ephemeral).toBe(true)
     expect(body.mailtoMaxBodyChars).toBe(1800)
-    const list = await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()
+    expect((await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()).variants).toHaveLength(0)
 
-    expect(list.variants).toHaveLength(1)
+    await ctx("member")
+    const saved = await (
+      await POST(jsonRequest("http://x", "POST", { language: "en", tone: "friendly" }), routeParams({ id: "m_1" }))
+    ).json()
+
+    expect(saved.variant.ephemeral).toBeUndefined()
+    expect((await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()).variants).toHaveLength(1)
   })
 
   it("validates input, 409s empty meetings and 404s invisible ones", async () => {
@@ -271,5 +279,94 @@ describe("/api/meetings/:id/follow-up", () => {
     )
 
     expect(memberForce.status).toBe(200)
+  })
+})
+
+describe("follow-up authorization (shared cache)", () => {
+  const privateMeeting = testMeeting({
+    id: "m_private",
+    title: "שיחה פרטית",
+    visibility: "private",
+    ownerUserId: "user_owner",
+    summary: {
+      overview: "סודי: מחיר רצפה",
+      decisions: ["מחיר רצפה סודי"],
+      actionItems: [{ id: "p1", title: "משימה סודית", owner: "secret@x.co", status: "open" }],
+    },
+  })
+  const database = () =>
+    createInMemoryMeetingDatabase([
+      meeting,
+      privateMeeting,
+      testMeeting({ id: "m_w2", workspaceId: "ws_b", summary: meeting.summary }),
+    ])
+
+  it("a viewer never overwrites a stale shared variant; the member's row stays", async () => {
+    const db = database()
+
+    setRouteCtx(await createTestCtx({ role: "member", database: db }))
+    await POST(jsonRequest("http://x", "POST", { language: "he", tone: "formal" }), routeParams({ id: "m_1" }))
+    const before = (await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()).variants
+
+    // The meeting changes, so the cached row no longer matches its inputs.
+    db.meetings.set("m_1", { ...meeting, title: "כותרת חדשה" })
+    generateStructured.mockImplementation(async (request) => {
+      const base = answer(request)
+
+      return { ...base, value: { ...base.value, subject: "VIEWER SUBJECT" } }
+    })
+    setRouteCtx(await createTestCtx({ role: "viewer", userId: "user_viewer", database: db }))
+    const viewer = await (
+      await POST(jsonRequest("http://x", "POST", { language: "he", tone: "formal" }), routeParams({ id: "m_1" }))
+    ).json()
+
+    expect(viewer.variant).toMatchObject({ ephemeral: true, subject: "VIEWER SUBJECT" })
+    const after = (await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()).variants
+
+    expect(after.map((variant: { subject: string }) => variant.subject)).toEqual(
+      before.map((variant: { subject: string }) => variant.subject)
+    )
+    expect(JSON.stringify(after)).not.toContain("VIEWER SUBJECT")
+  })
+
+  it("a private meeting's variants and owners are invisible to other members (404)", async () => {
+    const db = database()
+
+    setRouteCtx(await createTestCtx({ role: "member", userId: "user_owner", database: db }))
+    const own = await (
+      await POST(jsonRequest("http://x", "POST", { language: "he", tone: "formal" }), routeParams({ id: "m_private" }))
+    ).json()
+
+    expect(own.variant.bodyText).toContain("secret@x.co")
+    setRouteCtx(await createTestCtx({ role: "admin", userId: "user_admin", database: db }))
+    const post = await POST(jsonRequest("http://x", "POST", { language: "he", tone: "formal" }), routeParams({ id: "m_private" }))
+    const get = await GET(new Request("http://x"), routeParams({ id: "m_private" }))
+
+    expect(post.status).toBe(404)
+    expect(get.status).toBe(404)
+    expect(JSON.stringify(await get.json())).not.toContain("secret")
+  })
+
+  it("scopes the docs store by workspace (W1 vs W2)", async () => {
+    const db = database()
+
+    setRouteCtx(await createTestCtx({ role: "member", database: db }))
+    await POST(jsonRequest("http://x", "POST", { language: "he", tone: "formal" }), routeParams({ id: "m_1" }))
+    const w2Scope: RepoScope = { kind: "member", workspaceId: "ws_b", userId: "user_w2", email: "w2@x.co", role: "owner" }
+
+    expect(await listFollowUpVariants(w2Scope, meeting)).toEqual([])
+    setRouteCtx(await createTestCtx({ role: "owner", workspaceId: "ws_b", userId: "user_w2", database: db }))
+    expect((await GET(new Request("http://x"), routeParams({ id: "m_1" }))).status).toBe(404)
+    expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_1" }))).status).toBe(404)
+  })
+
+  it("a read-only API key generates ephemerally", async () => {
+    setRouteCtx(await createTestCtx({ role: "viewer", principal: "api_key", database: database() }))
+    const body = await (
+      await POST(jsonRequest("http://x", "POST", { language: "en", tone: "concise" }), routeParams({ id: "m_1" }))
+    ).json()
+
+    expect(body.variant.ephemeral).toBe(true)
+    expect((await (await GET(new Request("http://x"), routeParams({ id: "m_1" }))).json()).variants).toEqual([])
   })
 })
