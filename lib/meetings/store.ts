@@ -4,6 +4,7 @@ import {
   createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
   createInMemoryShareLookup,
+  type GetShareMediaByToken,
   type InMemoryMeetingDatabase,
   type MeetingRepository,
   type RepoScope,
@@ -92,7 +93,10 @@ export function getSystemMeetingRepository(workspaceId: string): MeetingReposito
  * `link`-visible; the returned meeting carries its `workspaceId` so callers
  * can apply that workspace's `publicSharingEnabled` setting.
  */
-export type ShareLookup = Pick<MeetingRepository, "getShareByToken">
+export type ShareLookup = Pick<MeetingRepository, "getShareByToken"> & {
+  /** Lightweight lookup for the share media routes (no transcript hydration). */
+  getShareMediaByToken: GetShareMediaByToken
+}
 
 export function getShareLookup(): ShareLookup {
   const backend = getMeetingBackend()

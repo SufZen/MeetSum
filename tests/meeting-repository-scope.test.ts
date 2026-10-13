@@ -183,10 +183,16 @@ describe("in-memory favorites and shares", () => {
 
     expect((await repo(owner).getMeeting(meeting.id))!.visibility).toBe("link")
     expect((await lookup.getShareByToken(share.token))?.meeting.workspaceId).toBe("ws_1")
+    expect(await lookup.getShareMediaByToken(share.token)).toMatchObject({
+      share: { token: share.token },
+      meeting: { id: meeting.id, workspaceId: "ws_1", visibility: "link" },
+      mediaAssets: [],
+    })
 
     await repo(owner).updateMeetingVisibility(meeting.id, "workspace")
 
     expect(await lookup.getShareByToken(share.token)).toBeUndefined()
+    expect(await lookup.getShareMediaByToken(share.token)).toBeUndefined()
     expect([...db.shares.values()].every((item) => item.revoked)).toBe(true)
   })
 

@@ -23,6 +23,7 @@ import type {
   MeetingParticipant,
   MeetingRecord,
   MeetingRepository,
+  GetShareMediaByToken,
   MeetingShare,
   MeetingVisibility,
   RepoScope,
@@ -3930,8 +3931,60 @@ export function createPostgresMeetingRepository(
  */
 export function createPostgresShareLookup(client: Queryable): {
   getShareByToken: MeetingRepository["getShareByToken"]
+  getShareMediaByToken: GetShareMediaByToken
 } {
   return {
+    /**
+     * Media-route variant: one share/meeting query plus one media_assets
+     * query (scoped to the meeting's workspace) — never hydrates the
+     * transcript, summary, speakers or participants.
+     */
+    async getShareMediaByToken(token) {
+      const result = await client.query(
+        `
+          select ${SHARE_COLUMNS
+            .split(",")
+            .map((column) => `s.${column.trim()}`)
+            .join(", ")},
+                 m.workspace_id as meeting_workspace_id,
+                 m.visibility as meeting_visibility
+          from meeting_shares s
+          join meetings m on m.id = s.meeting_id
+          where s.token = $1
+            and s.revoked = false
+            and (s.expires_at is null or s.expires_at > now())
+            and m.visibility = 'link'
+          limit 1
+        `,
+        [token]
+      )
+      const row = result.rows[0] as
+        | (MeetingShareRow & { meeting_workspace_id: string; meeting_visibility: MeetingVisibility })
+        | undefined
+
+      if (!row) return undefined
+
+      const assets = await client.query(
+        `
+          select ${MEDIA_ASSET_COLUMNS}
+          from media_assets
+          where meeting_id = $1 and workspace_id = $2
+          order by created_at desc
+        `,
+        [row.meeting_id, row.meeting_workspace_id]
+      )
+
+      return {
+        share: mapMeetingShare(row),
+        meeting: {
+          id: row.meeting_id,
+          workspaceId: row.meeting_workspace_id,
+          visibility: row.meeting_visibility,
+        },
+        mediaAssets: (assets.rows as MediaAssetRow[]).map(mapMediaAsset),
+      }
+    },
+
     async getShareByToken(token) {
       const result = await client.query(
         `

@@ -594,6 +594,21 @@ describe("postgres meeting repository workspace scoping", () => {
     expect(result?.meeting.workspaceId).toBe(WS)
   })
 
+  it("share media lookup loads only the share and media rows (no hydration)", async () => {
+    const lookup = recordingClient()
+    const result = await createPostgresShareLookup(lookup.client).getShareMediaByToken("tok_1")
+    const [first, second, ...rest] = lookup.statements
+
+    expect(first.text).toContain("m.visibility = 'link'")
+    expect(first.text).toContain("s.revoked = false")
+    expect(first.text).toContain("(s.expires_at is null or s.expires_at > now())")
+    expect(second.text).toMatch(/from media_assets where meeting_id = \$1 and workspace_id = \$2/)
+    expect(second.values).toEqual(["meet_1", WS])
+    expect(rest).toHaveLength(0)
+    expect(result?.meeting).toMatchObject({ id: "meet_1", workspaceId: WS })
+    expect(result?.mediaAssets).toHaveLength(1)
+  })
+
   it("revokes active shares only when leaving link visibility", async () => {
     const leaving = recordingClient()
 

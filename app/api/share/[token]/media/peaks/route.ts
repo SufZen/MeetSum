@@ -18,6 +18,6 @@ export const GET = withPublicRoute<{ token: string }>(
 
     if (!access) return jsonError("Not found", 404)
 
-    return serveMeetingPeaks({ request, assets: access.meeting.mediaAssets ?? [] })
+    return serveMeetingPeaks({ request, assets: access.mediaAssets })
   }
 )

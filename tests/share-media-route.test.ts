@@ -1,13 +1,39 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  /** Share fixture source for both lookups. */
   getShareByToken: vi.fn(),
+  /** Full hydrating lookup (share page, verify route). */
+  fullLookup: vi.fn(),
+  /** Lightweight lookup the media routes must use. */
+  mediaLookup: vi.fn(),
   getAppSettings: vi.fn(),
   getMeetingObjectRange: vi.fn(),
 }))
 
 vi.mock("@/lib/meetings/store", () => ({
-  getShareLookup: () => ({ getShareByToken: mocks.getShareByToken }),
+  getShareLookup: () => ({
+    getShareByToken: async (token: string) => {
+      mocks.fullLookup(token)
+      return mocks.getShareByToken(token)
+    },
+    getShareMediaByToken: async (token: string) => {
+      mocks.mediaLookup(token)
+      const result = await mocks.getShareByToken(token)
+
+      return result
+        ? {
+            share: result.share,
+            meeting: {
+              id: result.meeting.id,
+              workspaceId: result.meeting.workspaceId,
+              visibility: result.meeting.visibility,
+            },
+            mediaAssets: result.meeting.mediaAssets ?? [],
+          }
+        : undefined
+    },
+  }),
 }))
 vi.mock("@/lib/settings/app-settings", () => ({ getAppSettings: mocks.getAppSettings }))
 vi.mock("@/lib/storage/object-storage", () => ({
@@ -92,6 +118,8 @@ afterAll(() => {
 
 beforeEach(() => {
   mocks.getShareByToken.mockReset().mockResolvedValue({ share: share(), meeting: meeting() })
+  mocks.fullLookup.mockReset()
+  mocks.mediaLookup.mockReset()
   mocks.getAppSettings.mockReset().mockResolvedValue({ publicSharingEnabled: true })
   mocks.getMeetingObjectRange.mockReset().mockResolvedValue({
     body: new ReadableStream<Uint8Array>({
@@ -112,6 +140,14 @@ describe("GET /api/share/:token/media", () => {
     expect(response.headers.get("cache-control")).toBe("private, max-age=3600")
     expect(mocks.getShareByToken).toHaveBeenCalledWith(TOKEN)
     expect(mocks.getAppSettings).toHaveBeenCalledWith("ws_1")
+  })
+
+  it("uses the lightweight media lookup, never the hydrating share lookup", async () => {
+    await GET(mediaRequest({ range: "bytes=0-9" }), params)
+    await getPeaks(mediaRequest({}, "GET", "/media/peaks"), params).catch(() => undefined)
+
+    expect(mocks.mediaLookup).toHaveBeenCalledWith(TOKEN)
+    expect(mocks.fullLookup).not.toHaveBeenCalled()
   })
 
   it("answers HEAD without touching storage", async () => {

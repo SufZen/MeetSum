@@ -12,7 +12,7 @@ async function handle(request: Request, { params }: { params: Promise<{ token: s
 
   if (!access) return jsonError("Not found", 404)
 
-  return serveMeetingMedia({ request, assets: access.meeting.mediaAssets ?? [] })
+  return serveMeetingMedia({ request, assets: access.mediaAssets })
 }
 
 const REASON =

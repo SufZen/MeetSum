@@ -1,4 +1,8 @@
-import type { MeetingRecord, MeetingShare } from "@/lib/meetings/repository"
+import type {
+  MeetingRecord,
+  MeetingShare,
+  ShareMediaLookupResult,
+} from "@/lib/meetings/repository"
 import { getShareLookup } from "@/lib/meetings/store"
 import { getAppSettings } from "@/lib/settings/app-settings"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
@@ -17,6 +21,27 @@ export async function lookupPublicShare(
   if (!token) return undefined
 
   const result = await getShareLookup().getShareByToken(token)
+
+  if (!result) return undefined
+
+  const settings = await getAppSettings(
+    result.meeting.workspaceId ?? DEFAULT_WORKSPACE_ID
+  )
+
+  return settings.publicSharingEnabled ? result : undefined
+}
+
+/**
+ * Same gates as lookupPublicShare for the share media routes, but loads only
+ * the share, the meeting's identity/visibility and its media asset rows —
+ * every Range request of a shared recording goes through here.
+ */
+export async function lookupPublicShareMedia(
+  token: string
+): Promise<ShareMediaLookupResult | undefined> {
+  if (!token) return undefined
+
+  const result = await getShareLookup().getShareMediaByToken(token)
 
   if (!result) return undefined
 

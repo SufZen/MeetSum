@@ -1,6 +1,6 @@
 import { getSessionSecret, readRequestCookie } from "@/lib/auth/session"
-import type { MeetingRecord, MeetingShare } from "@/lib/meetings/repository"
-import { lookupPublicShare, type PublicShare } from "@/lib/sharing/public-share"
+import type { MeetingShare, ShareMediaLookupResult } from "@/lib/meetings/repository"
+import { lookupPublicShareMedia } from "@/lib/sharing/public-share"
 import {
   SHARE_ACCESS_COOKIE,
   verifyShareAccessCookie,
@@ -16,7 +16,8 @@ import {
  */
 
 export type ShareMediaDeps = {
-  lookup?: (token: string) => Promise<PublicShare | undefined>
+  /** Defaults to the lightweight lookup (share + media rows, no transcript). */
+  lookup?: (token: string) => Promise<ShareMediaLookupResult | undefined>
   secret?: () => string
   now?: () => number
 }
@@ -40,13 +41,13 @@ export async function authorizeShareMediaRequest(
   request: Pick<Request, "headers">,
   token: string,
   deps: ShareMediaDeps = {}
-): Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined> {
+): Promise<ShareMediaLookupResult | undefined> {
   if (!token) return undefined
 
-  let result: PublicShare | undefined
+  let result: ShareMediaLookupResult | undefined
 
   try {
-    result = await (deps.lookup ?? lookupPublicShare)(token)
+    result = await (deps.lookup ?? lookupPublicShareMedia)(token)
   } catch (error) {
     console.error("Share media lookup failed", (error as Error)?.name ?? error)
     return undefined
@@ -80,5 +81,5 @@ export async function authorizeShareMediaRequest(
     if (!valid) return undefined
   }
 
-  return { share, meeting }
+  return result
 }

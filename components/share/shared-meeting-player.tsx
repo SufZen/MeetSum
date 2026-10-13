@@ -5,6 +5,10 @@
  * share includes the recording; media streams from `/api/share/<token>`) and
  * a read-only transcript. `?t=` positions the player; copied links point at
  * `/share/<token>?t=`.
+ *
+ * Props come only from `buildSharePayload` (lib/sharing/share-payload.ts):
+ * no internal meeting/segment/speaker/asset ids and no participant details
+ * are serialized to the browser.
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 
@@ -18,33 +22,32 @@ import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/reposito
 import type { TranscriptSegmentWire } from "@/lib/meetings/transcript-wire"
 import { parseTimeParam } from "@/lib/player/deep-link"
 
+/** Speaker names are resolved server-side; the island never gets participants. */
+const NO_PARTICIPANTS: readonly MeetingParticipant[] = []
+
 export function SharedMeetingPlayer({
   token,
-  meetingId,
   locale,
   language,
   media,
   segments,
   speakers,
-  participants,
   durationMs,
   showTranscript,
 }: {
   token: string
-  meetingId: string
   locale: "he" | "en"
   language?: string
   /** Present only when the share includes the `media` section. */
   media?: MeetingMediaSummary
   segments: TranscriptSegmentWire[]
   speakers: MeetingSpeaker[]
-  participants: MeetingParticipant[]
   durationMs?: number
   showTranscript: boolean
 }) {
   const t = dictionaries[locale]
   const [initialMs, setInitialMs] = useState<number | undefined>()
-  const directory = useSpeakerDirectory(speakers, participants, t.speakersGenericLabel)
+  const directory = useSpeakerDirectory(speakers, NO_PARTICIPANTS, t.speakersGenericLabel)
   const speakerName = useCallback(
     (segment: { speaker: string; speakerId?: string }) => directory.forSegment(segment).name,
     [directory]
@@ -59,7 +62,7 @@ export function SharedMeetingPlayer({
 
   return (
     <MeetingPlayerProvider
-      meetingId={meetingId}
+      meetingId="share"
       mediaBaseUrl={media?.available ? `/api/share/${encodeURIComponent(token)}` : undefined}
       media={media}
       segments={visibleSegments}
@@ -84,7 +87,7 @@ export function SharedMeetingPlayer({
               meetingLanguage={language}
               segments={visibleSegments}
               speakers={speakers}
-              participants={participants}
+              participants={NO_PARTICIPANTS}
               status="ready"
             />
           </section>

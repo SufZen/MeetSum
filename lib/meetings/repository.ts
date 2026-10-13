@@ -2712,13 +2712,49 @@ export function createInMemoryMeetingRepository(
 }
 
 /**
+ * Lightweight result of a share-token lookup for the public media routes
+ * (M4): the share, the meeting's identity/visibility and its media asset
+ * rows only — no transcript, summary, speakers or participants are loaded
+ * (every Range request of a shared recording hits this).
+ */
+export type ShareMediaLookupResult = {
+  share: MeetingShare
+  meeting: Pick<MeetingRecord, "id" | "workspaceId" | "visibility">
+  mediaAssets: MediaAsset[]
+}
+
+export type GetShareMediaByToken = (token: string) => Promise<ShareMediaLookupResult | undefined>
+
+/**
  * Cross-workspace share-token lookup over an in-memory database (mirrors
  * createPostgresShareLookup): active, unexpired share AND `link` visibility.
  */
 export function createInMemoryShareLookup(db: InMemoryMeetingDatabase): {
   getShareByToken: MeetingRepository["getShareByToken"]
+  getShareMediaByToken: GetShareMediaByToken
 } {
   return {
+    async getShareMediaByToken(token) {
+      const share = [...db.shares.values()].find(
+        (item) => item.token === token && !item.revoked
+      )
+      const expired =
+        share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
+      const meeting = share && !expired ? db.meetings.get(share.meetingId) : undefined
+
+      if (!share || !meeting || meeting.visibility !== "link") return undefined
+
+      return {
+        share,
+        meeting: {
+          id: meeting.id,
+          workspaceId: meetingWorkspaceId(meeting),
+          visibility: meeting.visibility,
+        },
+        mediaAssets: [...(meeting.mediaAssets ?? [])],
+      }
+    },
+
     async getShareByToken(token) {
       const share = [...db.shares.values()].find(
         (item) => item.token === token && !item.revoked
