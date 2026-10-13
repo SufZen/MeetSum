@@ -7,8 +7,10 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { createHash } from "node:crypto"
-import { createWriteStream } from "node:fs"
+import { createReadStream, createWriteStream } from "node:fs"
+import { stat } from "node:fs/promises"
 import { Readable, Transform, type TransformCallback } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import type { ReadableStream as WebReadableStream } from "node:stream/web"
@@ -23,6 +25,7 @@ export type StoredObject = {
 }
 
 let client: S3Client | undefined
+const presignClients = new Map<string, S3Client>()
 const ensuredBuckets = new Set<string>()
 
 /**
@@ -290,5 +293,81 @@ export async function deleteMeetingObject(key: string) {
       Bucket: getMeetingMediaBucket(),
       Key: key,
     })
+  )
+}
+
+/**
+ * Uploads a local file to an exact key (no timestamp/uuid decoration), e.g.
+ * the transient `asr-handoff/<uuid>.ogg` objects handed to remote ASR.
+ */
+export async function putMeetingObjectFile(options: {
+  key: string
+  path: string
+  contentType: string
+}): Promise<StoredObject> {
+  const bucket = getMeetingMediaBucket()
+  const { size } = await stat(options.path)
+
+  await ensureBucket(bucket)
+  await getS3Client().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: options.key,
+      Body: createReadStream(options.path),
+      ContentLength: size,
+      ContentType: options.contentType,
+    })
+  )
+
+  return { bucket, key: options.key, contentType: options.contentType, sizeBytes: size }
+}
+
+function getPresignClient(endpoint: string, env: Record<string, string | undefined>) {
+  const cacheKey = `${endpoint}|${env.S3_ACCESS_KEY ?? ""}|${env.S3_REGION ?? ""}`
+  const existing = presignClients.get(cacheKey)
+
+  if (existing) return existing
+
+  const created = new S3Client({
+    region: env.S3_REGION ?? "us-east-1",
+    endpoint,
+    forcePathStyle: true,
+    credentials:
+      env.S3_ACCESS_KEY && env.S3_SECRET_KEY
+        ? { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }
+        : undefined,
+  })
+
+  presignClients.set(cacheKey, created)
+  return created
+}
+
+/**
+ * Time-limited GET URL for an object. MinIO is internal-only, so the URL is
+ * signed against `publicEndpoint` (default `S3_PUBLIC_ENDPOINT`): SigV4
+ * signs the host, so the public host must be used at signing time, not
+ * substituted afterwards. Signing is local (no network call).
+ */
+export async function getMeetingObjectPresignedUrl(
+  key: string,
+  ttlSeconds: number,
+  options: { publicEndpoint?: string; env?: Record<string, string | undefined> } = {}
+): Promise<string> {
+  const env = options.env ?? process.env
+  const endpoint = (options.publicEndpoint ?? env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT ?? "").trim()
+
+  if (!endpoint) {
+    throw new Error("Presigned URLs need S3_PUBLIC_ENDPOINT (or S3_ENDPOINT)")
+  }
+  if (!env.S3_ACCESS_KEY || !env.S3_SECRET_KEY) {
+    throw new Error("Presigned URLs need S3_ACCESS_KEY and S3_SECRET_KEY")
+  }
+
+  const ttl = Math.max(60, Math.min(7 * 24 * 3600, Math.round(ttlSeconds)))
+
+  return getSignedUrl(
+    getPresignClient(endpoint.replace(/\/+$/, ""), env),
+    new GetObjectCommand({ Bucket: env.S3_BUCKET ?? "meeting-media", Key: key }),
+    { expiresIn: ttl }
   )
 }

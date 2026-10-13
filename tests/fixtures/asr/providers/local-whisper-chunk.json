@@ -1,0 +1,25 @@
+{
+  "_synthetic": true,
+  "_note": "Hand-written OpenAI-compatible verbose_json chunk response (timestamp_granularities[]=word) from docs/runbooks/laptop-hebrew-asr/app.py. Times are chunk-relative seconds.",
+  "withWords": {
+    "text": "שלום עולם. נבדוק את סופבייס",
+    "language": "he",
+    "duration": 4.0,
+    "segments": [
+      { "id": 0, "start": 0.2, "end": 1.4, "text": " שלום עולם." },
+      { "id": 1, "start": 1.8, "end": 4.0, "text": " נבדוק את סופבייס" }
+    ],
+    "words": [
+      { "word": " שלום", "start": 0.2, "end": 0.7, "probability": 0.97 },
+      { "word": " עולם.", "start": 0.7, "end": 1.4, "probability": 0.93 },
+      { "word": " נבדוק", "start": 1.8, "end": 2.5, "probability": 0.9 },
+      { "word": " את", "start": 2.5, "end": 2.8, "probability": 0.99 },
+      { "word": " סופבייס", "start": 2.8, "end": 4.0, "probability": 0.62 }
+    ]
+  },
+  "segmentsOnly": {
+    "text": "שלום עולם",
+    "language": "he",
+    "segments": [{ "id": 0, "start": 1.0, "end": 3.0, "text": " שלום עולם" }]
+  }
+}

@@ -1,3 +1,4 @@
+import { getAsrChainConfig, getAsrRouterStatus, type AsrRouterStatus } from "@/lib/ai/asr/router"
 import { getDatabasePool } from "@/lib/db/client"
 import {
   getGeminiProviderMode,
@@ -59,8 +60,39 @@ export function getProviderStatus(): ProviderStatus[] {
   const localWhisperConfig = getLocalWhisperProviderConfig()
   const localWhisperConfigured = isLocalWhisperConfigured()
   const workspaceAuth = getWorkspaceAuthStatus()
+  const asr = getAsrChainConfig()
+  const asrProvider = (id: string) => asr.providers.find((provider) => provider.id === id)
+  const runpod = asrProvider("runpod-ivrit")
+  const soniox = asrProvider("soniox")
 
   return [
+    {
+      id: "asr-router",
+      label: "Hebrew ASR chain",
+      configured: asr.chain.length > 0,
+      mode: asr.chain.join(" → ") || "none",
+      detail: asr.chain.length
+        ? `Hebrew: ${asr.chain.join(" → ")}; other languages: ${asr.nonHebrewChain.join(" → ") || "none"}`
+        : "No ASR provider configured (RunPod, Soniox or local Whisper)",
+    },
+    {
+      id: "runpod-ivrit",
+      label: "RunPod Hebrew ASR (ivrit-ai)",
+      configured: Boolean(runpod?.configured),
+      mode: runpod?.model,
+      detail: runpod?.configured
+        ? "Serverless GPU transcription + diarization configured"
+        : "Missing RUNPOD_API_KEY / RUNPOD_ASR_ENDPOINT_ID",
+    },
+    {
+      id: "soniox",
+      label: "Soniox",
+      configured: Boolean(soniox?.configured),
+      mode: soniox?.model,
+      detail: soniox?.configured
+        ? "Async transcription + diarization configured"
+        : "Optional; missing SONIOX_API_KEY",
+    },
     {
       id: "gemini",
       label: geminiMode === "vertex-ai" ? "Gemini on Vertex AI" : "Gemini",
@@ -105,6 +137,14 @@ export function getProviderStatus(): ProviderStatus[] {
         : "Optional local model not configured",
     },
   ]
+}
+
+/**
+ * ASR chain with live provider health (5 s timeout each) and circuit
+ * breaker state, for the ops dashboard / `GET /api/asr/status`.
+ */
+export async function getAsrOpsStatus(): Promise<AsrRouterStatus> {
+  return getAsrRouterStatus()
 }
 
 /**
