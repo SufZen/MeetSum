@@ -1,0 +1,5 @@
+{
+  "status": "BAD_REFRESH_TOKEN",
+  "message": "missing or unknown refresh token",
+  "correlationId": "c0ffee00-0000-0000-0000-000000000002"
+}
