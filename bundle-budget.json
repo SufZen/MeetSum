@@ -1,0 +1,41 @@
+{
+  "description": "M9 first-load JS budgets, KB gzipped (level 9), polyfills included; see scripts/bundle-size.mjs. budgetKb is the M9 target (enforced with --strict); baselineKb is the ratchet (fails above baselineKb + maxGrowthKb).",
+  "maxGrowthKb": 5,
+  "routes": {
+    "/[locale]": {
+      "budgetKb": 300,
+      "baselineKb": 413.9
+    },
+    "/[locale]/analytics": {
+      "budgetKb": 330,
+      "baselineKb": 330
+    },
+    "/[locale]/onboarding": {
+      "budgetKb": 260,
+      "baselineKb": 260
+    },
+    "/share/[token]": {
+      "budgetKb": 220,
+      "baselineKb": 246.3
+    },
+    "/[locale]/login": {
+      "baselineKb": 201
+    },
+    "/[locale]/tasks": {
+      "baselineKb": 301.7
+    },
+    "/[locale]/search": {
+      "baselineKb": 296.3
+    },
+    "/[locale]/rooms/[id]": {
+      "baselineKb": 244.7
+    },
+    "/[locale]/invite/[token]": {
+      "baselineKb": 219
+    },
+    "/[locale]/unsubscribe": {
+      "baselineKb": 196.7
+    }
+  },
+  "newRoutes": "analytics and onboarding are Step 0 stubs: their baseline starts at the budget until Package C lands them, then --write-baseline lowers it."
+}
