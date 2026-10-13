@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { llmErrorResponse } from "@/app/api/_lib/llm-errors"
-import { loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/meeting-access"
+import { creatorUserId, loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { can, toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { generatePrepBrief, getPrepBrief } from "@/lib/intelligence/prep/brief"
@@ -31,9 +31,11 @@ export const GET = withAuthz<{ id: string }>("meeting:read", async (request, ctx
 
 /**
  * POST /api/meetings/:id/prep `{language?, force?}`: generates the brief
- * (works for upcoming calendar meetings). Viewers can generate (only from
- * meeting data they can see; `language` is an enum); `force` needs
- * meeting:write.
+ * (works for upcoming calendar meetings), always from the meetings the caller
+ * can see (`language` is an enum). The cached brief is one shared row per
+ * meeting and language, so only `meeting:write` writes or overwrites it;
+ * viewers get a brief that is returned but not saved (`ephemeral`), and
+ * `force` needs meeting:write.
  */
 export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ctx, { params }) => {
   const { id } = await params
@@ -59,7 +61,8 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
       await generatePrepBrief(toRepoScope(ctx), ctx.meetings, meeting, {
         language,
         force: body?.force === true,
-        actorUserId: ctx.user?.id,
+        actorUserId: creatorUserId(ctx),
+        canWrite: can(ctx.role, "meeting:write"),
       })
     )
   } catch (error) {

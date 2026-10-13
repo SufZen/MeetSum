@@ -69,6 +69,14 @@ function seed() {
       ownerUserId: "user_me",
       summary: { overview: "מחיר רצפה סודי 4.2M", decisions: ["מחיר רצפה סודי"], actionItems: [] },
     }),
+    testMeeting({
+      id: "m_w2",
+      workspaceId: "ws_b",
+      title: "סקירת Lisboa W2",
+      startedAt: "2026-10-02T10:00:00.000Z",
+      contexts: [room],
+      summary: { overview: "נתוני W2 בלבד", decisions: ["החלטת W2"], actionItems: [] },
+    }),
   ])
 }
 
@@ -113,7 +121,7 @@ async function target(scope: RepoScope) {
 
 describe("generatePrepBrief", () => {
   it("cites only related meetings and tasks the user can see", async () => {
-    const result = await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW })
+    const result = await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })
     const request = generateStructured.mock.calls[0][0] as LlmStructuredRequest<PrepBriefOutput>
 
     expect(request).toMatchObject({
@@ -138,20 +146,20 @@ describe("generatePrepBrief", () => {
   })
 
   it("serves an unchanged brief from cache and regenerates on force", async () => {
-    await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW })
-    const again = await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW })
+    await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })
+    const again = await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })
 
     expect(again.cached).toBe(true)
     expect(generateStructured).toHaveBeenCalledTimes(1)
 
-    await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, force: true })
+    await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, force: true, canWrite: true })
     expect(generateStructured).toHaveBeenCalledTimes(2)
   })
 
   it("propagates LLM errors", async () => {
     generateStructured.mockRejectedValue(new LlmError("no key", "config", "none", false))
 
-    await expect(generatePrepBrief(other, repoFor(other), await target(other), { now: NOW })).rejects.toThrow(
+    await expect(generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })).rejects.toThrow(
       "no key"
     )
   })
@@ -166,7 +174,7 @@ describe("getPrepBrief", () => {
   })
 
   it("never serves a brief built from a meeting the reader cannot see", async () => {
-    await generatePrepBrief(me, repoFor(me), await target(me), { now: NOW })
+    await generatePrepBrief(me, repoFor(me), await target(me), { now: NOW, canWrite: true })
     const prompt = (generateStructured.mock.calls[0][0] as LlmStructuredRequest<PrepBriefOutput>).instructions
 
     expect(prompt).toContain("סודי")
@@ -230,5 +238,100 @@ describe("/api/meetings/:id/prep", () => {
     expect(await unconfigured.json()).toEqual({ error: "llm_not_configured", kind: "config" })
     generateStructured.mockRejectedValue(new LlmError("boom", "server", "gemini", true))
     expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).status).toBe(502)
+  })
+})
+
+describe("prep brief authorization (shared cache)", () => {
+  const viewer: RepoScope = { kind: "member", workspaceId: "ws_a", userId: "user_other", email: "other@x.co", role: "viewer" }
+
+  function promptOf(call: number) {
+    return (generateStructured.mock.calls[call][0] as LlmStructuredRequest<PrepBriefOutput>).instructions
+  }
+
+  it("a viewer whose visible inputs differ gets an ephemeral brief and never overwrites the cache", async () => {
+    // The owner of the private meeting (member) writes the shared brief.
+    const own = await generatePrepBrief(me, repoFor(me), await target(me), { now: NOW, canWrite: true })
+
+    expect(own.ephemeral).toBeUndefined()
+    generateStructured.mockResolvedValue(llmResult({ ...output, goal: "VIEWER GOAL" }))
+
+    const fresh = await generatePrepBrief(viewer, repoFor(viewer), await target(viewer), { now: NOW, canWrite: false })
+
+    expect(fresh).toMatchObject({ ephemeral: true, brief: { goal: "VIEWER GOAL" } })
+    expect(fresh.cached).toBeUndefined()
+    // Built only from what the viewer can see.
+    expect(promptOf(1)).not.toContain("סודי")
+    // The shared row is untouched: the member still gets their brief.
+    const again = await getPrepBrief(me, repoFor(me), await target(me), { now: NOW })
+
+    expect(again.brief?.goal).toBe("לסגור את תנאי העסקה")
+    expect(again.stale).toBe(false)
+  })
+
+  it("a viewer's generation is not persisted even when there is no cached brief", async () => {
+    const fresh = await generatePrepBrief(viewer, repoFor(viewer), await target(viewer), { now: NOW, canWrite: false })
+
+    expect(fresh.ephemeral).toBe(true)
+    expect((await getPrepBrief(viewer, repoFor(viewer), await target(viewer), { now: NOW })).brief).toBeNull()
+    expect((await getPrepBrief(other, repoFor(other), await target(other), { now: NOW })).brief).toBeNull()
+  })
+
+  it("a viewer gets the cached brief when it was built from exactly what they can see", async () => {
+    await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })
+    const served = await generatePrepBrief(viewer, repoFor(viewer), await target(viewer), { now: NOW, canWrite: false })
+
+    expect(served.cached).toBe(true)
+    expect(served.ephemeral).toBeUndefined()
+    expect(generateStructured).toHaveBeenCalledTimes(1)
+  })
+
+  it("selects related meetings from the caller's own workspace only (W1 vs W2)", async () => {
+    const w2: RepoScope = { kind: "member", workspaceId: "ws_b", userId: "user_w2", email: "w2@x.co", role: "member" }
+    const w1 = await generatePrepBrief(other, repoFor(other), await target(other), { now: NOW, canWrite: true })
+
+    expect(w1.related.map((item) => item.meetingId)).toEqual(["m_prev"])
+    expect(promptOf(0)).not.toContain("W2")
+    // A W2 member cannot even load the W1 meeting.
+    expect(await repoFor(w2).getMeeting("m_target")).toBeUndefined()
+  })
+})
+
+describe("/api/meetings/:id/prep authorization", () => {
+  it("a viewer POST returns an ephemeral brief and leaves the member's cached brief in place", async () => {
+    setRouteCtx(await createTestCtx({ role: "member", userId: "user_me", email: "me@x.co", database }))
+    expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).status).toBe(200)
+
+    generateStructured.mockResolvedValue(llmResult({ ...output, goal: "VIEWER GOAL" }))
+    setRouteCtx(await createTestCtx({ role: "viewer", userId: "user_other", email: "other@x.co", database }))
+    const viewerPost = await (await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).json()
+
+    expect(viewerPost).toMatchObject({ ephemeral: true, brief: { goal: "VIEWER GOAL" } })
+    // The viewer is not served the member's brief (it cites a private meeting).
+    const viewerGet = await (await GET(new Request("http://x"), routeParams({ id: "m_target" }))).json()
+
+    expect(viewerGet).toMatchObject({ brief: null, stale: true })
+    expect(JSON.stringify(viewerGet)).not.toContain("m_secret")
+
+    setRouteCtx(await createTestCtx({ role: "member", userId: "user_me", email: "me@x.co", database }))
+    const memberGet = await (await GET(new Request("http://x"), routeParams({ id: "m_target" }))).json()
+
+    expect(memberGet.brief.goal).toBe("לסגור את תנאי העסקה")
+  })
+
+  it("a read-only API key generates ephemerally and never writes the cache", async () => {
+    setRouteCtx(await createTestCtx({ role: "viewer", principal: "api_key", database }))
+    const response = await (await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).json()
+
+    expect(response.ephemeral).toBe(true)
+    expect((await (await GET(new Request("http://x"), routeParams({ id: "m_target" }))).json()).brief).toBeNull()
+    expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_secret" }))).status).toBe(404)
+  })
+
+  it("a W2 member gets 404 for a W1 meeting", async () => {
+    setRouteCtx(await createTestCtx({ role: "owner", userId: "user_w2", workspaceId: "ws_b", database }))
+
+    expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).status).toBe(404)
+    expect((await GET(new Request("http://x"), routeParams({ id: "m_target" }))).status).toBe(404)
+    expect(generateStructured).not.toHaveBeenCalled()
   })
 })

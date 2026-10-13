@@ -64,6 +64,11 @@ export type PrepBriefResult = {
   stale?: boolean
   /** Generation served from cache (same input hash). */
   cached?: boolean
+  /**
+   * Generated for this caller only and not saved: callers without
+   * `meeting:write` never write the shared cached brief.
+   */
+  ephemeral?: boolean
 }
 
 export type PrepContextMeeting = {
@@ -283,6 +288,34 @@ function prepInputHash(context: PrepContext): string {
   return sha1Hex(JSON.stringify({ v: PREP_PROMPT_VERSION, context }))
 }
 
+/** Every meeting a cached brief was built from or cites. */
+function briefMeetingIds(sourceMeetingIds: readonly string[], brief: PrepBrief | null | undefined): string[] {
+  const ids = new Set(sourceMeetingIds)
+
+  for (const item of [
+    ...(brief?.whereWeLeftOff ?? []),
+    ...(brief?.openTasks ?? []),
+    ...(brief?.previousDecisions ?? []),
+  ]) {
+    if (item.meetingId) ids.add(item.meetingId)
+  }
+
+  return [...ids]
+}
+
+/** True when the caller's scoped repository can see every source meeting. */
+async function allSourcesVisible(
+  meetings: MeetingRepository,
+  sourceMeetingIds: readonly string[],
+  brief: PrepBrief | null | undefined
+): Promise<boolean> {
+  for (const sourceId of briefMeetingIds(sourceMeetingIds, brief)) {
+    if (!(await meetings.getMeeting(sourceId, { includeTranscript: false }))) return false
+  }
+
+  return true
+}
+
 /** Cached brief for the meeting's language, plus today's related meetings. */
 export async function getPrepBrief(
   scope: RepoScope,
@@ -299,10 +332,8 @@ export async function getPrepBrief(
   // The cached brief is shared by everyone who can see this meeting, but its
   // sources may include a private meeting this reader cannot see: then it is
   // not served (the reader can generate one from what they can see).
-  for (const sourceId of cached.sourceMeetingIds) {
-    if (!(await meetings.getMeeting(sourceId, { includeTranscript: false }))) {
-      return { brief: null, related, language, stale: true }
-    }
+  if (!(await allSourcesVisible(meetings, cached.sourceMeetingIds, cached.content))) {
+    return { brief: null, related, language, stale: true }
   }
 
   const context = await buildPrepContext(meetings, meeting, related, language)
@@ -320,12 +351,19 @@ export async function getPrepBrief(
 /**
  * Generates (or serves from cache when the inputs are unchanged and `force`
  * is not set) the prep brief. LLM errors propagate to the caller.
+ *
+ * `meetings` must be the caller's scoped repository: related meetings and
+ * their tasks always come from what the caller can see. Only callers with
+ * `meeting:write` (`canWrite`) write or overwrite the shared cached row;
+ * anyone else gets a brief generated from their own visible meetings that is
+ * returned but never persisted (`ephemeral`), so a viewer can neither replace
+ * what other members see nor read a brief built from meetings they can't see.
  */
 export async function generatePrepBrief(
   scope: RepoScope,
   meetings: MeetingRepository,
   meeting: MeetingRecord,
-  options: { language?: string; actorUserId?: string; force?: boolean; now?: Date } = {}
+  options: { language?: string; actorUserId?: string; force?: boolean; now?: Date; canWrite: boolean }
 ): Promise<PrepBriefResult> {
   const language = resolveDocLanguage(meeting, options.language)
   const related = await findRelatedMeetings(meetings, meeting, { now: options.now })
@@ -333,7 +371,14 @@ export async function generatePrepBrief(
   const inputHash = prepInputHash(context)
   const cached = await getGeneratedDoc<PrepBrief>(scope, meeting.id, "prep_brief", language)
 
-  if (cached && cached.inputHash === inputHash && !options.force) {
+  // Same input hash = built from exactly the caller's visible context; the
+  // source check is defence in depth.
+  if (
+    cached &&
+    cached.inputHash === inputHash &&
+    !options.force &&
+    (await allSourcesVisible(meetings, cached.sourceMeetingIds, cached.content))
+  ) {
     return {
       brief: cached.content,
       related,
@@ -363,6 +408,18 @@ export async function generatePrepBrief(
     ],
   })
   const brief = mapPrepOutput(result.value, context)
+
+  if (!options.canWrite) {
+    return {
+      brief,
+      related,
+      language,
+      generatedAt: new Date().toISOString(),
+      aiRunId: result.aiRunId,
+      ephemeral: true,
+    }
+  }
+
   const saved = await upsertGeneratedDoc<PrepBrief>(scope, {
     meetingId: meeting.id,
     kind: "prep_brief",
