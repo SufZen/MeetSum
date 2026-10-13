@@ -16,7 +16,7 @@ import type {
   SentimentLabel,
   SentimentTurn,
 } from "@/lib/analytics/types"
-import { describeLlmFailure, generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
+import { describeLlmFailure, generateStructured, interactiveLlmOptions, LlmError } from "@/lib/ai/llm"
 import { dataBlock } from "@/lib/ai/prompts/data-block"
 import type { Chapter } from "@/lib/intelligence"
 import { sha1Hex } from "@/lib/intelligence/normalize"
@@ -190,6 +190,7 @@ export async function analyzeSentiment(
   }
 
   let failedTurns = 0
+  let notConfigured: LlmError | undefined
   let aiRunId: string | undefined
   let provider = input.previous?.provider
   let model = input.previous?.model
@@ -234,6 +235,7 @@ export async function analyzeSentiment(
       model = result.model
     } catch (error) {
       failedTurns += batch.length
+      if (error instanceof LlmError && error.kind === "config") notConfigured = error
       // Error kind only: provider/parse messages can carry model output.
       console.warn(`[sentiment] batch failed for meeting ${input.meetingId}: ${describeLlmFailure(error)}`)
     }
@@ -241,6 +243,8 @@ export async function analyzeSentiment(
 
   const sentiment = summarizeSentiment(turns, classified, input, { failedTurns, provider, model })
 
+  // Nothing classified because no provider is configured: surface it (503).
+  if (!sentiment && notConfigured) throw notConfigured
   return sentiment ? { sentiment, aiRunId } : undefined
 }
 

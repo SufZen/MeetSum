@@ -19,6 +19,7 @@ vi.mock("@/lib/ai/llm", async (importOriginal) => {
 
 import { GET } from "@/app/api/meetings/[id]/analytics/route"
 import { POST as rerunSentiment } from "@/app/api/meetings/[id]/analytics/sentiment/route"
+import { LlmError } from "@/lib/ai/llm"
 import { resetMemoryAnalytics } from "@/lib/analytics/store"
 import {
   createInMemoryMeetingDatabase,
@@ -134,6 +135,18 @@ describe("POST /api/meetings/:id/analytics/sentiment", () => {
     const read = await (await get("m_a")).json()
 
     expect(read.analytics.sentiment.overall.turns).toBe(2)
+  })
+
+  it("answers 503 llm_not_configured (with metrics) when no provider is configured", async () => {
+    await as("member")
+    generateStructured.mockRejectedValue(new LlmError("no key", "config", "none", false))
+
+    const response = await post("m_a")
+    const body = await response.json()
+
+    expect(response.status).toBe(503)
+    expect(body).toMatchObject({ error: "llm_not_configured", sentiment: "failed" })
+    expect(body.analytics).toBeDefined()
   })
 
   it("keeps metrics and answers 502 when sentiment fails", async () => {

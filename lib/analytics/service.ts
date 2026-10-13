@@ -17,7 +17,7 @@ import {
   reaggregateSentiment,
 } from "@/lib/analytics/sentiment"
 import { getMeetingAnalytics, upsertMeetingAnalytics } from "@/lib/analytics/store"
-import { describeLlmFailure } from "@/lib/ai/llm/types"
+import { describeLlmFailure, LlmError } from "@/lib/ai/llm/types"
 import {
   MEETING_ANALYTICS_VERSION,
   type MeetingAnalyticsRecord,
@@ -115,12 +115,18 @@ export async function recomputeMeetingAnalytics(
   repo: MeetingRepository,
   meeting: MeetingRecord,
   options: { sentiment?: boolean; force?: boolean; jobId?: string; interactive?: boolean } = {}
-): Promise<{ analytics: MeetingAnalyticsRecord | undefined; sentiment: "ok" | "skipped" | "failed" }> {
+): Promise<{
+  analytics: MeetingAnalyticsRecord | undefined
+  sentiment: "ok" | "skipped" | "failed"
+  /** Set when sentiment failed because no LLM provider is configured. */
+  sentimentError?: "llm_not_configured"
+}> {
   const inputs = await loadInputs(repo, meeting)
   const stored = await getMeetingAnalytics(scope, meeting.id)
   const metrics = computeMeetingAnalytics(inputs.segments, inputs.speakers)
   let sentimentStatus: "ok" | "skipped" | "failed" = "skipped"
   let sentiment: Awaited<ReturnType<typeof analyzeSentiment>>
+  let sentimentError: "llm_not_configured" | undefined
 
   if (options.sentiment !== false) {
     try {
@@ -138,6 +144,7 @@ export async function recomputeMeetingAnalytics(
       sentimentStatus = sentiment ? "ok" : "failed"
     } catch (error) {
       sentimentStatus = "failed"
+      if (error instanceof LlmError && error.kind === "config") sentimentError = "llm_not_configured"
       // Error kind only: provider/parse messages can carry model output.
       console.warn(`[analytics] sentiment failed for ${meeting.id}: ${describeLlmFailure(error)}`)
     }
@@ -154,7 +161,7 @@ export async function recomputeMeetingAnalytics(
     sentimentAiRunId: sentiment?.sentiment ? (sentiment.aiRunId ?? null) : undefined,
   })
 
-  return { analytics, sentiment: sentimentStatus }
+  return { analytics, sentiment: sentimentStatus, ...(sentimentError ? { sentimentError } : {}) }
 }
 
 /** Whether sentiment runs for a workspace (`aiFeatures.sentiment`, env). */

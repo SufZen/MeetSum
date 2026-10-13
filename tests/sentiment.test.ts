@@ -171,10 +171,16 @@ describe("analyzeSentiment", () => {
   })
 
   it("returns undefined when every batch fails or there are no turns", async () => {
-    generateStructured.mockRejectedValue(new LlmError("no key", "config", "none", false))
+    generateStructured.mockRejectedValue(new LlmError("503", "server", "gemini", true))
 
     expect(await analyzeSentiment(input(segments(3)))).toBeUndefined()
     expect(await analyzeSentiment(input([]))).toBeUndefined()
+  })
+
+  it("rethrows the config error when nothing could be classified because no provider is configured", async () => {
+    generateStructured.mockRejectedValue(new LlmError("no key", "config", "none", false))
+
+    await expect(analyzeSentiment(input(segments(3)))).rejects.toMatchObject({ kind: "config" })
   })
 
   it("clamps scores into -1..1", async () => {

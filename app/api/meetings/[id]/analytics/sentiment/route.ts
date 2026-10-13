@@ -31,6 +31,15 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     interactive: true,
   })
 
+  // Like prep and follow-up: no provider configured is a 503, a provider
+  // failure a 502 (fresh metrics are stored and returned either way).
+  if (result.sentimentError === "llm_not_configured") {
+    return NextResponse.json(
+      { error: "llm_not_configured", kind: "config", analytics: result.analytics, sentiment: result.sentiment },
+      { status: 503 }
+    )
+  }
+
   return NextResponse.json(
     { analytics: result.analytics, sentiment: result.sentiment },
     { status: result.sentiment === "failed" ? 502 : 200 }
