@@ -11,6 +11,8 @@ import {
   enqueueWorkspaceRetention,
 } from "@/lib/jobs/workspace-schedules"
 import { assertRuntimeEnvironment } from "@/lib/ops/environment"
+import { warmSearchCapabilities } from "@/lib/search/capabilities"
+import { enqueueIndexSweeps, indexSweepEveryMs } from "@/lib/search/index-sweep"
 
 assertRuntimeEnvironment()
 
@@ -94,7 +96,24 @@ function scheduleMediaRetention() {
   )
 }
 
+/**
+ * M6 search index sweeper: every MEETSUM_INDEX_SWEEP_EVERY_MS, one
+ * search.index.sweep job per live workspace re-enqueues stale, failed or
+ * re-keyed meetings. Postgres only (other storage keeps no index).
+ */
+function scheduleSearchIndexSweep() {
+  if (process.env.MEETSUM_STORAGE !== "postgres") return
+
+  void warmSearchCapabilities()
+  const enqueueSweeps = () =>
+    void enqueueIndexSweeps().catch((error) => console.error("Scheduled search index sweep failed", error))
+
+  enqueueSweeps()
+  scheduledTimers.push(setInterval(enqueueSweeps, indexSweepEveryMs()))
+}
+
 scheduleGoogleSync()
 scheduleTeamsSubscriptionRenewal()
 scheduleMediaRetention()
+scheduleSearchIndexSweep()
 console.log("MeetSum worker started")

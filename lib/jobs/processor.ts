@@ -61,6 +61,8 @@ import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
 import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
 import { requestMeetingReindex } from "@/lib/search/index-trigger"
+import { indexMeeting } from "@/lib/search/indexer"
+import { sweepWorkspaceIndex } from "@/lib/search/index-sweep"
 import { deleteMeetingObjects } from "@/lib/storage/object-storage"
 import { applyMediaRetention } from "@/lib/storage/retention"
 import {
@@ -539,7 +541,9 @@ async function summarizeAndPersist(scope: JobScope, options: {
   })
 
   await scope.repo.updateMeetingStatus(meeting.id, "indexing")
-  await setStage(scope, jobRecordId, { stage: "meeting.index", ...options.stageResult })
+  // The search index itself is built by the debounced meeting.index job
+  // requested below (M6); this stage persists the summary.
+  await setStage(scope, jobRecordId, { stage: "summary.persist", ...options.stageResult })
 
   const persisted = await scope.repo.upsertMeetingIntelligence(
     meeting.id,
@@ -1109,29 +1113,31 @@ async function processIntelligenceOnlyJob(
 }
 
 /**
- * Search indexing is not implemented yet (M6). The job validates that there
- * is something to index and reports honestly instead of re-transcribing.
+ * Search indexing (M6, lib/search/indexer.ts): chunk, embed changed chunks,
+ * write the index. A meeting with nothing to index yet (e.g. renamed
+ * before transcription) is a clean no-op (`state: "skipped"`), never a
+ * failed job.
  */
 async function processIndexJob(
   scope: JobScope,
   payload: MeetSumJobPayload,
   jobRecordId?: string
 ) {
-  const meeting = await loadMeeting(scope, requireMeetingId(payload))
+  const meetingId = requireMeetingId(payload)
 
   await setStage(scope, jobRecordId, { stage: "meeting.index" })
 
-  if (!meeting.transcript?.length) {
-    throw new UnrecoverableError(
-      `Meeting ${meeting.id} has no transcript to index yet.`
-    )
-  }
+  const result = await indexMeeting({ workspaceId: scope.workspaceId }, meetingId, {
+    jobId: jobRecordId,
+  })
 
-  return {
-    meetingId: meeting.id,
-    indexed: false,
-    reason: "search indexing ships in M6",
-  }
+  return { meetingId, ...result }
+}
+
+async function processIndexSweepJob(scope: JobScope, payload: MeetSumJobPayload) {
+  const limit = typeof payload.limit === "number" && payload.limit > 0 ? payload.limit : undefined
+
+  return sweepWorkspaceIndex(scope.workspaceId, limit ? { limit } : {})
 }
 
 async function processArtifactImportJob(
@@ -1334,6 +1340,9 @@ async function dispatchJob(
   }
   if (job.name === "meeting.index") {
     return processIndexJob(scope, job.data, jobRecordId)
+  }
+  if (job.name === "search.index.sweep") {
+    return processIndexSweepJob(scope, job.data)
   }
   if (job.name === "artifact.import") {
     return processArtifactImportJob(scope, job.data, jobRecordId)
