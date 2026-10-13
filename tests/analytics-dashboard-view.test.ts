@@ -62,6 +62,22 @@ describe("AnalyticsDashboard", () => {
     expect(html).toContain('aria-current="true"')
   })
 
+  it("shows the completion rate and its counts in the same (workspace) scope", () => {
+    const html = render(
+      {
+        ...FILLED,
+        actionItems: { ...FILLED.actionItems, created: 10, completed: 4, completionRate: 0.4 },
+        me: { ...FILLED.me, tasksOpen: 7, tasksDone: 1 },
+      },
+      true,
+      "en"
+    )
+
+    expect(html).toContain("4 of 10 completed")
+    // The viewer's own counts only appear labelled as theirs.
+    expect(html).toContain("Your tasks: 7 open · 1 done")
+  })
+
   it("tells members the breakdown is for admins", () => {
     expect(render(FILLED, false, "en")).toContain("Admins see the breakdown by member.")
   })

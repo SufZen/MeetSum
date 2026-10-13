@@ -200,9 +200,11 @@ export function AnalyticsDashboard({
               <Kpi
                 label={t("analyticsCompletionRate")}
                 value={fmt.percent(overview.actionItems.completionRate)}
-                detail={t("analyticsTasksOpenDone", {
-                  open: fmt.number(overview.me.tasksOpen),
-                  done: fmt.number(overview.me.tasksDone),
+                // Same scope as the rate (the filter's); the viewer's own
+                // counts are labelled "Your tasks" on the action items card.
+                detail={t("analyticsCompletionDetail", {
+                  completed: fmt.number(overview.actionItems.completed),
+                  created: fmt.number(overview.actionItems.created),
                 })}
               />
             </section>
@@ -281,11 +283,18 @@ export function AnalyticsDashboard({
 
               <ChartCard
                 title={t("analyticsActionItems")}
-                description={
+                description={[
                   overview.actionItems.medianHoursToComplete !== null
-                    ? `${t("analyticsMedianToComplete")}: ${fmt.duration(overview.actionItems.medianHoursToComplete * 3_600_000, "short")} · ${t("analyticsOverdue")}: ${fmt.number(overview.actionItems.overdue)}`
-                    : `${t("analyticsOverdue")}: ${fmt.number(overview.actionItems.overdue)}`
-                }
+                    ? `${t("analyticsMedianToComplete")}: ${fmt.duration(overview.actionItems.medianHoursToComplete * 3_600_000, "short")}`
+                    : null,
+                  `${t("analyticsOverdue")}: ${fmt.number(overview.actionItems.overdue)}`,
+                  `${t("analyticsYourTasks")}: ${t("analyticsTasksOpenDone", {
+                    open: fmt.number(overview.me.tasksOpen),
+                    done: fmt.number(overview.me.tasksDone),
+                  })}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
                 empty={overview.actionItems.created === 0 ? t("analyticsActionsEmpty") : null}
                 chart={
                   <ActionChart
