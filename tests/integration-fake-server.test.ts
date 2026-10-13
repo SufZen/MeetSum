@@ -107,7 +107,9 @@ describe("merged fake providers (npm run integrations:fake)", () => {
 
     // `PATCH /v1/pages/:id` and `GET /v1/databases/:id` see the host-less path.
     await expect(notionRequest(notion, "PATCH", `/v1/pages/${page.id}`, { properties: {} })).resolves.toMatchObject({ id: page.id })
-    await expect(notionRequest(notion, "GET", "/v1/databases/fake-db-7")).resolves.toMatchObject({ id: "fake-db-7" })
+    await expect(notionRequest(notion, "GET", "/v1/databases/fake-notion-db-0001")).resolves.toMatchObject({ id: "fake-notion-db-0001" })
+    // An unknown database id is a 404, as in real Notion.
+    await expect(notionRequest(notion, "GET", "/v1/databases/fake-db-7")).rejects.toMatchObject({ kind: "not_found" })
 
     const hubspot = createHubspotClient(via, "fake-hubspot-access")
 

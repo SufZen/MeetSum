@@ -50,18 +50,28 @@ export function createFakeNotionHandlers(state: FakeNotionState = createFakeNoti
         next_cursor: null,
       },
     }),
-    "GET /v1/databases/:id": (request) => ({
-      body: {
-        object: "database",
-        id: idFromPath(request, "/v1/databases/"),
-        title: [{ plain_text: "פגישות" }],
-        properties: {
-          Name: { name: "Name", type: "title" },
-          Date: { name: "Date", type: "date" },
-          Participants: { name: "Participants", type: "multi_select" },
+    // Only the fake database exists: any other id is a 404, as in real Notion
+    // (so a forged destination database id is rejected in the e2e).
+    "GET /v1/databases/:id": (request) => {
+      const id = idFromPath(request, "/v1/databases/")
+
+      if (id.replace(/-/g, "") !== DATABASE_ID.replace(/-/g, "")) {
+        return { status: 404, body: { object: "error", status: 404, code: "object_not_found", message: "Could not find database." } }
+      }
+
+      return {
+        body: {
+          object: "database",
+          id,
+          title: [{ plain_text: "פגישות" }],
+          properties: {
+            Name: { name: "Name", type: "title" },
+            Date: { name: "Date", type: "date" },
+            Participants: { name: "Participants", type: "multi_select" },
+          },
         },
-      },
-    }),
+      }
+    },
     // Pending-create lookup (review fix #4): the fake never loses a write, so nothing to find.
     "POST /v1/databases/:id/query": () => ({ body: { object: "list", results: [], has_more: false, next_cursor: null } }),
     "POST /v1/pages": (request) => {
