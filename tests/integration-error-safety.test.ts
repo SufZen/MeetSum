@@ -96,6 +96,7 @@ describe("integration error safety", () => {
       scopes: [],
       accessTokenEnc: "v2:a:b:c",
       config: {},
+      generation: 0,
       lastError: `legacy free text ${BODY}`,
       createdAt: "2026-10-13T00:00:00.000Z",
       updatedAt: "2026-10-13T00:00:00.000Z",
