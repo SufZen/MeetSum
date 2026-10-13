@@ -33,7 +33,7 @@ export const POST = withAuthz<{ id: string }>(
         headers: {
           "content-type":
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "content-disposition": contentDispositionAttachment(meeting.title, "docx"),
+          "content-disposition": contentDispositionAttachment(meeting.title, "docx", { date: meeting.startedAt, id: meeting.id }),
           ...rateLimit.headers,
         },
       })
