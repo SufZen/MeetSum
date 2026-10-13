@@ -112,9 +112,28 @@ create table if not exists reactions (
   user_id text not null references users(id) on delete cascade,
   emoji text not null,
   created_at timestamptz not null default now(),
-  primary key (target_type, target_id, user_id, emoji)
+  -- Target ids (e.g. summary-item hashes) repeat across meetings: the key is
+  -- per workspace and meeting.
+  primary key (workspace_id, meeting_id, target_type, target_id, user_id, emoji)
 );
 create index if not exists idx_reactions_meeting on reactions(meeting_id);
+-- Databases that applied an earlier draft of 022 keyed reactions by
+-- (target_type, target_id, user_id, emoji) only, so the same summary item in
+-- two meetings collided. Re-key them idempotently.
+do $$
+declare
+  pk_name text;
+  pk_cols int;
+begin
+  select c.conname, array_length(c.conkey, 1) into pk_name, pk_cols
+    from pg_constraint c
+   where c.conrelid = 'reactions'::regclass and c.contype = 'p';
+  if pk_name is not null and pk_cols <> 6 then
+    execute format('alter table reactions drop constraint %I', pk_name);
+    alter table reactions add constraint reactions_pkey
+      primary key (workspace_id, meeting_id, target_type, target_id, user_id, emoji);
+  end if;
+end $$;
 
 create table if not exists notifications (
   id text primary key,

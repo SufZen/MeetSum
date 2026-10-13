@@ -686,6 +686,7 @@ export async function toggleReaction(
   if (backend.kind === "memory") {
     const index = backend.db.reactions.findIndex(
       (reaction) =>
+        reaction.workspaceId === scope.workspaceId &&
         reaction.meetingId === input.meetingId &&
         reaction.targetType === input.targetType &&
         reaction.targetId === input.targetId &&
@@ -737,7 +738,7 @@ export async function toggleReaction(
       select m.workspace_id, m.id, $1, $2, $3, $4
       from meetings m
       where m.id = $5 and m.workspace_id = $6 and ${visible}
-      on conflict do nothing
+      on conflict (workspace_id, meeting_id, target_type, target_id, user_id, emoji) do nothing
       returning target_id
     `,
     values

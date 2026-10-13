@@ -290,6 +290,72 @@ describe("comment store", () => {
   })
 })
 
+describe("reaction keys across meetings and workspaces", () => {
+  afterEach(() => setCollabBackendForTesting(undefined))
+
+  it("keeps the same summary item in two meetings and two workspaces apart", async () => {
+    const collab = createCollabMemoryDb()
+
+    setCollabBackendForTesting({ kind: "memory", db: collab })
+    const db = createInMemoryMeetingDatabase([
+      testMeeting({ id: "m_1", transcript: SEGMENTS, durationMs: 9000, intelligence: INTELLIGENCE }),
+      testMeeting({ id: "m_2", transcript: SEGMENTS, durationMs: 9000, intelligence: INTELLIGENCE }),
+      testMeeting({ id: "m_w2", workspaceId: "ws_b", transcript: SEGMENTS, durationMs: 9000, intelligence: INTELLIGENCE }),
+    ])
+    const ctxFor = (workspaceId: string): CommentStoreContext => {
+      const repoScope = scope("user_me", "member", workspaceId)
+
+      return { scope: repoScope, userId: "user_me", meetings: createInMemoryMeetingRepository(db, repoScope) }
+    }
+    const react = (workspaceId: string, meetingId: string) =>
+      toggleReaction(ctxFor(workspaceId), {
+        meetingId,
+        targetType: "summary_item",
+        targetId: SUMMARY_ITEM,
+        emoji: "\u{1F44D}",
+      })
+
+    // Same hash-derived target id, same user and emoji in three meetings.
+    expect(await react("ws_a", "m_1")).toEqual({ active: true })
+    expect(await react("ws_a", "m_2")).toEqual({ active: true })
+    expect(await react("ws_b", "m_w2")).toEqual({ active: true })
+    expect(collab.reactions).toHaveLength(3)
+    // Un-reacting in one meeting leaves the others alone.
+    expect(await react("ws_a", "m_1")).toEqual({ active: false })
+    expect((await listMeetingComments(ctxFor("ws_a"), "m_2")).reactions).toEqual([
+      { targetType: "summary_item", targetId: SUMMARY_ITEM, emoji: "\u{1F44D}", count: 1, mine: true },
+    ])
+    expect((await listMeetingComments(ctxFor("ws_b"), "m_w2")).reactions).toHaveLength(1)
+    expect((await listMeetingComments(ctxFor("ws_a"), "m_1")).reactions).toEqual([])
+  })
+
+  it("upserts on the workspace + meeting key in SQL", async () => {
+    const statements: string[] = []
+
+    setCollabBackendForTesting({
+      kind: "postgres",
+      client: {
+        async query(text: string) {
+          statements.push(text)
+          return { rows: text.includes("insert into reactions") ? [{ target_id: "s1" }] : [] }
+        },
+      },
+    })
+    const db = createInMemoryMeetingDatabase([testMeeting({ id: "m_a", transcript: SEGMENTS })])
+    const repoScope = scope("user_me")
+
+    await toggleReaction(
+      { scope: repoScope, userId: "user_me", meetings: createInMemoryMeetingRepository(db, repoScope) },
+      { meetingId: "m_a", targetType: "segment", targetId: "s1", emoji: "\u{1F44D}" }
+    )
+    const insert = statements.find((text) => text.includes("insert into reactions"))
+    const remove = statements.find((text) => text.includes("delete from reactions"))
+
+    expect(insert).toContain("on conflict (workspace_id, meeting_id, target_type, target_id, user_id, emoji) do nothing")
+    expect(remove).toMatch(/meeting_id = \$5 and workspace_id = \$6/)
+  })
+})
+
 describe("comment store (Postgres SQL)", () => {
   afterEach(() => setCollabBackendForTesting(undefined))
 

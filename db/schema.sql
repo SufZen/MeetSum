@@ -708,7 +708,9 @@ create table if not exists reactions (
   user_id text not null references users(id) on delete cascade,
   emoji text not null,
   created_at timestamptz not null default now(),
-  primary key (target_type, target_id, user_id, emoji)
+  -- Target ids (e.g. summary-item hashes) repeat across meetings: the key is
+  -- per workspace and meeting.
+  primary key (workspace_id, meeting_id, target_type, target_id, user_id, emoji)
 );
 
 create table if not exists notifications (
