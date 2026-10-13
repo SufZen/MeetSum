@@ -14,8 +14,8 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 | M5 | Intelligence parity | `parity/m5-intelligence` | merged (live summary eval needs a Gemini key) | #24 |
 | M6 | Search & AskMeetSum | `parity/m6-search` | merged (hybrid/vector mode needs the pgvector image and a Gemini key) | #25 |
 | M7 | Meeting bot (Vexa sidecar) | `parity/m7-bot` | merged (live run needs a Vexa host and a bot Google account) | #23 |
-| M8 | Integrations | `parity/m8-integrations` | Step 0 done ([m8.md](m8.md); migration 027, frozen contracts, stubs); packages A–D next; live runs need Slack/Entra/Notion/HubSpot apps, see the runbook checklist | — |
-| M9 | i18n/RTL & polish | `parity/m9-polish` | todo | — |
+| M8 | Integrations | `parity/m8-integrations` | merged (live runs need Slack/Graph/Notion/HubSpot apps) | #26 |
+| M9 | i18n/RTL & polish | `parity/m9-polish` | spec refreshed against `main` ([m9.md](m9.md); migration 030); Step 0 next | — |
 | M10 | Hardening & final audit | `parity/m10-hardening` | todo | — |
 
 ## Parity matrix
@@ -32,7 +32,7 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 | Global semantic search | ✓ | ✓ hybrid vector+FTS+trigram, Hebrew normalizer (recall@5 0.94 lexical) | M6 ✅ |
 | Teams/workspaces/roles/sharing | ✓ | workspaces, roles, invites, scoped API keys, visibility | M2 ✅ |
 | Analytics | ✓ | per-meeting talk time/WPM/questions/fillers/sentiment; dashboard pending | M5 ✅ / M9 |
-| Integrations (Slack, CRM, Notion, Zapier, Outlook) | ✓ | webhooks/RealizeOS | M8 |
+| Integrations (Slack, CRM, Notion, Zapier, Outlook) | ✓ | ✓ Slack, Outlook calendar, Notion, HubSpot, Google Docs, DOCX, email recap, webhook catalog v2 (fixture/fake-provider tested; live runs need the apps) | M8 ✅ (code) |
 | Live transcript | ✓ | ✗ | M7 (stretch) |
 | Hebrew ASR, RTL, prompts, search, PDF, dates | weak | partial | M3/M6/M9 |
 
@@ -58,3 +58,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 - 2026-10-13: M8 Step 0 done on `parity/m8-integrations`: migration **027_integrations.sql** (applied cleanly on the embedded smoke Postgres; versions 001–027 contiguous; `db/schema.sql` mirrors it), frozen contracts (`lib/integrations/core/types.ts`, `lib/platform/event-catalog.ts`, i18n key lists, `.env.example` block), real `bidi`/`recap` helpers, row-bound AES-GCM secrets (v2 with AAD and an HKDF purpose key; a bound field refuses v1 unless it opts in for migration), the member-level `integrations:connect` permission, audit actions, rate-limit presets, no-op stubs with one-line call sites, 17 route stubs (501) behind their final guards with route coverage (the Notion export lost its token-in-body path and admin check), and UI mount points. Defaults kept: `summary.created` (no rename), Slack `chat:write.public` (override with `SLACK_SCOPES`), email recap members-only and off by default, owner-only private opt-ins, re-export updates in place, at most one automatic post per rule/meeting/event; Slack slash command and Graph push stay stretch. Typecheck, lint and tests green.
 - 2026-10-13: M8 Integration step: new migration **028_integration_token_generation.sql** (`integration_connections.token_generation` replaces `config._gen`, which it carries over and strips), so M9 is renumbered to **029** (m9.md updated; the migrations test asserts 001-028 contiguous).
 - 2026-10-13: M8 review fixes (branch `m8-review-fixes`): new migration **029_integration_refresh_lease.sql** (`integration_connections.refresh_lease_until`: token refresh takes a short lease instead of holding a row lock across the provider call), so M9 is renumbered to **030** (m9.md updated; the migrations test asserts 001-029 contiguous).
+- 2026-10-13: M8 merged to main (#26). M9 spec refreshed against `main` `125a432` (m9.md): pt/es/it removed in Step 0 (he default, Accept-Language on every path), migration **030** (user locale/zone/preferences, notification dedupe/links, onboarding progress, `meeting_shares.password_hash`, revision `edit_group_id`), fail-closed visibility fix in Step 0 (`processor.ts:258` and read paths). Baselines: 329 hardcoded strings in 29 files (AST scan), `check.mjs` 52, `/[locale]` 408.7 KB gz (budget 300). Fonts self-hosted in M9 (shared with the PDF). Packages: A i18n core + locale + Settings shell + content sweep, B PDF/exports/fonts/share + M4 carry-overs, C notifications/analytics/onboarding + e2e, D routing/dialogs/segment states/PWA/bundle.
