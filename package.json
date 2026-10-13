@@ -20,6 +20,7 @@
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "db:migrate": "tsx scripts/migrate.ts",
     "calendar:cleanup": "tsx scripts/calendar-noise-cleanup.ts",
     "media:retention": "tsx scripts/media-retention.ts",
@@ -28,6 +29,10 @@
     "backup:restore": "sh scripts/restore-full.sh",
     "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
     "llm:evaluate": "tsx scripts/evaluate-hebrew-summaries.ts",
+    "search:backfill": "tsx scripts/search-backfill.ts",
+    "search:vector-setup": "tsx scripts/search-vector-setup.ts",
+    "search:eval": "tsx scripts/search-eval.ts",
+    "search:e2e-seed": "tsx scripts/search-e2e-seed.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
   },
@@ -70,6 +75,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
     "@eslint/eslintrc": "^3",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.2.1",
