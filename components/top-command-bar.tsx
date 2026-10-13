@@ -143,6 +143,7 @@ export function TopCommandBar({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={dictionary.commandPlaceholder}
+          aria-label={dictionary.commandPlaceholder}
           className="h-7 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
         />
         <kbd className="hidden min-w-12 shrink-0 whitespace-nowrap rounded border border-line bg-surface-2 px-1.5 py-0.5 text-center font-mono text-2xs text-muted-foreground sm:inline-flex">

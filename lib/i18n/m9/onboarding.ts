@@ -74,7 +74,7 @@ export const m9OnboardingMessages = {
     onboardingStatusTodo: "לביצוע",
     onboardingStatusSkipped: "דולג",
     onboardingUnskip: "ביטול הדילוג",
-    onboardingContinue: "המשך ההגדרה",
+    onboardingContinue: "להמשך ההגדרה",
     onboardingGoToMeetings: "מעבר לפגישות",
     onboardingActionFailed: "השמירה נכשלה. נסו שוב.",
     onboardingGoogleConnect: "חיבור Google",

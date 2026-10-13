@@ -10,8 +10,8 @@
  * - `role="dialog"` only inside `components/ui/**`.
  * Elements with a spread attribute are skipped (the spread may carry the
  * attribute). Opt-out: `// a11y-allow: <reason>` on the line or the line above.
- * Ratchet: per-file counts may only go down against
- * `tests/fixtures/a11y-baseline.json` (`UPDATE_A11Y_BASELINE=1` rewrites it).
+ * Strict since the M9 Integration step: zero findings outside reasoned
+ * `a11y-allow` lines (the per-file baseline is gone).
  */
 import ts from "typescript"
 import { describe, expect, it } from "vitest"
@@ -19,21 +19,16 @@ import { describe, expect, it } from "vitest"
 import {
   attributeNames,
   attributeValue,
-  countByFile,
   isAllowed,
   lineOf,
   listUiFiles,
   parseFile,
-  ratchetRegressions,
-  readBaseline,
   tagNameOf,
   visit,
-  writeBaseline,
   type Finding,
   type ScanFile,
 } from "./helpers/tsx-scan"
 
-const BASELINE_FILE = "tests/fixtures/a11y-baseline.json"
 const FORM_CONTROLS = new Set(["input", "Input", "textarea", "Textarea", "select"])
 const LABEL_WRAPPERS = new Set(["label", "Label", "FieldLabel"])
 const KEY_HANDLERS = ["onKeyDown", "onKeyUp", "onKeyPress"]
@@ -128,11 +123,8 @@ export function scanA11y(scan: ScanFile): Finding[] {
   return findings
 }
 
-describe("static accessibility (M9 ratchet)", () => {
+describe("static accessibility (M9, strict)", () => {
   const findings = listUiFiles().flatMap((file) => scanA11y(parseFile(file)))
-  const counts = countByFile(findings)
-
-  if (process.env.UPDATE_A11Y_BASELINE === "1") writeBaseline(BASELINE_FILE, counts)
 
   it("detects the patterns it is meant to detect", () => {
     const rules = scanA11y(parseFile("tests/fixtures/a11y-scan-sample.tsx")).map((finding) => finding.rule)
@@ -140,7 +132,7 @@ describe("static accessibility (M9 ratchet)", () => {
     expect(rules).toEqual(["icon-button-label", "img-alt", "click-non-interactive", "control-label", "dialog-outside-ui"])
   })
 
-  it("never adds an a11y finding to a file (per-file baseline)", () => {
-    expect(ratchetRegressions(counts, readBaseline(BASELINE_FILE))).toEqual([])
+  it("has no findings outside reasoned a11y-allow lines", () => {
+    expect(findings).toEqual([])
   })
 })

@@ -9,29 +9,23 @@
  * - `new Error("…")` in components (anything outside app/).
  * Brand names are removed before checking. Per-line opt-out:
  * `// i18n-allow: <reason>` (reason required) on the line or the line above.
- * Ratchet: per-file counts may only go down against
- * `tests/fixtures/i18n-baseline.json` (`UPDATE_I18N_BASELINE=1` rewrites it).
- * The Integration step deletes the baseline and runs strict.
+ * Strict since the M9 Integration step: zero findings outside the brand
+ * allowlist and reasoned `i18n-allow` lines (the per-file baseline is gone).
  */
 import ts from "typescript"
 import { describe, expect, it } from "vitest"
 
 import {
   attributesOf,
-  countByFile,
   isAllowed,
   lineOf,
   listUiFiles,
   parseFile,
-  ratchetRegressions,
-  readBaseline,
   visit,
-  writeBaseline,
   type Finding,
   type ScanFile,
 } from "./helpers/tsx-scan"
 
-const BASELINE_FILE = "tests/fixtures/i18n-baseline.json"
 
 const TEXT_ATTRIBUTES = new Set([
   "aria-label",
@@ -136,11 +130,8 @@ export function scanHardcodedStrings(scan: ScanFile): Finding[] {
   return findings
 }
 
-describe("hardcoded UI strings (M9 ratchet)", () => {
+describe("hardcoded UI strings (M9, strict)", () => {
   const findings = listUiFiles().flatMap((file) => scanHardcodedStrings(parseFile(file)))
-  const counts = countByFile(findings)
-
-  if (process.env.UPDATE_I18N_BASELINE === "1") writeBaseline(BASELINE_FILE, counts)
 
   it("detects the patterns it is meant to detect", () => {
     const sample = parseFile("tests/fixtures/i18n-scan-sample.tsx")
@@ -155,7 +146,7 @@ describe("hardcoded UI strings (M9 ratchet)", () => {
     ])
   })
 
-  it("never adds a hardcoded string to a file (per-file baseline)", () => {
-    expect(ratchetRegressions(counts, readBaseline(BASELINE_FILE))).toEqual([])
+  it("has no findings outside the brand allowlist and i18n-allow lines", () => {
+    expect(findings).toEqual([])
   })
 })
