@@ -301,3 +301,27 @@ export function zoneOffsetMs(instant: Date, timeZone: string): number {
 
   return asUtc - Math.floor(instant.getTime() / 1000) * 1000
 }
+
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const
+
+/** "1.5 MB" / "1.5 מ״ב" (binary multiples, one decimal above bytes). */
+export function formatBytes(bytes: number, fmt: Fmt): string {
+  const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  const index = safe ? Math.min(Math.floor(Math.log(safe) / Math.log(1024)), BYTE_UNITS.length - 1) : 0
+
+  return formatNumber(safe / 1024 ** index, fmt, {
+    style: "unit",
+    unit: BYTE_UNITS[index],
+    unitDisplay: "short",
+    maximumFractionDigits: index === 0 ? 0 : 1,
+  })
+}
+
+/** The runtime's own IANA zone (the browser's, client-side), for "use the browser time zone". */
+export function systemTimeZone(): string {
+  try {
+    return new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  } catch {
+    return "UTC"
+  }
+}
