@@ -9,7 +9,7 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 | M1 | Pipeline correctness & security | `parity/m1-pipeline` | PR open (stacked on #16) | #17 |
 | M2 | Multi-user workspaces | `parity/m2-workspaces` | PR open (stacked on #17) | #18 |
 | M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | PR open (stacked on #18) | #19 |
-| M3 | Hebrew ASR + diarization | `parity/m3-asr` | in progress (stacked on M3.5; builds on mocks, live run needs RunPod/HF/Soniox keys) | — |
+| M3 | Hebrew ASR + diarization | `parity/m3-asr` | PR open (stacked on #19; live run needs RunPod/HF/Soniox keys) | #20 |
 | M4 | Player & transcript UX | `parity/m4-player` | todo | — |
 | M5 | Intelligence parity | `parity/m5-intelligence` | todo (Claude key) | — |
 | M6 | Search & AskMeetSum | `parity/m6-search` | todo | — |
@@ -23,7 +23,7 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 |---|---|---|---|
 | Auto-join bot (Meet/Teams/Zoom) | ✓ | ✗ | M7 |
 | Upload / desktop / browser recording | ✓ | ✓ (streaming, idempotent; Zoom/Teams wired) | M1 ✅ |
-| Speaker diarization + names | ✓ | ✗ | M3 |
+| Speaker diarization + names | ✓ | built (pyannote worker + Soniox fallback, speaker suggestions); needs keys for live | M3 ✅ (code) |
 | Player + click-to-seek transcript, editing | ✓ | ✗ (mock) | M4 |
 | Summaries, templates, chapters/topics | ✓ | partial | M5 |
 | Action items mgmt, tasks view | ✓ | partial | M5 |
@@ -48,3 +48,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 - 2026-10-12: M0 PR #16 (378 tests). M1 PR #17 (718 tests, 2 security reviews, Zoom signing-oracle fix). Known: db/schema.sql stale (M10); no live Postgres/Redis/MinIO run yet.
 - 2026-10-13: M2 PR #18 (1417 tests; 3 security reviews; live-verified on real Postgres 18: migrations, bootstrap, invites, scoped keys, cross-workspace 404s). User approved inserting M3.5 design system (Cadence v2.0) before M4; order M2 → M3.5 → M3 → M4. Design rules: paragraph dir from segment language, fallback meeting language; dir=auto only for unknown-language text.
 - 2026-10-13: Session crash recovered (no work lost). M3.5 PR #19 (check.mjs 710→65; signed-in he/en light/dark check on real Postgres; one-primary-action fix). M3 stubs committed (65ea7df, migration 020); 3 M3 packages running. Worktree cleanup accidentally emptied shared node_modules → reinstalled via npm ci; agents now use per-worktree npm ci (no junctions).
+- 2026-10-13: M3 PR #20 (1760 tests + 31 worker pytest; router RunPod-ivrit → Soniox → chunked local; words jsonb; speaker entities + suggestions; Hebrew-safe WER/DER eval; 2 security fixes: error redaction incl. breaker, Meet display-name spoofing). Migration 020 applied on real Postgres. Root cause of node_modules wipe found: Next standalone junctions inside worktree .next.
