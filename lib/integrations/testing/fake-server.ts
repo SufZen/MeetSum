@@ -21,6 +21,10 @@
  *   POST   /__fake/webhook                 -> a webhook receiver, recorded as
  *                                            provider `webhook` with `rawBody`
  *                                            (to verify `x-meetsum-signature-v2`)
+ *
+ * Raw routes (`options.rawRoutes`, M10) get the unparsed body as a Buffer
+ * (binary uploads such as the fake ASR's multipart audio) and log their own
+ * redacted entry through `record`.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 
@@ -35,7 +39,17 @@ export type FakeProviderServer = {
   url: string
   /** Requests received so far (optionally of one provider), tokens redacted. */
   requests(provider?: string): FakeLoggedRequest[]
+  /** Appends an already-redacted entry (raw routes log through this). */
+  record(entry: FakeLoggedRequest): void
   close(): Promise<void>
+}
+
+/** A route that needs the raw body (binary multipart), matched by path prefix. */
+export type FakeRawRoute = {
+  prefix: string
+  /** Upper bound of the raw body (default 25 MB). */
+  maxBytes?: number
+  handle(request: { method: string; path: string; headers: Record<string, string>; body: Buffer }): Promise<FakeProviderResponse>
 }
 
 const SECRET_KEYS = /^(access_token|refresh_token|id_token|token|client_secret|code|code_verifier|password|secret|authorization)$/i
@@ -66,7 +80,7 @@ export function redactFakeRequest(request: FakeProviderRequest): FakeProviderReq
   }
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readRawBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Buffer> {
   const chunks: Buffer[] = []
   let total = 0
 
@@ -74,11 +88,19 @@ async function readBody(req: IncomingMessage): Promise<string> {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
 
     total += buffer.byteLength
-    if (total > MAX_BODY_BYTES) throw new Error("fake request body too large")
+    if (total > maxBytes) throw new Error("fake request body too large")
     chunks.push(buffer)
   }
 
-  return Buffer.concat(chunks).toString("utf8")
+  return Buffer.concat(chunks)
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  return (await readRawBody(req)).toString("utf8")
+}
+
+function headersOf(req: IncomingMessage): Record<string, string> {
+  return Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(", ") : (value ?? "")]))
 }
 
 function parseBody(raw: string, contentType: string | undefined): unknown {
@@ -178,7 +200,7 @@ export function findFakeHandler(
 
 export async function createFakeProviderServer(
   handlers: FakeProviderHandlers,
-  options: { port?: number; host?: "127.0.0.1" | "localhost" } = {}
+  options: { port?: number; host?: "127.0.0.1" | "localhost"; rawRoutes?: FakeRawRoute[] } = {}
 ): Promise<FakeProviderServer> {
   if (process.env.NODE_ENV === "production") throw new Error("the fake provider server is refused in production")
 
@@ -202,12 +224,20 @@ export async function createFakeProviderServer(
         return send(res, { body: { ok: true } })
       }
 
+      const rawRoute = options.rawRoutes?.find((route) => url.pathname === route.prefix || url.pathname.startsWith(`${route.prefix}/`))
+
+      if (rawRoute) {
+        const body = await readRawBody(req, rawRoute.maxBytes ?? 25 * 1024 * 1024)
+
+        return send(res, await rawRoute.handle({ method, path: url.pathname, headers: headersOf(req), body }))
+      }
+
       const raw = await readBody(req)
       const request: FakeProviderRequest = {
         method,
         path: url.pathname,
         query: Object.fromEntries(url.searchParams),
-        headers: Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(", ") : (value ?? "")])),
+        headers: headersOf(req),
         body: parseBody(raw, req.headers["content-type"]),
       }
 
@@ -241,6 +271,7 @@ export async function createFakeProviderServer(
 
   return {
     url: `http://${host}:${port}`,
+    record: (entry) => void log.push(entry),
     requests: (provider) => structuredClone(filtered(provider)),
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   }
