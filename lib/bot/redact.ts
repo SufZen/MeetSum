@@ -13,6 +13,7 @@
  */
 
 export const BOT_REDACT_MAX_LENGTH = 300
+const REDACT_INPUT_MAX = 4000
 
 const SECRET_KEYS = [
   "meeting_password",
@@ -67,12 +68,10 @@ export function redactBotText(raw: string): string {
   return (
     raw
       // URL query strings and fragments (scheme://host/path kept).
-      .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>`]+)[?#][^\s"'<>`]*/gi, "$1?[redacted]")
-      // Scheme-less join links (`zoom.us/j/1?pwd=...`).
-      .replace(
-        /\b((?:[a-z0-9-]+\.)+(?:com|us|io|net|org|il|microsoft|google)\/[^\s?#"'<>`]*)[?#][^\s"'<>`]*/gi,
-        "$1?[redacted]"
-      )
+      // Bounded repetition only: input is attacker-influenced (Vexa bodies, URLs).
+      .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/[^\s?#"'<>`]{1,2048})[?#][^\s"'<>`]*/gi, "$1?[redacted]")
+      // Scheme-less join links (`zoom.us/j/1?pwd=...`): any `host/path?query`.
+      .replace(/\b([a-z0-9.-]{1,253}\/[^\s?#"'<>`]{0,2048})[?#][^\s"'<>`]*/gi, "$1?[redacted]")
       .replace(KEY_VALUE, (_match, quote: string, key: string, separator: string, value: string) => {
         const quoted = value.startsWith('"') || value.startsWith("'")
         const replacement = quoted ? `${value[0]}[redacted]${value[0]}` : "[redacted]"
@@ -82,7 +81,7 @@ export function redactBotText(raw: string): string {
       .replace(/\bbearer\s+(?!\[redacted\])[^\s,;"'}\]]+/gi, "Bearer [redacted]")
       // Bare `p=` (Teams passcode) when it survived outside a URL.
       .replace(/(^|[^A-Za-z0-9_])p=[^\s&,;"'}\]]+/g, "$1p=[redacted]")
-      .replace(/\b[A-Fa-f0-9]{32,}\b/g, "[hex]")
+      .replace(/\b[A-Fa-f0-9]{32,512}\b/g, "[hex]")
       .replace(/[A-Za-z0-9+_-]{40,}={0,2}/g, (match) => (hasLetterAndDigit(match) ? "[blob]" : match))
   )
 }
@@ -93,7 +92,8 @@ export function redactBotText(raw: string): string {
  */
 export function redactBotError(input: unknown, maxLength = BOT_REDACT_MAX_LENGTH): string {
   const limit = Math.max(1, Math.min(BOT_REDACT_MAX_LENGTH, Math.floor(maxLength)))
-  const redacted = redactBotText(stringify(input)).replace(/\s+/g, " ").trim()
+  // Output is at most 300 characters: bound the regex work on huge inputs.
+  const redacted = redactBotText(stringify(input).slice(0, REDACT_INPUT_MAX)).replace(/\s+/g, " ").trim()
 
   return redacted.length > limit ? `${redacted.slice(0, limit - 1)}…` : redacted
 }

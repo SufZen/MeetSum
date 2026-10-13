@@ -1,12 +1,10 @@
 import { resyncWorkspaceBotSessions } from "@/lib/bot/calendar-sync"
 import { type BotConfig, getBotConfig } from "@/lib/bot/config"
 import { dispatchNow } from "@/lib/bot/dispatch"
-import { applyVexaSnapshot, type BotSideEffect } from "@/lib/bot/lifecycle"
+import { applyVexaSnapshot, type BotSideEffect, runBotSideEffects } from "@/lib/bot/lifecycle"
 import {
-  consentJobId,
   defaultBotQueuePort,
   dispatchJobId,
-  finalizeJobId,
   type BotQueuePort,
 } from "@/lib/bot/queue"
 import { botLog, redactBotError } from "@/lib/bot/redact"
@@ -82,27 +80,16 @@ export function resolveReconcileDeps(deps: Partial<ReconcileDeps> = {}): Reconci
   }
 }
 
-/** Enqueues finalize/consent side effects (shared with the webhook path). */
-export async function runBotSideEffects(
+/** Follow-up jobs through the shared lifecycle helper (same idempotent ids as the webhook). */
+function sideEffects(
+  d: ReconcileDeps,
   session: Pick<BotSessionRecord, "id" | "workspaceId">,
-  effects: readonly BotSideEffect[],
-  queue: BotQueuePort = defaultBotQueuePort,
-  config: BotConfig = getBotConfig()
-): Promise<void> {
-  if (effects.includes("enqueue_finalize")) {
-    await queue.enqueue(
-      "bot.finalize",
-      { sessionId: session.id, workspaceId: session.workspaceId },
-      { jobId: finalizeJobId(session.id), attempts: config.finalizeAttempts }
-    )
-  }
-  if (effects.includes("enqueue_consent")) {
-    await queue.enqueue(
-      "bot.consent",
-      { sessionId: session.id, workspaceId: session.workspaceId },
-      { jobId: consentJobId(session.id) }
-    )
-  }
+  effects: readonly BotSideEffect[]
+) {
+  return runBotSideEffects(session, effects, {
+    enqueue: d.queue.enqueue,
+    finalizeAttempts: d.config.finalizeAttempts,
+  })
 }
 
 export type ReconcileStats = {
@@ -263,7 +250,7 @@ export async function runBotReconcile(
       const result = await d.applySnapshot(d.store, session, meeting, "poll")
 
       stats.polled += 1
-      await runBotSideEffects(result.session, result.sideEffects, d.queue, d.config)
+      await sideEffects(d, result.session, result.sideEffects)
     })
   }
 
@@ -282,7 +269,7 @@ export async function runBotReconcile(
           continue
         }
 
-        await runBotSideEffects(session, ["enqueue_finalize"], d.queue, d.config)
+        await sideEffects(d, session, ["enqueue_finalize"])
         stats.finalizeEnqueued += 1
       }
     }

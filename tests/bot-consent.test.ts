@@ -59,7 +59,7 @@ describe("runBotConsent", () => {
       "81234567890",
       "שלום, כאן MeetSum Notetaker. הפגישה מוקלטת ומתומללת עבור דנה לוי. מי שאינו מסכים להקלטה יכול לבקש מהמארח להוציא אותי."
     )
-    expect((await store.get(created.id))?.consentStatus).toBe("sent")
+    expect((await store.get(created.id, { workspaceId: "ws_a" }))?.consentStatus).toBe("sent")
 
     // Idempotent.
     expect(await runBotConsent({ sessionId: created.id, workspaceId: "ws_a" }, deps)).toEqual({ status: "skipped" })
@@ -80,7 +80,7 @@ describe("runBotConsent", () => {
     const created = await store.create(session())
 
     expect(await runBotConsent({ sessionId: created.id, workspaceId: "ws_a" }, deps)).toEqual({ status: "unsupported" })
-    expect((await store.get(created.id))?.consentStatus).toBe("unsupported")
+    expect((await store.get(created.id, { workspaceId: "ws_a" }))?.consentStatus).toBe("unsupported")
   })
 
   it("records `disabled` without sending when consent is off", async () => {

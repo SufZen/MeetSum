@@ -90,7 +90,7 @@ describe("scheduleDispatch", () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(provider.requestBot).toHaveBeenCalledTimes(1)
 
-    const after = await store.get(session.id)
+    const after = await store.get(session.id, { workspaceId: "ws_a" })
 
     expect(after).toMatchObject({ status: "requested", vexaMeetingId: "4242", attempts: 1 })
     expect(after?.requestedAt).toBe("2026-10-14T08:59:00.000Z")
@@ -117,8 +117,8 @@ describe("runDispatch", () => {
     const { store, provider, deps } = setup()
     const session = await store.create(sessionInput())
 
-    await store.update(session.id, { dispatchRev: 1 })
-    expect((await runDispatch({ sessionId: session.id, rev: 0 }, deps)).outcome).toBe("skipped")
+    await store.update(session.id, { dispatchRev: 1 }, { workspaceId: "ws_a" })
+    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).outcome).toBe("skipped")
     expect(provider.requestBot).not.toHaveBeenCalled()
   })
 
@@ -135,7 +135,7 @@ describe("runDispatch", () => {
 
     const { store, provider, deps } = setup()
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result.session).toMatchObject({ status: "cancelled", statusReason: "missed_window" })
     expect(provider.requestBot).not.toHaveBeenCalled()
@@ -147,7 +147,7 @@ describe("runDispatch", () => {
     await store.create(sessionInput({ calendarEventId: "cal_other", nativeMeetingId: "zzz-zzzz-zzz", status: "active" }))
 
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result.outcome).toBe("redelayed")
     expect(result.session).toMatchObject({ status: "scheduled", dispatchRev: 1, dispatchAt: "2026-10-14T09:00:00.000Z" })
@@ -163,7 +163,7 @@ describe("runDispatch", () => {
     const session = await store.create(sessionInput())
 
     vi.setSystemTime(new Date("2026-10-14T09:29:30.000Z"))
-    expect(await runDispatch({ sessionId: session.id, rev: 0 }, deps)).toMatchObject({
+    expect(await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).toMatchObject({
       outcome: "failed",
       session: { status: "failed", statusReason: "capacity" },
     })
@@ -177,7 +177,7 @@ describe("runDispatch", () => {
     })
     const { store, queue, deps } = setup({ provider })
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result).toMatchObject({ outcome: "redelayed", session: { status: "scheduled", dispatchRev: 1 } })
     expect(queue.jobs.at(-1)?.options.delay).toBe(60_000)
@@ -192,7 +192,7 @@ describe("runDispatch", () => {
     })
     const { store, deps } = setup({ provider })
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result).toMatchObject({ outcome: "adopted", session: { status: "requested", vexaMeetingId: "777" } })
   })
@@ -207,21 +207,25 @@ describe("runDispatch", () => {
     const { store, deps } = setup({ provider })
     const other = await store.create(sessionInput({ workspaceId: "ws_b", calendarEventId: "cal_b", status: "completed" }))
 
-    await store.update(other.id, { vexaMeetingId: "888" })
+    await store.update(other.id, { vexaMeetingId: "888" }, { workspaceId: "ws_b" })
 
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result.session).toMatchObject({ status: "blocked", statusReason: "already_in_meeting", error: null })
+    // The other workspace's session is untouched and never named.
+    expect(await store.get(other.id, { workspaceId: "ws_b" })).toMatchObject({ status: "completed", vexaMeetingId: "888" })
+    expect(JSON.stringify(store.events.filter((event) => event.workspaceId === "ws_a"))).not.toContain(other.id)
+    expect(JSON.stringify(vi.mocked(console.log).mock.calls)).not.toContain(other.id)
   })
 
-  it("a live session for the same target in another workspace blocks before any POST", async () => {
+  it("a live session for the same target in the same workspace blocks before any POST", async () => {
     const { store, provider, deps } = setup()
 
-    await store.create(sessionInput({ workspaceId: "ws_b", calendarEventId: "cal_b", status: "active" }))
+    await store.create(sessionInput({ calendarEventId: "cal_b", status: "active" }))
 
     const session = await store.create(sessionInput())
-    const result = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(result.session).toMatchObject({ status: "blocked", statusReason: "already_in_meeting" })
     expect(provider.requestBot).not.toHaveBeenCalled()
@@ -236,8 +240,8 @@ describe("runDispatch", () => {
     const { store, deps } = setup({ provider })
     const session = await store.create(sessionInput())
 
-    await expect(runDispatch({ sessionId: session.id, rev: 0 }, deps)).rejects.toBeInstanceOf(UnrecoverableError)
-    expect(await store.get(session.id)).toMatchObject({ status: "failed", statusReason: "invalid_meeting_link" })
+    await expect(runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).rejects.toBeInstanceOf(UnrecoverableError)
+    expect(await store.get(session.id, { workspaceId: "ws_a" })).toMatchObject({ status: "failed", statusReason: "invalid_meeting_link" })
   })
 
   it("config/auth errors mark vexa_misconfigured; auth_session_missing is bot_signed_out", async () => {
@@ -251,11 +255,11 @@ describe("runDispatch", () => {
     const first = await store.create(sessionInput())
     const second = await store.create(sessionInput({ calendarEventId: "cal_2", nativeMeetingId: "qqq-qqqq-qqq" }))
 
-    expect((await runDispatch({ sessionId: first.id, rev: 0 }, deps)).session).toMatchObject({
+    expect((await runDispatch({ sessionId: first.id, rev: 0, workspaceId: "ws_a" }, deps)).session).toMatchObject({
       status: "failed",
       statusReason: "vexa_misconfigured",
     })
-    expect((await runDispatch({ sessionId: second.id, rev: 0 }, deps)).session).toMatchObject({
+    expect((await runDispatch({ sessionId: second.id, rev: 0, workspaceId: "ws_a" }, deps)).session).toMatchObject({
       status: "blocked",
       statusReason: "bot_signed_out",
     })
@@ -273,11 +277,11 @@ describe("runDispatch", () => {
     const { store, deps } = setup({ provider })
     const session = await store.create(sessionInput())
 
-    await expect(runDispatch({ sessionId: session.id, rev: 0 }, deps)).rejects.toMatchObject({ kind: "timeout" })
-    expect(await store.get(session.id)).toMatchObject({ status: "requested", vexaMeetingId: null })
+    await expect(runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).rejects.toMatchObject({ kind: "timeout" })
+    expect(await store.get(session.id, { workspaceId: "ws_a" })).toMatchObject({ status: "requested", vexaMeetingId: null })
 
     // BullMQ retry of the same job.
-    const retry = await runDispatch({ sessionId: session.id, rev: 0 }, deps)
+    const retry = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
 
     expect(retry).toMatchObject({ outcome: "adopted", session: { vexaMeetingId: "4242" } })
     expect(provider.requestBot).toHaveBeenCalledTimes(1)
@@ -293,8 +297,8 @@ describe("runDispatch", () => {
     const { store, deps } = setup({ provider })
     const session = await store.create(sessionInput())
 
-    await expect(runDispatch({ sessionId: session.id, rev: 0 }, deps)).rejects.toBeInstanceOf(VexaError)
-    expect((await runDispatch({ sessionId: session.id, rev: 0 }, deps)).session).toMatchObject({ vexaMeetingId: "99" })
+    await expect(runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).rejects.toBeInstanceOf(VexaError)
+    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).session).toMatchObject({ vexaMeetingId: "99" })
     expect(provider.findActiveBot).toHaveBeenCalledTimes(1)
   })
 
@@ -303,8 +307,8 @@ describe("runDispatch", () => {
     const session = await store.create(sessionInput())
 
     await Promise.all([
-      runDispatch({ sessionId: session.id, rev: 0 }, deps),
-      runDispatch({ sessionId: session.id, rev: 0 }, deps),
+      runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps),
+      runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps),
     ])
     expect(provider.requestBot).toHaveBeenCalledTimes(1)
   })
@@ -345,7 +349,7 @@ describe("POST /bots bodies through the real client", () => {
     )
 
     expect(session.meetingUrlRedacted).not.toMatch(/pwd|p=|context/)
-    await runDispatch({ sessionId: session.id, rev: 0 }, { store, provider: () => vexa, queue: fakeQueue().port, config: testBotConfig() })
+    await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, { store, provider: () => vexa, queue: fakeQueue().port, config: testBotConfig() })
     expect(fake.calls[0].body).toEqual(postBodies[name])
   })
 
@@ -356,7 +360,7 @@ describe("POST /bots bodies through the real client", () => {
     const session = await store.create(sessionInput())
 
     await runDispatch(
-      { sessionId: session.id, rev: 0 },
+      { sessionId: session.id, rev: 0, workspaceId: "ws_a" },
       { store, provider: () => vexa, queue: fakeQueue().port, config: testBotConfig({ MEETSUM_LIVE_TRANSCRIPT: "true" }) }
     )
     expect(fake.calls[0].body).toMatchObject({ transcribe_enabled: true })
@@ -385,7 +389,7 @@ describe("dispatchNow", () => {
 
     await scheduleDispatch(session, deps)
 
-    const updated = await dispatchNow(session.id, deps)
+    const updated = await dispatchNow(session, deps)
 
     expect(updated).toMatchObject({ dispatchRev: 1, dispatchAt: "2026-10-14T08:00:00.000Z" })
     expect(queue.port.remove).toHaveBeenCalledWith(`bot.dispatch:${session.id}:0`)
@@ -401,7 +405,55 @@ describe("dispatchNow", () => {
     const { store, deps } = setup()
     const session = await store.create(sessionInput({ status: "active" }))
 
-    expect((await dispatchNow(session.id, deps)).status).toBe("active")
+    expect((await dispatchNow(session, deps)).status).toBe("active")
+    expect((await dispatchNow(session.id, { ...deps, workspaceId: "ws_a" })).status).toBe("active")
     await expect(dispatchNow(session.id, { ...deps, workspaceId: "ws_b" })).rejects.toThrow("not found")
+    await expect(dispatchNow(session.id, deps)).rejects.toThrow("requires the session's workspaceId")
+  })
+})
+
+describe("workspace isolation (W1/W2)", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-10-14T08:59:00.000Z"))
+  })
+
+  it("a W1 dispatch job can never read or update a W2 session", async () => {
+    const { store, provider, queue, deps } = setup()
+    const w2 = await store.create(sessionInput({ workspaceId: "ws_2", calendarEventId: "cal_w2" }))
+    const before = await store.get(w2.id, { workspaceId: "ws_2" })
+    const forged = await runDispatch({ sessionId: w2.id, rev: 0, workspaceId: "ws_1" }, deps)
+
+    expect(forged).toEqual({ outcome: "skipped" })
+    expect(provider.requestBot).not.toHaveBeenCalled()
+    expect(queue.jobs).toHaveLength(0)
+    expect(await store.get(w2.id, { workspaceId: "ws_2" })).toEqual(before)
+    expect(store.events.filter((event) => event.botSessionId === w2.id)).toEqual([])
+    await expect(dispatchNow(w2.id, { ...deps, workspaceId: "ws_1" })).rejects.toThrow("not found")
+    expect(await store.get(w2.id, { workspaceId: "ws_2" })).toEqual(before)
+  })
+
+  it("two workspaces with the same meeting link get independent sessions", async () => {
+    const provider = fakeProvider({
+      requestBot: vi
+        .fn()
+        .mockResolvedValueOnce({ vexaMeetingId: "501", raw: {} })
+        .mockRejectedValueOnce(new VexaError("conflict", "Vexa POST /bots → 409", { status: 409 })),
+      findActiveBot: vi.fn(async () => ({ platform: "google_meet", nativeMeetingId: "abc-defg-hij", vexaMeetingId: "501" })),
+    })
+    const { store, deps } = setup({ provider })
+    const w1 = await store.create(sessionInput({ workspaceId: "ws_1" }))
+    const w2 = await store.create(sessionInput({ workspaceId: "ws_2" }))
+
+    expect(w1.id).not.toBe(w2.id)
+    expect(await store.findByCalendarEvent("ws_1", "cal_1")).toMatchObject({ id: w1.id })
+    expect(await store.findByCalendarEvent("ws_2", "cal_1")).toMatchObject({ id: w2.id })
+
+    await runDispatch({ sessionId: w1.id, rev: 0, workspaceId: "ws_1" }, deps)
+
+    const second = await runDispatch({ sessionId: w2.id, rev: 0, workspaceId: "ws_2" }, deps)
+
+    // Vexa's own 409 stops W2's bot; it never adopts W1's Vexa meeting.
+    expect(second.session).toMatchObject({ status: "blocked", statusReason: "already_in_meeting", vexaMeetingId: null })
+    expect(await store.get(w1.id, { workspaceId: "ws_1" })).toMatchObject({ status: "requested", vexaMeetingId: "501" })
   })
 })

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { type ReconcileDeps, runBotReconcile, runBotSideEffects } from "@/lib/bot/reconcile"
+import { type ReconcileDeps, runBotReconcile } from "@/lib/bot/reconcile"
 import { createMemoryBotSessionStore } from "@/lib/bot/store-memory"
 import type { BotSessionCreateInput } from "@/lib/bot/store"
 import { VexaError, type VexaMeeting } from "@/lib/bot/vexa/types"
@@ -32,6 +32,7 @@ function setup(provider = fakeProvider()) {
       status: meeting.status === "completed" ? "completed" : "active",
       at: NOW,
       source: "poll",
+      workspaceId: session.workspaceId,
     })
 
     return {
@@ -72,7 +73,7 @@ async function sessionAt(ctx: ReturnType<typeof setup>, overrides: Partial<BotSe
   const created = await ctx.store.create(input(rest))
 
   if (status && status !== "scheduled") {
-    await ctx.store.transition(created.id, { status, at: when, source: "webhook" })
+    await ctx.store.transition(created.id, { status, at: when, source: "webhook", workspaceId: "ws_a" })
   }
   return created
 }
@@ -118,8 +119,8 @@ describe("runBotReconcile", () => {
     const stale = await sessionAt(ctx, { status: "active" }, minutesAgo(11))
     const fresh = await sessionAt(ctx, { status: "active" }, minutesAgo(2))
 
-    await ctx.store.update(stale.id, { vexaMeetingId: "4242" })
-    await ctx.store.update(fresh.id, { vexaMeetingId: "4343" })
+    await ctx.store.update(stale.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
+    await ctx.store.update(fresh.id, { vexaMeetingId: "4343" }, { workspaceId: "ws_a" })
 
     const stats = await runBotReconcile({}, ctx.deps)
 
@@ -140,9 +141,9 @@ describe("runBotReconcile", () => {
     const ctx = setup(provider)
     const session = await sessionAt(ctx, { status: "joining" }, minutesAgo(30))
 
-    await ctx.store.update(session.id, { vexaMeetingId: "4242" })
+    await ctx.store.update(session.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
     expect((await runBotReconcile({}, ctx.deps)).stale).toBe(1)
-    expect(await ctx.store.get(session.id)).toMatchObject({ status: "failed", statusReason: "stale" })
+    expect(await ctx.store.get(session.id, { workspaceId: "ws_a" })).toMatchObject({ status: "failed", statusReason: "stale" })
   })
 
   it("(b) `requested` for 10+ minutes without a Vexa id → failed/vexa_unavailable", async () => {
@@ -150,12 +151,12 @@ describe("runBotReconcile", () => {
     const old = await sessionAt(ctx, { status: "requested" }, minutesAgo(12))
     const recent = await sessionAt(ctx, { status: "requested" }, minutesAgo(5))
 
-    await ctx.store.update(old.id, { requestedAt: minutesAgo(12).toISOString() })
-    await ctx.store.update(recent.id, { requestedAt: minutesAgo(5).toISOString() })
+    await ctx.store.update(old.id, { requestedAt: minutesAgo(12).toISOString() }, { workspaceId: "ws_a" })
+    await ctx.store.update(recent.id, { requestedAt: minutesAgo(5).toISOString() }, { workspaceId: "ws_a" })
 
     expect((await runBotReconcile({}, ctx.deps)).unavailable).toBe(1)
-    expect(await ctx.store.get(old.id)).toMatchObject({ status: "failed", statusReason: "vexa_unavailable" })
-    expect((await ctx.store.get(recent.id))?.status).toBe("requested")
+    expect(await ctx.store.get(old.id, { workspaceId: "ws_a" })).toMatchObject({ status: "failed", statusReason: "vexa_unavailable" })
+    expect((await ctx.store.get(recent.id, { workspaceId: "ws_a" }))?.status).toBe("requested")
   })
 
   it("(c) awaiting admission past the timeout → stopBot → blocked/not_admitted", async () => {
@@ -163,14 +164,14 @@ describe("runBotReconcile", () => {
     const waiting = await sessionAt(ctx, { status: "awaiting_admission" }, minutesAgo(16))
     const recent = await sessionAt(ctx, { status: "awaiting_admission" }, minutesAgo(5))
 
-    await ctx.store.update(waiting.id, { vexaMeetingId: "4242" })
+    await ctx.store.update(waiting.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
 
     const stats = await runBotReconcile({}, ctx.deps)
 
     expect(stats.notAdmitted).toBe(1)
     expect(ctx.provider.stopBot).toHaveBeenCalledWith("google_meet", waiting.nativeMeetingId)
-    expect(await ctx.store.get(waiting.id)).toMatchObject({ status: "blocked", statusReason: "not_admitted" })
-    expect((await ctx.store.get(recent.id))?.status).toBe("awaiting_admission")
+    expect(await ctx.store.get(waiting.id, { workspaceId: "ws_a" })).toMatchObject({ status: "blocked", statusReason: "not_admitted" })
+    expect((await ctx.store.get(recent.id, { workspaceId: "ws_a" }))?.status).toBe("awaiting_admission")
   })
 
   it("(d) live sessions whose meeting was deleted are stopped", async () => {
@@ -179,7 +180,7 @@ describe("runBotReconcile", () => {
 
     expect((await runBotReconcile({}, ctx.deps)).meetingDeleted).toBe(1)
     expect(ctx.provider.stopBot).toHaveBeenCalledTimes(1)
-    expect(await ctx.store.get(orphan.id)).toMatchObject({ status: "stopping", statusReason: "meeting_deleted" })
+    expect(await ctx.store.get(orphan.id, { workspaceId: "ws_a" })).toMatchObject({ status: "stopping", statusReason: "meeting_deleted" })
 
     // Next tick: already stopping, no second stop.
     await runBotReconcile({}, ctx.deps)
@@ -190,16 +191,16 @@ describe("runBotReconcile", () => {
     const ctx = setup()
     const completed = await sessionAt(ctx, { status: "active" }, minutesAgo(40))
 
-    await ctx.store.transition(completed.id, { status: "completed", at: minutesAgo(30), source: "webhook" })
+    await ctx.store.transition(completed.id, { status: "completed", at: minutesAgo(30), source: "webhook", workspaceId: "ws_a" })
 
     const imported = await sessionAt(ctx, { status: "active" }, minutesAgo(40))
 
-    await ctx.store.transition(imported.id, { status: "completed", at: minutesAgo(30), source: "webhook" })
-    await ctx.store.update(imported.id, { recordingStatus: "imported" })
+    await ctx.store.transition(imported.id, { status: "completed", at: minutesAgo(30), source: "webhook", workspaceId: "ws_a" })
+    await ctx.store.update(imported.id, { recordingStatus: "imported" }, { workspaceId: "ws_a" })
 
     const neverJoined = await sessionAt(ctx, { status: "requested" }, minutesAgo(40))
 
-    await ctx.store.transition(neverJoined.id, { status: "completed", at: minutesAgo(30), source: "webhook" })
+    await ctx.store.transition(neverJoined.id, { status: "completed", at: minutesAgo(30), source: "webhook", workspaceId: "ws_a" })
 
     expect((await runBotReconcile({}, ctx.deps)).finalizeEnqueued).toBe(1)
     expect(ctx.queue.jobs.filter((job) => job.name === "bot.finalize").map((job) => job.payload)).toEqual([
@@ -226,26 +227,28 @@ describe("runBotReconcile", () => {
     const broken = await sessionAt(ctx, { status: "active" }, minutesAgo(30))
     const orphan = await sessionAt(ctx, { status: "active", meetingId: null }, minutesAgo(30))
 
-    await ctx.store.update(broken.id, { vexaMeetingId: "4242" })
+    await ctx.store.update(broken.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
 
     const stats = await runBotReconcile({}, ctx.deps)
 
     expect(stats.errors).toHaveLength(1)
     expect(stats.errors[0]).not.toContain("abc123")
-    expect((await ctx.store.get(orphan.id))?.status).toBe("stopping")
+    expect((await ctx.store.get(orphan.id, { workspaceId: "ws_a" }))?.status).toBe("stopping")
   })
 })
 
-describe("runBotSideEffects", () => {
-  it("enqueues finalize and consent with idempotent ids", async () => {
-    const queue = fakeQueue()
+describe("side effects", () => {
+  it("polled snapshots enqueue consent/finalize once, through the lifecycle helper", async () => {
+    const provider = fakeProvider({ getMeeting: vi.fn(async () => meeting("active")) })
+    const ctx = setup(provider)
+    const session = await sessionAt(ctx, { status: "joining" }, minutesAgo(20))
 
-    await runBotSideEffects({ id: "bot_1", workspaceId: "ws_a" }, ["enqueue_finalize", "enqueue_consent", "notify"], queue.port, testBotConfig())
-    await runBotSideEffects({ id: "bot_1", workspaceId: "ws_a" }, ["enqueue_finalize"], queue.port, testBotConfig())
+    await ctx.store.update(session.id, { vexaMeetingId: "4242" }, { workspaceId: "ws_a" })
+    await runBotReconcile({}, ctx.deps)
+    await runBotReconcile({}, ctx.deps)
 
-    expect(queue.jobs.map((job) => [job.name, job.id, job.options.attempts])).toEqual([
-      ["bot.finalize", "bot.finalize-bot_1", 8],
-      ["bot.consent", "bot.consent-bot_1", undefined],
+    expect(ctx.queue.jobs.map((job) => [job.name, job.id, job.payload])).toEqual([
+      ["bot.consent", `bot.consent-${session.id}`, { sessionId: session.id, workspaceId: "ws_a" }],
     ])
   })
 })

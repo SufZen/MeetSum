@@ -228,6 +228,54 @@ describe("parseMeetingLink table (docs/parity/m7.md)", () => {
   })
 })
 
+describe("linear-time extraction (ReDoS)", () => {
+  const pathological: Array<[string, string]> = [
+    ["repeated zoom fragments", "https://zoom.us/j/".repeat(2800)],
+    ["a. runs", "a.".repeat(25_000)],
+    ["a. runs with a slash", `${"a.".repeat(25_000)}/x`],
+    ["dash runs", "-".repeat(50_000)],
+    ["dot-dash mix", "a.-".repeat(17_000)],
+    ["unbalanced closers", `https://meet.google.com/abc-defg-hij${")".repeat(50_000)}`],
+    ["unclosed tags", "<a href=\"x ".repeat(5_000)],
+    ["unclosed hrefs", "href=\"".repeat(9_000)],
+    ["nested wrappers", "https://www.google.com/url?q=".repeat(1_800)],
+    ["urldefense markers", "https://urldefense.com/v3/__".repeat(1_800)],
+    ["entities", "&#x2F;".repeat(9_000)],
+    ["scheme soup", "http:/https:/http://".repeat(2_600)],
+  ]
+
+  it.each(pathological)("%s completes quickly", (_label, text) => {
+    expect(text.length).toBeGreaterThanOrEqual(45_000)
+
+    for (const source of ["description", "location"] as const) {
+      const started = performance.now()
+
+      extractMeetingLinks(text, source)
+      parseMeetingLink(text, source)
+      expect(performance.now() - started).toBeLessThan(50)
+    }
+
+    const started = performance.now()
+
+    diagnoseMeetingLink(text.slice(0, 4096))
+    extractMeetingLinks(text.slice(0, 4096))
+    expect(performance.now() - started).toBeLessThan(50)
+  })
+
+  it("caps the number of candidates and links", () => {
+    const many = Array.from({ length: 200 }, (_, index) => `https://zoom.us/j/${81234500000 + index}`).join(" ")
+
+    expect(extractMeetingLinks(many, "description").length).toBeLessThanOrEqual(20)
+  })
+
+  it("scans only the first 20,000 characters of calendar text", () => {
+    const late = `${"x ".repeat(10_001)}https://meet.google.com/abc-defg-hij`
+
+    expect(extractMeetingLinks(late, "description")).toEqual([])
+    expect(extractMeetingLinks(`https://meet.google.com/abc-defg-hij ${late}`, "description")).toHaveLength(1)
+  })
+})
+
 describe("secrets round-trip", () => {
   it("rebuilds canonical URLs from the redacted URL and sealed secrets", () => {
     const zoom = parseMeetingLink("https://acme.zoom.us/j/81234567890?pwd=AbC123")!

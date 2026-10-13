@@ -52,7 +52,7 @@ function setup(rulesFor: () => BotRules = () => rules) {
   const config = testBotConfig()
   const queue = fakeQueue((job: QueuedJob) =>
     job.name === "bot.dispatch"
-      ? runDispatch(job.payload as { sessionId: string; rev: number }, { store, provider: () => provider, queue: queue.port, config })
+      ? runDispatch(job.payload as { sessionId: string; rev: number; workspaceId: string }, { store, provider: () => provider, queue: queue.port, config })
       : undefined
   )
   const deps: Partial<CalendarSyncDeps> = {
@@ -119,7 +119,7 @@ describe("syncCalendarBotSession", () => {
     expect(provider.requestBot).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(provider.requestBot).toHaveBeenCalledTimes(1)
-    expect((await store.get(session!.id))?.status).toBe("requested")
+    expect((await store.get(session!.id, { workspaceId: "ws_a" }))?.status).toBe("requested")
   })
 
   it("repeated polls are idempotent", async () => {
@@ -149,7 +149,7 @@ describe("syncCalendarBotSession", () => {
     expect(queue.port.remove).toHaveBeenCalledWith(`bot.dispatch:${session.id}:0`)
 
     // Even if the old job had fired, its rev is stale.
-    expect((await runDispatch({ sessionId: session.id, rev: 0 }, { store, provider: () => provider, queue: queue.port, config: testBotConfig() })).outcome).toBe("skipped")
+    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, { store, provider: () => provider, queue: queue.port, config: testBotConfig() })).outcome).toBe("skipped")
 
     await vi.advanceTimersByTimeAsync(60 * 60_000)
     expect(provider.requestBot).not.toHaveBeenCalled()
@@ -164,7 +164,7 @@ describe("syncCalendarBotSession", () => {
 
     const session = (await store.findByCalendarEvent(WS, "cal_1"))!
 
-    await store.transition(session.id, { status: "cancelled", reason: "user_opt_out", at: new Date(), source: "api" })
+    await store.transition(session.id, { status: "cancelled", reason: "user_opt_out", at: new Date(), source: "api", workspaceId: "ws_a" })
 
     const moved = calendarEvent({ start: { dateTime: "2026-10-14T09:30:00.000Z" } })
 
@@ -186,11 +186,11 @@ describe("syncCalendarBotSession", () => {
 
     const session = (await store.findByCalendarEvent(WS, "cal_1"))!
 
-    await store.transition(session.id, { status: "active", at: new Date(), source: "webhook" })
+    await store.transition(session.id, { status: "active", at: new Date(), source: "webhook", workspaceId: "ws_a" })
     expect(
       await syncCalendarBotSession(input(calendarEvent({ start: { dateTime: "2026-10-14T09:05:00.000Z" } })), deps)
     ).toBe("unchanged")
-    expect((await store.get(session.id))?.status).toBe("active")
+    expect((await store.get(session.id, { workspaceId: "ws_a" }))?.status).toBe("active")
   })
 
   it("skips internal-only meetings under external_only", async () => {
@@ -217,6 +217,32 @@ describe("syncCalendarBotSession", () => {
   })
 })
 
+describe("workspace isolation (W1/W2)", () => {
+  it("the same calendar event id and link in two workspaces yields independent sessions", async () => {
+    const { store, queue, deps } = setup()
+    const w1 = { ...input(calendarEvent()), workspaceId: "ws_1" }
+    const w2 = { ...input(calendarEvent()), workspaceId: "ws_2" }
+
+    expect(await syncCalendarBotSession(w1, deps)).toBe("created")
+    expect(await syncCalendarBotSession(w2, deps)).toBe("created")
+
+    const s1 = (await store.findByCalendarEvent("ws_1", "cal_1"))!
+    const s2 = (await store.findByCalendarEvent("ws_2", "cal_1"))!
+
+    expect(s1.id).not.toBe(s2.id)
+    expect(queue.jobs.map((job) => job.payload)).toEqual([
+      { sessionId: s1.id, rev: 0, workspaceId: "ws_1" },
+      { sessionId: s2.id, rev: 0, workspaceId: "ws_2" },
+    ])
+
+    // Moving / cancelling W1's event never touches W2.
+    await syncCalendarBotSession({ ...w1, event: calendarEvent({ start: { dateTime: "2026-10-14T11:00:00.000Z" } }) }, deps)
+    await cancelCalendarBotSession({ workspaceId: "ws_1", calendarEventId: "cal_1", reason: "event_cancelled" }, deps)
+    expect(await store.get(s2.id, { workspaceId: "ws_2" })).toMatchObject({ status: "scheduled", dispatchRev: 0 })
+    expect(await store.get(s1.id, { workspaceId: "ws_1" })).toMatchObject({ status: "cancelled", dispatchRev: 1 })
+  })
+})
+
 describe("cancelCalendarBotSession", () => {
   it("cancels a scheduled session and removes its job", async () => {
     const { store, provider, queue, deps } = setup()
@@ -228,7 +254,7 @@ describe("cancelCalendarBotSession", () => {
     expect(await cancelCalendarBotSession({ workspaceId: WS, calendarEventId: "cal_1", reason: "event_cancelled" }, deps)).toBe(
       "cancelled"
     )
-    expect(await store.get(session.id)).toMatchObject({ status: "cancelled", statusReason: "event_cancelled" })
+    expect(await store.get(session.id, { workspaceId: "ws_a" })).toMatchObject({ status: "cancelled", statusReason: "event_cancelled" })
     expect(queue.pending()).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
     expect(provider.requestBot).not.toHaveBeenCalled()
@@ -241,11 +267,11 @@ describe("cancelCalendarBotSession", () => {
 
     const session = (await store.findByCalendarEvent(WS, "cal_1"))!
 
-    await store.transition(session.id, { status: "active", at: new Date(), source: "webhook" })
+    await store.transition(session.id, { status: "active", at: new Date(), source: "webhook", workspaceId: "ws_a" })
     expect(await cancelCalendarBotSession({ workspaceId: WS, calendarEventId: "cal_1", reason: "event_cancelled" }, deps)).toBe(
       "unchanged"
     )
-    expect((await store.get(session.id))?.status).toBe("active")
+    expect((await store.get(session.id, { workspaceId: "ws_a" }))?.status).toBe("active")
   })
 })
 
@@ -282,7 +308,7 @@ describe("rules changes", () => {
     // The manual session only gets its calendar times refreshed.
     expect(await resyncWorkspaceBotSessions(WS, { ...deps, listUpcomingEvents })).toEqual({ cancelled: 1, times_updated: 1 })
     expect(await store.findByCalendarEvent(WS, "cal_1")).toMatchObject({ status: "cancelled", statusReason: "rule_disabled" })
-    expect((await store.get(manual.id))?.status).toBe("scheduled")
+    expect((await store.get(manual.id, { workspaceId: "ws_a" }))?.status).toBe("scheduled")
 
     current = rules
 

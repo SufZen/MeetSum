@@ -32,16 +32,24 @@ export type BotRulesActor = { userId?: string; apiKeyId?: string }
 
 export type BotRulesFieldError = { path: string; message: string }
 
-/** Route → 400 with `code` (`invalid` per-field errors, or `consent_ack_required`). */
+/**
+ * Route → 400: `{code:"consent_ack_required"}` or `{code:"validation_failed",
+ * fields:{path: message}}` (the shape lib/bot/service.ts maps).
+ */
 export class BotRulesValidationError extends Error {
-  readonly code: "invalid" | "consent_ack_required"
+  readonly code: "validation_failed" | "consent_ack_required"
   readonly errors: BotRulesFieldError[]
+  /** Per-field messages keyed by dotted path; absent for consent_ack_required. */
+  readonly fields?: Record<string, string>
 
   constructor(code: BotRulesValidationError["code"], errors: BotRulesFieldError[]) {
     super(code === "consent_ack_required" ? "consent_ack_required" : "Invalid bot rules")
     this.name = "BotRulesValidationError"
     this.code = code
     this.errors = errors
+    if (code === "validation_failed") {
+      this.fields = Object.fromEntries(errors.map((error) => [error.path || "body", error.message]))
+    }
   }
 }
 
@@ -170,7 +178,7 @@ export function applyBotRulesPatch(
   now: Date = new Date()
 ): { ok: true; rules: BotRules } | { ok: false; error: BotRulesValidationError } {
   if (!isRecord(patch)) {
-    return { ok: false, error: new BotRulesValidationError("invalid", [{ path: "", message: "must be an object" }]) }
+    return { ok: false, error: new BotRulesValidationError("validation_failed", [{ path: "", message: "must be an object" }]) }
   }
 
   const errors: BotRulesFieldError[] = []
@@ -247,7 +255,7 @@ export function applyBotRulesPatch(
     errors.push({ path: "acknowledgeConsent", message: "must be a boolean" })
   }
 
-  if (errors.length) return { ok: false, error: new BotRulesValidationError("invalid", errors) }
+  if (errors.length) return { ok: false, error: new BotRulesValidationError("validation_failed", errors) }
 
   if (patch.acknowledgeConsent === true) {
     next.consentAcknowledgedAt = now.toISOString()

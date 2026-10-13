@@ -113,7 +113,8 @@ describe("bot rules (memory)", () => {
       )
     )
 
-    expect(error.code).toBe("invalid")
+    expect(error.code).toBe("validation_failed")
+    expect(error.fields).toMatchObject({ autoJoin: expect.any(String), "consentMessage.he": "must not contain URLs" })
     expect(error.errors.map((item) => item.path).sort()).toEqual([
       "autoJoin",
       "botName",

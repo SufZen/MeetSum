@@ -19,14 +19,17 @@ import type {
 export const MEETING_LINK_INPUT_MAX_CHARS = 4096
 /**
  * Calendar descriptions (HTML Teams/Zoom invites) are routinely longer than
- * 4 KB, so calendar sources get a larger, still bounded, budget.
+ * 4 KB: only their first 20,000 characters are scanned.
  */
-export const MEETING_LINK_CALENDAR_MAX_CHARS = 64 * 1024
+export const MEETING_LINK_CALENDAR_MAX_CHARS = 20_000
+/** Candidates parsed per scan, links returned, and characters per URL run. */
+const MAX_CANDIDATES = 50
+const MAX_LINKS = 20
+const MAX_RUN_CHARS = 4096
 
 const BIDI_CONTROLS = /[‎‏‪-‮⁦-⁩؜﻿​]/g
 // RFC 3986 characters plus `{}"`, which raw Teams `context={"Tid":…}` uses.
 const URL_RUN = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%{}"]+/g
-const SCHEME = /https?:\/\//gi
 const TRAILING = new Set([".", ",", ";", ":", "!", "?", ")", "]", "}", ">", '"', "'"])
 
 const MEET_ID = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/
@@ -76,36 +79,71 @@ function decodeEntities(text: string): string {
   })
 }
 
-/** HTML decode, `<a href>` → href, tags dropped, bidi controls removed, NFKC. */
+/**
+ * HTML decode, `href` values lifted out of their tags, tags dropped, bidi
+ * controls removed, NFKC. Every pattern here is linear: single character
+ * classes with bounded repetition and no nested or overlapping quantifiers
+ * (calendar descriptions are attacker-controlled — anyone can send an invite).
+ */
 export function normalizeMeetingText(text: string): string {
   let value = decodeEntities(text)
 
   value = value
-    .replace(/<a\b[^>]*?\bhref\s*=\s*(["'])(.*?)\1[^>]*>/gi, " $2 ")
-    .replace(/<[^>]{0,2000}>/g, " ")
+    // `href="X"` → `> X <`: the URL lands outside the tag the next step drops.
+    .replace(/\bhref\s{0,8}=\s{0,8}"([^"]{0,4096})"/gi, " > $1 < ")
+    .replace(/\bhref\s{0,8}=\s{0,8}'([^']{0,4096})'/gi, " > $1 < ")
+    // `[^<>]` stops at the next tag start, so each character is scanned once.
+    .replace(/<[^<>]{0,2000}>/g, " ")
   value = decodeEntities(value)
 
   return value.replace(BIDI_CONTROLS, "").normalize("NFKC")
 }
 
+const OPENERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" }
+
+/** Trims trailing punctuation, keeping balanced closers. Linear in the candidate. */
 function trimTrailing(candidate: string): string {
-  let value = candidate
+  const counts: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 }
 
-  while (value.length) {
-    const last = value[value.length - 1]
-
-    if (!TRAILING.has(last)) break
-    if (last === ")" && count(value, "(") >= count(value, ")")) break
-    if (last === "]" && count(value, "[") >= count(value, "]")) break
-    if (last === "}" && count(value, "{") >= count(value, "}")) break
-    value = value.slice(0, -1)
+  for (const char of candidate) {
+    if (char in counts) counts[char] += 1
   }
 
-  return value
+  let end = candidate.length
+
+  while (end > 0) {
+    const last = candidate[end - 1]
+
+    if (!TRAILING.has(last)) break
+
+    const opener = OPENERS[last]
+
+    if (opener && counts[opener] >= counts[last]) break
+    if (opener) counts[last] -= 1
+    end -= 1
+  }
+
+  return candidate.slice(0, end)
 }
 
-function count(value: string, char: string) {
-  return value.split(char).length - 1
+/** `host` of `scheme://host/...` or `host/...` by string scanning (no regex). */
+function hostOf(candidate: string): string {
+  const lower = candidate.toLowerCase()
+  const afterScheme = lower.startsWith("https://") ? 8 : lower.startsWith("http://") ? 7 : 0
+  let end = afterScheme
+
+  while (end < lower.length && !"/?#".includes(lower[end])) end += 1
+
+  const authority = lower.slice(afterScheme, end)
+  const at = authority.lastIndexOf("@")
+  const hostPort = at >= 0 ? authority.slice(at + 1) : authority
+  const colon = hostPort.indexOf(":")
+
+  return (colon >= 0 ? hostPort.slice(0, colon) : hostPort).replace(/\.$/, "")
+}
+
+function isHostname(value: string) {
+  return value.length >= 3 && value.length <= 253 && value.includes(".") && /^[a-z0-9.-]+$/.test(value)
 }
 
 function isZoomHost(host: string) {
@@ -161,9 +199,14 @@ function unwrap(url: URL, raw: string): string | undefined {
     return url.searchParams.get("url") ?? undefined
   }
   if (host === "urldefense.com") {
-    const match = /\/v3\/__(.+?)__/.exec(raw)
+    const marker = raw.indexOf("/v3/__")
 
-    return match?.[1]
+    if (marker < 0) return undefined
+
+    const start = marker + "/v3/__".length
+    const end = raw.indexOf("__", start)
+
+    return end > start ? raw.slice(start, end) : undefined
   }
 
   return undefined
@@ -285,9 +328,10 @@ function parseCandidate(candidate: string, depth = 0): Attempt {
 
     if (!inner) return { ok: false, reason: "unsupported_host" }
 
-    const normalized = trimTrailing(normalizeMeetingText(inner).trim())
+    const normalized = trimTrailing(normalizeMeetingText(inner.slice(0, MAX_RUN_CHARS)).trim())
+    const schemed = /^https?:\/\//i.test(normalized)
 
-    return /^https?:\/\//i.test(normalized) || /^[a-z0-9.-]+\.[a-z]{2,}\//i.test(normalized)
+    return schemed || (normalized.includes("/") && isHostname(hostOf(normalized)))
       ? parseCandidate(normalized, depth + 1)
       : { ok: false, reason: "unsupported_host" }
   }
@@ -299,33 +343,49 @@ function parseCandidate(candidate: string, depth = 0): Attempt {
   return { ok: false, reason: "unsupported_host" }
 }
 
-/** URL candidates inside one ASCII run (a run ends at Hebrew letters, spaces, ״/׳). */
+/** Scheme offsets in a run, found with indexOf (no regex). */
+function schemeOffsets(run: string): number[] {
+  const lower = run.toLowerCase()
+  const offsets: number[] = []
+  let from = 0
+
+  while (offsets.length < MAX_CANDIDATES) {
+    const index = lower.indexOf("http", from)
+
+    if (index < 0) break
+    if (lower.startsWith("https://", index) || lower.startsWith("http://", index)) offsets.push(index)
+    from = index + 4
+  }
+
+  return offsets
+}
+
+/**
+ * URL candidates inside one ASCII run (a run ends at Hebrew letters, spaces,
+ * ״/׳). Linear: offsets by indexOf, hosts by string scanning, each candidate
+ * bounded by the next scheme offset (a wrapper keeps the rest of the run,
+ * still capped at MAX_RUN_CHARS).
+ */
 function candidatesOf(run: string): string[] {
-  const starts: number[] = []
-
-  for (const match of run.matchAll(SCHEME)) starts.push(match.index ?? 0)
-
+  const starts = schemeOffsets(run)
   const candidates: string[] = []
   const prefixEnd = starts[0] ?? run.length
-  const prefix = run.slice(0, prefixEnd).replace(/^[^A-Za-z0-9]+/, "")
-  const bare = /^((?:[a-z0-9-]+\.)+[a-z]{2,})\//i.exec(prefix)
+  let lead = 0
 
-  if (bare && isKnownHost(bare[1].toLowerCase())) candidates.push(prefix)
+  while (lead < prefixEnd && !/[A-Za-z0-9]/.test(run[lead])) lead += 1
+
+  const prefix = run.slice(lead, prefixEnd)
+  const bareHost = prefix.includes("/") ? hostOf(prefix) : ""
+
+  if (isHostname(bareHost) && isKnownHost(bareHost)) candidates.push(prefix)
 
   for (let index = 0; index < starts.length; index += 1) {
     const start = starts[index]
-    const head = run.slice(start)
-    let host = ""
-
-    try {
-      host = new URL(trimTrailing(head)).hostname.toLowerCase()
-    } catch {
-      host = ""
-    }
+    const host = hostOf(run.slice(start, Math.min(run.length, start + 300)))
 
     // A wrapper's own query carries the nested link: keep it whole.
-    if (host && isWrapperHost(host)) {
-      candidates.push(head)
+    if (isWrapperHost(host)) {
+      candidates.push(run.slice(start))
       break
     }
 
@@ -341,20 +401,25 @@ function maxChars(source: MeetingLinkSource) {
 
 type Scan = { links: ParsedMeetingLink[]; rejects: MeetingLinkRejectReason[] }
 
-function scan(text: string, source: MeetingLinkSource, limit = Number.POSITIVE_INFINITY): Scan {
+function scan(text: string, source: MeetingLinkSource, limit = MAX_LINKS): Scan {
   const result: Scan = { links: [], rejects: [] }
 
   if (typeof text !== "string" || !text) return result
-  if (text.length > maxChars(source)) {
+  // Pasted input over 4 KB is rejected; calendar text is truncated to a bounded prefix.
+  if (source === "input" && text.length > MEETING_LINK_INPUT_MAX_CHARS) {
     result.rejects.push("too_long")
     return result
   }
 
   const seen = new Set<string>()
-  const normalized = normalizeMeetingText(text)
+  const normalized = normalizeMeetingText(text.slice(0, maxChars(source)))
+  let parsed = 0
 
   for (const match of normalized.matchAll(URL_RUN)) {
-    for (const candidate of candidatesOf(match[0])) {
+    for (const candidate of candidatesOf(match[0].slice(0, MAX_RUN_CHARS))) {
+      if (parsed >= MAX_CANDIDATES) return result
+      parsed += 1
+
       const attempt = parseCandidate(candidate)
 
       if (!attempt.ok) {

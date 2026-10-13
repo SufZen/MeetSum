@@ -59,6 +59,19 @@ describe("redactBotError", () => {
     expect(redactBotError("abcdefghij", 5)).toBe("abcd…")
   })
 
+  it.each([
+    ["a. runs", "a.".repeat(25_000)],
+    ["slashes", "a/".repeat(25_000)],
+    ["hex then letter", `${"a".repeat(50_000)}g`],
+    ["scheme-ish", "abc:/".repeat(10_000)],
+    ["keys", "passcode=".repeat(6_000)],
+  ])("is linear on pathological input (%s)", (_label, input) => {
+    const started = performance.now()
+
+    redactBotError(input)
+    expect(performance.now() - started).toBeLessThan(50)
+  })
+
   it("scrubSecrets removes literal values", () => {
     expect(scrubSecrets("key k_0123456789abcdef echoed", ["k_0123456789abcdef"])).toBe("key [redacted] echoed")
   })

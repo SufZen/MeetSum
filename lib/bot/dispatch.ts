@@ -205,7 +205,8 @@ async function adopt(d: DispatchDeps, session: BotSessionRecord): Promise<BotSes
 
   if (!active?.vexaMeetingId) return undefined
 
-  const owner = await d.store.findByVexaMeetingId(active.vexaMeetingId)
+  // SYSTEM lookup: a session of any workspace that already owns this Vexa meeting.
+  const owner = await d.store.getForWebhook({ vexaMeetingId: active.vexaMeetingId })
 
   if (owner && owner.id !== session.id) return undefined
 
@@ -268,14 +269,14 @@ async function request(d: DispatchDeps, session: BotSessionRecord, rev: number):
 }
 
 export async function runDispatch(
-  input: { sessionId: string; rev: number; workspaceId?: string },
+  input: { sessionId: string; rev: number; workspaceId: string },
   deps: Partial<DispatchDeps> = {}
 ): Promise<DispatchResult> {
   const d = resolveDispatchDeps(deps)
-  const session = await d.store.withTransaction((tx) => d.store.getForUpdate(input.sessionId, tx))
+  const session = await d.store.withTransaction((tx) => d.store.getForUpdate(input.sessionId, tx, { workspaceId: input.workspaceId }))
 
   if (!session) return { outcome: "skipped" }
-  if (input.workspaceId && session.workspaceId !== input.workspaceId) return { outcome: "skipped" }
+  if (session.workspaceId !== input.workspaceId) return { outcome: "skipped" }
   if (session.dispatchRev !== input.rev) return { outcome: "skipped", session }
 
   // A BullMQ retry after a retryable POST failure: adopt a bot that may exist.
@@ -314,7 +315,7 @@ export async function runDispatch(
 
     if (!marked?.applied) return { outcome: "skipped", session: marked?.session }
   } catch (error) {
-    if (error instanceof BotSessionConflictError && error.constraint === "uq_bot_sessions_live_target") {
+    if (error instanceof BotSessionConflictError && error.constraint === "uq_bot_sessions_ws_live_target") {
       return terminate(d, session, "blocked", "already_in_meeting")
     }
     throw error
@@ -335,11 +336,17 @@ export async function runDispatch(
  * enqueues an immediate dispatch. Non-scheduled sessions are returned as is.
  */
 export async function dispatchNow(
-  sessionId: string,
+  target: string | Pick<BotSession, "id" | "workspaceId">,
   deps: Partial<DispatchDeps> & { workspaceId?: string } = {}
 ): Promise<BotSession> {
   const d = resolveDispatchDeps(deps)
-  const session = await d.store.get(sessionId, deps.workspaceId ? { workspaceId: deps.workspaceId } : {})
+  const sessionId = typeof target === "string" ? target : target.id
+  const workspaceId = deps.workspaceId ?? (typeof target === "string" ? undefined : target.workspaceId)
+
+  // The store is workspace-scoped: never dispatch without the session's workspace.
+  if (!workspaceId) throw new Error("dispatchNow requires the session's workspaceId")
+
+  const session = await d.store.get(sessionId, { workspaceId })
 
   if (!session) throw new Error("bot session not found")
   if (session.status !== "scheduled") return session
