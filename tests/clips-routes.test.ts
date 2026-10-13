@@ -119,9 +119,9 @@ describe("clip routes", () => {
     expect(collab.clips.size).toBe(20)
   })
 
-  it("caps live clips per meeting at 200 (429)", async () => {
+  it("answers 429 with the quota scope when a user is at their per-meeting cap", async () => {
     await as("member")
-    for (let index = 0; index < 200; index += 1) {
+    for (let index = 0; index < 50; index += 1) {
       collab.clips.set(`clip_seed_${index}`, {
         id: `clip_seed_${index}`,
         workspaceId: "ws_a",
@@ -131,6 +131,7 @@ describe("clip routes", () => {
         endMs: 4000,
         segmentIds: [],
         renderStatus: "pending",
+        createdByUserId: "user_me",
         createdAt: "2026-10-01T00:00:00Z",
         updatedAt: "2026-10-01T00:00:00Z",
       })
@@ -139,7 +140,10 @@ describe("clip routes", () => {
     const blocked = await create("m_a", { startMs: 0, endMs: 4000 })
 
     expect(blocked.status).toBe(429)
-    expect(await blocked.json()).toEqual({ error: "clip_limit_reached" })
+    expect(await blocked.json()).toEqual({ error: "clip_limit_reached", scope: "user" })
+
+    await as("member", "user_dana")
+    expect((await create("m_a", { startMs: 0, endMs: 4000 })).status).toBe(201)
   })
 
   it("rejects bad ranges with their code", async () => {

@@ -110,7 +110,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   } catch (error) {
     if (error instanceof ClipNotFoundError) return meetingNotFound()
     if (error instanceof ClipLimitError) {
-      return NextResponse.json({ error: "clip_limit_reached" }, { status: 429 })
+      return NextResponse.json({ error: "clip_limit_reached", scope: error.scope }, { status: 429 })
     }
     if (error instanceof ClipValidationError) {
       return NextResponse.json({ error: error.code }, { status: 400 })

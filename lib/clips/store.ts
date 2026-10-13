@@ -43,18 +43,52 @@ export class ClipNotFoundError extends Error {
   }
 }
 
-/** A clip of a private meeting cannot be shared. */
-/** Live clips per meeting. */
-export const MAX_CLIPS_PER_MEETING = 200
+/**
+ * Live (non-deleted) clips one user may have in one meeting: a member can
+ * never exhaust the meeting for everyone else. Deleting frees quota.
+ */
+export const MAX_CLIPS_PER_USER_PER_MEETING = 50
+/** Meeting-wide safety net (live clips of all users). */
+export const MAX_CLIPS_PER_MEETING = 500
 
-/** The meeting already has MAX_CLIPS_PER_MEETING live clips (route → 429). */
+/** A clip quota is full (route → 429 `clip_limit_reached`). */
 export class ClipLimitError extends Error {
-  constructor() {
+  constructor(readonly scope: "user" | "meeting") {
     super("clip_limit_reached")
     this.name = "ClipLimitError"
   }
 }
 
+function assertClipQuota(meetingLive: number, userLive: number) {
+  if (userLive >= MAX_CLIPS_PER_USER_PER_MEETING) throw new ClipLimitError("user")
+  if (meetingLive >= MAX_CLIPS_PER_MEETING) throw new ClipLimitError("meeting")
+}
+
+type PoolLike = Queryable & { connect?: () => Promise<Queryable & { release: () => void }> }
+
+/** BEGIN/COMMIT on a dedicated connection (test fakes without `connect` run as-is). */
+async function inTransaction<T>(client: Queryable, fn: (tx: Queryable) => Promise<T>): Promise<T> {
+  const pool = client as PoolLike
+
+  if (typeof pool.connect !== "function") return fn(client)
+
+  const connection = await pool.connect()
+
+  try {
+    await connection.query("begin")
+    const result = await fn(connection)
+
+    await connection.query("commit")
+    return result
+  } catch (error) {
+    await connection.query("rollback").catch(() => undefined)
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
+/** A clip of a private meeting cannot be shared. */
 export class ClipShareError extends Error {
   constructor(readonly code: "meeting_private") {
     super(code)
@@ -159,11 +193,16 @@ export async function createClip(
   const backend = await backendOf()
 
   if (backend.kind === "memory") {
+    // Count and insert run in the same synchronous step (no await between):
+    // concurrent requests cannot overshoot.
     const live = [...backend.db.clips.values()].filter(
       (clip) => clip.meetingId === meetingId && clip.workspaceId === ctx.scope.workspaceId && !clip.deletedAt
-    ).length
+    )
 
-    if (live >= MAX_CLIPS_PER_MEETING) throw new ClipLimitError()
+    assertClipQuota(
+      live.length,
+      ctx.actorUserId ? live.filter((clip) => clip.createdByUserId === ctx.actorUserId).length : 0
+    )
 
     const now = nowIso()
     const clip: StoredClip = {
@@ -185,15 +224,35 @@ export async function createClip(
     return publicClip(clip)
   }
 
-  const count = await backend.client.query(
-    `select count(*)::int as live from meeting_clips where meeting_id = $1 and workspace_id = $2 and deleted_at is null`,
-    [meetingId, ctx.scope.workspaceId]
-  )
+  return inTransaction(backend.client, async (tx) => {
+    // Serialize clip creation per meeting so count + insert are atomic:
+    // concurrent requests queue on the lock and each counts after the
+    // previous insert committed (READ COMMITTED takes a new snapshot per
+    // statement).
+    await tx.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`meeting_clips:${meetingId}`])
 
-  if (Number((count.rows[0] as { live?: number } | undefined)?.live ?? 0) >= MAX_CLIPS_PER_MEETING) {
-    throw new ClipLimitError()
-  }
+    const count = await tx.query(
+      `select count(*)::int as meeting_live,
+              count(*) filter (where created_by_user_id = $3)::int as user_live
+         from meeting_clips
+        where meeting_id = $1 and workspace_id = $2 and deleted_at is null`,
+      [meetingId, ctx.scope.workspaceId, ctx.actorUserId ?? null]
+    )
+    const counts = count.rows[0] as { meeting_live?: number; user_live?: number } | undefined
 
+    assertClipQuota(Number(counts?.meeting_live ?? 0), ctx.actorUserId ? Number(counts?.user_live ?? 0) : 0)
+
+    return insertClipRow(tx, ctx, meetingId, id, range)
+  })
+}
+
+async function insertClipRow(
+  client: Queryable,
+  ctx: ClipStoreContext,
+  meetingId: string,
+  id: string,
+  range: ReturnType<typeof resolveClipRange>
+): Promise<MeetingClip> {
   const values: unknown[] = [
     id,
     range.title,
@@ -205,7 +264,7 @@ export async function createClip(
     meetingId,
   ]
   const visible = meetingScopeSql(ctx.scope, "m", values)
-  const result = await backend.client.query(
+  const result = await client.query(
     `
       insert into meeting_clips (
         id, workspace_id, meeting_id, title, start_ms, end_ms, segment_ids,

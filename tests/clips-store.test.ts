@@ -4,7 +4,10 @@ import { createCollabMemoryDb, setCollabBackendForTesting, type CollabMemoryDb }
 import { ClipValidationError, resolveClipRange } from "@/lib/clips/range"
 import { chapterHeadings, nextSelection, selectionRange } from "@/lib/clips/selection"
 import {
+  ClipLimitError,
   ClipNotFoundError,
+  MAX_CLIPS_PER_MEETING,
+  MAX_CLIPS_PER_USER_PER_MEETING,
   createClip,
   deleteClip,
   getClip,
@@ -206,6 +209,77 @@ describe("clip store (memory backend)", () => {
     expect(await getClip(otherWorkspace, clip.id)).toBeUndefined()
   })
 
+  describe("clip quotas", () => {
+    const seedClips = (count: number, createdByUserId: string, meetingId = "m_a") => {
+      for (let index = 0; index < count; index += 1) {
+        const id = `clip_${createdByUserId}_${meetingId}_${index}`
+
+        collab.clips.set(id, {
+          id,
+          workspaceId: "ws_a",
+          meetingId,
+          title: "seed",
+          startMs: 0,
+          endMs: 5000,
+          segmentIds: [],
+          renderStatus: "pending",
+          createdByUserId,
+          createdAt: "2026-10-01T00:00:00Z",
+          updatedAt: "2026-10-01T00:00:00Z",
+        })
+      }
+    }
+
+    it("caps one user at 50 live clips per meeting without blocking anyone else", async () => {
+      seedClips(MAX_CLIPS_PER_USER_PER_MEETING, "user_me")
+      const me = ctxFor(db, member("user_me", "me@example.com"))
+      const dana = ctxFor(db, member("user_dana", "dana@example.com"))
+
+      await expect(createClip(me, "m_a", { startMs: 0, endMs: 5000 })).rejects.toMatchObject({
+        name: "ClipLimitError",
+        scope: "user",
+      })
+      await expect(createClip(dana, "m_a", { startMs: 0, endMs: 5000 })).resolves.toMatchObject({
+        createdByUserId: "user_dana",
+      })
+    })
+
+    it("frees quota when a clip is deleted", async () => {
+      const me = ctxFor(db, member("user_me", "me@example.com"))
+
+      seedClips(MAX_CLIPS_PER_USER_PER_MEETING - 1, "user_me")
+      const last = await createClip(me, "m_a", { startMs: 0, endMs: 5000 })
+
+      await expect(createClip(me, "m_a", { startMs: 0, endMs: 5000 })).rejects.toBeInstanceOf(ClipLimitError)
+      expect(await deleteClip(me, last.id)).toBe(true)
+      await expect(createClip(me, "m_a", { startMs: 0, endMs: 5000 })).resolves.toBeDefined()
+    })
+
+    it("keeps a high meeting-wide safety net", async () => {
+      for (let user = 0; user < MAX_CLIPS_PER_MEETING / MAX_CLIPS_PER_USER_PER_MEETING; user += 1) {
+        seedClips(MAX_CLIPS_PER_USER_PER_MEETING, `user_${user}`)
+      }
+
+      await expect(
+        createClip(ctxFor(db, member("user_me", "me@example.com")), "m_a", { startMs: 0, endMs: 5000 })
+      ).rejects.toMatchObject({ scope: "meeting" })
+    })
+
+    it("never overshoots the user cap under concurrent requests", async () => {
+      seedClips(MAX_CLIPS_PER_USER_PER_MEETING - 3, "user_me")
+      const me = ctxFor(db, member("user_me", "me@example.com"))
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, () => createClip(me, "m_a", { startMs: 0, endMs: 5000 }))
+      )
+      const live = [...collab.clips.values()].filter(
+        (clip) => clip.createdByUserId === "user_me" && !clip.deletedAt
+      )
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3)
+      expect(live).toHaveLength(MAX_CLIPS_PER_USER_PER_MEETING)
+    })
+  })
+
   it("renames and soft-deletes", async () => {
     const ctx = ctxFor(db, member("user_me", "me@example.com"))
     const clip = await createClip(ctx, "m_a", { startMs: 0, endMs: 5000 })
@@ -271,6 +345,51 @@ describe("clip store (Postgres SQL)", () => {
     expect(insert?.text).toMatch(/m\.owner_user_id = \$10/)
     expect(insert?.text).toMatch(/lower\(mp_scope\.email\) = \$11/)
     expect(insert?.values.slice(7)).toEqual(["m_a", "ws_a", "user_me", "me@example.com"])
+  })
+
+  it("counts and inserts under a per-meeting advisory lock inside one transaction", async () => {
+    const statements: string[] = []
+    const connection = {
+      async query(text: string) {
+        statements.push(text.replace(/\s+/g, " ").trim())
+        if (text.includes("insert into meeting_clips")) return { rows: [clipRow] }
+        if (text.includes("as meeting_live")) return { rows: [{ meeting_live: 3, user_live: 1 }] }
+        return { rows: [] }
+      },
+      release() {},
+    }
+    const pool = { query: connection.query, connect: async () => connection }
+
+    setCollabBackendForTesting({ kind: "postgres", client: pool })
+    await createClip(ctxFor(seed(), member("user_me", "me@example.com")), "m_a", { startMs: 0, endMs: 5000 })
+
+    const lock = statements.findIndex((text) => text.includes("pg_advisory_xact_lock"))
+    const count = statements.findIndex((text) => text.includes("as meeting_live"))
+    const insert = statements.findIndex((text) => text.includes("insert into meeting_clips"))
+
+    expect(statements[0]).toBe("begin")
+    expect(statements.at(-1)).toBe("commit")
+    expect(lock).toBeGreaterThan(0)
+    expect(count).toBeGreaterThan(lock)
+    expect(insert).toBeGreaterThan(count)
+    expect(statements[count]).toContain("deleted_at is null")
+  })
+
+  it("refuses the insert when the caller is at the per-user cap (Postgres)", async () => {
+    const statements: string[] = []
+    const client = {
+      async query(text: string) {
+        statements.push(text)
+        if (text.includes("as meeting_live")) return { rows: [{ meeting_live: 60, user_live: 50 }] }
+        return { rows: [] }
+      },
+    }
+
+    setCollabBackendForTesting({ kind: "postgres", client })
+    await expect(
+      createClip(ctxFor(seed(), member("user_me", "me@example.com")), "m_a", { startMs: 0, endMs: 5000 })
+    ).rejects.toMatchObject({ scope: "user" })
+    expect(statements.some((text) => text.includes("insert into meeting_clips"))).toBe(false)
   })
 
   it("lists live clips of the workspace with the meeting scope", async () => {
