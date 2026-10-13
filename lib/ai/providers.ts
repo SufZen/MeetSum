@@ -5,33 +5,21 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 
-import {
-  fetch as undiciFetch,
-  Agent as UndiciAgent,
-  FormData as UndiciFormData,
-} from "undici"
+import { fetch as undiciFetch, FormData as UndiciFormData } from "undici"
 
+import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
+import { TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
+import { longAsrDispatcher } from "@/lib/ai/asr/http"
+import { transcribeWithRouter, type AsrRouterOptions } from "@/lib/ai/asr/router"
+import type { AsrGlossary, AsrResult } from "@/lib/ai/asr/types"
 import {
   buildMeetingIntelligence,
   cleanupTranscriptSegments,
   type SmartTask,
 } from "@/lib/intelligence"
 
-// Long-running local ASR can hold a connection open for many minutes while the
-// model transcribes, sending zero bytes until the final JSON. Two things break
-// that otherwise:
-//   1. Node's built-in fetch (undici) defaults headersTimeout/bodyTimeout to
-//      300s, aborting real transcriptions with a generic "fetch failed" long
-//      before our own AbortController fires. We disable both here; the
-//      AbortController (LOCAL_TRANSCRIPTION_TIMEOUT_MS) remains the real cap.
-//   2. A silent, idle TCP connection is reset by stateful firewalls/NAT after
-//      ~5 minutes (observed: ECONNRESET at ~300s). TCP keepalive probes keep
-//      the socket non-idle so the connection survives a long transcription.
-const longAsrDispatcher = new UndiciAgent({
-  headersTimeout: 0,
-  bodyTimeout: 0,
-  connect: { keepAlive: true, keepAliveInitialDelay: 30_000 },
-})
+export { TranscriptionUnavailableError }
+
 import type {
   MeetingRecord,
   TranscriptSegment,
@@ -546,17 +534,6 @@ async function waitForGeminiFile(
   throw new Error(`Timed out waiting for Gemini file processing: ${name}`)
 }
 
-/**
- * Thrown when no transcription provider can produce a real transcript, so the
- * job fails honestly instead of persisting fabricated placeholder text.
- */
-export class TranscriptionUnavailableError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "TranscriptionUnavailableError"
-  }
-}
-
 export class HeuristicFallbackProvider
   implements TranscriptionProvider, SummaryProvider
 {
@@ -990,10 +967,22 @@ export class GeminiSummaryProvider implements SummaryProvider {
   }
 }
 
+export type GeminiUsageMetadata = {
+  promptTokenCount?: number
+  candidatesTokenCount?: number
+  totalTokenCount?: number
+}
+
 export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   readonly id = "gemini"
   readonly model = process.env.GOOGLE_GEMINI_AUDIO_MODEL ?? "gemini-3.5-flash"
   private readonly fallback = new HeuristicFallbackProvider()
+  private lastUsage: GeminiUsageMetadata | undefined
+
+  /** Token usage of the last successful Gemini call (for cost estimates). */
+  getLastUsage(): GeminiUsageMetadata | undefined {
+    return this.lastUsage
+  }
 
   async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
     const asset = meeting.mediaAssets?.find((item) => item.storageKey)
@@ -1133,6 +1122,14 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
         },
       })
 
+      this.lastUsage = response.usageMetadata
+        ? {
+            promptTokenCount: response.usageMetadata.promptTokenCount,
+            candidatesTokenCount: response.usageMetadata.candidatesTokenCount,
+            totalTokenCount: response.usageMetadata.totalTokenCount,
+          }
+        : undefined
+
       const segments = normalizeGeminiSegments(
         parseGeminiTranscriptSegments(response.text ?? "{}"),
         meeting
@@ -1150,24 +1147,92 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
   }
 }
 
-export function createTranscriptionProvider(): TranscriptionProvider {
-  const mode = getTranscriptionProviderMode()
-  const geminiProvider = isGeminiConfigured()
-    ? new GeminiAudioTranscriptionProvider()
-    : new HeuristicFallbackProvider()
+/** Router result → transcript segments (words, turn index, source `asr`). */
+export function asrResultToTranscriptSegments(result: AsrResult): TranscriptSegment[] {
+  return result.segments.map((segment) => ({
+    id: `seg_${crypto.randomUUID()}`,
+    speaker: segment.speaker,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    text: segment.text,
+    confidence: segment.confidence,
+    language: segment.language ?? result.language,
+    turnIndex: segment.turnIndex,
+    source: "asr",
+    words: segment.words.map((word) => ({
+      startMs: word.startMs,
+      endMs: word.endMs,
+      text: word.text,
+      ...(word.confidence !== undefined ? { confidence: word.confidence } : {}),
+      ...(word.language && word.language !== segment.language ? { language: word.language } : {}),
+    })),
+  }))
+}
 
-  if (mode === "local-whisper" && isLocalWhisperConfigured()) {
-    return new LocalWhisperTranscriptionProvider()
+/**
+ * @deprecated Adapter exposing the M3 ASR router through the legacy
+ * TranscriptionProvider interface. New code calls `transcribeWithRouter`
+ * (lib/ai/asr) directly and persists words/speakers.
+ */
+export class AsrRouterTranscriptionProvider implements TranscriptionProvider {
+  readonly id = "asr-router"
+  readonly model = "asr-router"
+  private lastRun: TranscriptionRunMetadata = { provider: "asr-router", model: "asr-router" }
+  private readonly fallback = new HeuristicFallbackProvider()
+
+  constructor(private readonly options: AsrRouterOptions & { glossary?: AsrGlossary } = {}) {}
+
+  getLastRun() {
+    return this.lastRun
   }
 
-  if (mode === "auto" && isLocalWhisperConfigured()) {
-    return new AutoTranscriptionProvider(
-      new LocalWhisperTranscriptionProvider(),
-      geminiProvider
+  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
+    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
+
+    if (!asset?.storageKey) return this.fallback.transcribe(meeting)
+
+    const result = await transcribeWithRouter(
+      {
+        meetingId: meeting.id,
+        workspaceId: meeting.workspaceId,
+        language: meeting.language,
+        media: {
+          kind: "object",
+          storageKey: asset.storageKey,
+          contentType: asset.contentType,
+          filename: asset.filename,
+          sizeBytes: asset.sizeBytes,
+        },
+        glossary: this.options.glossary ?? DEFAULT_ASR_GLOSSARY,
+        diarize: true,
+      },
+      this.options
     )
-  }
+    const failed = result.attempts.find((attempt) => !attempt.ok)
 
-  return geminiProvider
+    this.lastRun = {
+      provider: result.provider,
+      model: result.model,
+      ...(result.fallbackUsed
+        ? {
+            fallbackUsed: true,
+            attemptedProvider: failed?.provider,
+            fallbackReason: failed?.error,
+            fallbackElapsedMs: failed?.elapsedMs,
+          }
+        : {}),
+    }
+
+    return asrResultToTranscriptSegments(result)
+  }
+}
+
+/**
+ * @deprecated Use `transcribeWithRouter` from lib/ai/asr. Kept as a thin
+ * adapter over the ASR router for callers not yet migrated.
+ */
+export function createTranscriptionProvider(): TranscriptionProvider {
+  return new AsrRouterTranscriptionProvider()
 }
 
 export function createSummaryProvider(): SummaryProvider {

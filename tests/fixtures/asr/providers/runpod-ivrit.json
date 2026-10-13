@@ -1,0 +1,59 @@
+{
+  "_synthetic": true,
+  "_note": "Hand-written RunPod responses in the ivrit-ai serverless worker shape (generator chunks of {result: [segments]}, stable-whisper + diarization). Re-record and scrub against a live endpoint when RUNPOD_API_KEY is available.",
+  "run": { "id": "job-ivrit-1", "status": "IN_QUEUE" },
+  "inProgress": { "id": "job-ivrit-1", "status": "IN_PROGRESS", "delayTime": 2400 },
+  "completed": {
+    "id": "job-ivrit-1",
+    "status": "COMPLETED",
+    "delayTime": 2400,
+    "executionTime": 42000,
+    "output": [
+      {
+        "result": [
+          {
+            "start": 0.0,
+            "end": 2.4,
+            "text": " שלום לכולם, אני דנה.",
+            "speakers": ["SPEAKER_01"],
+            "words": [
+              { "word": " שלום", "start": 0.0, "end": 0.5, "probability": 0.98 },
+              { "word": " לכולם,", "start": 0.5, "end": 1.1, "probability": 0.95 },
+              { "word": " אני", "start": 1.2, "end": 1.5, "probability": 0.97 },
+              { "word": " דנה.", "start": 1.5, "end": 2.4, "probability": 0.93 }
+            ]
+          },
+          {
+            "start": 3.0,
+            "end": 6.2,
+            "text": " אנחנו עוברים בסופבייס עם קלוד קוד",
+            "speakers": ["SPEAKER_00"],
+            "words": [
+              { "word": " אנחנו", "start": 3.0, "end": 3.4, "probability": 0.96 },
+              { "word": " עוברים", "start": 3.4, "end": 3.9, "probability": 0.94 },
+              { "word": " בסופבייס", "start": 3.9, "end": 4.8, "probability": 0.71 },
+              { "word": " עם", "start": 4.8, "end": 5.0, "probability": 0.99 },
+              { "word": " קלוד", "start": 5.0, "end": 5.5, "probability": 0.81 },
+              { "word": " קוד", "start": 5.5, "end": 6.2, "probability": 0.77 }
+            ]
+          }
+        ]
+      },
+      {
+        "result": [
+          {
+            "start": 6.8,
+            "end": 8.4,
+            "text": " מעולה, דוגמה טובה.",
+            "speakers": ["SPEAKER_01"],
+            "words": [
+              { "word": " מעולה,", "start": 6.8, "end": 7.3, "probability": 0.97 },
+              { "word": " דוגמה", "start": 7.3, "end": 7.9, "probability": 0.92 },
+              { "word": " טובה.", "start": 7.9, "end": 8.4, "probability": 0.95 }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

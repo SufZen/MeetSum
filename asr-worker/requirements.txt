@@ -1,0 +1,15 @@
+# MeetSum ASR worker (RunPod serverless, CUDA 12 GPU). Pinned; bump deliberately.
+#
+# torch: the CUDA 12.4 wheel index stops at torch 2.6, while pyannote.audio 4.0
+# needs a newer torch, so torch/torchaudio come from the cu126 index. cu126
+# wheels bundle their own CUDA runtime and run on the CUDA 12.4 base image /
+# any R550+ driver via CUDA minor-version compatibility.
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.8.0
+torchaudio==2.8.0
+
+faster-whisper==1.1.*
+pyannote.audio==4.0.*
+runpod==1.7.*
+requests==2.32.*
+numpy==2.2.*
