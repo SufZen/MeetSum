@@ -46,9 +46,16 @@ export function parseClientReferenceManifest(source) {
   return [...files]
 }
 
-/** Route path from a manifest location: `<app>/[locale]/tasks/page_client…` → `/[locale]/tasks`. */
+/**
+ * Route path from a manifest location: `<app>/[locale]/tasks/page_client…` →
+ * `/[locale]/tasks`. Route groups (`(home)`) are not part of the URL.
+ */
 export function routeOf(appDir, manifestPath) {
-  const dir = relative(appDir, manifestPath).split(sep).slice(0, -1).join("/")
+  const dir = relative(appDir, manifestPath)
+    .split(sep)
+    .slice(0, -1)
+    .filter((part) => !/^\(.+\)$/.test(part))
+    .join("/")
 
   return `/${dir}`.replace(/\/$/, "") || "/"
 }

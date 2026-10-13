@@ -5,7 +5,7 @@
  * `MEETSUM_ONBOARDING_ENABLED` is not "false". Never throws. Server-only.
  *
  * The Step 0 stub returned `Promise<false>`; the return type is widened to
- * `boolean` (the only caller, `app/[locale]/page.tsx`, already treats it as one).
+ * `boolean` (the only caller, `app/[locale]/(home)/page.tsx`, already treats it as one).
  */
 import type { AuthContext } from "@/lib/auth/authz"
 import { computeOnboardingRedirect } from "@/lib/onboarding/service"

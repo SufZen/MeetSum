@@ -16,13 +16,27 @@ const root = path.resolve(__dirname, "..")
 
 describe("segment state files", () => {
   const segments = ["app/[locale]", "app/[locale]/rooms/[id]", "app/[locale]/tasks", "app/[locale]/search", "app/[locale]/invite/[token]", "app/[locale]/invite/accept"]
+  // The home page's skeleton lives in the `(home)` route group so that it
+  // does not wrap every other `[locale]` route; routes that answer 404 for a
+  // missing record have no loading.tsx, so notFound() runs before streaming
+  // starts and the status is a real 404 (not a soft 200).
+  const loadingFiles = ["app/[locale]/(home)/loading.tsx", "app/[locale]/tasks/loading.tsx", "app/[locale]/search/loading.tsx", "app/[locale]/invite/[token]/loading.tsx"]
+  const hardNotFound = ["app/[locale]", "app/[locale]/rooms/[id]", "app/[locale]/invite/accept"]
 
-  it.each(segments.flatMap((segment) => ["loading.tsx", "error.tsx", "not-found.tsx"].map((file) => `${segment}/${file}`)))(
+  it.each(segments.flatMap((segment) => ["error.tsx", "not-found.tsx"].map((file) => `${segment}/${file}`)))(
     "%s exists",
     (file) => {
       expect(existsSync(path.join(root, file))).toBe(true)
     }
   )
+
+  it.each(loadingFiles)("%s exists", (file) => {
+    expect(existsSync(path.join(root, file))).toBe(true)
+  })
+
+  it.each(hardNotFound)("%s has no loading.tsx (a missing record answers HTTP 404)", (segment) => {
+    expect(existsSync(path.join(root, segment, "loading.tsx"))).toBe(false)
+  })
 
   it("global-error has its own Hebrew RTL document and no error.message", () => {
     const source = readFileSync(path.join(root, "app/global-error.tsx"), "utf8")

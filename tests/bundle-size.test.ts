@@ -25,6 +25,8 @@ describe("bundle-size.mjs", () => {
     expect(routeOf(app, path.join(app, "[locale]", "page_client-reference-manifest.js"))).toBe("/[locale]")
     expect(routeOf(app, path.join(app, "[locale]", "tasks", "page_client-reference-manifest.js"))).toBe("/[locale]/tasks")
     expect(routeOf(app, path.join(app, "page_client-reference-manifest.js"))).toBe("/")
+    // Route groups are not part of the URL.
+    expect(routeOf(app, path.join(app, "[locale]", "(home)", "page_client-reference-manifest.js"))).toBe("/[locale]")
   })
 
   it("fails on growth over baseline + maxGrowth, and over budget only when strict", () => {
