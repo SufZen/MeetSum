@@ -182,13 +182,15 @@ No real keys are needed. This is Acceptance 14 (`tests/e2e/m8-integrations.spec.
 1. `docker compose up postgres redis`
 2. `npm run db:migrate`
 3. `npm run integrations:e2e-seed` (writes test session cookies and ids to `E2E_ENV_FILE`, default `.secrets/e2e.env`, gitignored; nothing is printed)
-4. `npm run integrations:fake` (fake Slack, Microsoft, Notion, HubSpot and Google on `127.0.0.1:4010`, plus a webhook receiver)
+4. `npm run integrations:fake` (fake Slack, Microsoft, Notion, HubSpot and Google on `127.0.0.1:4010`, plus a webhook receiver). The spec reads the recorded, token-redacted requests with `GET /__fake/requests?provider=<id>` and clears them with `DELETE /__fake/requests`; the webhook receiver records `provider: "webhook"` with the raw body for the signature check. The fake Outlook event uses the iCalUID `e2e-m8-shared-event@meetsum.test`, the one the seed puts on a Google row.
 5. Start the app and the worker with:
    - `NODE_ENV=development`
    - `MEETSUM_INTEGRATIONS_FAKE_BASE_URL=http://127.0.0.1:4010`
    - fake client ids and secrets for every provider (any non-empty value, e.g. `SLACK_CLIENT_ID=fake-slack`)
    - `MEETSUM_EMAIL_PROVIDER=log` and `E2E_EMAIL_CAPTURE_FILE=.secrets/e2e-emails.jsonl`
    - `MEETSUM_OAUTH_REDIRECT_BASE=http://localhost:3000`
+   - `MEETSUM_WEBHOOK_ALLOWED_HOSTS=127.0.0.1` (the fake webhook receiver, `POST http://127.0.0.1:4010/__fake/webhook`, is loopback; the SSRF guard refuses it otherwise)
+   - `MEETSUM_MS_CALENDAR_SYNC_MINUTES=1` (the Outlook sync runs every minute, so step 6 sees the fake Teams event quickly)
 6. `E2E_BASE_URL=http://localhost:3000 npm run test:e2e -- m8`
 7. `npm run integrations:e2e-seed -- --complete <meetingId>` runs the real dispatch path for a seeded meeting without ASR (the spec calls it itself; it is also useful by hand).
 

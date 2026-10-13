@@ -30,8 +30,12 @@ function inHours(hours: number): string {
   return new Date(Date.now() + hours * 3_600_000).toISOString().replace("Z", "0000")
 }
 
-/** One upcoming Teams event; its iCalUID can be seeded on a Google row to show dedupe. */
-export const FAKE_OUTLOOK_ICAL_UID = "040000008200E00074C5B7101A82E00800000000FAKE01"
+/**
+ * One upcoming Teams event. Its iCalUID is the one `integrations:e2e-seed`
+ * puts on a Google calendar row (`E2E_M8_ICAL_UID`), so the e2e shows that
+ * a meeting on both calendars yields one meeting and one bot session.
+ */
+export const FAKE_OUTLOOK_ICAL_UID = "e2e-m8-shared-event@meetsum.test"
 
 export const microsoftFakeHandlers: FakeProviderHandlers = {
   "GET /organizations/oauth2/v2.0/authorize": (request) => {
