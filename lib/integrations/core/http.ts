@@ -244,7 +244,7 @@ export async function providerFetchWith(
     if (error instanceof TypeError && /redirect/i.test(error.message)) {
       throw new ProviderError("invalid", `${provider} redirect refused`)
     }
-    throw new ProviderError("retryable", `${provider} request failed`, { cause: error })
+    throw new ProviderError("retryable", `${provider} request failed`)
   }
 
   if (response.status >= 300 && response.status < 400) {
@@ -259,7 +259,7 @@ export async function providerFetchWith(
   } catch (error) {
     if (error instanceof ProviderError) throw error
     if (timeout.aborted) throw new ProviderError("retryable", `${provider} request timed out`)
-    throw new ProviderError("retryable", `${provider} response failed`, { cause: error })
+    throw new ProviderError("retryable", `${provider} response failed`)
   }
 
   return new Response(response.status === 204 || response.status === 205 ? null : body, {

@@ -184,7 +184,7 @@ describe("redactIntegrationError and Retry-After", () => {
     )
 
     expect(text).not.toMatch(/abc\.def|dana@|4\/0AbCd|1\/\/xyz|shh|xoxb-1/)
-    expect(text).toContain("***")
+    expect(text).toContain("[redacted]")
     expect(redactIntegrationError("x".repeat(2000)).length).toBeLessThanOrEqual(500)
     expect(redactIntegrationError("line1\nline2")).toBe("line1 line2")
   })
