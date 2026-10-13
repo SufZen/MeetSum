@@ -10,10 +10,10 @@
 
 | Field | Value |
 | --- | --- |
-| Generated | 2026-10-13T00:31:01.501Z |
-| Git SHA | `04afc036dbee38f74c8fa6aa6fc8efd9b3b7a075` |
+| Generated | 2026-10-13T01:23:28.141Z |
+| Git SHA | `f7897e8a087460fb339d583faee2e39fe63c585b` |
 | Manifest | `tests/fixtures/asr/eval/manifest.json` |
-| Manifest SHA-256 | `eba291d234d8918538dfd9f61a6162245b87b467317422f646cd94cb7bcba4de` |
+| Manifest SHA-256 | `c04e1eb1fa2806fcdbadbe32755d2a3f23147dfd78af6842dc7e0181c5f48401` |
 | Mode | replay (synthetic) |
 | DER collar | 250 ms |
 | Samples | 3 |
