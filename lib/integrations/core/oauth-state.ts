@@ -139,40 +139,81 @@ export function defaultIntegrationsReturnTo(locale: string = DEFAULT_LOCALE): st
   return `/${isSupportedLocale(locale) ? locale : DEFAULT_LOCALE}?panel=settings&section=integrations`
 }
 
-/** Same-origin relative path (no `//`, `\`, control characters), else the integrations page. */
-export function safeIntegrationReturnTo(value: string | null | undefined, locale?: string): string {
-  if (
-    !value ||
-    value.length > 512 ||
-    !value.startsWith("/") ||
-    value.startsWith("//") ||
-    value.includes("\\") ||
-    /[\u0000-\u001f\u007f]/.test(value) ||
-    value.startsWith("/api/")
-  ) {
-    return defaultIntegrationsReturnTo(locale)
+const RETURN_TO_BASE = new URL("https://meetsum.invalid")
+
+/**
+ * Pre-parse check of a relative return path: a single leading `/` not
+ * followed by `/` or `\`, no backslash or control character anywhere, no
+ * encoded `/` or `\` (`%2f`, `%5c`, also double-encoded), not `/api/`,
+ * at most 512 characters.
+ */
+function isSafeRelativePath(value: string | null | undefined): value is string {
+  if (!value || value.length > 512) return false
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return false
+  if (value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return false
+  if (value.startsWith("/api/")) return false
+
+  let decoded = value
+
+  for (let round = 0; round < 3; round += 1) {
+    if (/%2f|%5c/i.test(decoded)) return false
+    try {
+      const next = decodeURIComponent(decoded)
+
+      if (next === decoded) break
+      decoded = next
+    } catch {
+      return false
+    }
   }
+  return !decoded.includes("\\") && !/[\u0000-\u001f\u007f]/.test(decoded) && !decoded.startsWith("//")
+}
+
+/** Parsed against a fixed base; undefined unless it stays same-origin. */
+function parseSameOrigin(value: string): URL | undefined {
+  try {
+    const url = new URL(value, RETURN_TO_BASE)
+
+    return url.origin === RETURN_TO_BASE.origin ? url : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Same-origin relative path (checked before and after parsing), else the integrations page. */
+export function safeIntegrationReturnTo(value: string | null | undefined, locale?: string): string {
+  if (!isSafeRelativePath(value)) return defaultIntegrationsReturnTo(locale)
+
+  const url = parseSameOrigin(value)
+
+  if (!url || url.pathname.startsWith("/api/")) return defaultIntegrationsReturnTo(locale)
 
   return value
 }
 
-/** Relative return path plus `integration_error=<code>` (a fixed enum, never provider text). */
-export function withIntegrationError(returnTo: string, code: IntegrationErrorCode): string {
-  // Parsed against a fixed same-origin base: a second "?" stays in the
-  // query, a "#fragment" stays after it, and anything that would leave the
-  // origin collapses to "/".
-  const base = "https://meetsum.invalid"
-  let url: URL
+/**
+ * Relative return path plus `integration_error=<code>` (a fixed enum, never
+ * provider text). The path is validated before parsing (see
+ * `isSafeRelativePath`) and after (`new URL(value, base).origin === base`);
+ * only `pathname + search + hash` is emitted, never an absolute URL, so the
+ * code lands in the query (not the fragment) and a second `?` stays in the
+ * query. Anything invalid falls back to the integrations settings path.
+ */
+export function withIntegrationError(returnTo: string, code: IntegrationErrorCode, locale?: string): string {
+  const fallback = () => {
+    const url = new URL(defaultIntegrationsReturnTo(locale), RETURN_TO_BASE)
 
-  try {
-    url = new URL(returnTo, base)
-  } catch {
-    url = new URL("/", base)
+    url.searchParams.set("integration_error", code)
+    return `${url.pathname}${url.search}`
   }
-  if (url.origin !== base) url = new URL("/", base)
+
+  if (!isSafeRelativePath(returnTo)) return fallback()
+
+  const url = parseSameOrigin(returnTo)
+
+  if (!url || url.pathname.startsWith("/api/") || url.pathname.startsWith("//")) return fallback()
 
   url.searchParams.set("integration_error", code)
-
   return `${url.pathname}${url.search}${url.hash}`
 }
 

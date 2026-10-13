@@ -96,9 +96,35 @@ describe("OAuth state", () => {
     expect(withIntegrationError("/he?a=1?b=2", "denied")).toBe("/he?a=1%3Fb%3D2&integration_error=denied")
     // An existing code is replaced, never duplicated.
     expect(withIntegrationError("/he?integration_error=state&x=1", "denied")).toBe("/he?integration_error=denied&x=1")
-    // Never leaves the origin.
-    expect(withIntegrationError("//evil.test/x", "denied")).toBe("/?integration_error=denied")
-    expect(withIntegrationError("https://evil.test/x", "denied")).toBe("/?integration_error=denied")
+  })
+
+  it("never redirects off-site: unsafe returnTo values fall back to the integrations settings path", () => {
+    const fallback = "/he?panel=settings&section=integrations&integration_error=denied"
+
+    for (const value of [
+      "//evil.com",
+      "/\\evil.com",
+      "/%2F%2Fevil.com",
+      "/%252F%252Fevil.com",
+      "/%5Cevil.com",
+      "https://evil.com",
+      "https:evil.com",
+      "/\t/evil.com",
+      "/\n/evil.com",
+      "javascript:alert(1)",
+      "/api/integrations/slack/oauth/start",
+      "",
+    ]) {
+      const result = withIntegrationError(value, "denied", "he")
+
+      expect(result, JSON.stringify(value)).toBe(fallback)
+      expect(result.startsWith("/") && !result.startsWith("//")).toBe(true)
+      expect(safeIntegrationReturnTo(value, "he"), JSON.stringify(value)).toBe("/he?panel=settings&section=integrations")
+    }
+  })
+
+  it("keeps the error code in the query, not the fragment, for a valid path with ?a=1#frag", () => {
+    expect(withIntegrationError("/he/settings?a=1#frag", "denied")).toBe("/he/settings?a=1&integration_error=denied#frag")
   })
 })
 
