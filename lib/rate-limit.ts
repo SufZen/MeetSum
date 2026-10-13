@@ -10,7 +10,24 @@ type RateLimitEntry = {
   timestamps: number[]
 }
 
-const store = new Map<string, RateLimitEntry>()
+/** The limiter's backing store (a Map in-process; swappable for tests). */
+export type RateLimitStore = Pick<
+  Map<string, RateLimitEntry>,
+  "get" | "set" | "delete" | "clear" | typeof Symbol.iterator
+>
+
+const defaultStore = new Map<string, RateLimitEntry>()
+let store: RateLimitStore = defaultStore
+
+/** Tests: replace the store (e.g. one that throws); undefined restores it. */
+export function setRateLimitStoreForTesting(next: RateLimitStore | undefined) {
+  store = next ?? defaultStore
+}
+
+/** A store failure denies the request (fail closed), never allows it. */
+function denied(config: RateLimitConfig): RateLimitResult {
+  return { allowed: false, remaining: 0, resetMs: Date.now() + Math.min(config.windowMs, 60_000), limit: config.maxRequests }
+}
 
 // Clean up stale entries every 5 minutes
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
@@ -53,6 +70,14 @@ export function checkRateLimit(
   key: string,
   config: RateLimitConfig
 ): RateLimitResult {
+  try {
+    return checkRateLimitInStore(key, config)
+  } catch {
+    return denied(config)
+  }
+}
+
+function checkRateLimitInStore(key: string, config: RateLimitConfig): RateLimitResult {
   cleanup(config.windowMs)
 
   const now = Date.now()
@@ -104,6 +129,14 @@ export function checkRateLimitWindows(
   key: string,
   windows: readonly RateLimitConfig[]
 ): RateLimitResult {
+  try {
+    return checkRateLimitWindowsInStore(key, windows)
+  } catch {
+    return denied(windows[0] ?? { maxRequests: 0, windowMs: 60_000 })
+  }
+}
+
+function checkRateLimitWindowsInStore(key: string, windows: readonly RateLimitConfig[]): RateLimitResult {
   const longest = Math.max(...windows.map((window) => window.windowMs))
 
   cleanup(longest)

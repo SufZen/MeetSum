@@ -146,6 +146,31 @@ describe("clip routes", () => {
     expect((await create("m_a", { startMs: 0, endMs: 4000 })).status).toBe(201)
   })
 
+  it("fails closed: 503 when the quota cannot be checked, 403 for an API key with no creator", async () => {
+    await as("member")
+    setCollabBackendForTesting({
+      kind: "postgres",
+      client: {
+        async query(text: string) {
+          if (text.includes("pg_advisory_xact_lock")) throw new Error("lock timeout")
+          return { rows: [] }
+        },
+      },
+    })
+
+    const unavailable = await create("m_a", { startMs: 0, endMs: 4000 })
+
+    expect(unavailable.status).toBe(503)
+    expect(await unavailable.json()).toEqual({ error: "quota_unavailable" })
+
+    setCollabBackendForTesting({ kind: "memory", db: collab })
+    const ctx = await createTestCtx({ role: "member", principal: "api_key", database })
+
+    setRouteCtx({ ...ctx, apiKey: ctx.apiKey ? { ...ctx.apiKey, createdByUserId: undefined } : ctx.apiKey })
+    expect((await create("m_a", { startMs: 0, endMs: 4000 })).status).toBe(403)
+    expect(collab.clips.size).toBe(0)
+  })
+
   it("rejects bad ranges with their code", async () => {
     await as("member")
 

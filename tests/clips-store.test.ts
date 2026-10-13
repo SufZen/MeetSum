@@ -5,6 +5,8 @@ import { ClipValidationError, resolveClipRange } from "@/lib/clips/range"
 import { chapterHeadings, nextSelection, selectionRange } from "@/lib/clips/selection"
 import {
   ClipLimitError,
+  ClipOwnerRequiredError,
+  ClipQuotaUnavailableError,
   ClipNotFoundError,
   MAX_CLIPS_PER_MEETING,
   MAX_CLIPS_PER_USER_PER_MEETING,
@@ -332,7 +334,7 @@ describe("clip store (Postgres SQL)", () => {
   }
 
   it("inserts through a visibility-scoped select of the meeting", async () => {
-    const pool = recording({ "insert into meeting_clips": [clipRow] })
+    const pool = recording({ "insert into meeting_clips": [clipRow], "as meeting_live": [{ meeting_live: 0, user_live: 0 }] })
 
     setCollabBackendForTesting({ kind: "postgres", client: pool.client })
 
@@ -373,6 +375,77 @@ describe("clip store (Postgres SQL)", () => {
     expect(count).toBeGreaterThan(lock)
     expect(insert).toBeGreaterThan(count)
     expect(statements[count]).toContain("deleted_at is null")
+  })
+
+  describe("fails closed", () => {
+    const create = () =>
+      createClip(ctxFor(seed(), member("user_me", "me@example.com")), "m_a", { startMs: 0, endMs: 5000 })
+
+    function failing(onQuery: (text: string) => { rows: unknown[] }) {
+      const statements: string[] = []
+
+      setCollabBackendForTesting({
+        kind: "postgres",
+        client: {
+          async query(text: string) {
+            statements.push(text)
+            return onQuery(text)
+          },
+        },
+      })
+      return statements
+    }
+
+    it.each([
+      ["the advisory lock errors", (text: string) => {
+        if (text.includes("pg_advisory_xact_lock")) throw new Error("lock timeout")
+        return { rows: [] }
+      }],
+      ["the count query errors", (text: string) => {
+        if (text.includes("as meeting_live")) throw new Error("statement timeout")
+        return { rows: [] }
+      }],
+      ["the count query returns no row", () => ({ rows: [] })],
+      ["the count is NULL", (text: string) =>
+        text.includes("as meeting_live") ? { rows: [{ meeting_live: null, user_live: null }] } : { rows: [] }],
+    ])("rejects the create without inserting when %s", async (_label, onQuery) => {
+      const statements = failing(onQuery)
+
+      await expect(create()).rejects.toBeInstanceOf(ClipQuotaUnavailableError)
+      expect(statements.some((text) => text.includes("insert into meeting_clips"))).toBe(false)
+    })
+
+    it("guards the insert itself with NULL-safe quota subqueries", async () => {
+      const statements = failing((text) =>
+        text.includes("as meeting_live")
+          ? { rows: [{ meeting_live: 0, user_live: 0 }] }
+          : text.includes("insert into meeting_clips")
+            ? { rows: [clipRow] }
+            : { rows: [] }
+      )
+
+      await create()
+
+      const insert = statements.find((text) => text.includes("insert into meeting_clips"))!.replace(/\s+/g, " ")
+
+      expect(insert).toContain(`and q.deleted_at is null), 0) < ${MAX_CLIPS_PER_MEETING}`)
+      expect(insert).toContain(`and q.created_by_user_id = $7), 0) < ${MAX_CLIPS_PER_USER_PER_MEETING}`)
+    })
+
+    it("rejects a principal with no user behind it (no per-user bypass), in both backends", async () => {
+      const noUser = { ...ctxFor(seed(), member("user_me", "me@example.com")), actorUserId: undefined }
+      const statements = failing(() => ({ rows: [] }))
+
+      await expect(createClip(noUser, "m_a", { startMs: 0, endMs: 5000 })).rejects.toBeInstanceOf(
+        ClipOwnerRequiredError
+      )
+      expect(statements).toEqual([])
+
+      setCollabBackendForTesting({ kind: "memory", db: createCollabMemoryDb() })
+      await expect(createClip(noUser, "m_a", { startMs: 0, endMs: 5000 })).rejects.toBeInstanceOf(
+        ClipOwnerRequiredError
+      )
+    })
   })
 
   it("refuses the insert when the caller is at the per-user cap (Postgres)", async () => {

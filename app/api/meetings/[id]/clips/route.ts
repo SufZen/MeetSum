@@ -6,7 +6,14 @@ import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { ClipValidationError } from "@/lib/clips/range"
 import { canManageClip, clipStoreContext } from "@/lib/clips/route-context"
-import { ClipLimitError, ClipNotFoundError, createClip, listClips } from "@/lib/clips/store"
+import {
+  ClipLimitError,
+  ClipNotFoundError,
+  ClipOwnerRequiredError,
+  ClipQuotaUnavailableError,
+  createClip,
+  listClips,
+} from "@/lib/clips/store"
 import { toClipWire, type CreateClipInput } from "@/lib/clips/types"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { rateLimitRequest, type RateLimitConfig } from "@/lib/rate-limit"
@@ -109,6 +116,12 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     )
   } catch (error) {
     if (error instanceof ClipNotFoundError) return meetingNotFound()
+    if (error instanceof ClipQuotaUnavailableError) {
+      return NextResponse.json({ error: "quota_unavailable" }, { status: 503, headers: { "Retry-After": "5" } })
+    }
+    if (error instanceof ClipOwnerRequiredError) {
+      return NextResponse.json({ error: "clip_owner_required" }, { status: 403 })
+    }
     if (error instanceof ClipLimitError) {
       return NextResponse.json({ error: "clip_limit_reached", scope: error.scope }, { status: 429 })
     }

@@ -59,6 +59,22 @@ export class ClipLimitError extends Error {
   }
 }
 
+/** The quota could not be checked (lock/count failed): route → 503. */
+export class ClipQuotaUnavailableError extends Error {
+  constructor() {
+    super("quota_unavailable")
+    this.name = "ClipQuotaUnavailableError"
+  }
+}
+
+/** No user behind the principal (e.g. an API key without a creator): route → 403. */
+export class ClipOwnerRequiredError extends Error {
+  constructor() {
+    super("clip_owner_required")
+    this.name = "ClipOwnerRequiredError"
+  }
+}
+
 function assertClipQuota(meetingLive: number, userLive: number) {
   if (userLive >= MAX_CLIPS_PER_USER_PER_MEETING) throw new ClipLimitError("user")
   if (meetingLive >= MAX_CLIPS_PER_MEETING) throw new ClipLimitError("meeting")
@@ -189,6 +205,12 @@ export async function createClip(
     durationMs: meeting.durationMs,
     maxMs: clipMaxMs(ctx.env),
   })
+  // The per-user quota needs a user: API keys count under their creator, and
+  // a principal with no user behind it cannot create clips (fail closed).
+  const actorUserId = ctx.actorUserId
+
+  if (!actorUserId) throw new ClipOwnerRequiredError()
+
   const id = createId("clip")
   const backend = await backendOf()
 
@@ -199,10 +221,7 @@ export async function createClip(
       (clip) => clip.meetingId === meetingId && clip.workspaceId === ctx.scope.workspaceId && !clip.deletedAt
     )
 
-    assertClipQuota(
-      live.length,
-      ctx.actorUserId ? live.filter((clip) => clip.createdByUserId === ctx.actorUserId).length : 0
-    )
+    assertClipQuota(live.length, live.filter((clip) => clip.createdByUserId === actorUserId).length)
 
     const now = nowIso()
     const clip: StoredClip = {
@@ -215,7 +234,7 @@ export async function createClip(
       segmentIds: range.segmentIds,
       ...(range.transcriptExcerpt ? { transcriptExcerpt: range.transcriptExcerpt } : {}),
       renderStatus: "pending",
-      ...(ctx.actorUserId ? { createdByUserId: ctx.actorUserId } : {}),
+      createdByUserId: actorUserId,
       createdAt: now,
       updatedAt: now,
     }
@@ -228,21 +247,38 @@ export async function createClip(
     // Serialize clip creation per meeting so count + insert are atomic:
     // concurrent requests queue on the lock and each counts after the
     // previous insert committed (READ COMMITTED takes a new snapshot per
-    // statement).
-    await tx.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`meeting_clips:${meetingId}`])
+    // statement). Any failure of the lock or the count rejects the create.
+    let counts: { meeting_live?: unknown; user_live?: unknown } | undefined
 
-    const count = await tx.query(
-      `select count(*)::int as meeting_live,
-              count(*) filter (where created_by_user_id = $3)::int as user_live
-         from meeting_clips
-        where meeting_id = $1 and workspace_id = $2 and deleted_at is null`,
-      [meetingId, ctx.scope.workspaceId, ctx.actorUserId ?? null]
-    )
-    const counts = count.rows[0] as { meeting_live?: number; user_live?: number } | undefined
+    try {
+      await tx.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`meeting_clips:${meetingId}`])
 
-    assertClipQuota(Number(counts?.meeting_live ?? 0), ctx.actorUserId ? Number(counts?.user_live ?? 0) : 0)
+      const count = await tx.query(
+        `select coalesce(count(*), 0)::int as meeting_live,
+                coalesce(count(*) filter (where created_by_user_id = $3), 0)::int as user_live
+           from meeting_clips
+          where meeting_id = $1 and workspace_id = $2 and deleted_at is null`,
+        [meetingId, ctx.scope.workspaceId, actorUserId]
+      )
 
-    return insertClipRow(tx, ctx, meetingId, id, range)
+      counts = count.rows[0] as typeof counts
+    } catch {
+      throw new ClipQuotaUnavailableError()
+    }
+
+    const asCount = (value: unknown) =>
+      typeof value === "number" || (typeof value === "string" && value.trim() !== "") ? Number(value) : Number.NaN
+    const meetingLive = asCount(counts?.meeting_live)
+    const userLive = asCount(counts?.user_live)
+
+    // No row or a non-numeric count is not "zero": fail closed.
+    if (!counts || !Number.isFinite(meetingLive) || !Number.isFinite(userLive)) {
+      throw new ClipQuotaUnavailableError()
+    }
+
+    assertClipQuota(meetingLive, userLive)
+
+    return insertClipRow(tx, ctx, meetingId, id, range, actorUserId)
   })
 }
 
@@ -251,7 +287,8 @@ async function insertClipRow(
   ctx: ClipStoreContext,
   meetingId: string,
   id: string,
-  range: ReturnType<typeof resolveClipRange>
+  range: ReturnType<typeof resolveClipRange>,
+  actorUserId: string
 ): Promise<MeetingClip> {
   const values: unknown[] = [
     id,
@@ -260,7 +297,7 @@ async function insertClipRow(
     range.endMs,
     range.segmentIds,
     range.transcriptExcerpt ?? null,
-    ctx.actorUserId ?? null,
+    actorUserId,
     meetingId,
   ]
   const visible = meetingScopeSql(ctx.scope, "m", values)
@@ -273,6 +310,13 @@ async function insertClipRow(
       select $1, m.workspace_id, m.id, $2, $3, $4, $5::text[], $6, 'pending', $7
       from meetings m
       where m.id = $8 and ${visible}
+        -- Quota guard in the insert itself (defence in depth, NULL-safe).
+        and coalesce((select count(*) from meeting_clips q
+                      where q.meeting_id = m.id and q.workspace_id = m.workspace_id
+                        and q.deleted_at is null), 0) < ${MAX_CLIPS_PER_MEETING}
+        and coalesce((select count(*) from meeting_clips q
+                      where q.meeting_id = m.id and q.workspace_id = m.workspace_id
+                        and q.deleted_at is null and q.created_by_user_id = $7), 0) < ${MAX_CLIPS_PER_USER_PER_MEETING}
       returning id, workspace_id, meeting_id, title, start_ms, end_ms, segment_ids,
         transcript_excerpt, render_status, storage_key, render_error,
         created_by_user_id, created_at, updated_at

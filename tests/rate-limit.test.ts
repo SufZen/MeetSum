@@ -9,8 +9,45 @@ import {
   llmOnDemandWindows,
   RATE_LIMIT_PRESETS,
   type RateLimitConfig,
+  type RateLimitStore,
   rateLimitRequest,
+  setRateLimitStoreForTesting,
 } from "@/lib/rate-limit"
+
+describe("rate limiter fails closed", () => {
+  const broken = {
+    get() {
+      throw new Error("store unavailable")
+    },
+    set() {
+      throw new Error("store unavailable")
+    },
+    delete() {
+      throw new Error("store unavailable")
+    },
+    clear() {},
+    [Symbol.iterator]() {
+      throw new Error("store unavailable")
+    },
+  } as unknown as RateLimitStore
+
+  afterEach(() => {
+    setRateLimitStoreForTesting(undefined)
+    delete process.env.MEETSUM_RATE_LIMIT
+  })
+
+  it("denies when its store is unavailable", () => {
+    setRateLimitStoreForTesting(broken)
+
+    expect(checkRateLimit("k", { maxRequests: 5, windowMs: 60_000 }).allowed).toBe(false)
+    expect(checkRateLimitWindows("k", llmOnDemandWindows(true)).allowed).toBe(false)
+
+    const { blocked } = rateLimitRequest(new Request("http://x"), { maxRequests: 5, windowMs: 60_000 }, "k")
+
+    expect(blocked?.status).toBe(429)
+    expect(Number(blocked?.headers.get("Retry-After"))).toBeGreaterThan(0)
+  })
+})
 
 describe("multi-window rate limit (llmOnDemand)", () => {
   beforeEach(() => {
