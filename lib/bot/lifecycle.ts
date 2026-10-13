@@ -9,7 +9,6 @@ import {
   type BotTransitionEvent,
 } from "@/lib/bot/store"
 import {
-  BOT_STATUS_RANK,
   type BotSession,
   type BotSessionRecord,
   type BotStatus,
@@ -109,17 +108,16 @@ export function mapVexaStatus(
   return undefined
 }
 
-/** The session reached `active` (or Vexa says the bot was admitted). */
+/**
+ * The bot was in the meeting: `joined_at` (stamped by the first applied
+ * `active`) or Vexa's `bot_admitted_at`. `stopping` alone proves nothing: a
+ * user may stop a bot that is still waiting in the lobby.
+ */
 export function botWasActive(
-  session: Pick<BotSession, "joinedAt" | "status">,
+  session: Pick<BotSession, "joinedAt">,
   provenance?: VexaServiceProvenance
 ): boolean {
-  return (
-    Boolean(session.joinedAt) ||
-    BOT_STATUS_RANK[session.status] === BOT_STATUS_RANK.active ||
-    session.status === "stopping" ||
-    Boolean(provenance?.botAdmittedAt)
-  )
+  return Boolean(session.joinedAt) || Boolean(provenance?.botAdmittedAt)
 }
 
 /**

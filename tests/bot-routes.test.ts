@@ -106,7 +106,11 @@ import {
   createInMemoryMeetingDatabase,
   type InMemoryMeetingDatabase,
 } from "@/lib/meetings/repository"
+import { processVexaWebhook } from "@/lib/bot/webhook-handler"
+import { signVexaWebhook } from "@/lib/bot/webhook-verify"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
+
+import { testBotConfig } from "./fixtures/vexa/api/harness"
 
 /**
  * M7 B7 routes: Join now (201 Meet / Hebrew text, 400, 429 memory+DB,
@@ -210,6 +214,28 @@ afterEach(() => {
   setRouteCtx(undefined)
   vi.unstubAllEnvs()
 })
+
+const WEBHOOK_SECRET = "whsec_0123456789abcdef0123456789abcdef"
+
+/** A signed Vexa webhook through the real handler and the test store. */
+function vexaWebhook(payload: unknown, enqueue: (...args: unknown[]) => Promise<undefined>) {
+  const rawBody = JSON.stringify(payload)
+  const now = new Date()
+  const ts = String(Math.floor(now.getTime() / 1000))
+
+  return processVexaWebhook(
+    {
+      headers: new Headers({ "x-webhook-timestamp": ts, "x-webhook-signature": signVexaWebhook(WEBHOOK_SECRET, ts, rawBody) }),
+      rawBody,
+    },
+    {
+      store,
+      config: testBotConfig({ VEXA_WEBHOOK_SECRET: WEBHOOK_SECRET }),
+      enqueue: enqueue as never,
+      now: () => now,
+    }
+  )
+}
 
 function join(payload: unknown) {
   return joinNow(jsonRequest(`${BASE}/meetings/bot`, "POST", payload), routeParams({}))
@@ -474,6 +500,25 @@ describe("/api/meetings/[id]/bot", () => {
     expect(response.status).toBe(200)
     expect(mocks.stopBot).toHaveBeenCalledWith("google_meet", "abc-defg-hij")
     expect(store.sessions.get(session.id)).toMatchObject({ status: "stopping", statusReason: "user_stopped" })
+  })
+
+  it("a stop while awaiting admission ends cancelled/user_stopped after Vexa completes, with no finalize", async () => {
+    const session = await seedSession({ status: "awaiting_admission" })
+
+    await store.update(session.id, { vexaMeetingId: "4242" }, { workspaceId: WS })
+    await ctxFor()
+
+    const stopped = await stopBot(new Request(meetingBotUrl("m_visible"), { method: "DELETE" }), routeParams({ id: "m_visible" }))
+
+    expect(stopped.status).toBe(200)
+    expect(store.sessions.get(session.id)).toMatchObject({ status: "stopping", statusReason: "user_stopped" })
+
+    const enqueue = vi.fn(async () => undefined)
+    const result = await vexaWebhook({ event_type: "meeting.completed", data: { meeting: { id: 4242, status: "completed" } } }, enqueue)
+
+    expect(result).toMatchObject({ status: 200, body: { applied: true } })
+    expect(store.sessions.get(session.id)).toMatchObject({ status: "cancelled", statusReason: "user_stopped", joinedAt: null })
+    expect(enqueue).not.toHaveBeenCalled()
   })
 
   it("DELETE on a terminal session is 409", async () => {
