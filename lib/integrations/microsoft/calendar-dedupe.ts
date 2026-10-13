@@ -189,15 +189,76 @@ export type DeferredCalendarRow = {
   organizer_email: string | null
   ical_uid: string | null
   external_event_id: string | null
+  calendar_id: string | null
+}
+
+/** A row skipped as non-canonical: `dedupe_state = 'deferred'` (migration 030). */
+export async function markDeferredRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
+  await db.query(
+    "update calendar_events set dedupe_state = 'deferred' where id = $1 and workspace_id = $2 and dedupe_state is null",
+    [calendarEventId, workspaceId]
+  )
+}
+
+/** The row got its own meeting: a deferred row becomes 'promoted' (never promoted again). */
+export async function markPromotedRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
+  await db.query(
+    "update calendar_events set dedupe_state = 'promoted' where id = $1 and workspace_id = $2 and dedupe_state = 'deferred'",
+    [calendarEventId, workspaceId]
+  )
+}
+
+/** The event no longer passes the import filters: it stops being a promotion candidate. */
+export async function clearDeferredRow(db: Queryable, workspaceId: string, calendarEventId: string): Promise<void> {
+  await db.query(
+    "update calendar_events set dedupe_state = null where id = $1 and workspace_id = $2 and dedupe_state = 'deferred'",
+    [calendarEventId, workspaceId]
+  )
 }
 
 /**
- * Rows of ONE calendar (a Google identity or an Outlook connection) that
- * were skipped as non-canonical and still have no meeting (M8 review fix
- * #8): upcoming, not cancelled, with an iCalUID. Each sync re-evaluates
- * them, so a row whose canonical event was cancelled or deleted is
- * promoted (its meeting created) on the next sync even when the provider's
- * incremental feed does not return the event again.
+ * SQL predicate (alias `ce`): a deferred row may be promoted only when a
+ * sibling row of the same real meeting (workspace, iCalUID, start) was
+ * CANCELLED and its meeting closed by that cancellation (a canonical
+ * meeting the user deleted counts as a tombstone: never revived), and no
+ * sibling's bot session was opted out by the user ("Don't send bot" wins).
+ */
+const PROMOTABLE_SQL = `
+        exists (
+          select 1 from calendar_events s
+           where s.workspace_id = ce.workspace_id and s.ical_uid = ce.ical_uid
+             and s.starts_at = ce.starts_at and s.id <> ce.id and s.status = 'cancelled'
+             -- Its meeting still exists, closed by the cancellation: a
+             -- canonical meeting the user DELETED is a tombstone, never revived.
+             and exists (select 1 from meetings m where m.calendar_event_id = s.id and m.status = 'failed'))
+        and not exists (
+          select 1 from calendar_events s
+            join bot_sessions b on b.calendar_event_id = s.id and b.workspace_id = ce.workspace_id
+           where s.workspace_id = ce.workspace_id and s.ical_uid = ce.ical_uid
+             and s.starts_at = ce.starts_at and b.status_reason = 'user_opt_out')`
+
+/**
+ * True when a new meeting must NOT be created for this row although no
+ * canonical meeting matches: it is a deferred duplicate that is not
+ * promotable (see PROMOTABLE_SQL). Normal rows are never blocked.
+ */
+export async function isDeferredRowBlocked(db: Queryable, workspaceId: string, calendarEventId: string): Promise<boolean> {
+  const result = await db.query(
+    `select (ce.dedupe_state = 'deferred' and not (${PROMOTABLE_SQL})) as blocked
+       from calendar_events ce where ce.id = $1 and ce.workspace_id = $2`,
+    [calendarEventId, workspaceId]
+  )
+
+  return Boolean((result.rows[0] as { blocked?: boolean } | undefined)?.blocked)
+}
+
+/**
+ * Deferred duplicates of ONE calendar (a Google identity or an Outlook
+ * connection) that are promotable now (M8 review fix #8): upcoming, not
+ * cancelled themselves, no meeting, `dedupe_state = 'deferred'`, a sibling
+ * cancelled and no user opt-out. Each sync re-evaluates them through the
+ * same filters as a normal create, so a duplicate is promoted on its next
+ * sync even when the provider's incremental feed does not return it.
  */
 export async function listDeferredDuplicateRows(
   db: Queryable,
@@ -210,14 +271,17 @@ export async function listDeferredDuplicateRows(
   if (!owner) return []
 
   const result = await db.query(
-    `select ce.id, ce.raw, ce.title, ce.starts_at, ce.ends_at, ce.meet_link, ce.organizer_email, ce.ical_uid, ce.external_event_id
+    `select ce.id, ce.raw, ce.title, ce.starts_at, ce.ends_at, ce.meet_link, ce.organizer_email, ce.ical_uid,
+            ce.external_event_id, ce.calendar_id
        from calendar_events ce
       where ce.workspace_id = $1
         and ce.${column} = $2
+        and ce.dedupe_state = 'deferred'
         and ce.ical_uid is not null
         and ce.starts_at >= $3::timestamptz
         and coalesce(ce.status, '') <> 'cancelled'
         and not exists (select 1 from meetings m where m.calendar_event_id = ce.id)
+        and ${PROMOTABLE_SQL}
       order by ce.starts_at asc
       limit 50`,
     [scope.workspaceId, owner, new Date(now.getTime() - 24 * 60 * 60_000).toISOString()]

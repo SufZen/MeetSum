@@ -18,8 +18,12 @@ import type { CalendarEventLike } from "@/lib/bot/types"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
 import {
+  clearDeferredRow,
   findCanonicalMeetingId,
+  isDeferredRowBlocked,
   listDeferredDuplicateRows,
+  markDeferredRow,
+  markPromotedRow,
   withCalendarDedupeLock,
 } from "@/lib/integrations/microsoft/calendar-dedupe"
 import {
@@ -1324,6 +1328,14 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
               owner: { email: subject },
             }))
           ) {
+            await markDeferredRow(db, workspaceId, calendarEventId)
+            if (countSkips) stats.skipped = (stats.skipped ?? 0) + 1
+            return
+          }
+          // A deferred duplicate is created only once promotable (a sibling
+          // cancelled, no user opt-out); a deleted canonical meeting never
+          // resurrects it.
+          if (!ownMeetingId && (await isDeferredRowBlocked(db, workspaceId, calendarEventId))) {
             if (countSkips) stats.skipped = (stats.skipped ?? 0) + 1
             return
           }
@@ -1378,6 +1390,7 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
           )
 
           if (!upserted.rows.length) return
+          await markPromotedRow(db, workspaceId, calendarEventId)
 
           await upsertMeetingParticipantsFromCalendar({
             meetingId,
@@ -1437,6 +1450,12 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
         for (const event of events.data.items ?? []) {
           if (!event.id) continue
           if (!shouldImportCalendarEvent(event, importAll)) {
+            // Now filtered: an earlier deferred duplicate stops being a candidate.
+            await clearDeferredRow(
+              pool,
+              workspaceId,
+              createHashedId("gcal", `${identityId}:${item.id}:${event.id}`)
+            ).catch(() => undefined)
             stats.skipped = (stats.skipped ?? 0) + 1
             continue
           }
@@ -1538,11 +1557,23 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
 
     // Deferred duplicates of this identity whose canonical meeting was
     // cancelled or deleted: promote them (M8 review fix #8).
+    // Promotion goes through the SAME filters as a normal create: the
+    // calendar must still be listed and not excluded, the event must pass
+    // the import filters (title/all-day/meeting signal) and not be
+    // cancelled; the bot sync then re-runs the M7 rules and consent gate.
+    const calendarsById = new Map((calendarList.data.items ?? []).filter((item) => item.id).map((item) => [item.id as string, item]))
+
     for (const row of await listDeferredDuplicateRows(pool, { workspaceId, googleIdentityId: identityId })) {
       const startsAt = row.starts_at ? new Date(row.starts_at).toISOString() : undefined
+      const calendarItem = row.calendar_id ? calendarsById.get(row.calendar_id) : undefined
+      const event = row.raw as GoogleCalendarEvent
 
-      if (!startsAt) continue
-      await materialize(row.raw as GoogleCalendarEvent, row.id, startsAt, false).catch((error: unknown) => {
+      if (!startsAt || !calendarItem || shouldSkipCalendar(calendarItem, importAll)) continue
+      if (event.status === "cancelled" || !shouldImportCalendarEvent(event, importAll)) {
+        await clearDeferredRow(pool, workspaceId, row.id).catch(() => undefined)
+        continue
+      }
+      await materialize(event, row.id, startsAt, false).catch((error: unknown) => {
         stats.errors?.push(`dedupe: ${error instanceof Error ? error.name : "error"}`)
       })
     }

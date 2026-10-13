@@ -1,5 +1,5 @@
 /**
- * Test helper: a PGlite database with every migration applied (001–029),
+ * Test helper: a PGlite database with every migration applied (001–030),
  * exposed as a `Queryable`. Returns undefined when PGlite cannot load on
  * this host (tests then skip their Postgres half). Owner: Package A.
  */

@@ -25,8 +25,12 @@ import type { CalendarEventLike } from "@/lib/bot/types"
 import type { ProviderFetch } from "@/lib/integrations/core/types"
 import {
   type LockableQueryable,
+  clearDeferredRow,
   findCanonicalMeetingId,
+  isDeferredRowBlocked,
   listDeferredDuplicateRows,
+  markDeferredRow,
+  markPromotedRow,
   ownMeetingId,
   withCalendarDedupeLock,
 } from "@/lib/integrations/microsoft/calendar-dedupe"
@@ -319,6 +323,8 @@ async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: Outlo
   const mapped = mapGraphEventToCalendarEventLike(graph, { selfEmail: deps.userEmail })
 
   if (!mapped) {
+    // Now filtered (e.g. all-day): an earlier deferred row stops being a candidate.
+    await clearDeferredRow(deps.db, deps.workspaceId, outlookCalendarEventId(deps.connectionId, graph.id))
     stats.skipped += 1
     return
   }
@@ -367,17 +373,29 @@ async function materializeOutlookRow(deps: OutlookSyncDeps, mapped: MappedOutloo
 
         if (canonical) {
           // Non-canonical: another calendar already owns this meeting and its bot session.
+          await markDeferredRow(db, deps.workspaceId, calendarEventId)
           stats.deduped += 1
           return undefined
         }
         if (!shouldCreateMeeting(mapped, deps)) {
+          // Filtered: never a promotion candidate.
+          await clearDeferredRow(db, deps.workspaceId, calendarEventId)
           stats.skipped += 1
+          return undefined
+        }
+        // A deferred duplicate is created only once promotable (a sibling
+        // cancelled, no user opt-out); a deleted canonical meeting never
+        // resurrects it.
+        if (await isDeferredRowBlocked(db, deps.workspaceId, calendarEventId)) {
+          stats.deduped += 1
           return undefined
         }
         id = outlookMeetingId(calendarEventId)
       }
 
-      return (await upsertMeeting(locked, mapped, calendarEventId, id)) ? id : undefined
+      if (!(await upsertMeeting(locked, mapped, calendarEventId, id))) return undefined
+      await markPromotedRow(db, deps.workspaceId, calendarEventId)
+      return id
     }
   )
 
