@@ -18,6 +18,7 @@ import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import type { MeetingSpeaker } from "@/lib/meetings/repository"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 const ACTIONS = ["confirm", "reject", "reset"] as const
 
@@ -121,6 +122,8 @@ export const PATCH = withAuthz<{ id: string; speakerId: string }>(
           : {}),
       },
     })
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "speakers" })
 
     return NextResponse.json({ speaker: updated }, { headers: rateLimit.headers })
   }

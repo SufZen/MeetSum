@@ -24,6 +24,8 @@ export type MeetSumJobName =
   | "storage.delete"
   | "meeting.analyze"
   | "clip.render"
+  /** M6: re-index stale/failed meetings (owner: Package A). */
+  | "search.index.sweep"
 
 export type MeetSumJobPayload = {
   meetingId?: string
@@ -80,6 +82,8 @@ export type EnqueueJobOptions = {
    */
   jobId?: string
   attempts?: number
+  /** Milliseconds before the job becomes runnable (M6 re-index debounce). */
+  delay?: number
 }
 
 /** `media.prepare-<assetId>` (spec `media.prepare:<id>`; BullMQ forbids `:`). */
@@ -211,7 +215,7 @@ async function enqueueJob(
 
   if (!workspaceId) throw new JobWorkspaceRequiredError(name)
 
-  const { jobId, attempts: attemptsOverride } = {
+  const { jobId, attempts: attemptsOverride, delay } = {
     ...defaultJobOptions(name, payload),
     ...options,
   }
@@ -238,6 +242,7 @@ async function enqueueJob(
       getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
         jobId: jobId ?? record.id,
         attempts,
+        ...(delay !== undefined && Number.isFinite(delay) && delay > 0 ? { delay } : {}),
         backoff: { type: "exponential", delay: 3000 },
         removeOnComplete: 250,
         removeOnFail: 500,

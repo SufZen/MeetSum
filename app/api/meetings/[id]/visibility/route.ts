@@ -10,6 +10,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 const visibilities: readonly MeetingVisibility[] = [
   "private",
@@ -65,6 +66,8 @@ export const PATCH = withAuthz<{ id: string }>(
           sharesRevoked: previous === "link" && visibility !== "link",
         },
       })
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "visibility" })
 
       return NextResponse.json({ meeting: updated })
     } catch (error) {

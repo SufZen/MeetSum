@@ -60,6 +60,7 @@ import { reanchorMeetingComments } from "@/lib/comments/reanchor"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
 import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import { deleteMeetingObjects } from "@/lib/storage/object-storage"
 import { applyMediaRetention } from "@/lib/storage/retention"
 import {
@@ -552,6 +553,7 @@ async function summarizeAndPersist(scope: JobScope, options: {
 
   await applyAutoTitle(scope, meeting, intelligence.title)
   await enqueueMeetingAnalyze(scope, meeting.id)
+  await requestMeetingReindex({ workspaceId: scope.workspaceId, meetingId: meeting.id, reason: "intelligence" })
 
   return { intelligence, newActionItems }
 }
@@ -948,6 +950,7 @@ async function processMediaJob(
     asrRunId,
   })
   await reanchorMeetingComments(meeting.id)
+  await requestMeetingReindex({ workspaceId: scope.workspaceId, meetingId: meeting.id, reason: "transcript" })
 
   const suggestedSpeakers = await refreshSuggestionsSafely(scope, meeting.id, {
     loadMeetTimeline: meetTimelineLoader(scope, meeting, payload),
@@ -1062,6 +1065,7 @@ async function processIntelligenceOnlyJob(
       { preserveEdited: true }
     )
     await reanchorMeetingComments(meeting.id)
+    await requestMeetingReindex({ workspaceId: scope.workspaceId, meetingId: meeting.id, reason: "transcript" })
   }
 
   const refreshed = await scope.repo.getMeeting(meeting.id)
@@ -1206,6 +1210,7 @@ async function processArtifactImportJob(
     speakers: summarizeSpeakerStats(meetSegments, "meet"),
   })
   await reanchorMeetingComments(meetingId)
+  await requestMeetingReindex({ workspaceId: scope.workspaceId, meetingId: meetingId, reason: "transcript" })
   // Meet names only confirm through verified identities (meetSpeakers);
   // import never writes speaker profiles.
   await refreshSuggestionsSafely(scope, meetingId, {

@@ -6,6 +6,7 @@ import {
 } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 export const PATCH = withAuthz<{ id: string }>(
   "meeting:write",
@@ -24,6 +25,8 @@ export const PATCH = withAuthz<{ id: string }>(
         id,
         body.tags.map(String)
       )
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "tags" })
 
       return NextResponse.json({ meeting })
     } catch (error) {
