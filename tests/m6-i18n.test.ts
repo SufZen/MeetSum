@@ -53,10 +53,12 @@ describe("M6 i18n", () => {
     }
   })
 
-  it.each(MODULES)("%s: every Hebrew string is translated, unless it is a shortcut or brand", (_name, en, he) => {
+  it.each(MODULES)("%s: every Hebrew string is translated, unless it is a shortcut or a pure template", (_name, enMessages, heMessages) => {
     const hebrew = /[֐-׿]/
+    const en: Record<string, string> = enMessages
+    const he: Record<string, string> = heMessages
 
-    for (const key of Object.keys(en) as Array<keyof typeof en>) {
+    for (const key of Object.keys(en)) {
       if (en[key] === "Ctrl K" || en[key].startsWith("{")) continue
       expect(he[key], key).toMatch(hebrew)
     }

@@ -9,7 +9,6 @@ import {
   KeyRoundIcon,
   LinkIcon,
   RadioTowerIcon,
-  SearchIcon,
   SendIcon,
   ShieldCheckIcon,
   Trash2Icon,
@@ -18,6 +17,7 @@ import {
 import type { ComponentType, ReactNode, SVGProps } from "react"
 import { useEffect, useState } from "react"
 import dynamic from "next/dynamic"
+import { useParams } from "next/navigation"
 import { toast } from "sonner"
 
 import { JobActivityCenter } from "@/components/job-activity-center"
@@ -27,6 +27,7 @@ import {
   ProviderWarning,
   type ProviderStatusView,
 } from "@/components/provider-health-panel"
+import { CompactSearchBox } from "@/components/search/compact-search-box"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
@@ -55,29 +56,6 @@ const TemplatesSettings = dynamic(
   () => import("@/components/intelligence/template-editor").then((mod) => mod.TemplatesSettings),
   { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
 )
-
-type MemorySearchResult = {
-  id: string
-  title: string
-  startedAt: string
-  status: MeetingRecord["status"]
-  tags: string[]
-  overview: string
-  actionItems: Array<{ id: string; title: string; status: string }>
-  transcriptMatches: Array<{ id: string; speaker: string; startMs: number; text: string }>
-  matches: MemoryCitationView[]
-  matchCount: number
-}
-
-type MemoryCitationView = {
-  meetingId: string
-  meetingTitle: string
-  source: "summary" | "decision" | "action_item" | "transcript" | "tag"
-  text: string
-  segmentId?: string
-  actionItemId?: string
-  startMs?: number
-}
 
 type RoomResult = {
   id: string
@@ -318,21 +296,6 @@ function formatArtifactType(value: MeetArtifactView["artifactType"]) {
   return value[0].toUpperCase() + value.slice(1)
 }
 
-function formatMemoryTime(ms?: number) {
-  if (ms === undefined) return undefined
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-
-  return `${minutes}:${String(seconds).padStart(2, "0")}`
-}
-
-function formatMemorySource(value: MemoryCitationView["source"]) {
-  if (value === "action_item") return "Action"
-
-  return value.replace("_", " ")
-}
-
 function PageFrame({
   eyebrow,
   title,
@@ -488,7 +451,6 @@ export function OperationalPage({
   workspaceStatus,
   syncing,
   query,
-  onQueryChange,
   onSyncCalendar,
   onFindDriveRecordings,
   onRetryJob,
@@ -515,14 +477,8 @@ export function OperationalPage({
 }) {
   const t = dictionary
   const { can } = useWorkspace()
-  const [memoryAnswer, setMemoryAnswer] = useState("")
-  const [memoryQuestion, setMemoryQuestion] = useState("")
-  const [memoryCitations, setMemoryCitations] = useState<MemoryCitationView[]>([])
-  const [memoryResults, setMemoryResults] = useState<MemorySearchResult[]>([])
-  const [filterRoom, setFilterRoom] = useState("")
-  const [filterTag, setFilterTag] = useState("")
-  const [filterParticipant, setFilterParticipant] = useState("")
-  const [filterLanguage, setFilterLanguage] = useState("")
+  // M6: the memory panel is a compact entry into Search & Ask.
+  const memoryLocale = useParams<{ locale?: string }>()?.locale ?? "en"
   const [rooms, setRooms] = useState<RoomResult[]>([])
   const [selectedRoomId, setSelectedRoomId] = useState("")
   const [roomDetail, setRoomDetail] = useState<RoomDetailView>()
@@ -559,28 +515,11 @@ export function OperationalPage({
   useEffect(() => {
     if (panel !== "memory") return
 
-    const timeoutId = window.setTimeout(() => {
-      const params = new URLSearchParams({
-        query: query.trim(),
-        limit: "8",
-      })
-      if (filterRoom) params.set("roomId", filterRoom)
-      if (filterTag) params.set("tag", filterTag)
-      if (filterParticipant) params.set("participant", filterParticipant)
-      if (filterLanguage) params.set("language", filterLanguage)
-
-      void fetch(`/api/memory/search?${params}`)
-        .then((response) => response.json())
-        .then((body) => setMemoryResults(body.results ?? []))
-        .catch(() => setMemoryResults([]))
-      void fetch("/api/rooms")
-        .then((response) => response.json())
-        .then((body) => setRooms(body.rooms ?? []))
-        .catch(() => setRooms([]))
-    }, query.trim() ? 250 : 0)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [panel, query, filterRoom, filterTag, filterParticipant, filterLanguage])
+    void fetch("/api/rooms")
+      .then((response) => response.json())
+      .then((body) => setRooms(body.rooms ?? []))
+      .catch(() => setRooms([]))
+  }, [panel])
 
   useEffect(() => {
     if (panel !== "automations") return
@@ -622,25 +561,6 @@ export function OperationalPage({
     // Reload only when the panel opens (the dictionary is read at call time).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel])
-
-  async function askMemory() {
-    if (!memoryQuestion.trim()) return
-
-    const response = await fetch("/api/memory/ask", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question: memoryQuestion }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to ask memory")
-      return
-    }
-
-    setMemoryAnswer(body.answer ?? "No answer returned")
-    setMemoryCitations(Array.isArray(body.citations) ? body.citations : [])
-  }
 
   async function openRoom(roomId: string) {
     setSelectedRoomId(roomId)
@@ -1341,177 +1261,14 @@ export function OperationalPage({
 
     return (
       <PageFrame
-        eyebrow="Cross-meeting memory"
-        title="Ask and search your meeting memory"
-        description="Search summaries, transcripts, decisions, tags, rooms, and action items across imported meetings."
+        eyebrow={t.navMemory}
+        title={t.searchTitle}
+        description={t.searchSubtitle}
       >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <OpsCard
-            icon={SearchIcon}
-            title="Memory search"
-            description="Type a person, project, topic, tag, or decision to narrow the meeting memory."
-          >
-            <Input
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="Search summaries, transcripts, tags, and decisions"
-              className="h-10"
-            />
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground"
-                value={filterRoom}
-                onChange={(e) => setFilterRoom(e.target.value)}
-              >
-                <option value="">All rooms</option>
-                {rooms.map((room) => (
-                  <option key={room.id} value={room.id}>{room.name}</option>
-                ))}
-              </select>
-              <input
-                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
-                placeholder="Filter by tag..."
-                value={filterTag}
-                onChange={(e) => setFilterTag(e.target.value)}
-              />
-              <input
-                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground"
-                placeholder="Filter by participant..."
-                value={filterParticipant}
-                onChange={(e) => setFilterParticipant(e.target.value)}
-              />
-              <select
-                className="rounded-md border border-line bg-surface-2 px-2 py-1.5 text-xs text-foreground"
-                value={filterLanguage}
-                onChange={(e) => setFilterLanguage(e.target.value)}
-              >
-                <option value="">All languages</option>
-                <option value="he">Hebrew</option>
-                <option value="en">English</option>
-                <option value="pt">Portuguese</option>
-                <option value="es">Spanish</option>
-                <option value="it">Italian</option>
-              </select>
-              {(filterRoom || filterTag || filterParticipant || filterLanguage) ? (
-                <button
-                  className="text-xs text-brand-text hover:underline"
-                  onClick={() => { setFilterRoom(""); setFilterTag(""); setFilterParticipant(""); setFilterLanguage("") }}
-                  type="button"
-                >
-                  Clear filters
-                </button>
-              ) : null}
-            </div>
-            <div className="mt-3 grid gap-2">
-              {memoryResults.slice(0, 8).map((meeting) => (
-                <div key={meeting.id} className="rounded-lg border border-line bg-surface-2 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 truncate text-sm font-semibold text-foreground">{meeting.title}</div>
-                    <span className="shrink-0 rounded-sm bg-brand-soft px-2 py-0.5 text-2xs text-brand-text">
-                      {meeting.status}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                    {meeting.overview || meeting.transcriptMatches[0]?.text || "No summary yet."}
-                  </p>
-                  {meeting.matches?.length ? (
-                    <div className="mt-2 grid gap-1.5">
-                      {meeting.matches.slice(0, 3).map((match, index) => (
-                        <div
-                          className="rounded-md border border-line bg-surface px-2 py-1.5 text-xs leading-5"
-                          key={`${match.source}-${match.segmentId ?? match.actionItemId ?? index}`}
-                        >
-                          <div className="mb-0.5 flex items-center gap-2 text-2xs font-medium uppercase tracking-wide text-brand-text">
-                            <span>{formatMemorySource(match.source)}</span>
-                            {formatMemoryTime(match.startMs) ? (
-                              <span>{formatMemoryTime(match.startMs)}</span>
-                            ) : null}
-                          </div>
-                          <div className="line-clamp-2 text-muted-foreground">
-                            {match.text}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {meeting.matchCount ? (
-                      <span className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs text-brand-text">
-                        {meeting.matchCount} matches
-                      </span>
-                    ) : null}
-                    {meeting.tags.slice(0, 4).map((tag) => (
-                      <span key={tag} className="rounded-sm bg-surface px-2 py-0.5 text-2xs text-muted-foreground">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {!memoryResults.length ? (
-                <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
-                  No indexed meeting memory matched this search.
-                </div>
-              ) : null}
-            </div>
-          </OpsCard>
-          <OpsCard
-            icon={CitedMark}
-            title="Ask all meetings"
-            description="Ask across indexed summaries and transcripts. Answers include server-side citations when available."
-            status={
-              meetingTotals ? `${meetingTotals.completed} completed meetings` : undefined
-            }
-          >
-            <div className="grid gap-2">
-              <Input
-                className="h-10"
-                value={memoryQuestion}
-                onChange={(event) => setMemoryQuestion(event.target.value)}
-                placeholder="What did we decide about RealizeOS?"
-              />
-              <Button onClick={askMemory}>Ask memory</Button>
-              {memoryAnswer ? (
-                <div className="rounded-lg border border-line bg-surface-2 p-3 text-sm leading-6">
-                  <div className="whitespace-pre-wrap">{memoryAnswer}</div>
-                  {memoryCitations.length ? (
-                    <div className="mt-3 grid gap-2 border-t border-line pt-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Citations
-                      </div>
-                      {memoryCitations.slice(0, 6).map((citation, index) => (
-                        <div
-                          className="rounded-md border border-line bg-surface p-2 text-xs"
-                          key={`${citation.meetingId}-${citation.source}-${citation.segmentId ?? citation.actionItemId ?? index}`}
-                        >
-                          <div className="flex flex-wrap items-center gap-2 font-medium text-foreground">
-                            <button
-                              className="text-start text-brand-text hover:underline"
-                              onClick={() => onOpenMeeting(citation.meetingId)}
-                              type="button"
-                            >
-                              {citation.meetingTitle}
-                            </button>
-                            <Badge variant="outline" className="rounded-sm text-2xs">
-                              {formatMemorySource(citation.source)}
-                            </Badge>
-                            {formatMemoryTime(citation.startMs) ? (
-                              <span className="text-muted-foreground">
-                                {formatMemoryTime(citation.startMs)}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="mt-1 line-clamp-2 text-muted-foreground">
-                            {citation.text}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </OpsCard>
+          <div className="lg:col-span-2">
+            <CompactSearchBox locale={memoryLocale} dictionary={t} initialQuery={query} />
+          </div>
           <div className="lg:col-span-2">
             <OpsCard
               icon={LinkIcon}
