@@ -12,7 +12,8 @@
  * W2 meeting sharing a colliding term. Indexes every meeting inline with
  * `indexMeeting`. Signed test session cookies and the seeded ids go to
  * E2E_ENV_FILE (default `.secrets/e2e.env`, gitignored), never to stdout.
- * Re-running replaces the seeded rows (ids prefixed `e2e_`).
+ * Re-running replaces the seeded rows (ids prefixed `e2e_`) and succeeds
+ * after a partial run (every insert tolerates existing rows).
  */
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -77,10 +78,10 @@ async function main() {
 
   await pool.query("delete from meetings where id like 'e2e\\_%'")
   for (const user of Object.values(USERS)) {
-    await pool.query("insert into users (id, email) values ($1, $2) on conflict (id) do nothing", [user.id, user.email])
+    await pool.query("insert into users (id, email) values ($1, $2) on conflict do nothing", [user.id, user.email])
   }
   for (const workspace of [W1, W2]) {
-    await pool.query("insert into workspaces (id, name, slug) values ($1, $1, $1) on conflict (id) do nothing", [workspace])
+    await pool.query("insert into workspaces (id, name, slug) values ($1, $1, $1) on conflict do nothing", [workspace])
   }
   for (const user of Object.values(USERS)) {
     await pool.query(

@@ -57,14 +57,6 @@ export async function createPgliteSearchDb(root = process.cwd()): Promise<Pglite
   }
 }
 
-let counter = 0
-
-function rowId(prefix: string) {
-  counter += 1
-
-  return `${prefix}_${counter}`
-}
-
 /** Re-applies migration 025 (idempotence check). */
 export async function reapplyMigration025(db: PgliteSearchDb, root = process.cwd()): Promise<void> {
   await db.exec(readFileSync(path.join(root, "db", "migrations", "025_search_ask.sql"), "utf8"))
@@ -80,10 +72,12 @@ export async function seedPgliteMeetings(
   meetings: MeetingRecord[],
   chunkMeeting?: (meeting: MeetingRecord) => ChunkDraft[]
 ): Promise<void> {
-  const q = db.client.query
+  // Keep `this`: a pg.Pool's query is a method.
+  const q = (text: string, values?: unknown[]) => db.client.query(text, values)
   const workspaces = new Set(meetings.map((meeting) => meeting.workspaceId ?? "ws_default"))
   const users = new Set(meetings.map((meeting) => meeting.ownerUserId).filter((id): id is string => Boolean(id)))
 
+  // Every insert tolerates a rerun (after a partial or complete seed).
   for (const id of users) await q("insert into users (id, email) values ($1, $2) on conflict do nothing", [id, `${id}@example.com`])
   for (const id of workspaces) {
     await q("insert into workspaces (id, name, slug) values ($1, $1, $1) on conflict do nothing", [id])
@@ -119,9 +113,9 @@ export async function seedPgliteMeetings(
       ? meeting.participantDetails.map((participant) => ({ name: participant.name, email: participant.email ?? null }))
       : meeting.participants.map((name) => ({ name, email: name.includes("@") ? name : null }))
 
-    for (const person of people) {
-      await q("insert into meeting_participants (id, meeting_id, name, email) values ($1, $2, $3, $4)", [
-        rowId("mp"),
+    for (const [index, person] of people.entries()) {
+      await q("insert into meeting_participants (id, meeting_id, name, email) values ($1, $2, $3, $4) on conflict do nothing", [
+        `mp_${meeting.id}_${index}`,
         meeting.id,
         person.name,
         person.email,
@@ -145,7 +139,7 @@ export async function seedPgliteMeetings(
     }
 
     for (const speaker of meeting.speakers ?? []) {
-      await q("insert into speakers (id, meeting_id, label, display_name, workspace_id) values ($1, $2, $3, $4, $5)", [
+      await q("insert into speakers (id, meeting_id, label, display_name, workspace_id) values ($1, $2, $3, $4, $5) on conflict do nothing", [
         speaker.id,
         meeting.id,
         speaker.label,
@@ -156,7 +150,7 @@ export async function seedPgliteMeetings(
 
     for (const segment of meeting.transcript ?? []) {
       await q(
-        "insert into transcript_segments (id, meeting_id, speaker_id, start_ms, end_ms, text, turn_index) values ($1, $2, $3, $4, $5, $6, $7)",
+        "insert into transcript_segments (id, meeting_id, speaker_id, start_ms, end_ms, text, turn_index) values ($1, $2, $3, $4, $5, $6, $7) on conflict do nothing",
         [segment.id, meeting.id, segment.speakerId ?? null, segment.startMs, segment.endMs, segment.text, segment.turnIndex ?? null]
       )
     }
@@ -166,7 +160,8 @@ export async function seedPgliteMeetings(
         `insert into meeting_chunks (id, workspace_id, meeting_id, kind, chunk_index, source_id, segment_ids, segment_start_ms,
            segment_offsets, overlap_count, speaker_ids, start_ms, end_ms, language, text, text_norm, text_stem,
            token_estimate, content_hash, transcript_version)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+         on conflict do nothing`,
         [
           `${meeting.id}:${chunk.kind}:${chunk.chunkIndex}`,
           workspaceId,
