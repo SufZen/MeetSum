@@ -13,6 +13,7 @@
  *   X-MeetSum-Meeting.
  */
 import type { EmailMessage } from "@/lib/email/types"
+import { formatDate as formatDateValue } from "@/lib/i18n/format"
 import { RLM } from "@/lib/integrations/bidi"
 import { recapStrings } from "@/lib/integrations/email-recap/strings"
 import { formatRecapDueDate, type MeetingRecap } from "@/lib/integrations/recap"
@@ -44,11 +45,7 @@ function fill(template: string, values: Record<string, string>): string {
 }
 
 function formatDate(iso: string, locale: "he" | "en", timeZone: string): string {
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", { dateStyle: "long", timeStyle: "short", timeZone }).format(date)
+  return formatDateValue(iso, { locale, timeZone }, "dateTimeLong")
 }
 
 function safeHref(url: string | undefined): string | undefined {

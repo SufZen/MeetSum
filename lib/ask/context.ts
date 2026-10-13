@@ -24,9 +24,11 @@ import { quoteOf, type AliasEntry, type AliasMap } from "@/lib/ask/citations"
 import type { AskLanguage } from "@/lib/ask/messages"
 import { askInstructions } from "@/lib/ask/prompt"
 import { sanitizeAttribute, sanitizeLine, sanitizeName, sanitizeQuestion } from "@/lib/ask/sanitize"
+import { formatNumericDate } from "@/lib/i18n/format"
 import { estimateTokens, formatTimestamp, formatTranscriptForPrompt } from "@/lib/intelligence/transcript-format"
 import type { MeetingRecord, MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
 import type { RetrievedPassage, SearchMode } from "@/lib/search/types"
+import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 
 export type HistoryTurn = { role: "user" | "assistant"; content: string }
 
@@ -50,18 +52,9 @@ export type AskContext = {
 
 const MARKERS = /\s*\[\s*[sa]\d+(?:\s*[,;]\s*[sa]\d+)*\s*\]/gi
 
-const dateFormat = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Jerusalem",
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-})
-
-/** `DD.MM.YYYY` (Israel time). */
-export function formatPassageDate(iso: string): string {
-  const date = new Date(iso)
-
-  return Number.isNaN(date.getTime()) ? "" : dateFormat.format(date).replace(/\//g, ".")
+/** `DD.MM.YYYY` in the task/workspace zone (Asia/Jerusalem unless configured). */
+export function formatPassageDate(iso: string, timeZone: string = getTaskTimeZone()): string {
+  return formatNumericDate(iso, timeZone)
 }
 
 /**

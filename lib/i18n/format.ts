@@ -10,7 +10,15 @@ export type FmtLocale = "he" | "en"
 
 export type Fmt = { locale: FmtLocale; timeZone: string }
 
-export type DateStyle = "date" | "dateShort" | "dateTime" | "time" | "weekdayDate" | "monthYear"
+export type DateStyle =
+  | "date"
+  | "dateShort"
+  | "dateLong"
+  | "dateTime"
+  | "dateTimeLong"
+  | "time"
+  | "weekdayDate"
+  | "monthYear"
 
 export type DurationStyle = "long" | "short" | "clock"
 
@@ -21,7 +29,9 @@ export type DateInput = Date | string | number
 const DATE_STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
   date: { year: "numeric", month: "short", day: "numeric" },
   dateShort: { year: "2-digit", month: "numeric", day: "numeric" },
+  dateLong: { year: "numeric", month: "long", day: "numeric" },
   dateTime: { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" },
+  dateTimeLong: { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" },
   time: { hour: "2-digit", minute: "2-digit" },
   weekdayDate: { weekday: "long", month: "short", day: "numeric" },
   monthYear: { year: "numeric", month: "long" },
@@ -201,4 +211,93 @@ export function formatTimecode(ms: number): string {
   const pad = (value: number) => String(value).padStart(2, "0")
 
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`
+}
+
+/**
+ * Formats a date-only value (`YYYY-MM-DD`, e.g. a due date) without any zone
+ * shift: the calendar day is the value itself.
+ */
+export function formatDateOnly(isoDate: string, locale: FmtLocale, style: DateStyle = "date"): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
+
+  if (!match) return isoDate
+
+  const noonUtc = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12))
+
+  return formatDate(noonUtc, { locale, timeZone: "UTC" }, style)
+}
+
+export type ZonedParts = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number
+}
+
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+
+/** Numeric calendar fields of an instant in `timeZone` (machine use: keys, offsets, prompts). */
+export function zonedParts(value: DateInput, timeZone: string): ZonedParts | undefined {
+  const date = toDate(value)
+
+  if (Number.isNaN(date.getTime())) return undefined
+
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      weekday: "short",
+      numberingSystem: "latn",
+      calendar: "gregory",
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value])
+  ) as Record<string, string>
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+    weekday: WEEKDAY_INDEX[parts.weekday ?? ""] ?? 0,
+  }
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0")
+
+/** `YYYY-MM-DD` of an instant in `timeZone`, or "" for invalid input. */
+export function formatIsoDate(value: DateInput, timeZone: string): string {
+  const parts = zonedParts(value, timeZone)
+
+  return parts ? `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}` : ""
+}
+
+/** `DD.MM.YYYY` of an instant in `timeZone` (prompts, search metadata), or "" for invalid input. */
+export function formatNumericDate(value: DateInput, timeZone: string): string {
+  const parts = zonedParts(value, timeZone)
+
+  return parts ? `${pad2(parts.day)}.${pad2(parts.month)}.${parts.year}` : ""
+}
+
+/** Milliseconds `timeZone` is ahead of UTC at `instant`. */
+export function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = zonedParts(instant, timeZone)
+
+  if (!parts) return 0
+
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000
 }

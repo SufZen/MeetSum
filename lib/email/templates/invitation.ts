@@ -1,4 +1,6 @@
 import type { EmailMessage } from "@/lib/email/types"
+import { formatDate as formatDateValue } from "@/lib/i18n/format"
+import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 
 export type InvitationEmailLocale = "he" | "en"
 
@@ -28,14 +30,7 @@ function escapeHtml(value: string): string {
 }
 
 function formatDate(value: string, locale: InvitationEmailLocale): string {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) return value
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", {
-    dateStyle: "long",
-    timeZone: "UTC",
-  }).format(date)
+  return formatDateValue(value, { locale, timeZone: getTaskTimeZone() }, "dateLong") || value
 }
 
 /** Invitation email in Hebrew (RTL HTML) or English. */
