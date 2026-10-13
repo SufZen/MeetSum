@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { appendFileSync } from "node:fs"
 
 import { allowedExtraHeaders, buildMimeMessage, toBase64Url } from "@/lib/email/mime"
@@ -73,16 +74,28 @@ function captureForE2e(message: EmailMessage, env: NodeJS.ProcessEnv) {
   )
 }
 
+/**
+ * The log sender: "configured" outside production (dev and e2e use
+ * `MEETSUM_EMAIL_PROVIDER=log` on purpose), never in production, where it
+ * would silently drop real mail (a warning says so). It logs a recipient
+ * count and a short hash only: never the address, subject or body
+ * (invitation emails carry a one-time token).
+ */
 export function createLogEmailSender(env: NodeJS.ProcessEnv = process.env): EmailSender {
   return {
     provider: "log",
-    isConfigured: () => false,
+    isConfigured: () => {
+      if (env.NODE_ENV !== "production") return true
+      console.warn("[email] MEETSUM_EMAIL_PROVIDER resolves to log in production: email is not configured")
+      return false
+    },
     async send(message) {
       captureForE2e(message, env)
-      // Never log the body: invitation emails carry a one-time token.
-      console.info("[email] no provider configured; not sent", {
-        to: message.to,
-        subject: message.subject,
+      const recipients = (Array.isArray(message.to) ? message.to : [message.to]).filter(Boolean)
+
+      console.info("[email] log provider; not sent", {
+        recipients: recipients.length,
+        toHash: createHash("sha256").update(recipients.join(",").toLowerCase()).digest("hex").slice(0, 12),
       })
 
       return { provider: "log" }

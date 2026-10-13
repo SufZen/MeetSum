@@ -29,7 +29,7 @@ import { setIntegrationQueuePortForTesting } from "@/lib/integrations/core/queue
 import { setIntegrationStoreForTesting, type IntegrationStore } from "@/lib/integrations/core/store"
 import { createMemoryIntegrationStore } from "@/lib/integrations/core/store-memory"
 import { sealTokenSet } from "@/lib/integrations/core/tokens"
-import { createRecordingQueue, type RecordedJob } from "@/lib/integrations/testing/harness"
+import { createRecordingQueue, testRule, type RecordedJob } from "@/lib/integrations/testing/harness"
 import { createInMemoryMeetingDatabase, type InMemoryMeetingDatabase } from "@/lib/meetings/repository"
 import { resetRateLimitsForTesting } from "@/lib/rate-limit"
 import type { WorkspaceRole } from "@/lib/workspaces/types"
@@ -492,6 +492,18 @@ describe("integration routes", () => {
       expect((await putPrefs(jsonRequest(`${BASE}/x`, "PUT", { emailRecap: "maybe" }), routeParams({ id: "m_a" }))).status).toBe(400)
       expect((await putPrefs(jsonRequest(`${BASE}/x`, "PUT", { emailRecap: "off" }), routeParams({ id: "m_a" }))).status).toBe(200)
       expect((await (await getPrefs(new Request(`${BASE}/x`), routeParams({ id: "m_a" }))).json()).prefs.emailRecap).toBe("off")
+
+      // emailRecapAvailable: only with an enabled opt-in email rule (log email counts outside production).
+      const available = async () => (await (await getPrefs(new Request(`${BASE}/x`), routeParams({ id: "m_a" }))).json()).emailRecapAvailable
+
+      expect(await available()).toBe(false)
+      const emailRule = await store.createRule(
+        testRule({ id: "intr_email_optin", provider: "email", destination: { provider: "email", audience: "members", mode: "opt_in", locale: "meeting" } })
+      )
+
+      expect(await available()).toBe(true)
+      if (emailRule.ok) await store.updateRule("ws_a", emailRule.rule.id, { destination: { provider: "email", audience: "members", mode: "all_meetings", locale: "meeting" } })
+      expect(await available()).toBe(false)
 
       await as("viewer", "user_me")
       expect((await putPrefs(jsonRequest(`${BASE}/x`, "PUT", { emailRecap: "on" }), routeParams({ id: "m_a" }))).status).toBe(403)

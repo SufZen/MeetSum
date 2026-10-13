@@ -3,7 +3,8 @@ import { NextResponse } from "next/server"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { actorUserId, apiError, auditActor, limitFor, readJsonBody } from "@/lib/integrations/core/api"
 import { auditIntegration } from "@/lib/integrations/core/audit"
-import { getIntegrationStore } from "@/lib/integrations/core/store"
+import { getIntegrationStore, type IntegrationStore } from "@/lib/integrations/core/store"
+import { emailRecapProvider } from "@/lib/integrations/email-recap/provider"
 import type { MeetingIntegrationPrefs } from "@/lib/integrations/core/types"
 
 /**
@@ -12,6 +13,17 @@ import type { MeetingIntegrationPrefs } from "@/lib/integrations/core/types"
  * `allowPrivatePush` only by the meeting owner (others → 403); `emailRecap`
  * on a private meeting needs `canManageMeeting`. Audits field names only.
  */
+
+/**
+ * The per-meeting email recap control applies only when an enabled email
+ * recap rule runs in `opt_in` mode and email can actually be sent.
+ */
+async function emailRecapAvailable(store: IntegrationStore, workspaceId: string): Promise<boolean> {
+  const rule = (await store.listRules(workspaceId)).find((candidate) => candidate.provider === "email" && candidate.enabled)
+
+  if (!rule || rule.destination.provider !== "email" || rule.destination.mode !== "opt_in") return false
+  return emailRecapProvider.configured()
+}
 
 function view(meetingId: string, prefs: MeetingIntegrationPrefs | undefined) {
   return {
@@ -29,7 +41,10 @@ export const GET = withAuthz<{ id: string }>("meeting:read", async (_request, ct
 
   const store = await getIntegrationStore()
 
-  return NextResponse.json({ prefs: view(meeting.id, await store.getPrefs(ctx.workspace.id, meeting.id)) })
+  return NextResponse.json({
+    prefs: view(meeting.id, await store.getPrefs(ctx.workspace.id, meeting.id)),
+    emailRecapAvailable: await emailRecapAvailable(store, ctx.workspace.id),
+  })
 })
 
 export const PUT = withAuthz<{ id: string }>("meeting:write", async (request, ctx, route) => {
@@ -71,5 +86,5 @@ export const PUT = withAuthz<{ id: string }>("meeting:write", async (request, ct
 
   await auditIntegration(auditActor(ctx), "integration.meeting_prefs.updated", { type: "meeting", id: meeting.id }, { fields })
 
-  return NextResponse.json({ prefs: view(meeting.id, prefs) })
+  return NextResponse.json({ prefs: view(meeting.id, prefs), emailRecapAvailable: await emailRecapAvailable(store, ctx.workspace.id) })
 })
