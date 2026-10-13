@@ -8,6 +8,7 @@ import {
   safeIntegrationReturnTo,
   signOAuthState,
   verifyOAuthState,
+  withIntegrationError,
 } from "@/lib/integrations/core/oauth-state"
 import type { IntegrationStore } from "@/lib/integrations/core/store"
 import { createMemoryIntegrationStore } from "@/lib/integrations/core/store-memory"
@@ -83,6 +84,21 @@ describe("OAuth state", () => {
       expect(safeIntegrationReturnTo(value, "he"), String(value)).toBe("/he?panel=settings&section=integrations")
     }
     expect(safeIntegrationReturnTo("/he?panel=settings&section=integrations&x=1")).toBe("/he?panel=settings&section=integrations&x=1")
+  })
+
+  it("adds integration_error with the URL API (second '?', '#', an existing code)", () => {
+    expect(withIntegrationError("/he?panel=settings", "denied")).toBe("/he?panel=settings&integration_error=denied")
+    expect(withIntegrationError("/he", "denied")).toBe("/he?integration_error=denied")
+    // A fragment stays a fragment, after the query.
+    expect(withIntegrationError("/he?panel=settings#section", "denied")).toBe("/he?panel=settings&integration_error=denied#section")
+    expect(withIntegrationError("/he#top", "denied")).toBe("/he?integration_error=denied#top")
+    // A second "?" is part of the query value, not a new query.
+    expect(withIntegrationError("/he?a=1?b=2", "denied")).toBe("/he?a=1%3Fb%3D2&integration_error=denied")
+    // An existing code is replaced, never duplicated.
+    expect(withIntegrationError("/he?integration_error=state&x=1", "denied")).toBe("/he?integration_error=denied&x=1")
+    // Never leaves the origin.
+    expect(withIntegrationError("//evil.test/x", "denied")).toBe("/?integration_error=denied")
+    expect(withIntegrationError("https://evil.test/x", "denied")).toBe("/?integration_error=denied")
   })
 })
 

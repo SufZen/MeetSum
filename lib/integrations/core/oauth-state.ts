@@ -158,12 +158,22 @@ export function safeIntegrationReturnTo(value: string | null | undefined, locale
 
 /** Relative return path plus `integration_error=<code>` (a fixed enum, never provider text). */
 export function withIntegrationError(returnTo: string, code: IntegrationErrorCode): string {
-  const [path, query = ""] = returnTo.split("?")
-  const params = new URLSearchParams(query)
+  // Parsed against a fixed same-origin base: a second "?" stays in the
+  // query, a "#fragment" stays after it, and anything that would leave the
+  // origin collapses to "/".
+  const base = "https://meetsum.invalid"
+  let url: URL
 
-  params.set("integration_error", code)
+  try {
+    url = new URL(returnTo, base)
+  } catch {
+    url = new URL("/", base)
+  }
+  if (url.origin !== base) url = new URL("/", base)
 
-  return `${path}?${params.toString()}`
+  url.searchParams.set("integration_error", code)
+
+  return `${url.pathname}${url.search}${url.hash}`
 }
 
 export function oauthStateCookie(nonce: string, env: NodeJS.ProcessEnv = process.env): string {
