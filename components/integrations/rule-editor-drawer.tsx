@@ -241,6 +241,7 @@ export function RuleEditorDrawer({
                 <Input
                   dir="ltr"
                   value={draft.domainsText}
+                  // i18n-allow: example domains, not prose
                   placeholder="example.com, partner.co.il"
                   aria-label={t.integrationsRuleFilterDomains}
                   aria-invalid={Boolean(errors.domains)}

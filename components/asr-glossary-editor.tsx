@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -358,6 +359,7 @@ export function AsrGlossaryEditor({ dictionary: t }: { dictionary: Dictionary })
 }
 
 function AsrStatusSummary({ dictionary: t }: { dictionary: Dictionary }) {
+  const { fmt } = useI18n()
   const [status, setStatus] = useState<StatusPayload | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -395,7 +397,7 @@ function AsrStatusSummary({ dictionary: t }: { dictionary: Dictionary }) {
     if (!item?.configured) return t.asrStatusNotConfigured
     if (item.breakerOpenUntil) {
       return formatMessage(t.asrStatusBreakerOpen, {
-        time: new Date(item.breakerOpenUntil).toLocaleTimeString(),
+        time: fmt.date(item.breakerOpenUntil, "time"),
       })
     }
     if (item.healthy === true) return t.asrStatusHealthy

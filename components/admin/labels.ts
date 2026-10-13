@@ -1,8 +1,9 @@
+import { ApiError, type ApiKeyScopeName } from "@/components/admin/api"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatDate, type DateStyle, type Fmt } from "@/lib/i18n/format"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
 import type { InvitationStatus, WorkspaceRole } from "@/lib/workspaces/types"
-
-import type { ApiKeyScopeName } from "@/components/admin/api"
 
 export function roleLabel(t: Dictionary, role: WorkspaceRole): string {
   const labels: Record<WorkspaceRole, string> = {
@@ -54,23 +55,30 @@ export function visibilityLabel(
   return { label: t.visibilityWorkspace, hint: t.visibilityWorkspaceHint }
 }
 
-/** Locale-aware date/time (Hebrew uses he-IL formatting). */
+/** Locale- and time-zone-aware date/time via `lib/i18n/format` ("—" when missing). */
 export function formatDateTime(
-  locale: string,
+  fmt: Fmt,
   value?: string | null,
-  options: Intl.DateTimeFormatOptions = {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }
+  style: DateStyle = "dateTime"
 ): string {
   if (!value) return "—"
 
-  const date = new Date(value)
+  return formatDate(value, fmt, style) || "—"
+}
 
-  if (Number.isNaN(date.getTime())) return "—"
+/**
+ * Localized text for a failed admin API call: a known `ApiError` code maps
+ * to its `apiErr*` message; anything else (network errors, unknown shapes)
+ * becomes `fallback`, so server English never reaches a Hebrew UI.
+ */
+export function adminErrorMessage(
+  error: unknown,
+  t: Dictionary,
+  fallback: string
+): string {
+  if (error instanceof ApiError) {
+    return apiErrorMessage({ error: error.code, message: error.message }, t, fallback)
+  }
 
-  return new Intl.DateTimeFormat(
-    locale === "he" ? "he-IL" : locale,
-    options
-  ).format(date)
+  return fallback
 }

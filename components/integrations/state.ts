@@ -22,6 +22,8 @@ import type {
 } from "@/lib/integrations/core/types"
 import { INTEGRATION_ERROR_CODES, WORKSPACE_PROVIDER_IDS } from "@/lib/integrations/core/types"
 import type { IntegrationsMessageKey } from "@/components/integrations/messages"
+import { formatDate } from "@/lib/i18n/format"
+import { FALLBACK_TIME_ZONE } from "@/lib/i18n/time-zone"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
 
 // ---------------------------------------------------------------------------
@@ -444,6 +446,7 @@ export function emailRecapRequest(
   const body: RuleRequest = {
     provider: "email",
     connectionId: null,
+    // i18n-allow: stored rule name; `ruleDisplayName` shows the localized label
     name: existing?.name ?? "Email recap",
     enabled: true,
     trigger: "meeting.completed",
@@ -743,14 +746,18 @@ export function newIdempotencyKey(): string {
 // ---------------------------------------------------------------------------
 // Formatting
 
-/** Locale-aware date/time (`he-IL` for Hebrew). Returns "" for missing or invalid input. */
-export function formatWhen(locale: string, iso: string | undefined | null): string {
+/**
+ * Date and time in the viewer's locale and time zone (`lib/i18n/format`).
+ * Returns "" for missing or invalid input.
+ */
+export function formatWhen(
+  locale: string,
+  iso: string | undefined | null,
+  timeZone: string = FALLBACK_TIME_ZONE
+): string {
   if (!iso) return ""
-  const date = new Date(iso)
 
-  if (Number.isNaN(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(date)
+  return formatDate(iso, { locale: locale === "he" ? "he" : "en", timeZone }, "dateTime")
 }
 
 export function directionFor(locale: string): "rtl" | "ltr" {

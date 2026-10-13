@@ -43,7 +43,7 @@ export function MediaIngestionDrawer({
     mode === "record"
       ? dictionary.recordOnComputer
       : mode === "desktop"
-        ? "Import desktop recorder"
+        ? dictionary.opsIngestDesktopTrigger
         : dictionary.upload
   const TriggerIcon =
     mode === "record" ? MicIcon : mode === "desktop" ? LaptopIcon : UploadIcon
@@ -51,14 +51,14 @@ export function MediaIngestionDrawer({
     mode === "record"
       ? dictionary.recordOnComputer
       : mode === "desktop"
-        ? "Import from desktop recorder"
-        : "Upload meeting media"
+        ? dictionary.opsIngestDesktopTitle
+        : dictionary.opsIngestUploadTitle
   const description =
     mode === "record"
-      ? "Capture audio in the browser and queue it into the same transcription and summary pipeline."
+      ? dictionary.opsIngestRecordDescription
       : mode === "desktop"
-        ? "Import audio from a local desktop recorder companion. MeetSum keeps the meeting record, processing, sharing, and automations."
-      : "Upload audio/video directly into the processing pipeline. Files are stored privately first."
+        ? dictionary.opsIngestDesktopDescription
+        : dictionary.opsIngestUploadDescription
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -84,7 +84,7 @@ export function MediaIngestionDrawer({
         <div className="grid gap-4 p-4">
           {pending && (
             <div className="rounded-md border border-ring bg-brand-soft p-3 text-sm text-foreground">
-              Upload is queued. Keep this page open while MeetSum stores the media and starts processing.
+              {dictionary.opsIngestPending}
             </div>
           )}
           {(mode === "upload" || mode === "desktop") && (
@@ -92,13 +92,13 @@ export function MediaIngestionDrawer({
               <TriggerIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
               <span className="font-medium text-foreground">
                 {mode === "desktop"
-                  ? "Choose desktop recorder audio"
-                  : "Choose audio or video"}
+                  ? dictionary.opsIngestChooseDesktop
+                  : dictionary.opsIngestChooseMedia}
               </span>
               <span>
                 {mode === "desktop"
-                  ? "MeetSum will create a desktop recorder meeting and process it normally."
-                  : "Gemini-ready files are stored privately in MinIO first."}
+                  ? dictionary.opsIngestDesktopHint
+                  : dictionary.opsIngestUploadHint}
               </span>
               <input
                 type="file"

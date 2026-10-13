@@ -1,5 +1,6 @@
 import { CheckCircle2Icon, CircleAlertIcon, TriangleAlertIcon } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { Badge } from "@/components/ui/badge"
 
 export type ProviderStatusView = {
@@ -33,12 +34,14 @@ export function ProviderHealthPanel({
 }: {
   providers: ProviderStatusView[]
 }) {
+  const { t } = useI18n()
+
   return (
     <section className="ms-card grid gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Provider health</h3>
+        <h3 className="text-sm font-semibold">{t("opsProviderHealthTitle")}</h3>
         <Badge variant="secondary" className="rounded-sm">
-          live
+          {t("opsProviderHealthLive")}
         </Badge>
       </div>
       <div className="grid gap-2">
@@ -54,12 +57,14 @@ export function ProviderHealthPanel({
                 aria-hidden="true"
                 className={
                   provider.configured
-                    ? "mt-0.5 size-4 text-emerald-600"
-                    : "mt-0.5 size-4 text-amber-600"
+                    ? "mt-0.5 size-4 text-ok-text"
+                    : "mt-0.5 size-4 text-warn-text"
                 }
               />
               <div className="min-w-0">
-                <div className="text-sm font-medium">{provider.label}</div>
+                <div className="text-sm font-medium">
+                  <bdi>{provider.label}</bdi>
+                </div>
                 <p className="break-words text-xs leading-5 text-muted-foreground">
                   {provider.detail}
                 </p>

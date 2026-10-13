@@ -5,6 +5,7 @@ import { ExternalLinkIcon, RotateCcwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { BdiMessage } from "@/components/bot/bdi-message"
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { integrationsApi, type WebhookDeliveryView, type WebhookSubscriptionView } from "@/components/integrations/api"
 import { im } from "@/components/integrations/messages"
 import { ExceptionPill, IntegrationsSection, When } from "@/components/integrations/pieces"
@@ -91,6 +92,7 @@ function IntegrationDeliveries({
   rules: readonly IntegrationRuleDTO[]
   refreshKey: number
 }) {
+  const timeZone = useOptionalI18n()?.timeZone
   const [filters, setFilters] = useState<DeliveryFilters>({})
   const [rows, setRows] = useState<IntegrationDeliveryDTO[]>([])
   const [cursor, setCursor] = useState<string>()
@@ -217,7 +219,7 @@ function IntegrationDeliveries({
                 </span>
               ) : null}
               <span className="ms-auto text-xs text-fg-3">
-                <When value={formatWhen(locale, delivery.createdAt)} />
+                <When value={formatWhen(locale, delivery.createdAt, timeZone)} />
               </span>
               <Button variant="ghost" size="sm" onClick={() => setDetail(delivery)}>
                 {t.integrationsLogDetails}
@@ -259,11 +261,11 @@ function IntegrationDeliveries({
               ) : null}
               <div className="text-fg-2">{im(t, "integrationsLogAttempts", { attempts: detail.attempts, max: detail.maxAttempts })}</div>
               <div className="text-fg-2">
-                <BdiMessage template={t.integrationsLogCreated} values={{ when: formatWhen(locale, detail.createdAt) }} />
+                <BdiMessage template={t.integrationsLogCreated} values={{ when: formatWhen(locale, detail.createdAt, timeZone) }} />
               </div>
               {detail.completedAt ? (
                 <div className="text-fg-2">
-                  <BdiMessage template={t.integrationsLogCompleted} values={{ when: formatWhen(locale, detail.completedAt) }} />
+                  <BdiMessage template={t.integrationsLogCompleted} values={{ when: formatWhen(locale, detail.completedAt, timeZone) }} />
                 </div>
               ) : null}
               {detail.status === "skipped" && skipReasonKey(detail.skipReason) ? (
@@ -295,6 +297,7 @@ function IntegrationDeliveries({
 }
 
 function WebhookDeliveries({ t, locale, refreshKey }: { t: Dictionary; locale: string; refreshKey: number }) {
+  const timeZone = useOptionalI18n()?.timeZone
   const [subscriptions, setSubscriptions] = useState<WebhookSubscriptionView[]>([])
   const [subscriptionId, setSubscriptionId] = useState("")
   const [eventName, setEventName] = useState("")
@@ -402,7 +405,7 @@ function WebhookDeliveries({ t, locale, refreshKey }: { t: Dictionary; locale: s
             </bdi>
             <span className="text-xs text-fg-3">{im(t, "integrationsLogAttempts", { attempts: delivery.attempts, max: delivery.maxAttempts ?? "—" })}</span>
             <span className="text-xs text-fg-3">
-              <When value={formatWhen(locale, delivery.createdAt)} />
+              <When value={formatWhen(locale, delivery.createdAt, timeZone)} />
             </span>
             {isWebhookDeliveryRetryable(delivery.status) ? (
               <Button variant="ghost" size="sm" onClick={() => void retry(delivery)}>

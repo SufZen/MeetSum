@@ -15,7 +15,9 @@ import type {
   BotStatus,
   BotStatusReason,
 } from "@/lib/bot/types"
+import { formatDate } from "@/lib/i18n/format"
 import type { BotMessageKey } from "@/lib/i18n/m7/bot"
+import { FALLBACK_TIME_ZONE } from "@/lib/i18n/time-zone"
 
 export type BotPillStatus = "processing" | "review" | "live" | "failed"
 
@@ -278,17 +280,9 @@ export function botStripActions(
   }
 }
 
-/** The `scheduledAt` meta line formats the start as a local time. */
-export function formatBotJoinTime(iso: string, locale: string): string {
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(date)
+/** The `scheduledAt` meta line formats the start as a time in the viewer's zone. */
+export function formatBotJoinTime(iso: string, locale: string, timeZone: string = FALLBACK_TIME_ZONE): string {
+  return formatDate(iso, { locale: locale === "he" ? "he" : "en", timeZone }, "time")
 }
 
 /** Meeting ids whose bot status changed between two polls (refetch the detail view). */
