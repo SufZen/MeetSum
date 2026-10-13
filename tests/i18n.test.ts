@@ -8,6 +8,7 @@ import {
   isSupportedLocale,
   resolveLocalePreference,
 } from "@/lib/i18n/locales"
+import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
 import { dictionaries, formatMessage } from "@/lib/i18n/dictionaries"
 import {
   workspaceMessagesEn,
@@ -61,6 +62,34 @@ describe("internationalization", () => {
         placeholders(workspaceMessagesEn[key])
       )
     }
+  })
+
+  it("translates every speaker, glossary and ASR status string into Hebrew", () => {
+    const hebrew = /[֐-׿]/
+    const keys = Object.keys(asrMessagesEn) as Array<keyof typeof asrMessagesEn>
+
+    expect(keys.filter((key) => key.startsWith("speakers")).length).toBeGreaterThan(10)
+    expect(keys.filter((key) => key.startsWith("glossary")).length).toBeGreaterThan(10)
+    expect(keys.filter((key) => key.startsWith("asrStatus")).length).toBeGreaterThan(5)
+
+    for (const key of keys) {
+      expect(dictionaries.he[key], key).toMatch(hebrew)
+      expect(dictionaries.en[key], key).toBe(asrMessagesEn[key])
+      expect(dictionaries.pt[key], key).toBe(asrMessagesEn[key])
+    }
+  })
+
+  it("keeps ASR placeholders identical between Hebrew and English", () => {
+    const placeholders = (value: string) => (value.match(/\{\w+\}/g) ?? []).sort()
+
+    for (const key of Object.keys(asrMessagesEn) as Array<keyof typeof asrMessagesEn>) {
+      expect(placeholders(asrMessagesHe[key]), key).toEqual(placeholders(asrMessagesEn[key]))
+    }
+  })
+
+  it("localizes generic speaker labels", () => {
+    expect(formatMessage(dictionaries.he.speakersGenericLabel, { n: 2 })).toBe("דובר 2")
+    expect(formatMessage(dictionaries.en.speakersGenericLabel, { n: 2 })).toBe("Speaker 2")
   })
 
   it("fills message placeholders", () => {

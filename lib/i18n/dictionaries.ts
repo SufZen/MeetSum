@@ -1,3 +1,4 @@
+import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import {
   workspaceMessagesEn,
@@ -68,6 +69,7 @@ export const dictionaries = {
     signInWithGoogle: "Continue with Google",
     signInRestricted: "Access is by invitation to a workspace.",
     ...workspaceMessagesEn,
+    ...asrMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -130,6 +132,7 @@ export const dictionaries = {
     signInWithGoogle: "המשך עם Google",
     signInRestricted: "הגישה מתאפשרת בהזמנה לסביבת עבודה.",
     ...workspaceMessagesHe,
+    ...asrMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -192,6 +195,7 @@ export const dictionaries = {
     signInWithGoogle: "Continuar com Google",
     signInRestricted: "O acesso e feito por convite para um workspace.",
     ...workspaceMessagesEn,
+    ...asrMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -254,6 +258,7 @@ export const dictionaries = {
     signInWithGoogle: "Continuar con Google",
     signInRestricted: "El acceso es por invitacion a un workspace.",
     ...workspaceMessagesEn,
+    ...asrMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -316,6 +321,7 @@ export const dictionaries = {
     signInWithGoogle: "Continua con Google",
     signInRestricted: "L'accesso avviene su invito a un workspace.",
     ...workspaceMessagesEn,
+    ...asrMessagesEn,
   },
 } as const
 
