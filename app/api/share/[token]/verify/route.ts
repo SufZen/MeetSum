@@ -7,8 +7,10 @@ import { getSessionSecret } from "@/lib/auth/session"
 import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
 import { lookupPublicShare } from "@/lib/sharing/public-share"
 import {
+  SHARE_ACCESS_COOKIE,
   createShareAccessCookie,
   getShareAccessCookiePath,
+  verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
 import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
 
@@ -16,10 +18,29 @@ import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
 const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
 
 /**
- * Password attempts per share token across every IP (a botnet rotating IPs
- * still gets 30 guesses per 10 minutes for one link).
+ * Load-shedding ceiling per share token across every IP. Deliberately high:
+ * it never locks the link (a failed guess is not a strike against the
+ * token); above it requests get 429 + Retry-After for the rest of the
+ * minute. Fairness comes from the scrypt scheduler (one token can hold at
+ * most 2 of the process's verify slots), so a correct password from a new IP
+ * still gets in under a flood. `MEETSUM_SHARE_VERIFY_TOKEN_CEILING` (per
+ * minute, default 300).
  */
-const SHARE_VERIFY_TOKEN_RATE_LIMIT = { maxRequests: 30, windowMs: 10 * 60_000 }
+function tokenCeiling() {
+  const parsed = Number.parseInt(process.env.MEETSUM_SHARE_VERIFY_TOKEN_CEILING ?? "", 10)
+
+  return { maxRequests: Number.isFinite(parsed) && parsed > 0 ? parsed : 300, windowMs: 60_000 }
+}
+
+function cookieValue(request: Request, name: string): string | undefined {
+  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+    const [key, ...rest] = part.trim().split("=")
+
+    if (key === name) return rest.join("=")
+  }
+
+  return undefined
+}
 
 function isFormSubmission(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
@@ -91,23 +112,35 @@ export const POST = withPublicRoute<{ token: string }>(
         : NextResponse.json({ valid: true, passwordRequired: false })
     }
 
-    const tokenLimit = rateLimitRequest(request, SHARE_VERIFY_TOKEN_RATE_LIMIT, `share-verify-token:${token}`)
+    // Already verified (a valid access cookie): no password check at all.
+    if (
+      verifyShareAccessCookie(cookieValue(request, SHARE_ACCESS_COOKIE), {
+        token,
+        passwordHash: share.passwordHash,
+        secret: getSessionSecret(),
+      })
+    ) {
+      return form ? redirectToShare(token) : NextResponse.json({ valid: true, passwordRequired: true })
+    }
 
-    if (tokenLimit.blocked) {
-      return form ? redirectToShare(token, "rate_limited") : tokenLimit.blocked
+    const ceiling = rateLimitRequest(request, tokenCeiling(), `share-verify-token:${token}`)
+
+    if (ceiling.blocked) {
+      return form ? redirectToShare(token, "rate_limited") : ceiling.blocked
     }
 
     const password = await readPassword(request, form)
     let isValid = false
 
     try {
-      isValid = Boolean(password) && (await verifySharePassword(password, share.passwordHash))
+      isValid = Boolean(password) && (await verifySharePassword(password, share.passwordHash, { key: token }))
     } catch (error) {
       if (!(error instanceof ShareVerifyBusyError)) throw error
 
+      // The verifier stayed saturated past the short queue timeout.
       return form
         ? redirectToShare(token, "rate_limited")
-        : NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": "5" } })
+        : NextResponse.json({ error: "Service busy" }, { status: 503, headers: { "Retry-After": "5" } })
     }
 
     if (!isValid) {

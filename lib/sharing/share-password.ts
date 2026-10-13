@@ -30,7 +30,7 @@ const MAX_P = 4
 
 export type SharePasswordError = "password_invalid" | "password_too_short" | "password_too_long"
 
-/** A share password check could not start: too many are already queued (the caller answers 429/503). */
+/** A share password check could not start in time: the verifier is saturated (the caller answers 503 + Retry-After). */
 export class ShareVerifyBusyError extends Error {
   constructor() {
     super("Share password verification is busy")
@@ -45,24 +45,44 @@ export type ConcurrencyLimiter = {
 }
 
 /**
- * At most `max` tasks run at once; up to `maxQueue` wait in FIFO order and
- * any more are rejected with `ShareVerifyBusyError` (no unbounded backlog).
+ * At most `max` tasks run at once. Up to `maxQueue` wait in FIFO order for at
+ * most `timeoutMs`; a full queue or a wait past the timeout rejects with
+ * `ShareVerifyBusyError` (a short wait, never an unbounded backlog). A
+ * finishing task hands its slot straight to the next waiter.
  */
-export function createConcurrencyLimiter(max: number, maxQueue: number): ConcurrencyLimiter {
+export function createConcurrencyLimiter(max: number, maxQueue: number, timeoutMs = 5_000): ConcurrencyLimiter {
   let running = 0
-  const queue: Array<() => void> = []
+  const queue: Array<{ resume: () => void }> = []
   const release = () => {
-    running -= 1
-    queue.shift()?.()
+    const next = queue.shift()
+
+    if (next) next.resume()
+    else running -= 1
   }
 
   return {
     async run(task) {
-      if (running >= max) {
+      if (running < max) {
+        running += 1
+      } else {
         if (queue.length >= maxQueue) throw new ShareVerifyBusyError()
-        await new Promise<void>((resolve) => queue.push(resolve))
+        await new Promise<void>((resolve, reject) => {
+          const waiter = {
+            resume: () => {
+              clearTimeout(timer)
+              resolve()
+            },
+          }
+          const timer = setTimeout(() => {
+            const index = queue.indexOf(waiter)
+
+            if (index !== -1) queue.splice(index, 1)
+            reject(new ShareVerifyBusyError())
+          }, timeoutMs)
+
+          queue.push(waiter)
+        })
       }
-      running += 1
       try {
         return await task()
       } finally {
@@ -74,13 +94,40 @@ export function createConcurrencyLimiter(max: number, maxQueue: number): Concurr
 }
 
 /**
- * scrypt verifications in flight per process (each takes ~32 MiB and tens of
- * ms of CPU): `MEETSUM_SHARE_VERIFY_CONCURRENCY` (default 4), 32 queued.
+ * Fair scrypt scheduling (each verification takes ~32 MiB and tens of ms of
+ * CPU). Process-wide at most `MEETSUM_SHARE_VERIFY_CONCURRENCY` (default 4)
+ * run at once, and one share token may hold at most 2 of those slots with a
+ * small queue of its own, so a flood on one link waits on that link's queue
+ * and never starves other shares. Waits time out after 5 s (busy → 503).
  */
-const verifyLimiter = createConcurrencyLimiter(
+const globalVerifyLimiter = createConcurrencyLimiter(
   Math.max(1, Number.parseInt(process.env.MEETSUM_SHARE_VERIFY_CONCURRENCY ?? "", 10) || 4),
-  32
+  64
 )
+const PER_KEY_CONCURRENCY = 2
+const PER_KEY_QUEUE = 16
+const keyLimiters = new Map<string, ConcurrencyLimiter>()
+
+async function runVerification<T>(key: string | undefined, task: () => Promise<T>): Promise<T> {
+  if (!key) return globalVerifyLimiter.run(task)
+
+  let limiter = keyLimiters.get(key)
+
+  if (!limiter) {
+    limiter = createConcurrencyLimiter(PER_KEY_CONCURRENCY, PER_KEY_QUEUE)
+    keyLimiters.set(key, limiter)
+  }
+
+  const own = limiter
+
+  try {
+    return await own.run(() => globalVerifyLimiter.run(task))
+  } finally {
+    const stats = own.stats()
+
+    if (stats.running === 0 && stats.queued === 0 && keyLimiters.get(key) === own) keyLimiters.delete(key)
+  }
+}
 
 function scrypt(password: string, salt: Buffer, keyLength: number, options: ScryptOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -112,7 +159,11 @@ export function isScryptSharePasswordHash(stored: string | null | undefined): bo
 }
 
 /** Constant-time check of `password` against a stored scrypt (or legacy sha256) hash. */
-export async function verifySharePassword(password: string, stored: string | null | undefined): Promise<boolean> {
+export async function verifySharePassword(
+  password: string,
+  stored: string | null | undefined,
+  options: { key?: string } = {}
+): Promise<boolean> {
   if (!stored || typeof password !== "string" || !password || [...password].length > SHARE_PASSWORD_MAX) {
     return false
   }
@@ -148,7 +199,7 @@ export async function verifySharePassword(password: string, stored: string | nul
 
   if (expected.length < 16 || expected.length > 64) return false
 
-  const actual = await verifyLimiter.run(() =>
+  const actual = await runVerification(options.key, () =>
     scrypt(password, Buffer.from(saltRaw, "base64"), expected.length, {
       N: n,
       r,
