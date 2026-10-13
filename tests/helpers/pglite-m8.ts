@@ -1,5 +1,5 @@
 /**
- * PGlite with migrations 001–027 for M8 Package B tests, plus a `pg`-like
+ * PGlite with every migration (001–028) for M8 tests, plus a `pg`-like
  * `query(sql, params)` adapter. Returns undefined when PGlite cannot load.
  */
 import { listMigrationFiles } from "@/lib/db/migrations"
@@ -22,7 +22,7 @@ export async function createM8Database(): Promise<PgLike | undefined> {
     return undefined
   }
 
-  for (const migration of listMigrationFiles("db/migrations").filter((file) => file.version <= "027")) {
+  for (const migration of listMigrationFiles("db/migrations")) {
     await db.exec(migration.sql)
   }
 
