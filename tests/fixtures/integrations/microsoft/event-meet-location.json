@@ -1,0 +1,15 @@
+{
+  "id": "AAMkAGmeet1",
+  "iCalUId": "meet-location-uid@google.com",
+  "subject": "Sync with Google user",
+  "isCancelled": false,
+  "isAllDay": false,
+  "sensitivity": "confidential",
+  "start": { "dateTime": "2026-10-16T08:00:00.0000000", "timeZone": "UTC" },
+  "end": { "dateTime": "2026-10-16T08:30:00.0000000", "timeZone": "UTC" },
+  "organizer": { "emailAddress": { "name": "G", "address": "g@gmail.example" } },
+  "attendees": [],
+  "location": { "displayName": "https://meet.google.com/abc-defg-hij" },
+  "locations": [{ "displayName": "https://meet.google.com/abc-defg-hij" }],
+  "body": { "contentType": "text", "content": "" }
+}
