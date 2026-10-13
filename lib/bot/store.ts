@@ -243,7 +243,10 @@ export interface BotSessionStore {
     patch: BotSessionPatch,
     options: BotUpdateOptions
   ): Promise<BotSessionRecord | undefined>
-  /** Rank-guarded, transactional; records bot_events; bumps last_event_at. */
+  /**
+   * Rank-guarded, transactional; records bot_events; bumps last_event_at.
+   * A terminal status also nulls `passcode_enc` (the secret ends with the session).
+   */
   transition(id: string, input: BotTransitionInput): Promise<BotTransitionResult | undefined>
   /** Instance-wide without a workspace (capacity), else per workspace. */
   countLive(options?: { workspaceId?: string }): Promise<number>
@@ -255,6 +258,11 @@ export interface BotSessionStore {
    * not deduped and gets reprocessed. Workspace-scoped.
    */
   deleteEvent(id: string, scope: BotWorkspaceScope): Promise<void>
+  /**
+   * SYSTEM (retention), instance-wide: nulls `passcode_enc` on terminal
+   * sessions (rows that ended before transitions cleared it). Returns the count.
+   */
+  clearTerminalPasscodes(): Promise<number>
   /** SYSTEM (retention): empties payloads received before `before`. */
   pruneEventPayloads(before: Date): Promise<number>
   withTransaction<T>(fn: (tx: BotStoreTx) => Promise<T>): Promise<T>

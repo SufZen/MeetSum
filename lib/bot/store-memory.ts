@@ -376,6 +376,7 @@ export function createMemoryBotSessionStore(
 
         if (input.status === "active" && !previous.joinedAt) next.joinedAt = at
         if (isTerminalBotStatus(input.status) && !previous.leftAt) next.leftAt = at
+        if (isTerminalBotStatus(input.status)) next.passcodeEnc = null
 
         assertUnique(next)
         session = next
@@ -440,6 +441,19 @@ export function createMemoryBotSessionStore(
       const index = events.findIndex((event) => event.id === id && event.workspaceId === workspaceId)
 
       if (index >= 0) events.splice(index, 1)
+    },
+
+    async clearTerminalPasscodes() {
+      let cleared = 0
+
+      for (const [id, session] of sessions) {
+        if (session.passcodeEnc !== null && isTerminalBotStatus(session.status)) {
+          sessions.set(id, { ...session, passcodeEnc: null })
+          cleared += 1
+        }
+      }
+
+      return cleared
     },
 
     async pruneEventPayloads(before) {

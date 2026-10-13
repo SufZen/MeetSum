@@ -10,7 +10,7 @@ import { VexaError, type BotProvider } from "@/lib/bot/vexa/types"
  * have passed, `DELETE /meetings/{id}` erases Vexa's transcript and
  * recording objects. 2xx/404 → `vexa_purged_at`; 409 (bot still in the
  * meeting) → skipped for the next run. bot_events payloads are pruned to
- * `{}` after 30 days.
+ * `{}` after 30 days. Terminal sessions lose any leftover `passcode_enc`.
  */
 
 export const BOT_EVENT_PAYLOAD_RETENTION_DAYS = 30
@@ -22,7 +22,7 @@ export async function runBotRetention(
     store?: BotSessionStore
     retentionHours?: number
   } = {}
-): Promise<{ purged: number; skipped: number; prunedEvents: number }> {
+): Promise<{ purged: number; skipped: number; prunedEvents: number; passcodesCleared: number }> {
   const store = options.store ?? getBotSessionStore()
   const now = options.now ?? new Date()
   const hours = options.retentionHours ?? getBotConfig().artifactRetentionHours
@@ -62,5 +62,8 @@ export async function runBotRetention(
     new Date(now.getTime() - BOT_EVENT_PAYLOAD_RETENTION_DAYS * 86_400_000)
   )
 
-  return { purged, skipped, prunedEvents }
+  // Meeting passcodes are only needed to dispatch; never keep them past the end.
+  const passcodesCleared = await store.clearTerminalPasscodes()
+
+  return { purged, skipped, prunedEvents, passcodesCleared }
 }

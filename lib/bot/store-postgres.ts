@@ -511,6 +511,7 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
                    status_changed_at = $6,
                    joined_at = case when $3 = 'active' then coalesce(joined_at, $6) else joined_at end,
                    left_at = case when $7 then coalesce(left_at, $6) else left_at end,
+                   passcode_enc = case when $7 then null else passcode_enc end,
                    updated_at = now()
                  where id = $1 and workspace_id = $2
                  returning *`,
@@ -602,6 +603,17 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
         id,
         requireWorkspace(scope?.workspaceId),
       ])
+    },
+
+    async clearTerminalPasscodes() {
+      const result = await db.query(
+        `update bot_sessions set passcode_enc = null
+         where passcode_enc is not null and status in (${TERMINAL_SQL})
+         returning id`,
+        []
+      )
+
+      return result.rows.length
     },
 
     async pruneEventPayloads(before) {

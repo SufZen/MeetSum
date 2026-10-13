@@ -187,6 +187,8 @@ describe("postgres bot store (recording queryable)", () => {
     expect(statements[1].text).toMatch(/for update$/)
     expect(statements[1].values).toEqual(["bot_1", "ws_1"])
     expect(statements[2].text).toContain("joined_at = case when $3 = 'active'")
+    // A terminal status drops the sealed passcode with the session.
+    expect(statements[2].text).toContain("passcode_enc = case when $7 then null else passcode_enc end")
     expect(statements[2].text).toContain("where id = $1 and workspace_id = $2")
     expect(statements[3].values[2]).toBe("ws_1")
     expect(statements[3].values[8]).toBe(true)
