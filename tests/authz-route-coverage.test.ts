@@ -118,9 +118,6 @@ describe("API route authz coverage", () => {
     const REQUIRED: Record<string, string> = {
       // Live conference records of the subject mailbox (security review M2).
       "google/meet/artifacts GET": "integrations:manage",
-      // Writes meeting content to an external workspace; the route also
-      // checks `integrations:manage` in its body.
-      "meetings/[id]/export/notion POST": "meeting:write",
       "storage/media-assets GET": "storage:manage",
       "storage/media-assets/[id] DELETE": "storage:manage",
       "webhooks/test POST": "webhooks:manage",
@@ -211,6 +208,29 @@ describe("API route authz coverage", () => {
       // M6 admin
       "admin/search/status GET": "ops:read",
       "admin/search/reindex POST": "settings:write",
+      // M8 integrations
+      "integrations/providers GET": "workspace:read",
+      "integrations/[provider]/oauth/start GET": "integrations:connect",
+      "integrations/connections GET": "integrations:connect",
+      "integrations/connections/[id] PATCH": "integrations:connect",
+      "integrations/connections/[id] DELETE": "integrations:connect",
+      "integrations/connections/[id]/test POST": "integrations:connect",
+      "integrations/connections/[id]/options/[picker] GET": "meeting:write",
+      "integrations/rules GET": "integrations:manage",
+      "integrations/rules POST": "integrations:manage",
+      "integrations/rules/[id] PATCH": "integrations:manage",
+      "integrations/rules/[id] DELETE": "integrations:manage",
+      "integrations/deliveries GET": "integrations:manage",
+      "integrations/deliveries/[id] GET": "meeting:write",
+      "integrations/deliveries/[id]/retry POST": "integrations:manage",
+      "meetings/[id]/integrations/send POST": "meeting:write",
+      "meetings/[id]/integration-prefs GET": "meeting:read",
+      "meetings/[id]/integration-prefs PUT": "meeting:write",
+      // The Notion token comes only from the workspace connection (no admin check).
+      "meetings/[id]/export/notion POST": "meeting:write",
+      "meetings/[id]/export/google-docs POST": "meeting:read",
+      "meetings/[id]/export/docx POST": "meeting:read",
+      "webhooks/catalog GET": "webhooks:manage",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -226,9 +246,6 @@ describe("API route authz coverage", () => {
     )
 
     expect(actual).toEqual(REQUIRED)
-    const notion = routes.find((route) => route.route === "meetings/[id]/export/notion")
-    expect(notion?.source).toMatch(/can\(ctx\.role, "integrations:manage"\)/)
-    expect(notion?.source).not.toMatch(/process\.env\.NOTION_TOKEN/)
     // DELETE needs owner/admin on top of meeting:read.
     const detail = routes.find((route) => route.route === "meetings/[id]")
     expect(detail?.source).toMatch(/canManageMeeting\(ctx, meeting\)[\s\S]*permission: "meeting:manage"/)
@@ -363,6 +380,64 @@ describe("API route authz coverage", () => {
         expect(route.source, route.route).not.toMatch(/@\/lib\/db\/client|\bgetSystemMeetingRepository\b/)
         expect(SYSTEM_REPOSITORY_ROUTES.has(route.route), route.route).toBe(false)
       }
+    })
+  })
+
+  describe("M8 integrations routes", () => {
+    const source = (route: string) => routes.find((candidate) => candidate.route === route)?.source
+    const M8_ROUTES = routes.filter(
+      (route) =>
+        (/^integrations\//.test(route.route) && !/^integrations\/(teams|vexa)\//.test(route.route)) ||
+        /^meetings\/\[id\]\/(integrations\/send|integration-prefs|export\/(notion|google-docs))$/.test(route.route) ||
+        route.route === "email/unsubscribe"
+    )
+
+    it("finds the M8 routes", () => {
+      expect(M8_ROUTES.length).toBeGreaterThanOrEqual(17)
+    })
+
+    it("guards the OAuth callback with withSession (membership re-checked in the handler)", () => {
+      const callback = handlersOf(routes.find((route) => route.route === "integrations/[provider]/oauth/callback")!)
+
+      expect(callback).toEqual([{ route: "integrations/[provider]/oauth/callback", method: "GET", wrapper: "withSession" }])
+    })
+
+    it("never touches token columns or the token module from a route", () => {
+      for (const route of M8_ROUTES) {
+        expect(route.source, route.route).not.toMatch(/access_token_enc|refresh_token_enc/)
+        expect(route.source, route.route).not.toMatch(/@\/lib\/integrations\/core\/tokens/)
+      }
+    })
+
+    it("never audits titles, content, addresses, tokens or provider messages", () => {
+      for (const route of M8_ROUTES) {
+        for (const args of callArguments(route.source, "recordAuditLog")) {
+          expect(args, route.route).not.toMatch(/(title|summary|email|token|message|body)/)
+        }
+      }
+    })
+
+    it("takes the Notion token only from the connection (no body token, env token or admin check)", () => {
+      const notion = source("meetings/[id]/export/notion")
+
+      expect(notion).toBeDefined()
+      expect(notion).not.toMatch(/body\.token/)
+      expect(notion).not.toMatch(/process\.env\.NOTION_TOKEN/)
+      expect(notion).not.toMatch(/can\(ctx\.role, "integrations:manage"\)/)
+    })
+
+    it("never builds an OAuth redirect from the host or x-forwarded-host header", () => {
+      for (const route of ["integrations/[provider]/oauth/start", "integrations/[provider]/oauth/callback"]) {
+        expect(source(route), route).toBeDefined()
+        expect(source(route), route).not.toMatch(/["'](x-forwarded-host|host)["']/i)
+      }
+    })
+
+    it("verifies the unsubscribe token before anything else (or is still the Step 0 stub)", () => {
+      const text = source("email/unsubscribe") ?? ""
+
+      if (/not_implemented/.test(text)) return
+      expect(text).toMatch(/verifyUnsubscribeToken\(/)
     })
   })
 

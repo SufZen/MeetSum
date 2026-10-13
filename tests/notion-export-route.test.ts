@@ -19,40 +19,34 @@ vi.mock("@/lib/audit", () => ({ recordAuditLog: vi.fn() }))
 
 import { POST as exportNotion } from "@/app/api/meetings/[id]/export/notion/route"
 
+/**
+ * M8 Step 0: the token-in-body Notion export is replaced by a stub behind
+ * its final guard (`meeting:write`, no admin check). Package C rewrites this
+ * test with the connection-backed export (docs/parity/m8.md, C1).
+ */
+
 const BASE = "http://localhost"
 const fetchMock = vi.fn()
 
-function meetings() {
-  return [
-    testMeeting({ id: "m_shared", title: "Shared", visibility: "workspace" }),
-    testMeeting({
-      id: "m_private",
-      title: "Private",
-      visibility: "private",
-      ownerUserId: "user_owner",
-    }),
-  ]
-}
-
 async function callExport(
-  meetingId: string,
   body: Record<string, unknown>,
   options: Parameters<typeof createTestCtx>[0] = {}
 ) {
-  setRouteCtx(await createTestCtx({ meetings: meetings(), ...options }))
+  setRouteCtx(
+    await createTestCtx({
+      meetings: [testMeeting({ id: "m_shared", title: "Shared", visibility: "workspace" })],
+      ...options,
+    })
+  )
 
   return exportNotion(
-    jsonRequest(`${BASE}/api/meetings/${meetingId}/export/notion`, "POST", body),
-    routeParams({ id: meetingId })
+    jsonRequest(`${BASE}/api/meetings/m_shared/export/notion`, "POST", body),
+    routeParams({ id: "m_shared" })
   )
 }
 
 beforeEach(() => {
-  fetchMock.mockReset().mockResolvedValue(
-    new Response(JSON.stringify({ id: "page_1", url: "https://notion.so/page_1" }), {
-      status: 200,
-    })
-  )
+  fetchMock.mockReset()
   vi.stubGlobal("fetch", fetchMock)
   vi.stubEnv("NOTION_TOKEN", "secret_operator_token")
 })
@@ -63,71 +57,21 @@ afterEach(() => {
   setRouteCtx(undefined)
 })
 
-describe("POST /api/meetings/:id/export/notion", () => {
+describe("POST /api/meetings/:id/export/notion (M8 Step 0 stub)", () => {
   it("rejects viewers (needs meeting:write)", async () => {
-    const response = await callExport(
-      "m_shared",
-      { databaseId: "db_1", token: "secret_user" },
-      { role: "viewer" }
-    )
+    const response = await callExport({ databaseId: "db_1" }, { role: "viewer" })
 
     expect(response.status).toBe(403)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("rejects members (needs integrations:manage)", async () => {
-    const response = await callExport(
-      "m_shared",
-      { databaseId: "db_1", token: "secret_user" },
-      { role: "member" }
-    )
+  it("no longer requires an admin, and never uses a body token or NOTION_TOKEN", async () => {
+    for (const role of ["member", "admin"] as const) {
+      const response = await callExport({ databaseId: "db_1", token: "secret_user" }, { role })
 
-    expect(response.status).toBe(403)
-    expect(await response.json()).toEqual({
-      error: "Forbidden",
-      permission: "integrations:manage",
-    })
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("never falls back to the server NOTION_TOKEN", async () => {
-    const response = await callExport("m_shared", { databaseId: "db_1" }, { role: "admin" })
-
-    expect(response.status).toBe(400)
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("exports with the caller's own token for admins", async () => {
-    const response = await callExport(
-      "m_shared",
-      { databaseId: "db_1", token: "secret_user" },
-      { role: "admin" }
-    )
-
-    expect(response.status).toBe(201)
-    const [, init] = fetchMock.mock.calls[0]
-    expect(init.headers.Authorization).toBe("Bearer secret_user")
-  })
-
-  it("404s a private meeting the admin cannot see", async () => {
-    const response = await callExport(
-      "m_private",
-      { databaseId: "db_1", token: "secret_user" },
-      { role: "admin" }
-    )
-
-    expect(response.status).toBe(404)
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("404s a meeting of another workspace", async () => {
-    const response = await callExport(
-      "m_shared",
-      { databaseId: "db_1", token: "secret_user" },
-      { role: "admin", workspaceId: "ws_b" }
-    )
-
-    expect(response.status).toBe(404)
+      expect(response.status, role).toBe(501)
+      expect(await response.json()).toEqual({ error: "not_implemented" })
+    }
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
