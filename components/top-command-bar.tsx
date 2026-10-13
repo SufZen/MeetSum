@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react"
 import {
+  BotIcon,
   ChevronDownIcon,
   FolderSearchIcon,
   MoonIcon,
@@ -11,6 +12,7 @@ import {
   UserPlusIcon,
 } from "lucide-react"
 
+import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { MediaIngestionDrawer } from "@/components/media-ingestion-drawer"
 import { Button } from "@/components/ui/button"
@@ -52,6 +54,11 @@ export function TopCommandBar({
   onToggleDarkMode,
   aiStatus,
   onInvite,
+  recorder,
+  recordingMeetingId,
+  desktopOpen,
+  onDesktopOpenChange,
+  onSendBot,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
@@ -72,11 +79,21 @@ export function TopCommandBar({
   aiStatus?: AiProviderStatus
   /** Opens the admin panel's members area (shown to member managers). */
   onInvite?: () => void
+  /** M7: the shell's browser recorder, so recording (and the dock) survives closing the sheet. */
+  recorder?: BrowserRecorder
+  /** Meeting a browser recording is attached to (dock "Open meeting"). */
+  recordingMeetingId?: string | null
+  /** Controlled desktop-import sheet (opened by the blocked-bot fallback). */
+  desktopOpen?: boolean
+  onDesktopOpenChange?: (open: boolean) => void
+  /** Opens "Send bot to a meeting"; undefined hides it (bot disabled or no meeting:create). */
+  onSendBot?: () => void
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const { can, activeWorkspace } = useWorkspace()
   const [recorderEnabled, setRecorderEnabled] = useState(true)
   const activeWorkspaceId = activeWorkspace?.id
+  const sendBotVisible = Boolean(onSendBot) && can("meeting:create")
 
   // `pwaRecorderEnabled` (workspace setting) hides the browser recorder.
   useEffect(() => {
@@ -145,19 +162,53 @@ export function TopCommandBar({
           onFileChange={onFileChange}
           onRecordingReady={onRecordingReady}
         />
-        {recorderEnabled ? (
-          <MediaIngestionDrawer
-            dictionary={dictionary}
-            pending={pending}
-            mode="record"
-            onFileChange={onFileChange}
-            onRecordingReady={onRecordingReady}
-          />
+        {recorderEnabled || sendBotVisible ? (
+          // Record split button: record in this browser, or send the bot.
+          <div className="flex items-center gap-0.5">
+            {recorderEnabled ? (
+              <MediaIngestionDrawer
+                dictionary={dictionary}
+                pending={pending}
+                mode="record"
+                onFileChange={onFileChange}
+                onRecordingReady={onRecordingReady}
+                recorder={recorder}
+                meetingId={recordingMeetingId}
+              />
+            ) : null}
+            {sendBotVisible ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="record"
+                      size={recorderEnabled ? "icon" : "default"}
+                      className="h-9"
+                      aria-label={dictionary.botJoinMenu}
+                      title={dictionary.botJoinMenu}
+                    />
+                  }
+                >
+                  {recorderEnabled ? null : <BotIcon data-icon="inline-start" />}
+                  {recorderEnabled ? null : dictionary.botJoinMenu}
+                  <ChevronDownIcon aria-hidden="true" className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={onSendBot}>
+                    <BotIcon aria-hidden="true" className="size-4" />
+                    {dictionary.botJoinMenu}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
         ) : null}
         <MediaIngestionDrawer
           dictionary={dictionary}
           pending={pending}
           mode="desktop"
+          open={desktopOpen}
+          onOpenChange={onDesktopOpenChange}
           onFileChange={onDesktopFileChange}
           onRecordingReady={onRecordingReady}
         />
