@@ -6,15 +6,13 @@
  * revisit or a version poll costs a 304. Segment mutations go through
  * `patchSegment` / `undoSegment` and are folded into the cached copy.
  */
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import type {
   SegmentMutationResponse,
   TranscriptResponse,
   TranscriptSegmentWire,
 } from "@/lib/meetings/transcript-wire"
-import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
-import { toWireSegments } from "@/lib/player/wire"
 
 type CacheEntry = { etag?: string; data: TranscriptResponse }
 
@@ -71,16 +69,9 @@ export function useMeetingTranscript(
   meetingId: string | undefined,
   {
     version,
-    language,
-    fallbackSegments,
-    fallbackSpeakers,
   }: {
     /** `meeting.transcriptVersion`: a change triggers a conditional refetch. */
     version?: number
-    language?: string
-    /** Segments already on the record (pre-M4 detail, share page). */
-    fallbackSegments?: readonly TranscriptSegment[]
-    fallbackSpeakers?: readonly MeetingSpeaker[]
   } = {}
 ) {
   const [state, setState] = useState<{
@@ -93,11 +84,6 @@ export function useMeetingTranscript(
     return cached ? { meetingId, status: "ready", data: cached.data } : { meetingId, status: "idle" }
   })
   const [reload, setReload] = useState(0)
-  const fallbackRef = useRef({ fallbackSegments, fallbackSpeakers, language })
-
-  useEffect(() => {
-    fallbackRef.current = { fallbackSegments, fallbackSpeakers, language }
-  }, [fallbackSegments, fallbackSpeakers, language])
 
   useEffect(() => {
     if (!meetingId) return
@@ -137,23 +123,8 @@ export function useMeetingTranscript(
       .catch(() => {
         if (controller.signal.aborted) return
 
-        const fallback = fallbackRef.current
-
-        if (fallback.fallbackSegments?.length) {
-          setState({
-            meetingId,
-            status: "ready",
-            data: {
-              meetingId,
-              version: version ?? 0,
-              ...(fallback.language ? { language: fallback.language } : {}),
-              segments: toWireSegments(fallback.fallbackSegments),
-              speakers: [...(fallback.fallbackSpeakers ?? [])],
-            },
-          })
-          return
-        }
-
+        // No fallback: the detail route no longer carries the transcript, so
+        // a failed fetch is a real error (stale data stays visible if any).
         setState((current) => ({ meetingId, status: current.data ? "ready" : "error", data: current.data }))
       })
 

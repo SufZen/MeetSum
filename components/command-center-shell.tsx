@@ -378,9 +378,6 @@ export function CommandCenterShell({
   const selectedId = selectedListItem?.id
   const transcript = useMeetingTranscript(selectedDetail ? selectedId : undefined, {
     version: selectedDetail?.meeting.transcriptVersion,
-    language: selectedDetail?.meeting.language,
-    fallbackSegments: selectedDetail?.meeting.transcript,
-    fallbackSpeakers: selectedDetail?.meeting.speakers,
   })
 
   const loadDetail = useCallback(
@@ -1054,8 +1051,9 @@ export function CommandCenterShell({
       return false
     }
 
+    // PATCH answers `{ meeting }`; anything else is revalidated, not guessed.
     if (body?.meeting) upsertMeetingRecord(body.meeting)
-    else upsertMeetingRecord({ ...selectedMeeting, title })
+    else void loadDetail(selectedMeeting.id).catch(() => undefined)
     toast.success(dictionary.meetingRenamed)
     return true
   }
@@ -1572,7 +1570,7 @@ export function CommandCenterShell({
                     </span>
                   </label>
                 ) : null}
-                {selectedMeeting && !selectedMeeting.summary?.overview ? (
+                {selectedDetail && !selectedDetail.meeting.summary?.overview ? (
                   <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
                     This meeting has no generated summary yet. The public page
                     will still open, but it may only show metadata, participants,
