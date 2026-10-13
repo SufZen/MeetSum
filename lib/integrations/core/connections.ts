@@ -110,6 +110,7 @@ export async function upsertConnectionFromOAuth(
         // A reconnect starts a new token generation (in-flight refreshes and
         // stale reauth marks lose their compare-and-set).
         generation: current.generation + 1,
+        refreshLeaseUntil: null,
         lastError: null,
         lastRefreshedAt: new Date().toISOString(),
       })
@@ -209,8 +210,10 @@ export async function disconnectConnection(
 ): Promise<DisconnectResult> {
   const db = store ?? (await getIntegrationStore())
 
-  // Under the row lock: an in-flight refresh either finished before (and its
-  // tokens are read and revoked here) or runs after and sees `revoked`.
+  // Under the (short) row lock. A refresh in flight holds no lock, only the
+  // refresh lease: its token write is a CAS on the generation bumped here,
+  // so it loses and revokes the tokens it got; a refresh that finished
+  // before is read and revoked below.
   const tokens = await db.withConnectionLock(row.workspaceId, row.id, async (current, update) => {
     if (!current) return undefined
 
@@ -223,6 +226,7 @@ export async function disconnectConnection(
       refreshTokenEnc: null,
       expiresAt: null,
       generation: current.generation + 1,
+      refreshLeaseUntil: null,
     })
     return sealed
   })

@@ -1382,6 +1382,10 @@ alter table webhook_deliveries
 alter table integration_connections
   add column if not exists token_generation integer not null default 0;
 
+-- 029: token refresh lease (no row lock across the provider call).
+alter table integration_connections
+  add column if not exists refresh_lease_until timestamptz;
+
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
   on conflict (id) do nothing;

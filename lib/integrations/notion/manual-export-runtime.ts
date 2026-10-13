@@ -61,7 +61,7 @@ export type ManualExportRuntime = {
     provider: ProviderId,
     options?: { userId?: string }
   ): Promise<ManualExportConnection | undefined>
-  /** A fresh access token (refreshed under a row lock when needed). */
+  /** A fresh access token (refreshed under a refresh lease when needed). */
   getAccessToken(workspaceId: string, connectionId: string): Promise<string>
   /** Links of one connection and meeting (integration_links). */
   linkStore(workspaceId: string, connectionId: string, meetingId: string): LinkStore

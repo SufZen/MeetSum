@@ -128,7 +128,7 @@ describe("getAccessToken refresh", () => {
     expect(after && openToken(after, "refresh_token")).toBe("refresh-old")
   })
 
-  it("serializes a disconnect behind an in-flight refresh and revokes what it wrote", async () => {
+  it("lets a disconnect win over an in-flight refresh (no row lock held) and revokes what the refresh got", async () => {
     const { disconnectConnection } = await import("@/lib/integrations/core/connections")
     const revoke = vi.fn(async () => undefined)
     let release!: () => void
@@ -150,16 +150,17 @@ describe("getAccessToken refresh", () => {
     const row = await store.getConnection("ws_a", connectionId)
     const disconnecting = disconnectConnection(row!, { workspaceId: "ws_a" }, store)
 
-    release()
-    await pending
+    // The disconnect does not wait for the provider call (lease, not lock).
     await disconnecting
+    release()
+    await expect(pending).rejects.toMatchObject({ kind: "auth", providerCode: "connection_changed" })
 
     const after = await store.getConnection("ws_a", connectionId)
 
     expect(after?.status).toBe("revoked")
     expect(after?.accessTokenEnc).toBeUndefined()
     expect(after?.generation).toBe((row?.generation ?? 0) + 1)
-    // The refreshed token set was revoked at the provider by the disconnect.
+    // The refreshed token set lost its CAS write and was revoked at the provider.
     expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ accessToken: "access-new", refreshToken: "refresh-new" }))
     await expect(getAccessToken("ws_a", connectionId, deps())).rejects.toMatchObject({ kind: "auth" })
     expect(refresh).toHaveBeenCalledTimes(1)

@@ -5,8 +5,9 @@
  * - Tokens are AES-256-GCM `v2` ciphertexts bound to
  *   `${workspaceId}:${connectionId}:${field}` (a ciphertext copied to another
  *   row or field fails to decrypt).
- * - `getAccessToken` refreshes when `expires_at − 120 s < now`, inside the
- *   connection row lock, so concurrent jobs never race a rotating refresh
+ * - `getAccessToken` refreshes when `expires_at − 120 s < now` under a short
+ *   refresh lease (migration 029; no transaction or row lock is held across
+ *   the provider call), so concurrent jobs never race a rotating refresh
  *   token; a newly returned refresh token is always persisted.
  * - `invalid_grant` (or any `auth` failure) → `needs_reauth`.
  *
@@ -16,7 +17,7 @@ import { decryptSecret, encryptSecret } from "@/lib/auth/secret-crypto"
 import { integrationLog, storedIntegrationError } from "@/lib/integrations/core/errors"
 import { markConnectionNeedsReauth, type ReauthDeps } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
-import { getIntegrationStore, type IntegrationStore, type StoredConnection } from "@/lib/integrations/core/store"
+import { getIntegrationStore, type ConnectionPatch, type IntegrationStore, type StoredConnection } from "@/lib/integrations/core/store"
 import { ProviderError, type IntegrationProvider, type TokenSet } from "@/lib/integrations/core/types"
 
 export type TokenField = "access_token" | "refresh_token"
@@ -97,13 +98,25 @@ export type TokenDeps = ReauthDeps & {
   store?: IntegrationStore
   provider?: (id: string) => IntegrationProvider | undefined
   now?: () => number
+  /** Pause while another process holds the refresh lease (tests inject a short one). */
+  sleep?: (ms: number) => Promise<void>
 }
+
+/**
+ * Refresh lease length. The provider call is capped at 15 s by
+ * `providerFetch`, so a live holder always finishes (or fails) well within
+ * it; an expired lease belongs to a crashed holder and is taken over.
+ */
+export const REFRESH_LEASE_MS = 45_000
+const LEASE_POLL_MS = 250
 
 /**
  * A usable access token for an active connection, refreshing it first when
  * it expires within 120 s. Throws ProviderError(`auth`) when the connection
- * is not active or the refresh is rejected (the connection is then
- * `needs_reauth`), `config` when the provider cannot refresh.
+ * is not active (`connection_inactive`), changed during the refresh
+ * (`connection_changed`) or the refresh is rejected (`invalid_grant`; the
+ * connection is then `needs_reauth`), `retryable` when another holder's
+ * refresh did not finish in time.
  */
 export async function getAccessToken(workspaceId: string, connectionId: string, deps: TokenDeps = {}): Promise<string> {
   const store = deps.store ?? (await getIntegrationStore())
@@ -111,19 +124,14 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
   const current = await store.getConnection(workspaceId, connectionId)
 
   if (!current || current.status !== "active") throw connectionInactive()
-  if (!expiring(current, now())) {
-    const token = openToken(current, "access_token")
-
-    if (!token) throw new ProviderError("auth", "connection has no access token")
-    return token
-  }
+  if (!expiring(current, now())) return accessTokenOf(current)
 
   const key = `${workspaceId}:${connectionId}`
   const inFlight = refreshesInFlight.get(key)
 
   if (inFlight) return inFlight
 
-  const refresh = refreshUnderLock(store, workspaceId, connectionId, now, deps).finally(() => {
+  const refresh = refreshWithLease(store, workspaceId, connectionId, now, deps).finally(() => {
     refreshesInFlight.delete(key)
   })
 
@@ -131,96 +139,135 @@ export async function getAccessToken(workspaceId: string, connectionId: string, 
   return refresh
 }
 
-/** In-process single flight; the row lock serializes across processes. */
+/** In-process single flight; the refresh lease serializes across processes. */
 const refreshesInFlight = new Map<string, Promise<string>>()
 
-async function refreshUnderLock(
+function accessTokenOf(connection: StoredConnection): string {
+  const token = openToken(connection, "access_token")
+
+  if (!token) throw new ProviderError("auth", "connection has no access token")
+  return token
+}
+
+/**
+ * Lease-based refresh (migration 029). Why a lease and not the row lock:
+ * `select … for update` held a transaction (and a pooled connection) open
+ * across the provider's token call, and anything written inside it (the
+ * `lastError` of a failed refresh) was rolled back when the error was
+ * rethrown. Now:
+ *  1. take the lease with one conditional autocommitted update
+ *     (`active`, same generation, no live lease); on a miss, wait for the
+ *     holder and re-read (its fresh token is then used: single flight);
+ *  2. call the provider with NO transaction or lock open;
+ *  3. write the tokens with a compare-and-set on the generation read in 1,
+ *     clearing the lease; a disconnect/reconnect meanwhile bumped the
+ *     generation, so the write loses and the orphan tokens are revoked;
+ *  4. on failure, clear the lease and record `lastError` in the same CAS
+ *     write (committed on its own), or flag `needs_reauth` (CAS on the
+ *     same generation) for `invalid_grant`.
+ */
+async function refreshWithLease(
   store: IntegrationStore,
   workspaceId: string,
   connectionId: string,
   now: () => number,
   deps: TokenDeps
 ): Promise<string> {
-  let refreshFailure: unknown
-  let failedGeneration: number | undefined
-  let lost: { provider: IntegrationProvider; tokens: TokenSet } | undefined
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const waitUntil = Date.now() + REFRESH_LEASE_MS + 5_000
 
-  const token = await store.withConnectionLock(workspaceId, connectionId, async (connection, update) => {
+  for (;;) {
+    const connection = await store.getConnection(workspaceId, connectionId)
+
     if (!connection || connection.status !== "active") throw connectionInactive()
+    // Another process refreshed while we waited.
+    if (!expiring(connection, now())) return accessTokenOf(connection)
 
-    // Another job refreshed while we waited for the lock.
-    if (!expiring(connection, now())) {
-      const fresh = openToken(connection, "access_token")
-
-      if (!fresh) throw new ProviderError("auth", "connection has no access token")
-      return fresh
-    }
-
-    const refreshToken = openToken(connection, "refresh_token")
     const provider = (deps.provider ?? getProvider)(connection.provider)
+    const refresh = provider?.oauth?.refresh
 
-    if (!refreshToken || !provider?.oauth?.refresh) {
-      // No refresh path: use the token until the provider rejects it.
-      const existing = openToken(connection, "access_token")
+    // No refresh path: use the token until the provider rejects it.
+    if (!openToken(connection, "refresh_token") || !provider || !refresh) return accessTokenOf(connection)
 
-      if (!existing) throw new ProviderError("auth", "connection has no access token")
-      return existing
-    }
-
-    const generation = connection.generation
-    let refreshed: TokenSet
-
-    try {
-      refreshed = await provider.oauth.refresh(refreshToken)
-    } catch (error) {
-      if (isInvalidGrant(error)) {
-        refreshFailure = error
-        failedGeneration = generation
-        return undefined
-      }
-      await update({ lastError: storedIntegrationError(error, connection.provider) }, generation)
-      throw error
-    }
-
-    // Compare-and-set: discarded when a disconnect/reconnect won the race.
-    const written = await update(
-      {
-        ...sealTokenSet(workspaceId, connectionId, refreshed),
-        expiresAt: refreshed.expiresAt ?? null,
-        ...(refreshed.tokenType ? { tokenType: refreshed.tokenType } : {}),
-        ...(refreshed.scopes.length ? { scopes: refreshed.scopes } : {}),
-        lastRefreshedAt: new Date(now()).toISOString(),
-        lastError: null,
-      },
-      generation
+    const leased = await store.acquireRefreshLease(
+      workspaceId,
+      connectionId,
+      connection.generation,
+      new Date(now() + REFRESH_LEASE_MS),
+      new Date(now())
     )
 
-    if (!written) {
-      lost = { provider, tokens: refreshed }
-      return null
+    if (!leased) {
+      if (Date.now() > waitUntil) {
+        throw new ProviderError("retryable", "token refresh in progress", { providerCode: "refresh_in_progress" })
+      }
+      await sleep(LEASE_POLL_MS)
+      continue
     }
 
-    return refreshed.accessToken
+    return refreshLeased(store, leased, provider, refresh, now, deps)
+  }
+}
+
+async function refreshLeased(
+  store: IntegrationStore,
+  connection: StoredConnection,
+  provider: IntegrationProvider,
+  refresh: (refreshToken: string) => Promise<TokenSet>,
+  now: () => number,
+  deps: TokenDeps
+): Promise<string> {
+  const { workspaceId, id: connectionId, generation } = connection
+  const release = (patch: ConnectionPatch = {}) =>
+    store.updateConnectionIfCurrent(workspaceId, connectionId, generation, { ...patch, refreshLeaseUntil: null }).catch(() => undefined)
+  const refreshToken = openToken(connection, "refresh_token")
+
+  if (!expiring(connection, now()) || !refreshToken) {
+    await release()
+    return accessTokenOf(connection)
+  }
+
+  let refreshed: TokenSet
+
+  try {
+    refreshed = await refresh(refreshToken)
+  } catch (error) {
+    if (isInvalidGrant(error)) {
+      await release()
+      // CAS on the generation that held the rejected grant: a reconnect
+      // meanwhile keeps its fresh connection active.
+      await markConnectionNeedsReauth(workspaceId, connectionId, error, {
+        store,
+        generation,
+        ...(deps.notify ? { notify: deps.notify } : {}),
+      })
+      throw new ProviderError("auth", "refresh rejected; reconnect required", { providerCode: "invalid_grant" })
+    }
+    // Committed on its own, after the provider call (never rolled back).
+    await release({ lastError: storedIntegrationError(error, connection.provider) })
+    throw error
+  }
+
+  // Compare-and-set: discarded when a disconnect/reconnect won the race.
+  const written = await store.updateConnectionIfCurrent(workspaceId, connectionId, generation, {
+    ...sealTokenSet(workspaceId, connectionId, refreshed),
+    expiresAt: refreshed.expiresAt ?? null,
+    ...(refreshed.tokenType ? { tokenType: refreshed.tokenType } : {}),
+    ...(refreshed.scopes.length ? { scopes: refreshed.scopes } : {}),
+    lastRefreshedAt: new Date(now()).toISOString(),
+    lastError: null,
+    refreshLeaseUntil: null,
   })
 
-  if (token === null) {
+  if (!written) {
     // The fresh tokens belong to a connection that no longer exists: revoke them.
-    if (lost?.provider.oauth?.revoke) {
-      await lost.provider.oauth.revoke(lost.tokens).catch((error: unknown) => {
+    if (provider.oauth?.revoke) {
+      await provider.oauth.revoke(refreshed).catch((error: unknown) => {
         integrationLog.warn("revoke of a discarded refresh failed", error)
       })
     }
     throw new ProviderError("auth", "connection changed during refresh", { providerCode: "connection_changed" })
   }
 
-  if (token === undefined) {
-    await markConnectionNeedsReauth(workspaceId, connectionId, refreshFailure ?? "refresh rejected", {
-      store,
-      ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
-      ...(deps.notify ? { notify: deps.notify } : {}),
-    })
-    throw new ProviderError("auth", "refresh rejected; reconnect required", { providerCode: "invalid_grant" })
-  }
-
-  return token
+  return refreshed.accessToken
 }

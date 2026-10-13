@@ -87,7 +87,7 @@ export async function deliverNotionPage(
   let token: Promise<string> | undefined
   const client: NotionClientContext = {
     fetch: input.fetch,
-    // One token per delivery (A refreshes it under a row lock when needed).
+    // One token per delivery (A refreshes it under a refresh lease when needed).
     getAccessToken: () => (token ??= input.getAccessToken()),
     ...(options.env ? { env: options.env } : {}),
     ...(options.sleep ? { sleep: options.sleep } : {}),

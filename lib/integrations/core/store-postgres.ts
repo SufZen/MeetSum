@@ -79,6 +79,7 @@ function toConnection(row: Row): StoredConnection {
     expiresAt: iso(row.expires_at),
     config: json<Record<string, unknown>>(row.config, {}),
     generation: Number(row.token_generation ?? 0) || 0,
+    refreshLeaseUntil: iso(row.refresh_lease_until),
     createdByUserId: str(row.created_by_user_id),
     lastUsedAt: iso(row.last_used_at),
     lastRefreshedAt: iso(row.last_refreshed_at),
@@ -191,6 +192,7 @@ const CONNECTION_COLUMNS: Record<Exclude<keyof ConnectionPatch, "config" | "gene
   refreshTokenEnc: { column: "refresh_token_enc" },
   expiresAt: { column: "expires_at", cast: "timestamptz" },
   lastError: { column: "last_error" },
+  refreshLeaseUntil: { column: "refresh_lease_until", cast: "timestamptz" },
 }
 
 const RULE_COLUMNS: Record<keyof RulePatch, { column: string; cast?: string }> = {
@@ -377,6 +379,20 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
 
     async updateConnectionIfCurrent(workspaceId, id, generation, patch) {
       return updateConnectionWith(db, workspaceId, id, patch, generation)
+    },
+
+    async acquireRefreshLease(workspaceId, id, generation, until, at) {
+      const [row] = await rows(
+        db,
+        `update integration_connections
+            set refresh_lease_until = $4::timestamptz, updated_at = now()
+          where workspace_id = $1 and id = $2 and status = 'active' and token_generation = $3
+            and (refresh_lease_until is null or refresh_lease_until <= $5::timestamptz)
+          returning *`,
+        [workspaceId, id, generation, until.toISOString(), at.toISOString()]
+      )
+
+      return row ? toConnection(row) : undefined
     },
 
     async withConnectionLock(workspaceId, id, fn) {

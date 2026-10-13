@@ -144,6 +144,18 @@ export function createMemoryIntegrationStore(): IntegrationStore {
       return clone(next)
     },
 
+    async acquireRefreshLease(workspaceId, id, generation, until, at) {
+      const row = scoped(connections.get(id), workspaceId)
+
+      if (!row || row.status !== "active" || row.generation !== generation) return undefined
+      if (row.refreshLeaseUntil && Date.parse(row.refreshLeaseUntil) > at.getTime()) return undefined
+
+      const next = applyConnectionPatch(row, { refreshLeaseUntil: until.toISOString() })
+
+      connections.set(id, next)
+      return clone(next)
+    },
+
     async withConnectionLock(workspaceId, id, fn) {
       const previous = locks.get(id) ?? Promise.resolve()
       let release!: () => void

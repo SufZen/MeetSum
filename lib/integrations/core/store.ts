@@ -54,6 +54,11 @@ export type StoredConnection = {
    * Persisted in `integration_connections.token_generation` (migration 028).
    */
   generation: number
+  /**
+   * Refresh lease (migration 029): set while one process refreshes the
+   * tokens of this generation; others wait for it instead of refreshing.
+   */
+  refreshLeaseUntil?: string
   createdByUserId?: string
   lastUsedAt?: string
   lastRefreshedAt?: string
@@ -82,6 +87,7 @@ export type ConnectionPatch = Partial<
   expiresAt?: string | null
   lastError?: string | null
   generation?: number
+  refreshLeaseUntil?: string | null
 }
 
 export type NewConnection = Omit<StoredConnection, "createdAt" | "updatedAt" | "generation"> & { generation?: number }
@@ -219,6 +225,20 @@ export interface IntegrationStore {
     id: string,
     generation: number,
     patch: ConnectionPatch
+  ): Promise<StoredConnection | undefined>
+  /**
+   * Takes the refresh lease (`refresh_lease_until = until`) with one
+   * conditional, autocommitted update: only while the row is `active`, at
+   * `generation`, and has no live lease (null or ≤ `now`). Returns the row
+   * read by that update, or undefined when another holder has it (or the
+   * generation moved). No transaction or row lock outlives this call.
+   */
+  acquireRefreshLease(
+    workspaceId: string,
+    id: string,
+    generation: number,
+    until: Date,
+    now: Date
   ): Promise<StoredConnection | undefined>
   /** SYSTEM: active connections of one provider (tick jobs), instance-wide. */
   systemListActiveConnections(provider: ProviderId): Promise<StoredConnection[]>
