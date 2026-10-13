@@ -36,6 +36,7 @@ import {
 } from "@/lib/comments/types"
 import type { MeetingRecord, MeetingRepository, RepoScope } from "@/lib/meetings/repository"
 import { meetingScopeSql } from "@/lib/meetings/scope-sql"
+import { isWorkspaceVisibleMeeting, memberCanViewMeeting } from "@/lib/meetings/visibility"
 import { enqueueNotification } from "@/lib/notifications/enqueue"
 import { roleRank } from "@/lib/workspaces/constants"
 import { createId } from "@/lib/workspaces/tokens"
@@ -48,6 +49,8 @@ export type CommentStoreContext = {
   meetings: Pick<MeetingRepository, "getMeeting">
   /** Member user ids of the scope's workspace (mention validation). */
   listMemberIds?: (workspaceId: string) => Promise<ReadonlySet<string>>
+  /** Members with emails (notification visibility on private meetings). */
+  listMembers?: (workspaceId: string) => Promise<ReadonlyArray<{ userId: string; email?: string | null }>>
   backend?: CollabBackend
 }
 
@@ -124,6 +127,37 @@ async function defaultMemberIds(workspaceId: string): Promise<ReadonlySet<string
   const members = await getWorkspaceStore().listMembers(workspaceId)
 
   return new Set(members.map((member) => member.userId))
+}
+
+async function defaultMembers(workspaceId: string) {
+  const { getWorkspaceStore } = await import("@/lib/workspaces/store")
+  const members = await getWorkspaceStore().listMembers(workspaceId)
+
+  return members.map((member) => ({ userId: member.userId, email: member.user.email }))
+}
+
+/**
+ * Recipients that can open the meeting. Workspace-visible meetings need no
+ * lookup; on a private meeting a member who is neither the owner nor a
+ * participant is skipped (the notification would leak its existence).
+ */
+async function recipientsWhoCanSee(
+  ctx: CommentStoreContext,
+  meeting: MeetingRecord,
+  userIds: readonly string[]
+): Promise<Set<string>> {
+  if (!userIds.length || isWorkspaceVisibleMeeting(meeting)) return new Set(userIds)
+
+  const members = await (ctx.listMembers ?? defaultMembers)(ctx.scope.workspaceId)
+  const byId = new Map(members.map((member) => [member.userId, member]))
+
+  return new Set(
+    userIds.filter((userId) => {
+      const member = byId.get(userId)
+
+      return Boolean(member && memberCanViewMeeting(meeting, member))
+    })
+  )
 }
 
 async function visibleMeeting(ctx: CommentStoreContext, meetingId: string) {
@@ -400,6 +434,7 @@ export async function listMeetingComments(
 async function notifyForComment(
   ctx: CommentStoreContext,
   backend: CollabBackend,
+  meeting: MeetingRecord,
   comment: StoredComment,
   mentioned: readonly string[],
   parent?: StoredComment
@@ -412,9 +447,13 @@ async function notifyForComment(
     ...(comment.parentId ? { parentId: comment.parentId } : {}),
   }
   const notified = new Set<string>()
+  const allowed = await recipientsWhoCanSee(ctx, meeting, [
+    ...mentioned,
+    ...(parent ? [parent.authorUserId] : []),
+  ])
 
   for (const userId of mentioned) {
-    if (userId === ctx.userId || notified.has(userId)) continue
+    if (userId === ctx.userId || notified.has(userId) || !allowed.has(userId)) continue
     notified.add(userId)
     await enqueueNotification(
       { workspaceId: comment.workspaceId, userId, kind: "mention", payload, actorUserId: ctx.userId },
@@ -422,7 +461,12 @@ async function notifyForComment(
     )
   }
 
-  if (parent && parent.authorUserId !== ctx.userId && !notified.has(parent.authorUserId)) {
+  if (
+    parent &&
+    parent.authorUserId !== ctx.userId &&
+    !notified.has(parent.authorUserId) &&
+    allowed.has(parent.authorUserId)
+  ) {
     await enqueueNotification(
       {
         workspaceId: comment.workspaceId,
@@ -526,7 +570,7 @@ export async function createComment(
     comment.createdAt = toIso(row.created_at) ?? comment.createdAt
   }
 
-  await notifyForComment(ctx, backend, comment, comment.mentions, parent)
+  await notifyForComment(ctx, backend, meeting, comment, comment.mentions, parent)
   return toWire(comment)
 }
 
@@ -537,7 +581,7 @@ export async function editComment(
 ): Promise<MeetingComment> {
   const scope = memberScope(ctx)
   const text = normalizeCommentBody(body)
-  const { backend, comment } = await requireComment(ctx, commentId)
+  const { backend, comment, meeting } = await requireComment(ctx, commentId)
 
   if (comment.authorUserId !== ctx.userId) throw new CommentError("forbidden")
 
@@ -572,7 +616,7 @@ export async function editComment(
 
   const added = updated.mentions.filter((userId) => !comment.mentions.includes(userId))
 
-  await notifyForComment(ctx, backend, updated, added)
+  await notifyForComment(ctx, backend, meeting, updated, added)
   return toWire(updated)
 }
 

@@ -135,6 +135,23 @@ describe("PATCH /api/action-items/:id", () => {
     )
   })
 
+  it("does not notify an assignee who cannot see the (private) meeting", async () => {
+    const db = createInMemoryMeetingDatabase([
+      testMeeting({
+        id: "m_mine",
+        ownerUserId: "user_me",
+        visibility: "private",
+        summary: { overview: "", decisions: [], actionItems: [aiItem("ai_mine", "פרטי")] },
+      }),
+    ])
+
+    await useCtx({}, db)
+    const response = await patch("ai_mine", { meetingId: "m_mine", ownerUserId: "user_dana" })
+
+    expect(response.status).toBe(200)
+    expect(enqueueNotification).not.toHaveBeenCalled()
+  })
+
   it("does not notify when assigning to yourself", async () => {
     await useCtx()
     await patch("ai_1", { meetingId: "m_thu", ownerUserId: "user_me" })

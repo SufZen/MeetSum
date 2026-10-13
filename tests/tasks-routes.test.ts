@@ -235,6 +235,23 @@ describe("POST /api/tasks/bulk", () => {
     )
   })
 
+  it("does not notify an assignee who cannot see the private meeting", async () => {
+    const db = createInMemoryMeetingDatabase([
+      testMeeting({
+        id: "m_mine",
+        ownerUserId: "user_me",
+        visibility: "private",
+        summary: { overview: "", decisions: [], actionItems: [item("mine_1")] },
+      }),
+    ])
+
+    await useCtx({}, db)
+    const response = await post({ ids: ["mine_1"], patch: { ownerUserId: "user_dana" } })
+
+    expect(((await response.json()) as { updated: ActionItem[] }).updated).toHaveLength(1)
+    expect(enqueueNotification).not.toHaveBeenCalled()
+  })
+
   it("reports a storage failure as a 500, not as not found", async () => {
     const db = await useCtx()
     const ctx = await createTestCtx({ workspaceId: "ws_a", database: db })

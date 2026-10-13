@@ -187,6 +187,24 @@ describe("comment store", () => {
     expect(JSON.stringify(collab.notifications)).not.toContain("מסכים")
   })
 
+  it("does not notify mentioned members who cannot see a private meeting", async () => {
+    // user_me is a participant (by email); user_dana is a member who is not.
+    db.meetings.set("m_private", { ...db.meetings.get("m_private")!, participants: ["user_me@example.com"] })
+    const owner: CommentStoreContext = {
+      ...ctx("user_owner"),
+      listMembers: async () =>
+        [...MEMBERS].map((userId) => ({ userId, email: `${userId}@example.com` })),
+    }
+
+    await createComment(owner, "m_private", {
+      targetType: "segment",
+      targetId: "s1",
+      body: "@[Dana](user:user_dana) @[Me](user:user_me) לבדוק",
+    })
+
+    expect(collab.notifications.map((n) => [n.userId, n.kind])).toEqual([["user_me", "mention"]])
+  })
+
   it("threads one level deep on the same target", async () => {
     const me = ctx("user_me")
     const root = await createComment(me, "m_a", { targetType: "segment", targetId: "s1", body: "root" })

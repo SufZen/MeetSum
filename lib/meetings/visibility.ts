@@ -60,6 +60,29 @@ export function canViewMeeting(
   )
 }
 
+/** True when the meeting is visible to every member of its workspace. */
+export function isWorkspaceVisibleMeeting(meeting: Pick<MeetingRecord, "visibility">): boolean {
+  return SHARED_VISIBILITIES.includes(meeting.visibility ?? "workspace")
+}
+
+/**
+ * Whether a workspace member (a notification recipient) can see the meeting:
+ * the same rules as their own member scope. Used to skip mentions, replies
+ * and assignment notifications for members who cannot open a private meeting.
+ */
+export function memberCanViewMeeting(
+  meeting: Pick<MeetingRecord, "workspaceId" | "ownerUserId" | "visibility" | "participantDetails">,
+  member: { userId: string; email?: string | null }
+): boolean {
+  const workspaceId = meeting.workspaceId ?? DEFAULT_WORKSPACE_ID
+
+  return canViewMeeting(
+    { kind: "member", workspaceId, userId: member.userId, email: member.email ?? "", role: "member" },
+    meeting,
+    (meeting.participantDetails ?? []).map((participant) => participant.email)
+  )
+}
+
 const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /**

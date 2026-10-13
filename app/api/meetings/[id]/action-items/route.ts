@@ -79,7 +79,7 @@ export const POST = withAuthz<{ id: string }>(
       targetId: actionItem.id,
       metadata: { meetingId: id },
     })
-    await notifyAssignment(ctx, actionItem, id, undefined)
+    await notifyAssignment(ctx, actionItem, meeting, undefined)
 
     return NextResponse.json({ actionItem }, { status: 201 })
   }

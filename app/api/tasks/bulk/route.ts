@@ -78,7 +78,9 @@ export const POST = withAuthz("meeting:write", async (request, ctx) => {
       metadata: { meetingId: item.meetingId ?? null, fields: Object.keys(patch), bulk: true },
     })
     if (reassigning && item.meetingId && previous?.ownerUserId !== input.ownerUserId) {
-      await notifyAssignment(ctx, item, item.meetingId, previous?.ownerUserId)
+      const meeting = await ctx.meetings.getMeeting(item.meetingId, { includeTranscript: false })
+
+      if (meeting) await notifyAssignment(ctx, item, meeting, previous?.ownerUserId)
     }
   }
 

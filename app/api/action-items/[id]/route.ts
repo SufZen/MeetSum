@@ -79,7 +79,7 @@ export const PATCH = withAuthz<{ id: string }>(
       targetId: id,
       metadata: { meetingId: meeting.id, fields: Object.keys(patch) },
     })
-    await notifyAssignment(ctx, actionItem, meeting.id, current.ownerUserId)
+    await notifyAssignment(ctx, actionItem, meeting, current.ownerUserId)
 
     return NextResponse.json({ actionItem })
   }

@@ -11,6 +11,7 @@ import type {
   ActionItemPatch,
   MeetingRecord,
 } from "@/lib/meetings/repository"
+import { isWorkspaceVisibleMeeting, memberCanViewMeeting } from "@/lib/meetings/visibility"
 import { isDateOnly } from "@/lib/tasks/patch"
 import type { TaskListQuery, TaskMember } from "@/lib/tasks/types"
 import { getWorkspaceStore } from "@/lib/workspaces/store"
@@ -163,15 +164,24 @@ export function toRepositoryPatch(
 export async function notifyAssignment(
   ctx: Pick<AuthContext, "workspace" | "user" | "principal">,
   item: ActionItem,
-  meetingId: string,
+  meeting: Pick<MeetingRecord, "id" | "workspaceId" | "ownerUserId" | "visibility" | "participantDetails">,
   previousOwnerUserId: string | undefined
 ) {
   const assignee = item.ownerUserId
+  const meetingId = meeting.id
 
   if (!assignee || assignee === previousOwnerUserId) return
   if (ctx.principal === "user" && ctx.user?.id === assignee) return
 
   try {
+    // An assignee who cannot open the (private) meeting is not notified:
+    // the notification would point at a meeting they cannot see.
+    if (!isWorkspaceVisibleMeeting(meeting)) {
+      const member = (await listTaskMembers(ctx.workspace.id)).find((candidate) => candidate.userId === assignee)
+
+      if (!member || !memberCanViewMeeting(meeting, member)) return
+    }
+
     await enqueueNotification({
       workspaceId: ctx.workspace.id,
       userId: assignee,
