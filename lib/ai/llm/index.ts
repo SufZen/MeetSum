@@ -40,6 +40,18 @@ export type { LlmPreference, LlmRoute } from "@/lib/ai/llm/router"
 type Env = Record<string, string | undefined>
 type ProviderMap = Record<LlmRoute["provider"], LlmProvider>
 
+/** Deadline of an interactive (user-waiting) LLM request. */
+export const INTERACTIVE_LLM_TIMEOUT_MS = 60_000
+
+/**
+ * Options for interactive LLM tasks (prep brief, follow-up, sentiment POST):
+ * a 60s abort deadline and one transport retry, so a stuck provider never
+ * holds a request (or the caller's budget) for the SDK's default minutes.
+ */
+export function interactiveLlmOptions(): { signal: AbortSignal; maxRetries: number } {
+  return { signal: AbortSignal.timeout(INTERACTIVE_LLM_TIMEOUT_MS), maxRetries: 1 }
+}
+
 let overrides: Partial<ProviderMap> | undefined
 let defaults: ProviderMap | undefined
 

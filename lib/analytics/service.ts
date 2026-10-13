@@ -17,6 +17,7 @@ import {
   reaggregateSentiment,
 } from "@/lib/analytics/sentiment"
 import { getMeetingAnalytics, upsertMeetingAnalytics } from "@/lib/analytics/store"
+import { describeLlmFailure } from "@/lib/ai/llm/types"
 import {
   MEETING_ANALYTICS_VERSION,
   type MeetingAnalyticsRecord,
@@ -113,7 +114,7 @@ export async function recomputeMeetingAnalytics(
   scope: RepoScope,
   repo: MeetingRepository,
   meeting: MeetingRecord,
-  options: { sentiment?: boolean; force?: boolean; jobId?: string } = {}
+  options: { sentiment?: boolean; force?: boolean; jobId?: string; interactive?: boolean } = {}
 ): Promise<{ analytics: MeetingAnalyticsRecord | undefined; sentiment: "ok" | "skipped" | "failed" }> {
   const inputs = await loadInputs(repo, meeting)
   const stored = await getMeetingAnalytics(scope, meeting.id)
@@ -132,13 +133,13 @@ export async function recomputeMeetingAnalytics(
         language: inputs.language,
         previous: options.force ? undefined : stored?.sentiment,
         jobId: options.jobId,
+        ...(options.interactive ? { interactive: true } : {}),
       })
       sentimentStatus = sentiment ? "ok" : "failed"
     } catch (error) {
       sentimentStatus = "failed"
-      console.warn(
-        `[analytics] sentiment failed for ${meeting.id}: ${error instanceof Error ? error.message : String(error)}`
-      )
+      // Error kind only: provider/parse messages can carry model output.
+      console.warn(`[analytics] sentiment failed for ${meeting.id}: ${describeLlmFailure(error)}`)
     }
   }
 

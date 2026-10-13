@@ -26,6 +26,7 @@ import {
   listFollowUpVariants,
   type FollowUpOutput,
 } from "@/lib/intelligence/follow-up"
+import { resetLlmOnDemandForTesting } from "@/lib/intelligence/on-demand"
 import { resetMemoryGeneratedDocs } from "@/lib/intelligence/prep/generated-docs"
 import { createInMemoryMeetingDatabase, type MeetingRecord, type RepoScope } from "@/lib/meetings/repository"
 
@@ -69,6 +70,7 @@ function answer(request: LlmStructuredRequest<FollowUpOutput>) {
 
 beforeEach(() => {
   resetMemoryGeneratedDocs()
+  resetLlmOnDemandForTesting()
   generateStructured.mockReset()
   generateStructured.mockImplementation(async (request) => answer(request))
 })

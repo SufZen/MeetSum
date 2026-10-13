@@ -3,12 +3,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   applyRateLimitHeaders,
   checkRateLimit,
+  checkRateLimitWindows,
   extractRateLimitKey,
   getClientIp,
+  llmOnDemandWindows,
   RATE_LIMIT_PRESETS,
   type RateLimitConfig,
   rateLimitRequest,
 } from "@/lib/rate-limit"
+
+describe("multi-window rate limit (llmOnDemand)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("has writer and non-writer presets", () => {
+    expect(RATE_LIMIT_PRESETS.llmOnDemand.writer).toEqual([
+      { maxRequests: 3, windowMs: 60_000 },
+      { maxRequests: 20, windowMs: 3_600_000 },
+    ])
+    expect(RATE_LIMIT_PRESETS.llmOnDemand.nonWriter).toEqual([
+      { maxRequests: 2, windowMs: 60_000 },
+      { maxRequests: 10, windowMs: 3_600_000 },
+    ])
+    expect(llmOnDemandWindows(true)).toBe(RATE_LIMIT_PRESETS.llmOnDemand.writer)
+    expect(llmOnDemandWindows(false)).toBe(RATE_LIMIT_PRESETS.llmOnDemand.nonWriter)
+  })
+
+  it("enforces the per-minute and the per-hour window", () => {
+    const windows = llmOnDemandWindows(false)
+    const key = "llm-test:viewer"
+
+    expect(checkRateLimitWindows(key, windows).allowed).toBe(true)
+    expect(checkRateLimitWindows(key, windows).allowed).toBe(true)
+
+    const blocked = checkRateLimitWindows(key, windows)
+
+    expect(blocked.allowed).toBe(false)
+    expect(blocked.resetMs - Date.now()).toBeLessThanOrEqual(60_000)
+
+    // 10 per hour: after the minute resets, 8 more are allowed, then blocked.
+    for (let index = 0; index < 4; index += 1) {
+      vi.advanceTimersByTime(61_000)
+      expect(checkRateLimitWindows(key, windows).allowed).toBe(true)
+      expect(checkRateLimitWindows(key, windows).allowed).toBe(true)
+    }
+    vi.advanceTimersByTime(61_000)
+
+    const hourly = checkRateLimitWindows(key, windows)
+
+    expect(hourly.allowed).toBe(false)
+    expect(hourly.resetMs - Date.now()).toBeGreaterThan(60_000)
+  })
+})
 
 describe("rate limiter", () => {
   const config: RateLimitConfig = { maxRequests: 3, windowMs: 1000 }
@@ -116,7 +167,9 @@ describe("rate limit presets", () => {
   })
 
   it("all presets have a window of at least 1 second", () => {
-    for (const preset of Object.values(RATE_LIMIT_PRESETS)) {
+    const { llmOnDemand, ...single } = RATE_LIMIT_PRESETS
+
+    for (const preset of [...Object.values(single), ...llmOnDemand.writer, ...llmOnDemand.nonWriter]) {
       expect(preset.windowMs).toBeGreaterThanOrEqual(1000)
     }
   })

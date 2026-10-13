@@ -74,6 +74,21 @@ describe("Gemini provider", () => {
     expect(params.contents[0].parts[0].text).toBe("סכם")
   })
 
+  it("passes the abort signal and caps transport retries for interactive requests", async () => {
+    genai.generateContent.mockResolvedValue(response(JSON.stringify({ title: "x", tags: [] })))
+    const provider = createGeminiProvider({ env })
+    const signal = AbortSignal.timeout(60_000)
+
+    await provider.generate(request({ signal, maxRetries: 1 }), "gemini-3.8-flash")
+    await provider.generate(request(), "gemini-3.8-flash")
+
+    const [interactive, background] = genai.generateContent.mock.calls.map(([params]) => params)
+
+    expect(interactive.config.abortSignal).toBe(signal)
+    expect(interactive.config.httpOptions).toEqual({ retryOptions: { attempts: 2 } })
+    expect(background.config.httpOptions).toBeUndefined()
+  })
+
   it("keeps the system instruction identical across tasks", async () => {
     genai.generateContent.mockResolvedValue(response(JSON.stringify({ title: "x", tags: [] })))
     const provider = createGeminiProvider({ env })

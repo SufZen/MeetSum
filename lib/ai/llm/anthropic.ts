@@ -178,7 +178,13 @@ export function createAnthropicProvider(options: AnthropicProviderOptions = {}):
 
       const call = async (repair?: string): Promise<RawCompletion> => {
         const params = buildAnthropicParams(req, model, { env, repair })
-        const requestOptions = req.signal ? { signal: req.signal } : undefined
+        const requestOptions =
+          req.signal || req.maxRetries !== undefined
+            ? {
+                ...(req.signal ? { signal: req.signal } : {}),
+                ...(req.maxRetries !== undefined ? { maxRetries: req.maxRetries } : {}),
+              }
+            : undefined
         let message: AnthropicMessage
 
         try {

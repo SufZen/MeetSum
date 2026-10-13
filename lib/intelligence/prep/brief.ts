@@ -8,8 +8,9 @@
  */
 import { z } from "zod"
 
-import { generateStructured } from "@/lib/ai/llm"
+import { generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
 import { sha1Hex } from "@/lib/intelligence/normalize"
+import { getEphemeral, onDemandKey, setEphemeral, singleFlight } from "@/lib/intelligence/on-demand"
 import {
   getGeneratedDoc,
   upsertGeneratedDoc,
@@ -363,7 +364,36 @@ export async function generatePrepBrief(
   scope: RepoScope,
   meetings: MeetingRepository,
   meeting: MeetingRecord,
-  options: { language?: string; actorUserId?: string; force?: boolean; now?: Date; canWrite: boolean }
+  options: GeneratePrepOptions
+): Promise<PrepBriefResult> {
+  if (!options.actorKey) return generatePrepBriefOnce(scope, meetings, meeting, options)
+
+  const language = resolveDocLanguage(meeting, options.language)
+  const flightKey = onDemandKey({
+    actorKey: options.actorKey,
+    meetingId: meeting.id,
+    kind: "prep_brief",
+    variant: `${language}:${options.force ? "force" : "auto"}`,
+  })
+
+  return singleFlight(flightKey, () => generatePrepBriefOnce(scope, meetings, meeting, options))
+}
+
+type GeneratePrepOptions = {
+  language?: string
+  actorUserId?: string
+  /** Principal key (`user:…`/`api_key:…`): single-flight and the ephemeral cache. */
+  actorKey?: string
+  force?: boolean
+  now?: Date
+  canWrite: boolean
+}
+
+async function generatePrepBriefOnce(
+  scope: RepoScope,
+  meetings: MeetingRepository,
+  meeting: MeetingRecord,
+  options: GeneratePrepOptions
 ): Promise<PrepBriefResult> {
   const language = resolveDocLanguage(meeting, options.language)
   const related = await findRelatedMeetings(meetings, meeting, { now: options.now })
@@ -389,6 +419,22 @@ export async function generatePrepBrief(
     }
   }
 
+  // A caller who can't write gets a result that is never persisted: keep it
+  // briefly so repeating the same request does not call the model again.
+  const ephemeralKey =
+    !options.canWrite && options.actorKey
+      ? onDemandKey({
+          actorKey: options.actorKey,
+          meetingId: meeting.id,
+          kind: "prep_brief",
+          variant: language,
+          inputHash,
+        })
+      : undefined
+  const remembered = ephemeralKey ? getEphemeral<PrepBriefResult>(ephemeralKey) : undefined
+
+  if (remembered) return { ...remembered, related }
+
   const meetingAliases = new Set(context.meetings.map((item) => item.alias))
   const taskAliases = new Set(context.tasks.map((item) => item.alias))
   const result = await generateStructured<PrepBriefOutput>({
@@ -398,6 +444,7 @@ export async function generatePrepBrief(
     instructions: prepInstructions(context),
     schema: { name: "prep_brief", zod: prepBriefSchema },
     effort: "medium",
+    ...interactiveLlmOptions(),
     validate: (value) => [
       ...[...value.whereWeLeftOff, ...value.previousDecisions]
         .filter((item) => !meetingAliases.has(item.meeting.trim()))
@@ -410,7 +457,7 @@ export async function generatePrepBrief(
   const brief = mapPrepOutput(result.value, context)
 
   if (!options.canWrite) {
-    return {
+    const ephemeralResult: PrepBriefResult = {
       brief,
       related,
       language,
@@ -418,6 +465,9 @@ export async function generatePrepBrief(
       aiRunId: result.aiRunId,
       ephemeral: true,
     }
+
+    if (ephemeralKey) setEphemeral(ephemeralKey, ephemeralResult)
+    return ephemeralResult
   }
 
   const saved = await upsertGeneratedDoc<PrepBrief>(scope, {

@@ -14,8 +14,9 @@
  */
 import { z } from "zod"
 
-import { generateStructured } from "@/lib/ai/llm"
+import { generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
 import { sha1Hex } from "@/lib/intelligence/normalize"
+import { getEphemeral, onDemandKey, setEphemeral, singleFlight } from "@/lib/intelligence/on-demand"
 import {
   getGeneratedDoc,
   listGeneratedDocs,
@@ -244,10 +245,37 @@ export async function listFollowUpVariants(
  * Throws FollowUpUnavailableError when there is nothing to follow up on; LLM
  * errors propagate.
  */
+type GenerateFollowUpOptions = FollowUpOptions & {
+  force?: boolean
+  actorUserId?: string
+  /** Principal key (`user:…`/`api_key:…`): single-flight and the ephemeral cache. */
+  actorKey?: string
+  canWrite: boolean
+}
+
 export async function generateFollowUpEmail(
   scope: RepoScope,
   meeting: MeetingRecord,
-  options: FollowUpOptions & { force?: boolean; actorUserId?: string; canWrite: boolean }
+  options: GenerateFollowUpOptions
+): Promise<FollowUpVariant> {
+  if (!options.actorKey) return generateFollowUpEmailOnce(scope, meeting, options)
+
+  const flightKey = onDemandKey({
+    actorKey: options.actorKey,
+    meetingId: meeting.id,
+    kind: "follow_up_email",
+    variant: `${followUpVariantKey(options)}:${options.includeActionItems ? 1 : 0}:${options.force ? "force" : "auto"}`,
+  })
+
+  return singleFlight(flightKey, () => generateFollowUpEmailOnce(scope, meeting, options))
+}
+
+type EphemeralFollowUp = { content: FollowUpContent; createdAt: string; aiRunId?: string }
+
+async function generateFollowUpEmailOnce(
+  scope: RepoScope,
+  meeting: MeetingRecord,
+  options: GenerateFollowUpOptions
 ): Promise<FollowUpVariant> {
   const hasContent =
     Boolean(meeting.summary?.overview ?? meeting.intelligence?.overview) ||
@@ -268,6 +296,25 @@ export async function generateFollowUpEmail(
     if (served) return served
   }
 
+  // Non-persisted (viewer) results are remembered briefly per caller.
+  const ephemeralKey =
+    !options.canWrite && options.actorKey
+      ? onDemandKey({
+          actorKey: options.actorKey,
+          meetingId: meeting.id,
+          kind: "follow_up_email",
+          variant,
+          inputHash,
+        })
+      : undefined
+  const remembered = ephemeralKey ? getEphemeral<EphemeralFollowUp>(ephemeralKey) : undefined
+
+  if (remembered) {
+    const served = toVariant(meeting, { variant, ...remembered }, assembly)
+
+    if (served) return { ...served, ephemeral: true }
+  }
+
   const result = await generateStructured<FollowUpOutput>({
     task: "follow_up",
     ctx: { workspaceId: scope.workspaceId, meetingId: meeting.id, promptVersion: FOLLOW_UP_PROMPT_VERSION },
@@ -275,6 +322,7 @@ export async function generateFollowUpEmail(
     instructions: followUpInstructions(meeting, key),
     schema: { name: "follow_up_email", zod: followUpSchema },
     effort: "low",
+    ...interactiveLlmOptions(),
     validate: (value) => (value.subject.trim() ? [] : ["subject must not be empty"]),
   })
   const content: FollowUpContent = {
@@ -285,14 +333,10 @@ export async function generateFollowUpEmail(
   }
 
   if (!options.canWrite) {
-    return {
-      ...toVariant(
-        meeting,
-        { variant, content, createdAt: new Date().toISOString(), aiRunId: result.aiRunId },
-        assembly
-      )!,
-      ephemeral: true,
-    }
+    const generated: EphemeralFollowUp = { content, createdAt: new Date().toISOString(), aiRunId: result.aiRunId }
+
+    if (ephemeralKey) setEphemeral(ephemeralKey, generated)
+    return { ...toVariant(meeting, { variant, ...generated }, assembly)!, ephemeral: true }
   }
 
   const saved = await upsertGeneratedDoc<FollowUpContent>(scope, {

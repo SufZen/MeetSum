@@ -104,6 +104,16 @@ describe("Anthropic provider", () => {
     expect(params.messages).toEqual([{ role: "user", content: "החזר כותרת" }])
   })
 
+  it("passes the abort signal and per-request maxRetries for interactive requests", async () => {
+    sdk.create.mockResolvedValue(message(JSON.stringify({ title: "x" }), { model: "claude-haiku-5-5" }))
+    const provider = createAnthropicProvider({ env })
+    const signal = AbortSignal.timeout(60_000)
+
+    await provider.generate(request({ task: "title_tags_type", signal, maxRetries: 1 }), "claude-haiku-5-5")
+
+    expect(sdk.create.mock.calls[0][1]).toEqual({ signal, maxRetries: 1 })
+  })
+
   it("keeps the cached prefix byte-identical across tasks", async () => {
     sdk.create.mockImplementation(async () =>
       message(JSON.stringify({ title: "x" }), { model: "claude-haiku-5-5" })

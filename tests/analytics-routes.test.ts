@@ -127,7 +127,9 @@ describe("POST /api/meetings/:id/analytics/sentiment", () => {
     expect(body.sentiment).toBe("ok")
     expect(body.analytics.sentiment.bySpeaker.map((s: { label: string }) => s.label)).toEqual(["neutral", "positive"])
     expect(body.analytics.sentimentAiRunId).toBe("run_s")
-    expect(generateStructured).toHaveBeenCalledWith(expect.objectContaining({ task: "sentiment" }))
+    expect(generateStructured).toHaveBeenCalledWith(
+      expect.objectContaining({ task: "sentiment", signal: expect.any(AbortSignal), maxRetries: 1 })
+    )
 
     const read = await (await get("m_a")).json()
 

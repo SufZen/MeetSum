@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server"
 
 import { llmErrorResponse } from "@/app/api/_lib/llm-errors"
-import { creatorUserId, loadVisibleMeeting, meetingNotFound } from "@/app/api/_lib/meeting-access"
+import {
+  creatorUserId,
+  loadVisibleMeeting,
+  meetingNotFound,
+  principalKey,
+} from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { can, toRepoScope, withAuthz } from "@/lib/auth/authz"
+import { limitLlmOnDemand } from "@/lib/intelligence/on-demand"
 import { generatePrepBrief, getPrepBrief } from "@/lib/intelligence/prep/brief"
 
 function parseLanguage(value: unknown): string | undefined | false {
@@ -52,9 +58,17 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
   }
   // The brief is one shared row per meeting and language: overwriting a
   // cached brief needs meeting:write.
-  if (body?.force === true && !can(ctx.role, "meeting:write")) {
+  const canWrite = can(ctx.role, "meeting:write")
+
+  if (body?.force === true && !canWrite) {
     return NextResponse.json({ error: "Forbidden", permission: "meeting:write" }, { status: 403 })
   }
+
+  const actorKey = principalKey(ctx)
+  // Shared on-demand LLM budget (prep + follow-up), after authz and visibility.
+  const limited = limitLlmOnDemand({ workspaceId: ctx.workspace.id, actorKey, canWrite })
+
+  if (limited) return limited
 
   try {
     return NextResponse.json(
@@ -62,7 +76,8 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
         language,
         force: body?.force === true,
         actorUserId: creatorUserId(ctx),
-        canWrite: can(ctx.role, "meeting:write"),
+        actorKey,
+        canWrite,
       })
     )
   } catch (error) {

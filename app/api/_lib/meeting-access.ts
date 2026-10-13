@@ -45,6 +45,13 @@ export function auditActor(ctx: Pick<AuthContext, "audit">) {
   }
 }
 
+/** Stable principal key for per-caller budgets and caches. */
+export function principalKey(ctx: Pick<AuthContext, "principal" | "user" | "apiKey">): string {
+  return ctx.principal === "user"
+    ? `user:${ctx.user?.id ?? "unknown"}`
+    : `api_key:${ctx.apiKey?.id ?? "unknown"}`
+}
+
 /** User id that owns meetings created by this principal. */
 export function creatorUserId(
   ctx: Pick<AuthContext, "principal" | "user" | "apiKey">

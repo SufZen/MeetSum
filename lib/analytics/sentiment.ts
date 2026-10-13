@@ -16,7 +16,7 @@ import type {
   SentimentLabel,
   SentimentTurn,
 } from "@/lib/analytics/types"
-import { generateStructured } from "@/lib/ai/llm"
+import { describeLlmFailure, generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
 import type { Chapter } from "@/lib/intelligence"
 import { sha1Hex } from "@/lib/intelligence/normalize"
 import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
@@ -49,6 +49,8 @@ export type AnalyzeSentimentInput = {
   /** Previous result: its cached turns are reused by text hash. */
   previous?: MeetingSentiment
   jobId?: string
+  /** A user is waiting (POST): 60s deadline and one transport retry per batch. */
+  interactive?: boolean
 }
 
 export type SpeakerTurn = {
@@ -205,6 +207,7 @@ export async function analyzeSentiment(
         effort: "low",
         validate: (value) =>
           value.turns.filter((item) => !aliases.has(item.turn)).map((item) => `unknown turn id ${item.turn}`),
+        ...(input.interactive ? interactiveLlmOptions() : {}),
       })
       const byAlias = new Map(batch.map((turn) => [turn.alias, turn]))
 
@@ -226,11 +229,8 @@ export async function analyzeSentiment(
       model = result.model
     } catch (error) {
       failedTurns += batch.length
-      console.warn(
-        `[sentiment] batch failed for meeting ${input.meetingId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      )
+      // Error kind only: provider/parse messages can carry model output.
+      console.warn(`[sentiment] batch failed for meeting ${input.meetingId}: ${describeLlmFailure(error)}`)
     }
   }
 

@@ -112,6 +112,10 @@ export function buildGeminiParams<T>(
       responseJsonSchema: zodToProviderSchema(req.schema.zod),
       maxOutputTokens: req.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       ...(req.signal ? { abortSignal: req.signal } : {}),
+      // `attempts` counts the original request too.
+      ...(req.maxRetries !== undefined
+        ? { httpOptions: { retryOptions: { attempts: Math.max(1, req.maxRetries + 1) } } }
+        : {}),
     },
   }
 }

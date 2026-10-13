@@ -49,6 +49,11 @@ export type LlmStructuredRequest<T> = {
   /** Semantic errors -> one repair retry. */
   validate?: (value: T) => string[]
   signal?: AbortSignal
+  /**
+   * Transport retries per provider call (SDK default when unset). Interactive
+   * tasks use 1 with a 60s `signal` (see `interactiveLlmOptions`).
+   */
+  maxRetries?: number
   batch?: boolean
   /**
    * Provider preference; defaults to the workspace `llmProviderPreference`
@@ -104,6 +109,17 @@ export class LlmError extends Error {
     super(message)
     this.name = "LlmError"
   }
+}
+
+/**
+ * Loggable description of an LLM failure: error name, kind and provider
+ * only. Messages are never included (parse and provider errors can carry
+ * fragments of the model output or the prompt).
+ */
+export function describeLlmFailure(error: unknown): string {
+  if (error instanceof LlmError) return `${error.name} (${error.kind}, ${error.provider})`
+  if (error instanceof Error) return error.name || "Error"
+  return "unknown error"
 }
 
 export type LlmProvider = {

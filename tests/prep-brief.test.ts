@@ -21,6 +21,8 @@ import { GET, POST } from "@/app/api/meetings/[id]/prep/route"
 import { LlmError, type LlmStructuredRequest } from "@/lib/ai/llm"
 import { generatePrepBrief, getPrepBrief, type PrepBriefOutput } from "@/lib/intelligence/prep/brief"
 import { resetMemoryGeneratedDocs } from "@/lib/intelligence/prep/generated-docs"
+import { resetLlmOnDemandForTesting } from "@/lib/intelligence/on-demand"
+import { POST as followUpPost } from "@/app/api/meetings/[id]/follow-up/route"
 import {
   createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
@@ -111,6 +113,7 @@ const output: PrepBriefOutput = {
 beforeEach(() => {
   seed()
   resetMemoryGeneratedDocs()
+  resetLlmOnDemandForTesting()
   generateStructured.mockReset()
   generateStructured.mockResolvedValue(llmResult(output))
 })
@@ -325,6 +328,57 @@ describe("/api/meetings/:id/prep authorization", () => {
     expect(response.ephemeral).toBe(true)
     expect((await (await GET(new Request("http://x"), routeParams({ id: "m_target" }))).json()).brief).toBeNull()
     expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_secret" }))).status).toBe(404)
+  })
+
+  it("rate-limits a viewer's on-demand generation (shared with follow-up) with 429 and Retry-After", async () => {
+    setRouteCtx(await createTestCtx({ role: "viewer", userId: "user_other", email: "other@x.co", database }))
+
+    expect((await POST(jsonRequest("http://x", "POST", { language: "he" }), routeParams({ id: "m_target" }))).status).toBe(200)
+    expect((await POST(jsonRequest("http://x", "POST", { language: "en" }), routeParams({ id: "m_target" }))).status).toBe(200)
+
+    const blocked = await POST(jsonRequest("http://x", "POST", { language: "he" }), routeParams({ id: "m_target" }))
+
+    expect(blocked.status).toBe(429)
+    expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0)
+    // The budget is shared with follow-up emails.
+    expect(
+      (await followUpPost(jsonRequest("http://x", "POST", { language: "he" }), routeParams({ id: "m_prev" }))).status
+    ).toBe(429)
+    expect(generateStructured).toHaveBeenCalledTimes(2)
+    // Invisible meetings are still 404 (the limiter runs after the visibility check).
+    expect((await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_secret" }))).status).toBe(404)
+  })
+
+  it("serves a viewer's repeated identical request from the ephemeral cache", async () => {
+    setRouteCtx(await createTestCtx({ role: "viewer", userId: "user_other", email: "other@x.co", database }))
+
+    const first = await (await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).json()
+    const second = await (await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))).json()
+
+    expect(generateStructured).toHaveBeenCalledTimes(1)
+    expect(second).toMatchObject({ ephemeral: true, brief: first.brief })
+  })
+
+  it("collapses concurrent identical requests into one LLM call", async () => {
+    setRouteCtx(await createTestCtx({ role: "member", userId: "user_me", email: "me@x.co", database }))
+
+    const responses = await Promise.all([
+      POST(jsonRequest("http://x", "POST", { force: true }), routeParams({ id: "m_target" })),
+      POST(jsonRequest("http://x", "POST", { force: true }), routeParams({ id: "m_target" })),
+    ])
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(generateStructured).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes a 60s timeout and a single transport retry to the LLM layer", async () => {
+    setRouteCtx(await createTestCtx({ role: "member", userId: "user_me", email: "me@x.co", database }))
+    await POST(jsonRequest("http://x", "POST", {}), routeParams({ id: "m_target" }))
+
+    const request = generateStructured.mock.calls[0][0] as LlmStructuredRequest<PrepBriefOutput>
+
+    expect(request.signal).toBeInstanceOf(AbortSignal)
+    expect(request.maxRetries).toBe(1)
   })
 
   it("a W2 member gets 404 for a W1 meeting", async () => {

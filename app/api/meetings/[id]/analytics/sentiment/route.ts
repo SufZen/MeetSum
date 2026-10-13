@@ -28,6 +28,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   const result = await recomputeMeetingAnalytics(toRepoScope(ctx), ctx.meetings, meeting, {
     sentiment: true,
     force: body.force === true,
+    interactive: true,
   })
 
   return NextResponse.json(
