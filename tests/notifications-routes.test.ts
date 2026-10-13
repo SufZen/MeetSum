@@ -107,6 +107,7 @@ describe("GET /api/notifications", () => {
     expect(byId.n3?.href).toBe("/he?panel=settings&section=integrations")
     expect(byId.n4?.href).toBe("/he/invite/accept?id=inv_1")
     expect(byId.n4?.payload.workspaceName).toBe("Acme B")
+    expect(byId.n4?.payload.workspaceId).toBeUndefined()
   })
 
   it("paginates with a cursor and filters unread", async () => {

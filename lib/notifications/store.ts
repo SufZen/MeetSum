@@ -313,6 +313,8 @@ export async function toNotificationDTOs(
       href = invitationId ? `/${reader.locale}/invite/accept?id=${encodeURIComponent(invitationId)}` : ""
       const workspaceName = workspaceNames.get(String(payload.workspaceId ?? ""))
       if (workspaceName) payload.workspaceName = workspaceName
+      // The invitee is not a member yet: no workspace id leaves the server.
+      delete payload.workspaceId
     } else if (meetingId && seen) {
       const startMs = typeof payload.startMs === "number" ? payload.startMs : undefined
 
