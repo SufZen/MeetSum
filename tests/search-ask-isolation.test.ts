@@ -62,14 +62,18 @@ const ROOMS = {
   room_w2: { workspaceId: "ws_b", name: "W2 room" },
 } as const
 
+/** Tags only the private and the W2 meeting carry (facet leaks). */
+const PRIVATE_TAG = "legal" as const
+const W2_TAG = "real-estate" as const
+
 /** The shared corpus plus tags/rooms on the private and W2 meetings (facet leaks). */
 function corpus(): MeetingRecord[] {
   return searchCorpus().map((meeting) => {
-    if (meeting.id === "m_private") return { ...meeting, tags: ["secret-tag"] }
+    if (meeting.id === "m_private") return { ...meeting, tags: [PRIVATE_TAG] }
     if (meeting.id === "m_w2") {
       return {
         ...meeting,
-        tags: ["w2-tag"],
+        tags: [W2_TAG],
         contexts: [{ id: "room_w2", name: ROOMS.room_w2.name, createdAt: "2026-01-01T00:00:00.000Z" }],
       }
     }
@@ -124,8 +128,8 @@ const MARKERS: Record<string, string[]> = {
   // (Not "Supabase": the fixed style guide in every prompt mentions it.)
   m_budget: ["m_budget", "ישיבת תקציב רבעונית", "room_fin", "finance", "1,200 שקל"],
   m_hiring: ["m_hiring", "גיוס מפתחים", "room_hr", "נגייס שני מפתחים"],
-  m_private: ["m_private", "שיחה פרטית על תקציב", "secret-tag", "התקציב הנסתר"],
-  m_w2: ["m_w2", "Workspace B", "room_w2", "w2-tag", "התקציב של B", "ws_b"],
+  m_private: ["m_private", "שיחה פרטית על תקציב", "התקציב הנסתר"],
+  m_w2: ["m_w2", "Workspace B", "room_w2", "התקציב של B", "ws_b"],
 }
 
 function forbiddenMarkers(who: Who): string[] {
@@ -226,10 +230,7 @@ function recordingPgEngine(db: PgliteSearchDb): SearchEngine {
     return db.client.query(text, values)
   }
 
-  return createPgSearchEngine({
-    client: { query, connect: async () => ({ query, release: () => undefined }) },
-    capabilities: lexicalCaps(db.hebrewTrigrams),
-  })
+  return createPgSearchEngine({ client: { query }, capabilities: lexicalCaps(db.hebrewTrigrams) })
 }
 
 const ENGINES: { name: string; create: () => SearchEngine | null }[] = [
@@ -304,7 +305,13 @@ describe.each(ENGINES)("isolation on the $name", ({ name, create }) => {
       const facets = await get(facetsRoute, "/search/facets")
 
       expect(facets.status).toBe(200)
-      expectNoLeak(who, await facets.json(), "facets")
+
+      const facetBody = await facets.json()
+
+      expectNoLeak(who, facetBody, "facets")
+      if (!who.visible.includes("m_private")) expect(facetBody.tags, who.name).not.toContain(PRIVATE_TAG)
+      if (!who.visible.includes("m_w2")) expect(facetBody.tags, who.name).not.toContain(W2_TAG)
+      if (who.visible.includes("m_w2")) expect(facetBody.tags, who.name).not.toContain("finance")
 
       for (const path of [`/meetings/search?q=${encodeURIComponent("תקציב")}`, `/memory/search?query=${encodeURIComponent("תקציב")}`]) {
         const response = await get(path.startsWith("/memory") ? memorySearchRoute : legacySearchRoute, path)
