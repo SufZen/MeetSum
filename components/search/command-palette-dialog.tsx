@@ -9,6 +9,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowUpRightIcon, CalendarDaysIcon, SearchIcon } from "lucide-react"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { defaultPaletteSelection } from "@/components/search/palette-selection"
 import { formatMeetingDate } from "@/components/search/search-results"
 import { fetchSearch } from "@/components/search/use-search"
@@ -41,6 +42,8 @@ export function CommandPaletteDialog({
   dictionary: Dictionary
 }) {
   const router = useRouter()
+  // A's resolved zone (user → workspace → env); the formatter's default otherwise.
+  const timeZone = useOptionalI18n()?.timeZone
   const [value, setValue] = useState("")
   const [groups, setGroups] = useState<SearchMeetingGroup[]>([])
   const [searchedFor, setSearchedFor] = useState("")
@@ -157,7 +160,7 @@ export function CommandPaletteDialog({
                     <bdi dir={dirForLanguage(group.meeting.language)}>{group.meeting.title || t.searchUntitled}</bdi>
                   </span>
                   <time dateTime={group.meeting.startedAt} className="shrink-0 text-xs text-fg-3">
-                    {formatMeetingDate(group.meeting.startedAt, locale)}
+                    {formatMeetingDate(group.meeting.startedAt, locale, timeZone)}
                   </time>
                 </CommandItem>
               ))}

@@ -24,7 +24,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { apiErrorText } from "@/lib/i18n/api-errors"
-import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { JobRecord } from "@/lib/meetings/repository"
 
 const MAX_SELECTION = 5
@@ -86,8 +85,6 @@ export function DriveRecordingPickerDrawer({
   onOpenChange,
   onImported,
 }: {
-  /** @deprecated Strings come from `useI18n()`; kept for existing callers. */
-  dictionary?: Dictionary
   open: boolean
   onOpenChange: (open: boolean) => void
   onImported: (result: DriveImportResult) => void

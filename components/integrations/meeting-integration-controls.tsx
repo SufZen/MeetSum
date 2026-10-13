@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
 import { SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { integrationsApi, type MeetingPrefsResponse } from "@/components/integrations/api"
 import { im } from "@/components/integrations/messages"
+import { useDictionary } from "@/components/i18n-provider"
 import {
   DELIVERY_STATUS_KEYS,
   hasDefaultDestination,
@@ -31,8 +31,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
-import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries"
-import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { EmailRecapPreference, IntegrationConnectionDTO } from "@/lib/integrations/core/types"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
 
@@ -60,11 +59,7 @@ export function MeetingIntegrationControls({
   isOwner: boolean
   canManage: boolean
 }) {
-  const params = useParams<{ locale?: string }>()
-  const locale = (SUPPORTED_LOCALES as readonly string[]).includes(params?.locale ?? "")
-    ? (params?.locale as SupportedLocale)
-    : "en"
-  const t: Dictionary = getDictionary(locale)
+  const t: Dictionary = useDictionary()
   const { can } = useWorkspace()
   const canWrite = can("meeting:write")
   const canConnect = can("integrations:connect")

@@ -14,8 +14,8 @@ import {
 import Link from "next/link"
 
 import { LazyAskPanel } from "@/components/ask/lazy"
-import { useI18n } from "@/components/i18n-provider"
-import { formatMessage, getDictionary } from "@/lib/i18n/dictionaries"
+import { useDictionary, useI18n } from "@/components/i18n-provider"
+import { formatMessage } from "@/lib/i18n/dictionaries"
 import { formatDurationLabel } from "@/lib/meetings/duration"
 import type { RoomDetail, RoomMeetingSummary, RoomTask, RoomParticipant, RoomArtifact } from "@/lib/rooms"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -173,7 +173,7 @@ function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
 
 /** M6: room-scope AskMeetSum (streamed, cited answers), code split. */
 function AskRoom({ roomId, roomName, locale }: { roomId: string; roomName: string; locale: SupportedLocale }) {
-  const dictionary = getDictionary(locale)
+  const dictionary = useDictionary()
 
   return (
     <LazyAskPanel

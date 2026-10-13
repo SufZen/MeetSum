@@ -70,7 +70,7 @@ export const m9ShareMessages = {
     sharePageLanguageEn: "English",
   },
   he: {
-    sharePageTitle: "פגישה משותפת ב־MeetSum",
+    sharePageTitle: "פגישה משותפת ב־\u2060MeetSum",
     sharePagePasswordTitle: "הפגישה מוגנת בסיסמה",
     sharePagePasswordLabel: "סיסמה",
     sharePagePasswordSubmit: "פתיחת הפגישה",

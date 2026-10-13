@@ -22,6 +22,7 @@ import {
   type Fmt,
 } from "@/lib/i18n/format"
 import { directionFor, fixHebrewTypography } from "@/lib/i18n/hebrew-text"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import { pluralMessage, translate, type MessageSource, type MessageValues } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
@@ -29,6 +30,8 @@ export type I18nValue = {
   locale: SupportedLocale
   dir: "rtl" | "ltr"
   timeZone: string
+  /** The provider's messages (the full active-locale dictionary under `app/[locale]`). */
+  messages: MessageSource
   t: (key: string, values?: MessageValues) => string
   plural: (key: string, n: number, values?: MessageValues) => string
   fmt: {
@@ -50,6 +53,7 @@ function buildValue(locale: SupportedLocale, dir: "rtl" | "ltr", timeZone: strin
     locale,
     dir,
     timeZone,
+    messages,
     t: (key, values) => translate(messages, key, values),
     plural: (key, n, values) => pluralMessage(messages, locale, key, n, values),
     fmt: {
@@ -88,6 +92,16 @@ export function I18nProvider({
 /** The i18n context, or null outside an `I18nProvider` (shared primitives, tests). */
 export function useOptionalI18n(): I18nValue | null {
   return useContext(I18nContext)
+}
+
+/**
+ * The active-locale dictionary for components that still take a
+ * `dictionary: Dictionary` prop, without importing the runtime
+ * `dictionaries` object client-side. Only under `app/[locale]` (its layout
+ * passes the full dictionary; the share layout passes a slice).
+ */
+export function useDictionary(): Dictionary {
+  return useI18n().messages as Dictionary
 }
 
 /** Throws outside an `I18nProvider` (every app layout mounts one). */

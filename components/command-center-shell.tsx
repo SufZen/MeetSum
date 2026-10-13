@@ -1594,7 +1594,6 @@ export function CommandCenterShell({
           ) : null}
           {drivePickerReady ? (
             <DriveRecordingPickerDrawer
-              dictionary={dictionary}
               open={drivePickerOpen}
               onOpenChange={setDrivePickerOpen}
               onImported={handleDriveImported}
