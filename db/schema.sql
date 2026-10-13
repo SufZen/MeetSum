@@ -795,7 +795,7 @@ create table if not exists bot_sessions (
   meeting_url_redacted text,                              -- canonical URL, secrets stripped
   passcode_enc text,                                      -- encryptSecret(); never returned by APIs
   teams_base_host text,
-  vexa_meeting_id text unique,
+  vexa_meeting_id text,                                   -- unique per workspace (index below)
   status text not null default 'scheduled' check (status in ('scheduled','requested','joining',
     'awaiting_admission','needs_help','active','stopping','completed','failed','blocked','cancelled')),
   status_rank smallint not null default 0,
@@ -830,9 +830,23 @@ create table if not exists bot_sessions (
 );
 create unique index if not exists uq_bot_sessions_calendar
   on bot_sessions(workspace_id, calendar_event_id) where calendar_event_id is not null;
-create unique index if not exists uq_bot_sessions_live_target
-  on bot_sessions(platform, native_meeting_id)
+-- Every unique key is workspace-scoped: a session in one workspace must never
+-- block another workspace from sending its own bot to the same meeting
+-- (security review M7). Vexa itself 409s a second bot in the same meeting;
+-- that surfaces as blocked/already_in_meeting without leaking the owner.
+alter table bot_sessions drop constraint if exists bot_sessions_vexa_meeting_id_key;
+drop index if exists uq_bot_sessions_live_target;
+create unique index if not exists uq_bot_sessions_ws_live_target
+  on bot_sessions(workspace_id, platform, native_meeting_id)
   where status in ('requested','joining','awaiting_admission','needs_help','active','stopping');
+create unique index if not exists uq_bot_sessions_ws_vexa_meeting
+  on bot_sessions(workspace_id, vexa_meeting_id) where vexa_meeting_id is not null;
+-- Webhook resolution (system lookups; the workspace comes from the row).
+create index if not exists idx_bot_sessions_vexa_meeting
+  on bot_sessions(vexa_meeting_id) where vexa_meeting_id is not null;
+create index if not exists idx_bot_sessions_target
+  on bot_sessions(platform, native_meeting_id, created_at desc)
+  where status not in ('completed','failed','blocked','cancelled');
 create index if not exists idx_bot_sessions_ws_status on bot_sessions(workspace_id, status, scheduled_start);
 create index if not exists idx_bot_sessions_meeting on bot_sessions(meeting_id, created_at desc);
 create index if not exists idx_bot_sessions_open on bot_sessions(status, updated_at)
@@ -851,11 +865,14 @@ create table if not exists bot_events (
   payload jsonb not null default '{}'::jsonb,             -- redacted
   received_at timestamptz not null default now()
 );
-create unique index if not exists uq_bot_events_status
-  on bot_events(vexa_meeting_id, event_type, coalesce(vexa_status, ''))
-  where vexa_meeting_id is not null and source = 'webhook';
-create unique index if not exists uq_bot_events_event_id
-  on bot_events(vexa_event_id) where vexa_event_id is not null;
+drop index if exists uq_bot_events_status;
+drop index if exists uq_bot_events_event_id;
+create unique index if not exists uq_bot_events_ws_status
+  on bot_events(workspace_id, vexa_meeting_id, event_type, coalesce(vexa_status, ''))
+  where vexa_meeting_id is not null and workspace_id is not null and source = 'webhook';
+create unique index if not exists uq_bot_events_ws_event_id
+  on bot_events(workspace_id, vexa_event_id)
+  where vexa_event_id is not null and workspace_id is not null;
 create index if not exists idx_bot_events_session on bot_events(bot_session_id, received_at desc);
 
 -- The workspace every pre-M2 row belongs to (018).

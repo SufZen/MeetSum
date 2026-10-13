@@ -13,14 +13,23 @@ import { getDatabasePool } from "@/lib/db/client"
 /**
  * bot_sessions / bot_events persistence (M7 B1). Owned by Package B.
  *
- * Every Postgres statement is scoped by workspace_id except
- * findByVexaMeetingId and findOpenByTarget, which the webhook uses to resolve
- * the session's own workspace. Methods that take an optional `workspaceId`
- * scope by it when given (routes always pass it; workers resolve the session
- * first and then pass its workspace).
+ * Workspace scope is mandatory on every per-session path: `get`,
+ * `getForUpdate`, `update` and `transition` take a required `workspaceId`
+ * and a session of another workspace is simply "not found" (nothing
+ * changes). Every unique key is workspace-scoped too, so one workspace's
+ * session never blocks another workspace's bot for the same meeting.
+ *
+ * System lookups that return rows of any workspace are explicitly named and
+ * documented as such: `getForWebhook` (webhook resolution; the caller takes
+ * the workspace from the returned row, never from the payload) and the
+ * instance-wide worker lists (`listOpen`, `listDueForDispatch`,
+ * `listPurgeable`, `countLive` without a workspace, `pruneEventPayloads`).
  */
 
 export type BotEventSource = "webhook" | "poll" | "api"
+
+/** Required workspace scope for per-session reads and writes. */
+export type BotWorkspaceScope = { workspaceId: string }
 
 export type BotEvent = {
   id: string
@@ -39,7 +48,8 @@ export type BotEvent = {
 
 export type BotEventInput = {
   botSessionId?: string | null
-  workspaceId?: string | null
+  /** Always the resolved session's workspace (dedupe keys include it). */
+  workspaceId: string
   source: BotEventSource
   vexaMeetingId?: string | null
   vexaEventId?: string | null
@@ -129,7 +139,8 @@ export type BotTransitionInput = {
   reason?: BotStatusReason | null
   at: Date | string
   source: BotEventSource
-  workspaceId?: string
+  /** Required: a session of another workspace is not found. */
+  workspaceId: string
   event?: BotTransitionEvent
 }
 
@@ -139,14 +150,38 @@ export type BotTransitionResult = {
   previous: BotSessionRecord
 }
 
+export type BotUpdateOptions = BotWorkspaceScope & {
+  /** Update only when dispatch_rev still equals this value. */
+  expectedRev?: number
+  tx?: BotStoreTx
+}
+
+/** Webhook resolution keys (Model "Workspace isolation"). */
+export type BotWebhookLookup = {
+  vexaMeetingId?: string | null
+  platform?: BotPlatform | null
+  nativeMeetingId?: string | null
+}
+
 /** Opaque transaction handle (a pg PoolClient for Postgres). */
 export type BotStoreTx = { readonly kind: "bot_store_tx" }
 
-/** A unique index rejected the write (live target or calendar event already taken). */
-export class BotSessionConflictError extends Error {
-  readonly constraint: "uq_bot_sessions_live_target" | "uq_bot_sessions_calendar"
+export const BOT_SESSION_UNIQUE_CONSTRAINTS = [
+  "uq_bot_sessions_ws_live_target",
+  "uq_bot_sessions_calendar",
+  "uq_bot_sessions_ws_vexa_meeting",
+] as const
+export type BotSessionUniqueConstraint = (typeof BOT_SESSION_UNIQUE_CONSTRAINTS)[number]
 
-  constructor(constraint: BotSessionConflictError["constraint"]) {
+/**
+ * A workspace-scoped unique index rejected the write (this workspace already
+ * has a live bot for the target, a session for the calendar event, or the
+ * Vexa meeting id).
+ */
+export class BotSessionConflictError extends Error {
+  readonly constraint: BotSessionUniqueConstraint
+
+  constructor(constraint: BotSessionUniqueConstraint) {
     super(`bot session conflict: ${constraint}`)
     this.name = "BotSessionConflictError"
     this.constraint = constraint
@@ -155,16 +190,22 @@ export class BotSessionConflictError extends Error {
 
 export interface BotSessionStore {
   create(input: BotSessionCreateInput): Promise<BotSessionRecord>
-  get(id: string, options?: { workspaceId?: string }): Promise<BotSessionRecord | undefined>
-  /** `select ... for update` inside withTransaction. */
-  getForUpdate(id: string, tx: BotStoreTx): Promise<BotSessionRecord | undefined>
-  /** Webhook-only: not workspace-scoped. */
-  findByVexaMeetingId(vexaMeetingId: string): Promise<BotSessionRecord | undefined>
-  /** Webhook-only: newest non-terminal session for the target, any workspace. */
-  findOpenByTarget(
-    platform: BotPlatform,
-    nativeMeetingId: string
+  /** Workspace-scoped: another workspace's id is not found. */
+  get(id: string, scope: BotWorkspaceScope): Promise<BotSessionRecord | undefined>
+  /** `select ... for update` inside withTransaction; workspace-scoped. */
+  getForUpdate(
+    id: string,
+    tx: BotStoreTx,
+    scope: BotWorkspaceScope
   ): Promise<BotSessionRecord | undefined>
+  /**
+   * SYSTEM lookup for the Vexa webhook only (not workspace-scoped): by
+   * `vexaMeetingId`, else the newest non-terminal session for
+   * `(platform, nativeMeetingId)`. Ambiguous matches across workspaces
+   * resolve to nothing. Callers must take the workspace from the returned
+   * row, never from the payload.
+   */
+  getForWebhook(lookup: BotWebhookLookup): Promise<BotSessionRecord | undefined>
   findByCalendarEvent(
     workspaceId: string,
     calendarEventId: string
@@ -176,24 +217,27 @@ export interface BotSessionStore {
     workspaceId: string,
     options?: { meetingIds?: string[]; since?: Date }
   ): Promise<BotSessionRecord[]>
-  /** Instance-wide, for reconcile; `olderThan` filters on last_event_at. */
+  /** SYSTEM (reconcile), instance-wide; `olderThan` filters on last_event_at. */
   listOpen(options?: { olderThan?: Date }): Promise<BotSessionRecord[]>
-  /** `scheduled` with dispatch_at <= now, instance-wide. */
+  /** SYSTEM: `scheduled` with dispatch_at <= now, instance-wide. */
   listDueForDispatch(now: Date): Promise<BotSessionRecord[]>
-  /** Vexa artifacts due for deletion (B6), instance-wide. */
+  /** SYSTEM: Vexa artifacts due for deletion (B6), instance-wide. */
   listPurgeable(before: Date): Promise<BotSessionRecord[]>
-  /** Returns undefined when not found or `expectedRev` does not match dispatch_rev. */
+  /** Undefined when not found in the workspace or `expectedRev` does not match. */
   update(
     id: string,
     patch: BotSessionPatch,
-    options?: { expectedRev?: number; workspaceId?: string; tx?: BotStoreTx }
+    options: BotUpdateOptions
   ): Promise<BotSessionRecord | undefined>
   /** Rank-guarded, transactional; records bot_events; bumps last_event_at. */
   transition(id: string, input: BotTransitionInput): Promise<BotTransitionResult | undefined>
+  /** Instance-wide without a workspace (capacity), else per workspace. */
   countLive(options?: { workspaceId?: string }): Promise<number>
   countCreatedSince(workspaceId: string, since: Date): Promise<number>
-  /** Idempotent on the bot_events unique indexes. */
+  /** Idempotent on the workspace-scoped bot_events unique indexes. */
   recordEvent(input: BotEventInput): Promise<{ duplicate: boolean; event?: BotEvent }>
+  /** SYSTEM (retention): empties payloads received before `before`. */
+  pruneEventPayloads(before: Date): Promise<number>
   withTransaction<T>(fn: (tx: BotStoreTx) => Promise<T>): Promise<T>
 }
 
@@ -206,4 +250,9 @@ export function getBotSessionStore(): BotSessionStore {
 
   memoryStore ??= createMemoryBotSessionStore()
   return memoryStore
+}
+
+/** Test hook: replace (or reset with undefined) the process memory store. */
+export function setMemoryBotSessionStore(store: BotSessionStore | undefined) {
+  memoryStore = store
 }
