@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   embeddingKeyPredicate,
   ensureVectorSupport,
+  gcStaleEmbeddings,
   isSupportedPgvectorVersion,
   vectorIndexName,
   vectorSetupStatements,
@@ -89,6 +90,26 @@ describe("ensureVectorSupport", () => {
 
     await expect(ensureVectorSupport(old.db, DEFAULT_KEY)).resolves.toEqual({ enabled: false, reason: "vector_too_old" })
     expect(old.calls).toHaveLength(1)
+  })
+
+  it("GC deletes other keys' vectors only for meetings indexed with the active key", async () => {
+    const calls: { text: string; values: unknown[] }[] = []
+    const db = {
+      query: vi.fn(async (text: string, values: unknown[] = []) => {
+        calls.push({ text: flat(text), values })
+        return { rows: [text.includes("to_regclass") ? { ready: true } : { count: 7 }] }
+      }),
+    }
+
+    await expect(gcStaleEmbeddings(db, DEFAULT_KEY)).resolves.toBe(7)
+    expect(calls[1].text).toContain("not (e.model = 'gemini-embedding-001' and e.dimensions = 1536)")
+    expect(calls[1].text).toContain("m.workspace_id = e.workspace_id and m.search_embedding_key = $1")
+    expect(calls[1].values).toEqual(["gemini-embedding-001:1536"])
+
+    const empty = { query: vi.fn(async () => ({ rows: [{ ready: false }] })) }
+
+    await expect(gcStaleEmbeddings(empty, DEFAULT_KEY)).resolves.toBe(0)
+    expect(empty.query).toHaveBeenCalledTimes(1)
   })
 
   it("validates the key before touching the database", async () => {

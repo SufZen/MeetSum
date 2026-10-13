@@ -108,3 +108,31 @@ export async function ensureVectorSupport(
 
   return { enabled: true }
 }
+
+/**
+ * `search:vector-setup --gc`: deletes vectors of other keys for meetings
+ * already indexed with `activeKey` (re-keyed meetings). Returns the count;
+ * 0 when the embeddings table does not exist.
+ */
+export async function gcStaleEmbeddings(db: Queryable, activeKey: EmbeddingKey): Promise<number> {
+  const valid = assertValidEmbeddingKey(activeKey)
+  const table = await db.query("select to_regclass('meeting_chunk_embeddings') is not null as ready")
+
+  if (!(table.rows[0] as { ready?: boolean } | undefined)?.ready) return 0
+
+  const result = await db.query(
+    `with removed as (
+       delete from meeting_chunk_embeddings e
+       where not (${embeddingKeyPredicate(valid, "e")})
+         and exists (
+           select 1 from meetings m
+           where m.id = e.meeting_id and m.workspace_id = e.workspace_id and m.search_embedding_key = $1
+         )
+       returning 1
+     )
+     select count(*)::int as count from removed`,
+    [`${valid.model}:${valid.dimensions}`]
+  )
+
+  return Number((result.rows[0] as { count?: unknown } | undefined)?.count ?? 0)
+}
