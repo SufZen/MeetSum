@@ -14,10 +14,9 @@ import type {
 import { recordAuditLog, type AuditAction } from "@/lib/audit"
 import type { AuthContext } from "@/lib/auth/authz"
 import { can } from "@/lib/auth/authz"
-import { encryptSecret } from "@/lib/auth/secret-crypto"
 import { extractCalendarMeetingLink } from "@/lib/bot/calendar-links"
 import { getBotConfig, type BotConfig } from "@/lib/bot/config"
-import { dispatchNow, scheduleDispatch } from "@/lib/bot/dispatch"
+import { dispatchNow, scheduleDispatch, sealMeetingSecrets } from "@/lib/bot/dispatch"
 import { diagnoseMeetingLink, extractMeetingLinks, parseMeetingLink } from "@/lib/bot/meeting-url"
 import { enqueueBotJob, removeBotJob } from "@/lib/bot/queue"
 import { redactBotError } from "@/lib/bot/redact"
@@ -249,7 +248,8 @@ async function hasCapacity(workspaceId: string, config: BotConfig): Promise<bool
 
 async function safeDispatchNow(session: BotSessionRecord): Promise<BotSessionRecord> {
   try {
-    const dispatched = await dispatchNow(session.id)
+    // The store is workspace-scoped: pass the session (id + workspaceId).
+    const dispatched = await dispatchNow(session)
 
     return { ...session, ...dispatched, passcodeEnc: session.passcodeEnc }
   } catch (error) {
@@ -352,7 +352,7 @@ export async function joinBotNow(request: Request, ctx: Ctx): Promise<Response> 
       platform: link.platform,
       nativeMeetingId: link.nativeMeetingId,
       meetingUrlRedacted: link.redactedUrl,
-      passcodeEnc: link.passcode ? encryptSecret(link.passcode) : null,
+      passcodeEnc: sealMeetingSecrets(link),
       teamsBaseHost: link.teamsBaseHost ?? null,
       requestedByUserId: actorUserId(ctx) ?? null,
       scheduledStart: now.toISOString(),
@@ -457,7 +457,7 @@ export async function sendBotToMeeting(
           dispatchRev: existing.dispatchRev + 1,
           dispatchAt,
           meetingUrlRedacted: link.redactedUrl,
-          passcodeEnc: link.passcode ? encryptSecret(link.passcode) : existing.passcodeEnc,
+          passcodeEnc: sealMeetingSecrets(link) ?? existing.passcodeEnc,
         },
         { workspaceId, expectedRev: existing.dispatchRev }
       )
@@ -470,7 +470,7 @@ export async function sendBotToMeeting(
       platform: link.platform,
       nativeMeetingId: link.nativeMeetingId,
       meetingUrlRedacted: link.redactedUrl,
-      passcodeEnc: link.passcode ? encryptSecret(link.passcode) : null,
+      passcodeEnc: sealMeetingSecrets(link),
       teamsBaseHost: link.teamsBaseHost ?? null,
       requestedByUserId: actorUserId(ctx) ?? null,
       // A terminal calendar session keeps the (workspace, event) key.

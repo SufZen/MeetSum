@@ -26,7 +26,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/audit", () => ({ recordAuditLog: mocks.recordAuditLog }))
-vi.mock("@/lib/bot/dispatch", () => ({
+vi.mock("@/lib/bot/dispatch", async (importOriginal) => ({
+  sealMeetingSecrets: (await importOriginal<typeof import("@/lib/bot/dispatch")>()).sealMeetingSecrets,
+  openMeetingSecrets: (await importOriginal<typeof import("@/lib/bot/dispatch")>()).openMeetingSecrets,
   dispatchNow: mocks.dispatchNow,
   scheduleDispatch: mocks.scheduleDispatch,
   runDispatch: vi.fn(),
@@ -50,7 +52,8 @@ vi.mock("@/lib/settings/bot-rules", async () => {
     updateBotRules: mocks.updateBotRules,
   }
 })
-vi.mock("@/lib/bot/meeting-url", () => {
+vi.mock("@/lib/bot/meeting-url", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/bot/meeting-url")>()
   type Link = import("@/lib/bot/types").ParsedMeetingLink
 
   function extractMeetingLinks(text: string): Link[] {
@@ -82,6 +85,8 @@ vi.mock("@/lib/bot/meeting-url", () => {
   }
 
   return {
+    meetingLinkSecrets: actual.meetingLinkSecrets,
+    rebuildCanonicalUrl: actual.rebuildCanonicalUrl,
     extractMeetingLinks,
     parseMeetingLink: (text: string) => extractMeetingLinks(text)[0],
     diagnoseMeetingLink: (text: string) => (text.includes("zoom.us/my/") ? "personal_link" : "no_link"),
@@ -186,7 +191,11 @@ beforeEach(() => {
     testMeeting({ id: "m_other_ws", workspaceId: "ws_b" }),
   ])
   for (const mock of Object.values(mocks)) mock.mockReset()
-  mocks.dispatchNow.mockImplementation(async (sessionId: string) => {
+  mocks.dispatchNow.mockImplementation(async (target: { id: string; workspaceId: string }) => {
+    // The store is workspace-scoped: the service must pass the session itself.
+    expect(typeof target).toBe("object")
+    expect(target.workspaceId).toBeTruthy()
+    const sessionId = target.id
     const session = store.sessions.get(sessionId)!
 
     store.sessions.set(sessionId, { ...session, status: "requested", statusRank: 1 })
@@ -590,5 +599,94 @@ describe("/api/settings/bot", () => {
     await ctxFor("member")
 
     expect((await putSettings(jsonRequest(`${BASE}/settings/bot`, "PUT", {}), routeParams({}))).status).toBe(403)
+  })
+})
+
+describe("cross-tenant authorization (W1/W2)", () => {
+  // W2 sessions deliberately reuse W1's meeting id and link: only the
+  // caller's workspace (and meeting visibility) may decide what is seen.
+  async function seedW2(status: "scheduled" | "active") {
+    return seedSession({ workspaceId: "ws_b", meetingId: "m_visible", status })
+  }
+
+  it("list never returns another workspace's session, even for the same meeting id", async () => {
+    await seedW2("active")
+    await ctxFor()
+
+    const json = await body(await listSessions(new Request(`${BASE}/bot/sessions?active=1`), routeParams({})))
+
+    expect(json.byMeetingId).toEqual({})
+  })
+
+  it("get shows neither the session nor the history of another workspace", async () => {
+    await seedW2("active")
+    await ctxFor()
+
+    const json = await body(
+      await getMeetingBot(new Request(meetingBotUrl("m_visible")), routeParams({ id: "m_visible" }))
+    )
+
+    expect(json.session).toBeUndefined()
+    expect(json.history).toEqual([])
+    expect(json.canSend).toBe(true)
+  })
+
+  it("stop (cancel) cannot reach another workspace's live bot: 404, provider untouched", async () => {
+    const w2 = await seedW2("active")
+    const before = structuredClone(store.sessions.get(w2.id))
+    await ctxFor()
+
+    const response = await stopBot(
+      new Request(meetingBotUrl("m_visible"), { method: "DELETE" }),
+      routeParams({ id: "m_visible" })
+    )
+
+    expect(response.status).toBe(404)
+    expect(mocks.stopBot).not.toHaveBeenCalled()
+    expect(store.sessions.get(w2.id)).toEqual(before)
+  })
+
+  it("opt-out cannot cancel another workspace's scheduled bot", async () => {
+    const w2 = await seedW2("scheduled")
+    const before = structuredClone(store.sessions.get(w2.id))
+    await ctxFor()
+
+    const response = await stopBot(
+      new Request(meetingBotUrl("m_visible"), { method: "DELETE" }),
+      routeParams({ id: "m_visible" })
+    )
+
+    expect(response.status).toBe(404)
+    expect(mocks.removeBotJob).not.toHaveBeenCalled()
+    expect(store.sessions.get(w2.id)).toEqual(before)
+  })
+
+  it("opt-out and stop on a private meeting of the caller's own workspace are 404", async () => {
+    const scheduled = await seedSession({ meetingId: "m_private", status: "scheduled" })
+    const before = structuredClone(store.sessions.get(scheduled.id))
+    await ctxFor("admin")
+
+    const response = await stopBot(
+      new Request(meetingBotUrl("m_private"), { method: "DELETE" }),
+      routeParams({ id: "m_private" })
+    )
+
+    expect(response.status).toBe(404)
+    expect(store.sessions.get(scheduled.id)).toEqual(before)
+  })
+
+  it("join now never reuses, returns or dispatches another workspace's session", async () => {
+    const w2 = await seedW2("active")
+    await ctxFor()
+
+    const response = await join({ meetingUrl: "https://meet.google.com/abc-defg-hij" })
+    const json = await body(response)
+
+    expect(response.status).toBe(201)
+    expect((json.session as { id: string }).id).not.toBe(w2.id)
+    expect(json.reused).toBeUndefined()
+    expect(mocks.dispatchNow).toHaveBeenCalledTimes(1)
+    expect(mocks.dispatchNow.mock.calls[0][0]).toMatchObject({ workspaceId: WS })
+    expect(store.sessions.get(w2.id)?.status).toBe("active")
   })
 })
