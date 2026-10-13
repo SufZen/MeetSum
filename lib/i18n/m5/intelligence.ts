@@ -17,6 +17,7 @@ export const intelligenceMessagesEn = {
   // Summary
   intelAiLabel: "AI summary",
   intelAiLabelAt: "AI summary · {time}",
+  intelAutoLabel: "Automatic summary (no AI)",
   intelEditedLabel: "Edited",
   intelFromMoments: "From {n} moments in the call",
   intelFlag: "Flag this line",
@@ -181,6 +182,7 @@ export const intelligenceMessagesHe: Record<keyof typeof intelligenceMessagesEn,
 
   intelAiLabel: "סיכום AI",
   intelAiLabelAt: "סיכום AI · {time}",
+  intelAutoLabel: "סיכום אוטומטי (ללא AI)",
   intelEditedLabel: "נערך",
   intelFromMoments: "מתוך {n} רגעים בשיחה",
   intelFlag: "סימון שורה לבדיקה",

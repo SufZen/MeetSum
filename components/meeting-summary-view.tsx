@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AiProvenance } from "@/components/ui/meeting-atoms"
+import { summaryProvenance } from "@/lib/intelligence/provenance"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { SummaryItem, SummaryItemKind, SummaryItemRef } from "@/lib/intelligence"
@@ -185,6 +186,8 @@ export function MeetingSummaryView({
   const latestJob = workStatus.jobId ? jobs.find((job) => job.id === workStatus.jobId) : undefined
   const showWorkStatus = workStatus.kind === "processing" || workStatus.kind === "failed"
   const languageMismatch = generation?.languageCheck === "failed"
+  // Iris AI mark only for AI content (not heuristic / fallback summaries).
+  const provenance = summaryProvenance(generation)
   const generatedAt = generation?.generatedAt
     ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(generation.generatedAt))
     : undefined
@@ -391,10 +394,16 @@ export function MeetingSummaryView({
           ) : (
             <>
               <AiProvenance
-                state="ai"
+                state={provenance}
                 dir={dir}
                 sources={sourceColors}
-                label={generatedAt ? formatMessage(t.intelAiLabelAt, { time: generatedAt }) : t.intelAiLabel}
+                label={
+                  provenance === "auto"
+                    ? t.intelAutoLabel
+                    : generatedAt
+                      ? formatMessage(t.intelAiLabelAt, { time: generatedAt })
+                      : t.intelAiLabel
+                }
               >
                 <p className="leading-7">{overview}</p>
               </AiProvenance>
