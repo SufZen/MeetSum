@@ -14,7 +14,8 @@ import { formatTimecode } from "@/components/ui/meeting-atoms"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { AskCitation } from "@/lib/ask/types"
 import { dirForLanguage, strongDirection } from "@/lib/client/highlight"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 
 const chipBase =

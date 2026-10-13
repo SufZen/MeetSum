@@ -40,7 +40,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { actionForKey, isEditableTarget } from "@/lib/player/keyboard"
 import { RATES, formatRate } from "@/lib/player/rate"
 import { buildSpeakerRuns, type SpeakerLane } from "@/lib/player/speaker-timeline"

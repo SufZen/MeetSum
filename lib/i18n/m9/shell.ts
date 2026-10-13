@@ -1,15 +1,14 @@
 /**
  * M9 shell messages: dialogs, segment states, landmarks (owner: Package D).
  */
+import { m9ShellErrorMessages } from "@/lib/i18n/m9/shell-error"
+
 export const m9ShellMessages = {
   en: {
     shellSkipToContent: "Skip to main content",
     shellToastRegionLabel: "Notifications",
     shellMainNavLabel: "Main navigation",
-    shellErrorTitle: "Something went wrong",
-    shellErrorRetry: "Try again",
-    shellErrorBackToMeetings: "Back to meetings",
-    shellErrorDigest: "Error reference",
+    ...m9ShellErrorMessages.en,
     shellNotFoundTitle: "Page not found",
     shellNotFoundDescription: "The page doesn’t exist or was moved.",
     shellMeetingUnavailable: "This meeting isn’t available.",
@@ -136,10 +135,7 @@ export const m9ShellMessages = {
     shellSkipToContent: "דלגו לתוכן הראשי",
     shellToastRegionLabel: "הודעות מערכת",
     shellMainNavLabel: "ניווט ראשי",
-    shellErrorTitle: "משהו השתבש",
-    shellErrorRetry: "נסו שוב",
-    shellErrorBackToMeetings: "חזרה לפגישות",
-    shellErrorDigest: "מזהה שגיאה",
+    ...m9ShellErrorMessages.he,
     shellNotFoundTitle: "הדף לא נמצא",
     shellNotFoundDescription: "הדף אינו קיים או שהועבר.",
     shellMeetingUnavailable: "הפגישה אינה זמינה.",

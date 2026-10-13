@@ -7,10 +7,10 @@
  */
 import "./globals.css"
 
-import { m9ShellMessages } from "@/lib/i18n/m9/shell"
+import { m9ShellErrorMessages } from "@/lib/i18n/m9/shell-error"
 
-const he = m9ShellMessages.he
-const en = m9ShellMessages.en
+const he = m9ShellErrorMessages.he
+const en = m9ShellErrorMessages.en
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (

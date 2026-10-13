@@ -17,6 +17,14 @@ export function fillMessage(template: string, values: MessageValues = {}): strin
   })
 }
 
+/**
+ * `fillMessage` under its pre-M9 name. Client code imports it from here, never
+ * from a message module (`dictionaries.ts` re-exports it for server code).
+ */
+export function formatMessage(template: string, values: MessageValues): string {
+  return fillMessage(template, values)
+}
+
 /** Looks up `key` (falling back to the key itself) and fills its slots. */
 export function translate(messages: MessageSource, key: string, values?: MessageValues): string {
   return fillMessage(messages[key] ?? key, values)

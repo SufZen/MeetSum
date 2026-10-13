@@ -27,7 +27,8 @@ import { withoutTimeParam } from "@/lib/player/deep-link"
 import { nextRate, readPlayerPrefs, writePlayerPref } from "@/lib/player/rate"
 import { createPlayerStore, type PlayerState, type PlayerStore } from "@/lib/player/store"
 import { formatClock } from "@/lib/player/time-format"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 
 export type SeekSource =
   | "transcript"

@@ -15,7 +15,7 @@ import Link from "next/link"
 
 import { LazyAskPanel } from "@/components/ask/lazy"
 import { useDictionary, useI18n } from "@/components/i18n-provider"
-import { formatMessage } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { formatDurationLabel } from "@/lib/meetings/duration"
 import type { RoomDetail, RoomMeetingSummary, RoomTask, RoomParticipant, RoomArtifact } from "@/lib/rooms"
 import type { SupportedLocale } from "@/lib/i18n/locales"

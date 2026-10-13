@@ -37,7 +37,8 @@ import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useI18n } from "@/components/i18n-provider"
 import { useWorkspace } from "@/components/workspace-context"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
 const INVITABLE_ROLES: InvitableRole[] = ["viewer", "member", "admin"]

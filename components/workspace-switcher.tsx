@@ -34,7 +34,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useWorkspace } from "@/components/workspace-context"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 
 export function WorkspaceSwitcher({
   dictionary: t,

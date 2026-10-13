@@ -2,7 +2,8 @@ import { LogOutIcon, UsersIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
 /** Signed in, but not a member of any workspace (M2 D2). */

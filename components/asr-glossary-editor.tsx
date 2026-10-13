@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/table"
 import { useWorkspace } from "@/components/workspace-context"
 import type { AsrGlossary, AsrHealth, GlossaryTerm } from "@/lib/ai/asr/types"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 
 type Limits = { maxTerms: number; maxChars: number; maxAliases: number }
 

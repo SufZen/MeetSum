@@ -26,7 +26,8 @@ import {
   type AnswerInline,
 } from "@/lib/client/answer-segments"
 import { dirForLanguage, strongDirection } from "@/lib/client/highlight"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { buildSegmentLink } from "@/lib/player/deep-link"
 import { cn } from "@/lib/utils"
 

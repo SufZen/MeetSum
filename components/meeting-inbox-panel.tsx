@@ -13,7 +13,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { StatusPill } from "@/components/ui/meeting-atoms"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type {
   MeetingListItem,

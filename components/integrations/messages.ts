@@ -1,4 +1,5 @@
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { integrationsMessagesEn } from "@/lib/i18n/m8/integrations"
 
 export type IntegrationsMessageKey = keyof typeof integrationsMessagesEn

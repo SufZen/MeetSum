@@ -376,14 +376,5 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   loginErrorGeneric: "ההתחברות נכשלה. נסו שוב.",
 }
 
-/** Fills `{name}` placeholders. Unknown placeholders are left as-is. */
-export function formatMessage(
-  template: string,
-  values: Record<string, string | number | undefined>
-): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => {
-    const value = values[key]
-
-    return value === undefined ? match : String(value)
-  })
-}
+/** Fills `{name}` placeholders (defined in `messages.ts`, client-safe). */
+export { formatMessage } from "@/lib/i18n/messages"

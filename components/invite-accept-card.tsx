@@ -19,7 +19,8 @@ import {
 import { adminErrorMessage, roleLabel } from "@/components/admin/labels"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
 type LoadState =

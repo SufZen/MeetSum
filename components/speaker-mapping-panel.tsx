@@ -21,7 +21,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWorkspace } from "@/components/workspace-context"
 import { apiErrorMessage } from "@/lib/i18n/api-errors"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 
 type SpeakersPayload = {

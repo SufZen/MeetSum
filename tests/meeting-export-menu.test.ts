@@ -14,7 +14,10 @@ const { toastMock } = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: toastMock }))
 
+import { I18nProvider } from "@/components/i18n-provider"
 import { exportMenuModel, MeetingExportMenu } from "@/components/meetings/meeting-export-menu"
+import { getDictionary } from "@/lib/i18n/dictionaries"
+import { getExportsMessages } from "@/lib/i18n/m8/exports"
 import {
   DOWNLOAD_URL_TTL_MS,
   downloadExport,
@@ -24,6 +27,20 @@ import {
   sendToIntegration,
 } from "@/lib/client/download-export"
 import { contentDispositionAttachment } from "@/lib/http/content-disposition"
+
+/** The menu reads its strings from the route's provider (M10 C), like under `app/[locale]`. */
+function menu(props: Parameters<typeof MeetingExportMenu>[0] & { locale: "he" | "en" }) {
+  return createElement(
+    I18nProvider,
+    {
+      locale: props.locale,
+      dir: props.locale === "he" ? "rtl" : "ltr",
+      timeZone: "UTC",
+      messages: getDictionary(props.locale),
+      children: createElement(MeetingExportMenu, props),
+    }
+  )
+}
 
 /**
  * M8 C3 export menu: Download (PDF, Markdown, DOCX) with the server's
@@ -68,7 +85,7 @@ describe("exportMenuModel", () => {
 describe("MeetingExportMenu render", () => {
   it("renders an RTL Hebrew menu button for the he locale and an LTR one for en", () => {
     const he = renderToStaticMarkup(
-      createElement(MeetingExportMenu, {
+      menu({
         meetingId: "m_1",
         title: "פגישה",
         language: "he",
@@ -79,7 +96,7 @@ describe("MeetingExportMenu render", () => {
       })
     )
     const en = renderToStaticMarkup(
-      createElement(MeetingExportMenu, {
+      menu({
         meetingId: "m_1",
         title: "Meeting",
         language: "he",
@@ -99,7 +116,7 @@ describe("MeetingExportMenu render", () => {
 
   it("is disabled until a meeting is selected", () => {
     const html = renderToStaticMarkup(
-      createElement(MeetingExportMenu, {
+      menu({
         meetingId: undefined,
         title: "",
         language: "",
@@ -130,7 +147,7 @@ describe("downloadExport", () => {
       stubDom()
       const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1])))
 
-      await downloadExport({ id: "m_1", title: "t" }, "pdf", { fetchImpl, locale: "en" })
+      await downloadExport({ id: "m_1", title: "t" }, "pdf", { fetchImpl, locale: "en", messages: getExportsMessages("en") })
       expect(URL.revokeObjectURL).not.toHaveBeenCalled()
       vi.advanceTimersByTime(DOWNLOAD_URL_TTL_MS)
       expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:1")
@@ -147,7 +164,7 @@ describe("downloadExport", () => {
       })
     )
 
-    await expect(downloadExport({ id: "m_1", title: "ignored" }, "docx", { fetchImpl, locale: "he" })).resolves.toBe(true)
+    await expect(downloadExport({ id: "m_1", title: "ignored" }, "docx", { fetchImpl, locale: "he", messages: getExportsMessages("he") })).resolves.toBe(true)
     expect(fetchImpl).toHaveBeenCalledWith("/api/meetings/m_1/export/docx?locale=he", { method: "POST" })
     expect(anchor.download).toBe("סיכום פגישה- Q4.docx")
     expect(anchor.click).toHaveBeenCalled()
@@ -161,6 +178,7 @@ describe("downloadExport", () => {
     const failed = await downloadExport({ id: "m_1", title: "x" }, "pdf", {
       fetchImpl: vi.fn(async () => new Response("{}", { status: 500 })),
       locale: "en",
+      messages: getExportsMessages("en"),
     })
 
     expect(failed).toBe(false)

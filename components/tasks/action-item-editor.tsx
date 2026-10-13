@@ -12,6 +12,7 @@
 import { useState } from "react"
 import { PlusIcon } from "lucide-react"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import {
   createActionItem,
   deleteActionItem,
@@ -19,7 +20,7 @@ import {
 } from "@/components/tasks/api"
 import { TaskItemRow } from "@/components/tasks/task-item-row"
 import { Button } from "@/components/ui/button"
-import { getTasksMessages, type TasksMessages } from "@/lib/i18n/m5/tasks"
+import type { TasksMessages } from "@/lib/i18n/m5/tasks"
 import type {
   ActionItem,
   ActionItemPatch,
@@ -72,7 +73,9 @@ export function ActionItemEditor({
   dictionary,
   canEdit = true,
 }: ActionItemEditorProps) {
-  const strings = dictionary ?? getTasksMessages(locale)
+  // Without a prop, the route's I18nProvider carries the task keys (M10 C).
+  const providerMessages = useOptionalI18n()?.messages
+  const strings = dictionary ?? ((providerMessages ?? {}) as unknown as TasksMessages)
   const [items, setItems] = useState(initialItems)
   const [syncedFrom, setSyncedFrom] = useState(initialItems)
   const [error, setError] = useState<string>()
