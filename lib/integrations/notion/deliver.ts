@@ -14,16 +14,24 @@
  *      keeps them; `progress.archivedBlockIds`);
  *   4. append the new children in batches (`progress.appendedBatches`).
  * - No second page after a lost write: before `POST /v1/pages` a pending
- *   intent `progress = {mode: "create", pendingCreate: {at}}` is written on
- *   its own, and the page id right after the create. A retry that finds the
- *   intent without a page id queries the database
- *   (`POST /v1/databases/{id}/query`) for the page: by the `MeetSum ID`
- *   property when the database has one, else by the exact title and
- *   `created_time` on or after the intent (minus 2 min: Notion rounds
- *   created_time to the minute). It creates only when nothing is found.
+ *   intent `progress = {mode: "create", pendingCreate: {at, nonce}}` is
+ *   written on its own (`nonce`: 128 random bits), and the page id right
+ *   after the create. When the database has a `MeetSum ID` rich_text
+ *   property, the new page carries `meetsum:<nonce>` there. A retry that
+ *   finds the intent without a page id queries THIS database
+ *   (`POST /v1/databases/{id}/query`) for that marker and adopts a page
+ *   only when ALL hold: exactly one live match; its `MeetSum ID` equals the
+ *   marker; its parent is this database; it was created on or after the
+ *   intent (minus 2 min: Notion rounds created_time to the minute); and its
+ *   `created_by` is our own bot user (`GET /v1/users/me` with the
+ *   connection's token, which is bound to one Notion workspace). Anyone who
+ *   can edit the database could copy a marker, so anything ambiguous or
+ *   foreign is never adopted (nor overwritten): a new page is created.
+ *   Without a `MeetSum ID` property there is nothing safe to match, so a
+ *   lost write can produce a second page (rare; documented).
  * - Calls are sequential (Notion allows about 3 requests/s).
  */
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 
 import { ProviderError, type DeliverInput, type DeliverResult, type DeliveryProgress } from "@/lib/integrations/core/types"
 import {
@@ -39,13 +47,21 @@ import {
   type NotionDatabase,
 } from "@/lib/integrations/notion/properties"
 
-type NotionPage = { id: string; url?: string; archived?: boolean; in_trash?: boolean }
+type NotionPage = {
+  id: string
+  url?: string
+  archived?: boolean
+  in_trash?: boolean
+  created_by?: { id?: string }
+  parent?: { type?: string; database_id?: string }
+  properties?: Record<string, { type?: string; rich_text?: { plain_text?: string; text?: { content?: string } }[] }>
+}
 type NotionList = { results?: { id: string }[]; has_more?: boolean; next_cursor?: string | null }
 
 type NotionProgress = {
   mode?: "create" | "update"
   /** A create was about to be sent at `at` (written before `POST /v1/pages`). */
-  pendingCreate?: { at: string }
+  pendingCreate?: { at: string; nonce: string }
   pageId?: string
   url?: string
   appendedBatches?: number
@@ -69,7 +85,9 @@ function readProgress(progress: DeliveryProgress): NotionProgress {
     ...(value.mode === "create" || value.mode === "update" ? { mode: value.mode } : {}),
     ...(typeof value.pageId === "string" ? { pageId: value.pageId } : {}),
     ...(typeof value.url === "string" ? { url: value.url } : {}),
-    ...(value.pendingCreate && typeof value.pendingCreate.at === "string" ? { pendingCreate: { at: value.pendingCreate.at } } : {}),
+    ...(value.pendingCreate && typeof value.pendingCreate.at === "string" && typeof value.pendingCreate.nonce === "string"
+      ? { pendingCreate: { at: value.pendingCreate.at, nonce: value.pendingCreate.nonce } }
+      : {}),
     appendedBatches: Number.isInteger(value.appendedBatches) ? Number(value.appendedBatches) : 0,
     archivedBlockIds: Array.isArray(value.archivedBlockIds)
       ? value.archivedBlockIds.filter((id): id is string => typeof id === "string")
@@ -138,21 +156,52 @@ export async function deliverNotionPage(
     }
   }
 
-  /** The page an interrupted create already made (see the module comment). */
-  const findCreatedPage = async (intent: { at: string }): Promise<NotionPage | undefined> => {
-    const since = new Date(Date.parse(intent.at) - 2 * 60_000).toISOString()
-    const created = { timestamp: "created_time", created_time: { on_or_after: since } }
-    const filter = propertyMap.meetsumId
-      ? { and: [{ property: propertyMap.meetsumId, rich_text: { equals: input.recap.meetingId } }, created] }
-      : { and: [{ property: propertyMap.title, title: { equals: (input.recap.title || "MeetSum").slice(0, 2000) } }, created] }
+  const markerOf = (nonce: string) => `meetsum:${nonce}`
+  const sameId = (left: string | undefined, right: string) => (left ?? "").replace(/-/g, "").toLowerCase() === right.replace(/-/g, "").toLowerCase()
+
+  /**
+   * The page an interrupted create already made, or undefined when nothing
+   * can be adopted safely (see the module comment): one exact match, in this
+   * database, created by our bot after the intent.
+   */
+  const findCreatedPage = async (intent: { at: string; nonce: string }): Promise<NotionPage | undefined> => {
+    const markerProperty = propertyMap.meetsumId
+
+    if (!markerProperty) return undefined
+
+    const marker = markerOf(intent.nonce)
+    const since = Date.parse(intent.at) - 2 * 60_000
     const found = await notionRequest<{ results?: NotionPage[] }>(
       client,
       "POST",
       `/v1/databases/${encodeURIComponent(databaseId)}/query`,
-      { filter, sorts: [{ timestamp: "created_time", direction: "ascending" }], page_size: 10 }
+      {
+        filter: {
+          and: [
+            { property: markerProperty, rich_text: { equals: marker } },
+            { timestamp: "created_time", created_time: { on_or_after: new Date(since).toISOString() } },
+          ],
+        },
+        page_size: 10,
+      }
     )
+    const candidates = (found.results ?? []).filter((page) => {
+      const text = (page.properties?.[markerProperty]?.rich_text ?? []).map((part) => part.plain_text ?? part.text?.content ?? "").join("")
 
-    return (found.results ?? []).find((page) => page.id && !page.archived && !page.in_trash)
+      return page.id && !page.archived && !page.in_trash && text === marker
+    })
+
+    // Ambiguous: never adopt.
+    if (candidates.length !== 1) return undefined
+
+    const [page] = candidates
+
+    if (page.parent?.type !== "database_id" || !sameId(page.parent.database_id, databaseId)) return undefined
+
+    const me = await notionRequest<{ id?: string; type?: string }>(client, "GET", "/v1/users/me")
+
+    if (!me.id || me.type !== "bot" || page.created_by?.id !== me.id) return undefined
+    return page
   }
 
   const create = async (): Promise<DeliverResult> => {
@@ -160,12 +209,16 @@ export async function deliverNotionPage(
       let page = progress.mode === "create" && progress.pendingCreate ? await findCreatedPage(progress.pendingCreate) : undefined
 
       if (!page) {
+        const intent = { at: new Date().toISOString(), nonce: randomBytes(16).toString("hex") }
+
         // 1. Intent first (its own write): no write, no page.
-        await save({ mode: "create", pendingCreate: { at: new Date().toISOString() }, appendedBatches: 0 })
-        // 2. The create.
+        await save({ mode: "create", pendingCreate: intent, appendedBatches: 0 })
+        // 2. The create, carrying the marker when the database can hold it.
         page = await notionRequest<NotionPage>(client, "POST", "/v1/pages", {
           parent: { database_id: databaseId },
-          properties,
+          properties: propertyMap.meetsumId
+            ? { ...properties, [propertyMap.meetsumId]: { rich_text: [{ type: "text", text: { content: markerOf(intent.nonce) } }] } }
+            : properties,
           children: batches[0] ?? [],
         })
       }

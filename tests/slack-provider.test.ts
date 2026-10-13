@@ -63,10 +63,10 @@ describe("Slack OAuth", () => {
     const url = new URL(slackAuthorizeUrl({ state: "s.t", redirectUri: "https://app.test/api/integrations/slack/oauth/callback" }, ENV))
 
     expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2/authorize")
-    expect(url.searchParams.get("scope")).toBe("chat:write,chat:write.public,channels:read,channels:history")
+    expect(url.searchParams.get("scope")).toBe("chat:write,chat:write.public,channels:read")
     expect(url.searchParams.get("client_id")).toBe("fixture-client")
     expect(url.searchParams.has("client_secret")).toBe(false)
-    expect(slackScopes({ ...ENV, SLACK_PRIVATE_CHANNELS: "true" })).toEqual(expect.arrayContaining(["groups:read", "groups:history"]))
+    expect(slackScopes({ ...ENV, SLACK_PRIVATE_CHANNELS: "true" })).toContain("groups:read")
     expect(slackScopes({ ...ENV, SLACK_SCOPES: "chat:write" })).toEqual(["chat:write"])
   })
 

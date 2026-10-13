@@ -322,9 +322,9 @@ describe("hubspot deliver", () => {
         contactIds: ["501", "502"],
         engagementId: "88001",
         taskIdsByActionItem: { ai_1: "77001", ai_2: "77002" },
-        // Pending-intent markers written before each create (review fix #4).
-        engagementIntent: { destinationKey: "meeting:9001", marker: expect.stringMatching(/^ms-[0-9a-f]{20}$/) },
-        taskIntents: { ai_1: expect.stringMatching(/^ms-[0-9a-f]{20}$/), ai_2: expect.stringMatching(/^ms-[0-9a-f]{20}$/) },
+        // Random pending-intent markers written before each create (review fix #4).
+        engagementIntent: { destinationKey: "meeting:9001", marker: expect.stringMatching(/^ms-[0-9a-f]{24}$/) },
+        taskIntents: { ai_1: expect.stringMatching(/^ms-[0-9a-f]{24}$/), ai_2: expect.stringMatching(/^ms-[0-9a-f]{24}$/) },
       },
     })
     expect(h.links.rows.map((row) => [row.objectKind, row.destinationKey, row.actionItemId, row.externalId])).toEqual([

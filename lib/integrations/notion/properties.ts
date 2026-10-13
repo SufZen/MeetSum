@@ -6,8 +6,7 @@
  * property's real name, and the optional properties are set only when they
  * exist with a compatible type (Date → `date`; Participants →
  * `multi_select`/`rich_text`; Language → `select`/`rich_text`; an optional
- * `MeetSum ID` rich_text gets the meeting id, so a retried create can find
- * the page it already made).
+ * `MeetSum ID` rich_text is located for the create marker, see deliver.ts).
  */
 import type { MeetingRecap } from "@/lib/integrations/recap"
 import { NOTION_MAX_TEXT_LENGTH, notionRichText } from "@/lib/integrations/notion/blocks"
@@ -25,7 +24,11 @@ export type NotionPropertyMap = {
   date?: string
   participants?: { name: string; type: "multi_select" | "rich_text" }
   language?: { name: string; type: "select" | "rich_text" }
-  /** Optional `MeetSum ID` rich_text property: the meeting id, used to find a page after a lost write. */
+  /**
+   * Optional `MeetSum ID` rich_text property. A new page gets the random
+   * per-create marker of its pending intent there (set by notion/deliver.ts,
+   * never the meeting id), so a retried create can find its own page.
+   */
   meetsumId?: string
 }
 
@@ -101,8 +104,6 @@ export function buildNotionProperties(recap: MeetingRecap, map: NotionPropertyMa
         ? { select: { name: optionName(recap.language) || "unknown" } }
         : { rich_text: notionRichText(recap.language) }
   }
-
-  if (map.meetsumId) properties[map.meetsumId] = { rich_text: notionRichText(recap.meetingId) }
 
   return properties
 }

@@ -9,14 +9,13 @@
  * PATCH the tracked engagement and create tasks only for action items
  * without a `hubspot_task` link.
  *
- * No duplicate on a lost write: every created object carries a marker
- * (`MeetSum ref: ms-<hash of meeting, destination[, action item]>`) in its
- * body. Before a create, a pending intent (`engagementIntent`,
+ * No duplicate on a lost write: every created object carries an
+ * unguessable per-create marker (`MeetSum ref: ms-<random>`) in its body. Before a create, a pending intent (`engagementIntent`,
  * `taskIntents`) is written on its own; right after it, the new id is
  * written (before the link). A retry that finds an intent without an id
  * searches HubSpot (`POST /crm/v3/objects/{type}/search` on `hs_timestamp`,
- * then the marker in the body) and adopts the object; it creates only when
- * the marker is not found. (VERIFY the search filter on `hs_timestamp`
+ * then the marker in the body) and adopts the object only when exactly one
+ * matches; otherwise it creates anew and never overwrites a foreign object. (VERIFY the search filter on `hs_timestamp`
  * against current HubSpot docs before the first live run.)
  *
  * Privacy: A's privacy gate runs before `deliver` (dispatch and deliver
@@ -25,7 +24,7 @@
  * still calls A's `evaluatePrivacyGate`, without prefs (fails closed): a
  * private meeting is skipped as `private_meeting` without a HubSpot call.
  */
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 
 import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
 import {
@@ -137,9 +136,9 @@ export type HubspotProgress = {
 const OBJECT_PATH = { meeting: "meetings", note: "notes", task: "tasks" } as const
 const BODY_PROPERTY = { meeting: "hs_meeting_body", note: "hs_note_body", task: "hs_task_body" } as const
 
-/** A short, stable marker for one created object (no ids or content of the meeting). */
-export function hubspotMarker(...parts: string[]): string {
-  return `ms-${createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 20)}`
+/** An unguessable per-create marker, stored in the pending intent before the create. */
+export function newHubspotMarker(): string {
+  return `ms-${randomBytes(12).toString("hex")}`
 }
 
 function markerLine(kind: EngagementKind | "task", marker: string): string {
@@ -177,7 +176,10 @@ async function findByMarker(
     }
   )
 
-  return found?.results?.find((result) => result.id && (result.properties?.[body] ?? "").includes(marker))?.id
+  const matches = (found?.results ?? []).filter((result) => result.id && (result.properties?.[body] ?? "").includes(marker))
+
+  // Adopt only an unambiguous match; anything else creates anew (never overwrite).
+  return matches.length === 1 ? matches[0].id : undefined
 }
 
 function sha256(value: unknown): string {
@@ -276,22 +278,23 @@ async function createTasks(
 
   const ownerOf = createOwnerResolver(client)
   const ownerEmailOf = await ownerEmailResolver(input)
-  const markerOf = (item: MeetingRecapActionItem) => hubspotMarker(input.meeting.id, "task", destinationKey, item.id)
   const intents = { ...(progress.taskIntents ?? {}) }
-  const toCreate: Array<{ item: MeetingRecapActionItem; properties: Record<string, string> }> = []
+  const toCreate: Array<{ item: MeetingRecapActionItem; marker: string; properties: Record<string, string> }> = []
 
   for (const item of pending) {
-    const marker = markerOf(item)
-    const properties = withMarker("task", taskProperties(item, input.recap, await ownerOf(await ownerEmailOf(item))), marker)
+    const base = taskProperties(item, input.recap, await ownerOf(await ownerEmailOf(item)))
+    const previous = intents[item.id]
     // A pending intent from an earlier attempt: the task may exist already.
-    const existing = intents[item.id] === marker ? await findByMarker(client, "task", properties.hs_timestamp ?? "", marker) : undefined
+    const existing = previous ? await findByMarker(client, "task", base.hs_timestamp ?? "", previous) : undefined
 
     if (existing) {
       taskIds[item.id] = existing
       await save({ taskIdsByActionItem: { ...taskIds } })
       await input.links.upsert({ objectKind: "hubspot_task", destinationKey, actionItemId: item.id, externalId: existing })
     } else {
-      toCreate.push({ item, properties })
+      const marker = newHubspotMarker()
+
+      toCreate.push({ item, marker, properties: withMarker("task", base, marker) })
     }
   }
 
@@ -299,7 +302,7 @@ async function createTasks(
     const batch = toCreate.slice(index, index + TASK_BATCH_SIZE)
 
     // 1. Intents first (their own write).
-    for (const { item } of batch) intents[item.id] = markerOf(item)
+    for (const { item, marker } of batch) intents[item.id] = marker
     await save({ taskIntents: { ...intents } })
 
     // 2. The create.
@@ -331,8 +334,7 @@ async function upsertEngagement(
 ): Promise<string> {
   const kind: EngagementKind = destination.logAs
   const destinationKey = `${kind}:${destination.dealId ?? ""}`
-  const marker = hubspotMarker(input.meeting.id, kind, destinationKey)
-  const properties = withMarker(kind, engagementProperties(kind, input.recap, renderHubspotNoteHtml(input.recap)), marker)
+  const properties = engagementProperties(kind, input.recap, renderHubspotNoteHtml(input.recap))
   const contentHash = sha256({ kind, properties, target })
   const link = await input.links.get({ objectKind: "hubspot_engagement", destinationKey })
   const remember = async (id: string) => {
@@ -360,15 +362,18 @@ async function upsertEngagement(
   // A pending intent from an earlier attempt: the engagement may exist already.
   const intent = progress.engagementIntent
 
-  if (intent?.destinationKey === destinationKey && intent.marker === marker) {
-    const existing = await findByMarker(client, kind, properties.hs_timestamp ?? "", marker)
+  if (intent?.destinationKey === destinationKey && intent.marker) {
+    const existing = await findByMarker(client, kind, properties.hs_timestamp ?? "", intent.marker)
 
     if (existing) return remember(existing)
   }
 
-  // 1. Intent first (its own write); 2. the create; 3. the id, then the link.
+  // 1. Intent first (its own write, with a fresh random marker); 2. the
+  // create carrying it; 3. the id, then the link.
+  const marker = newHubspotMarker()
+
   await save({ engagementIntent: { destinationKey, marker } })
-  return remember(await createEngagement(client, kind, properties, target))
+  return remember(await createEngagement(client, kind, withMarker(kind, properties, marker), target))
 }
 
 export async function deliverToHubspot(input: DeliverInput): Promise<DeliverResult> {
