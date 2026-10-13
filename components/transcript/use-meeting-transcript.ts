@@ -133,10 +133,17 @@ export function useMeetingTranscript(
 
   const data = state.meetingId === meetingId ? state.data : undefined
 
-  /** Folds a server segment (and speakers/version) into the cached copy. */
+  /**
+   * Folds the server's changed segments (all of a turn edit or its undo,
+   * M9 B5) and speakers/version into the cached copy.
+   */
   const applyMutation = useCallback(
-    (response: Pick<SegmentMutationResponse, "segment" | "speakers" | "version">) => {
+    (response: Pick<SegmentMutationResponse, "segment" | "segments" | "speakers" | "version">) => {
       if (!meetingId) return
+
+      const changed = new Map(
+        [response.segment, ...(response.segments ?? [])].map((segment) => [segment.id, segment])
+      )
 
       setState((current) => {
         if (current.meetingId !== meetingId || !current.data) return current
@@ -144,9 +151,7 @@ export function useMeetingTranscript(
         const next: TranscriptResponse = {
           ...current.data,
           version: response.version,
-          segments: current.data.segments.map((segment) =>
-            segment.id === response.segment.id ? response.segment : segment
-          ),
+          segments: current.data.segments.map((segment) => changed.get(segment.id) ?? segment),
           ...(response.speakers ? { speakers: response.speakers } : {}),
         }
 

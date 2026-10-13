@@ -153,6 +153,8 @@ type RevisionRow = {
   created_by_user_id: string | null
   created_at: string | Date
   reverted_at: string | Date | null
+  /** M9 (030). */
+  edit_group_id?: string | null
 }
 
 type SpeakerRow = {
@@ -681,6 +683,7 @@ function mapRevision(row: RevisionRow): TranscriptRevision {
     createdByUserId: row.created_by_user_id ?? undefined,
     createdAt: toIso(row.created_at),
     revertedAt: row.reverted_at ? toIso(row.reverted_at) : undefined,
+    ...(row.edit_group_id ? { editGroupId: row.edit_group_id } : {}),
   }
 }
 
@@ -910,7 +913,7 @@ const RECOMPUTE_SPEAKER_STATS_SQL = `
 
 const REVISION_COLUMNS = `
   id, meeting_id, segment_id, revision, text, words, speaker_id, source,
-  created_by_user_id, created_at, reverted_at
+  created_by_user_id, created_at, reverted_at, edit_group_id
 `
 
 /** Columns of `speakers s` joined to its participant `p` (name resolution). */
@@ -1931,12 +1934,25 @@ export function createPostgresMeetingRepository(
     meetingId: string,
     segmentId: string,
     speakerChanged: boolean,
-    version: number
+    version: number,
+    changedIds: readonly string[] = [segmentId]
   ): Promise<SegmentMutationResult> {
     const segment = await readSegment(db, meetingId, segmentId)
+    const segments =
+      changedIds.length > 1
+        ? (
+            (
+              await db.query(
+                `${TRANSCRIPT_SELECT} where ts.meeting_id = $1 and ts.id = any($2::text[]) order by ts.start_ms asc, ts.id asc`,
+                [meetingId, [...changedIds]]
+              )
+            ).rows as TranscriptRow[]
+          ).map(mapTranscriptRow)
+        : [segment]
 
     return {
       segment,
+      segments,
       ...(speakerChanged
         ? { speakers: (await selectSpeakers(db, meetingId)).map((row) => mapSpeaker(row)) }
         : {}),
@@ -2924,15 +2940,16 @@ export function createPostgresMeetingRepository(
           ]
         }
 
-        // Prior state of every changed segment (undo).
+        // Prior state of every changed segment (undo), one edit group per
+        // PATCH so a whole-turn change undoes atomically (M9 B5).
         await tx.query(
           `
             insert into transcript_segment_revisions (
               id, workspace_id, meeting_id, segment_id, revision, text, words,
-              speaker_id, source, created_by_user_id
+              speaker_id, source, created_by_user_id, edit_group_id
             )
             select u.revision_id, $1, ts.meeting_id, ts.id, ts.revision, ts.text, ts.words,
-                   ts.speaker_id, ts.source, $3
+                   ts.speaker_id, ts.source, $3, $6
             from unnest($4::text[], $5::text[]) as u(revision_id, segment_id)
             join transcript_segments ts on ts.id = u.segment_id and ts.meeting_id = $2
           `,
@@ -2942,6 +2959,7 @@ export function createPostgresMeetingRepository(
             patch.actorUserId ?? null,
             segmentIds.map(() => createId("rev")),
             segmentIds,
+            createId("edit"),
           ]
         )
 
@@ -2982,7 +3000,7 @@ export function createPostgresMeetingRepository(
 
         const version = await bumpTranscriptVersion(tx, meetingId)
 
-        return mutationResult(tx, meetingId, segmentId, speakerChanged, version)
+        return mutationResult(tx, meetingId, segmentId, speakerChanged, version, segmentIds)
       })
     },
 
@@ -3008,64 +3026,120 @@ export function createPostgresMeetingRepository(
           `,
           [meetingId, workspaceId, segmentId]
         )
-        const revision = revisionResult.rows[0] as RevisionRow | undefined
+        const latest = revisionResult.rows[0] as RevisionRow | undefined
 
-        if (!revision) throw new NothingToUndoError(segmentId)
+        if (!latest) throw new NothingToUndoError(segmentId)
+
+        // The whole edit group (M9 B5); a pre-030 revision is a group of one.
+        const group = latest.edit_group_id
+          ? ((
+              await tx.query(
+                `
+                  select ${REVISION_COLUMNS}
+                  from transcript_segment_revisions
+                  where meeting_id = $1 and workspace_id = $2 and edit_group_id = $3
+                    and reverted_at is null
+                  for update
+                `,
+                [meetingId, workspaceId, latest.edit_group_id]
+              )
+            ).rows as RevisionRow[])
+          : [latest]
+        const groupSegmentIds = [...new Set(group.map((revision) => revision.segment_id))]
+        const locked = (
+          await tx.query(
+            `${TRANSCRIPT_SELECT} where ts.meeting_id = $1 and ts.id = any($2::text[]) for update of ts`,
+            [meetingId, groupSegmentIds]
+          )
+        ).rows as TranscriptRow[]
+        const lockedById = new Map(locked.map((row) => [row.id, mapTranscriptRow(row)]))
+        const newest = (
+          await tx.query(
+            `
+              select distinct on (segment_id) id, segment_id
+              from transcript_segment_revisions
+              where meeting_id = $1 and workspace_id = $2 and segment_id = any($3::text[])
+                and reverted_at is null
+              order by segment_id, revision desc, created_at desc
+            `,
+            [meetingId, workspaceId, groupSegmentIds]
+          )
+        ).rows as Array<{ id: string; segment_id: string }>
+        const newestBySegment = new Map(newest.map((row) => [row.segment_id, row.id]))
+
+        // All or nothing: every segment of the group must still be in the
+        // state the edit left (no newer, un-reverted revision), else 409.
+        for (const revision of group) {
+          const segment = lockedById.get(revision.segment_id)
+
+          if (!segment) throw new TranscriptConflictError(current)
+          if (newestBySegment.get(revision.segment_id) !== revision.id) {
+            throw new TranscriptConflictError(segment)
+          }
+        }
 
         // A speaker merged away since keeps the segment on its current speaker.
-        const restoredSpeaker = revision.speaker_id
-          ? (
-              await tx.query(`select id from speakers where id = $1 and meeting_id = $2`, [
-                revision.speaker_id,
-                meetingId,
-              ])
-            ).rows.length
-            ? revision.speaker_id
-            : undefined
-          : undefined
-        const speakerChanged =
-          restoredSpeaker !== undefined && restoredSpeaker !== current.speakerId
+        const wantedSpeakers = [
+          ...new Set(group.map((revision) => revision.speaker_id).filter((id): id is string => Boolean(id))),
+        ]
+        const existingSpeakers = new Set(
+          wantedSpeakers.length
+            ? (
+                await tx.query(`select id from speakers where meeting_id = $1 and id = any($2::text[])`, [
+                  meetingId,
+                  wantedSpeakers,
+                ])
+              ).rows.map((row) => (row as { id: string }).id)
+            : []
+        )
+        const restoredSpeakerOf = (revision: RevisionRow) =>
+          revision.speaker_id && existingSpeakers.has(revision.speaker_id) ? revision.speaker_id : null
+        const speakerChanged = group.some((revision) => {
+          const restored = restoredSpeakerOf(revision)
+
+          return restored !== null && restored !== lockedById.get(revision.segment_id)?.speakerId
+        })
+        const encodeRevisionWords = (words: unknown) =>
+          words === null || words === undefined ? null : typeof words === "string" ? words : JSON.stringify(words)
 
         await tx.query(
           `
-            update transcript_segments
-            set text = $3,
-                words = $4::jsonb,
-                speaker_id = coalesce($5, speaker_id),
-                source = $6,
-                revision = revision + 1,
+            update transcript_segments ts
+            set text = u.text,
+                words = u.words::jsonb,
+                speaker_id = coalesce(u.speaker_id, ts.speaker_id),
+                source = u.source,
+                revision = ts.revision + 1,
                 edited_at = now(),
-                edited_by_user_id = $7
-            where id = $2 and meeting_id = $1
+                edited_by_user_id = $2
+            from unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+              as u(id, text, words, speaker_id, source)
+            where ts.meeting_id = $1 and ts.id = u.id
           `,
           [
             meetingId,
-            segmentId,
-            revision.text,
-            revision.words === null || revision.words === undefined
-              ? null
-              : typeof revision.words === "string"
-                ? revision.words
-                : JSON.stringify(revision.words),
-            restoredSpeaker ?? null,
-            revision.source,
             options.actorUserId ?? null,
+            group.map((revision) => revision.segment_id),
+            group.map((revision) => revision.text),
+            group.map((revision) => encodeRevisionWords(revision.words)),
+            group.map(restoredSpeakerOf),
+            group.map((revision) => revision.source),
           ]
         )
         await tx.query(
           `
             update transcript_segment_revisions
             set reverted_at = now()
-            where id = $1 and meeting_id = $2 and workspace_id = $3
+            where id = any($1::text[]) and meeting_id = $2 and workspace_id = $3
           `,
-          [revision.id, meetingId, workspaceId]
+          [group.map((revision) => revision.id), meetingId, workspaceId]
         )
 
         if (speakerChanged) await recomputeSpeakerDerived(tx, meetingId)
 
         const version = await bumpTranscriptVersion(tx, meetingId)
 
-        return mutationResult(tx, meetingId, segmentId, speakerChanged, version)
+        return mutationResult(tx, meetingId, segmentId, speakerChanged, version, groupSegmentIds)
       })
     },
 

@@ -41,6 +41,8 @@ export type MeetingDetailResponse = {
 /** `PATCH .../transcript/segments/[segmentId]` and `POST .../undo` */
 export type SegmentMutationResponse = {
   segment: TranscriptSegmentWire
+  /** Every changed segment, `segment` included (M9 B5: turn edits and their undo). */
+  segments?: TranscriptSegmentWire[]
   /** Present when speakers changed. */
   speakers?: MeetingSpeaker[]
   version: number

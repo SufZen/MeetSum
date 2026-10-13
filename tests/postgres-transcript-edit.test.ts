@@ -62,10 +62,13 @@ function recordingPool(override?: Responder) {
     if (/^select m\.id, m\.transcript_version from meetings m/.test(normalized)) {
       return { rows: [{ id: "meet_1", transcript_version: 7 }] }
     }
-    if (/^select ts\.id, ts\.speaker_id\b.* where ts\.id = \$1/.test(normalized)) {
+    if (/^select ts\.id, ts\.speaker_id\b.* where (ts\.id = \$1|ts\.meeting_id = \$1 and ts\.id = any)/.test(normalized)) {
       return { rows: [SEGMENT] }
     }
     if (/^select id from speakers where id = \$1/.test(normalized)) return { rows: [{ id: values[0] }] }
+    if (/^select id from speakers where meeting_id = \$1 and id = any/.test(normalized)) {
+      return { rows: (values[1] as string[]).map((id) => ({ id })) }
+    }
     if (/^update meetings m set transcript_version/.test(normalized)) {
       return { rows: [{ transcript_version: 8 }] }
     }
@@ -261,14 +264,15 @@ describe("postgres undoTranscriptSegment", () => {
       { expectedRevision: 0, actorUserId: "user_me" }
     )
     const select = find(statements, /^select .* from transcript_segment_revisions/)
-    const restore = find(statements, /^update transcript_segments set text = \$3/)
+    const restore = find(statements, /^update transcript_segments ts set text = u\.text/)
     const reverted = find(statements, /^update transcript_segment_revisions set reverted_at/)
 
     expect(select.text).toContain("reverted_at is null")
     expect(select.values).toEqual(["meet_1", WS, "seg_1"])
-    expect(restore.values.slice(0, 3)).toEqual(["meet_1", "seg_1", "שלום"])
-    expect(restore.values[4]).toBe("spk_2")
-    expect(reverted.values).toEqual(["rev_1", "meet_1", WS])
+    // A pre-030 revision (no edit_group_id) is a group of one.
+    expect(restore.values).toEqual(["meet_1", "user_me", ["seg_1"], ["שלום"], [JSON.stringify([[1000, 3000, "שלום", 0.9]])], ["spk_2"], ["asr"]])
+    expect(reverted.values).toEqual([["rev_1"], "meet_1", WS])
+    expect(result.segments?.map((segment) => segment.id)).toEqual(["seg_1"])
     // Speaker changed back: turns and stats recomputed.
     find(statements, /^update transcript_segments ts set turn_index/)
     expect(result.version).toBe(8)

@@ -1,6 +1,7 @@
 /**
- * M9 export messages: Hebrew PDF headings and page chrome (owner: Package B).
- * Distinct from M8's `lib/i18n/m8/exports.ts` (the export menu).
+ * M9 export messages: Hebrew PDF headings and page chrome, plus the M4
+ * carry-over transcript toasts (owner: Package B). Distinct from M8's
+ * `lib/i18n/m8/exports.ts` (the export menu).
  */
 export const m9ExportsMessages = {
   en: {
@@ -21,6 +22,8 @@ export const m9ExportsMessages = {
     pdfTranscriptTruncated: "The transcript was shortened to {count} segments.",
     pdfUnsupportedGlyphs: "Some characters could not be displayed ({count}).",
     pdfSubject: "Meeting summary and transcript",
+    transcriptSpeakerUndone_one: "Speaker change undone for {count} segment",
+    transcriptSpeakerUndone_other: "Speaker change undone for {count} segments",
   },
   he: {
     pdfOverview: "סקירה",
@@ -40,5 +43,8 @@ export const m9ExportsMessages = {
     pdfTranscriptTruncated: "התמליל קוצר ל־{count} קטעים.",
     pdfUnsupportedGlyphs: "חלק מהתווים לא הוצגו ({count}).",
     pdfSubject: "סיכום ותמליל של הפגישה",
+    transcriptSpeakerUndone_one: "בוטל שיוך הדובר לקטע אחד",
+    transcriptSpeakerUndone_two: "בוטל שיוך הדובר לשני קטעים",
+    transcriptSpeakerUndone_other: "בוטל שיוך הדובר ל־{count} קטעים",
   },
 }
