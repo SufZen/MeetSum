@@ -12,7 +12,7 @@
  */
 import type { CollabBackend } from "@/lib/clips/db"
 import type { MeetingRecord } from "@/lib/meetings/repository"
-import { memberCanViewMeeting } from "@/lib/meetings/visibility"
+import { canViewMeeting } from "@/lib/meetings/visibility"
 import { enqueueNotification } from "@/lib/notifications/enqueue"
 
 export type ProducerMember = { userId: string; email: string }
@@ -97,22 +97,11 @@ async function defaultGetBotRequester(workspaceId: string, sessionId: string): P
 }
 
 function canSee(meeting: ProducerMeeting, member: ProducerMember): boolean {
-  return memberCanViewMeeting(
-    {
-      workspaceId: meeting.workspaceId,
-      ownerUserId: meeting.ownerUserId,
-      visibility: meeting.visibility,
-      participantDetails: meeting.participantEmails.map((email, index) => ({
-        id: `p${index}`,
-        meetingId: meeting.id,
-        name: email,
-        email,
-        role: "attendee" as const,
-        source: "manual" as const,
-        attendanceStatus: "unknown" as const,
-      })),
-    },
-    member
+  // The recipient's own member scope (no admin bypass of private meetings).
+  return canViewMeeting(
+    { kind: "member", workspaceId: meeting.workspaceId ?? "", userId: member.userId, email: member.email, role: "member" },
+    meeting,
+    meeting.participantEmails
   )
 }
 
