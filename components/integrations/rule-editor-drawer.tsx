@@ -130,7 +130,7 @@ export function RuleEditorDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side={side} className="w-full overflow-y-auto sm:max-w-lg" dir={locale === "he" ? "rtl" : "ltr"}>
+      <SheetContent side={side} className="w-full overflow-y-auto sm:max-w-lg" dir={locale === "he" ? "rtl" : "ltr"} closeLabel={t.integrationsClose}>
         <SheetHeader>
           <SheetTitle>{draft.id ? t.integrationsRuleEdit : t.integrationsRuleNew}</SheetTitle>
           <SheetDescription>{t.integrationsSectionRules}</SheetDescription>

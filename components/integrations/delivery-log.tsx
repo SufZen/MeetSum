@@ -20,6 +20,7 @@ import {
   isDeliveryRetryable,
   isWebhookDeliveryRetryable,
   deliveryErrorKey,
+  ruleDisplayName,
   skipReasonKey,
   type DeliveryFilters,
 } from "@/components/integrations/state"
@@ -143,7 +144,11 @@ function IntegrationDeliveries({
     await load()
   }
 
-  const ruleName = (id?: string) => rules.find((rule) => rule.id === id)?.name
+  const ruleName = (id?: string) => {
+    const rule = rules.find((item) => item.id === id)
+
+    return rule ? ruleDisplayName(rule, t) : undefined
+  }
 
   return (
     <div className="grid gap-3">
@@ -177,7 +182,7 @@ function IntegrationDeliveries({
               <NativeSelectOption value="">—</NativeSelectOption>
               {rules.map((rule) => (
                 <NativeSelectOption key={rule.id} value={rule.id}>
-                  {rule.name}
+                  {ruleDisplayName(rule, t)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -229,7 +234,7 @@ function IntegrationDeliveries({
 
       <Sheet open={Boolean(detail)} onOpenChange={(open) => !open && setDetail(null)}>
         {detail ? (
-          <SheetContent side={locale === "he" ? "left" : "right"} dir={locale === "he" ? "rtl" : "ltr"} className="w-full sm:max-w-md">
+          <SheetContent side={locale === "he" ? "left" : "right"} dir={locale === "he" ? "rtl" : "ltr"} className="w-full sm:max-w-md" closeLabel={t.integrationsClose}>
             <SheetHeader>
               <SheetTitle>{t.integrationsLogDetails}</SheetTitle>
             </SheetHeader>
