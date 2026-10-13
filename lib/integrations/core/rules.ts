@@ -3,8 +3,8 @@
  * zod validation; the destination provider must equal the rule provider
  * (and the connection's); caps → 409; `validateDestination` checks the
  * destination with the provider; `include_private` is honoured only for
- * the saving user, and editing another admin's rule resets it and stamps
- * the editor as the new owner. The email rule is a singleton (POST upserts).
+ * the saving user, and editing another admin's rule (or any edit through an
+ * API key) resets it and stamps the editor as the new owner. The email rule is a singleton (POST upserts).
  */
 import { randomUUID } from "node:crypto"
 
@@ -246,7 +246,10 @@ export async function updateRule(
     if (!connection || connection.status === "revoked") return { ok: false, status: 409, code: "connection_revoked" }
   }
 
-  const editorChanged = !input.userId || existing.createdByUserId !== input.userId
+  // An API key acts for its creator but never holds a private opt-in: its
+  // edit counts as another editor's, so it can't redirect (e.g. change the
+  // destination of) a rule that still pushes its creator's private meetings.
+  const editorChanged = !input.isUserPrincipal || !input.userId || existing.createdByUserId !== input.userId
   const updated = await store.updateRule(input.workspaceId, input.ruleId, {
     ...(body.name !== undefined ? { name: body.name } : {}),
     ...(body.enabled !== undefined ? { enabled: body.enabled, ...(body.enabled ? { disabledReason: null } : {}) } : {}),
