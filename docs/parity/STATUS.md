@@ -1,4 +1,4 @@
-# Fireflies parity — status
+| M8 | Integrations | `parity/m8-integrations` | in progress (live runs need Slack/Graph/Notion/HubSpot apps) | — || M7 | Meeting bot (Vexa sidecar) | `parity/m7-bot` | merged (live run needs a Vexa host and a bot Google account) | #23 || M6 | Search & AskMeetSum | `parity/m6-search` | merged (hybrid/vector mode needs the pgvector image and a Gemini key) | #25 || M5 | Intelligence parity | `parity/m5-intelligence` | merged (live summary eval needs a Gemini key) | #24 || M4 | Player & transcript UX | `parity/m4-player` | merged | #21 || M3 | Hebrew ASR + diarization | `parity/m3-asr` | merged (live run needs RunPod/HF/Soniox or the free-tier Groq key, #22) | #20 || M3.5 | Design system (Cadence v2.0, tokens + primitives) | `parity/m3_5-design` | merged | #19 || M2 | Multi-user workspaces | `parity/m2-workspaces` | merged | #18 || M1 | Pipeline correctness & security | `parity/m1-pipeline` | merged | #17 || M0 | Baseline & honesty | `parity/m0-baseline` | merged | #16 |# Fireflies parity — status
 
 Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked when the previous PR is not yet merged.
 
@@ -21,17 +21,17 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 ## Parity matrix
 | Area | Fireflies | MeetSum | Milestone |
 |---|---|---|---|
-| Auto-join bot (Meet/Teams/Zoom) | ✓ | ✗ | M7 |
+| Auto-join bot (Meet/Teams/Zoom) | ✓ | ✓ Vexa sidecar, Join now + calendar rules, consent, lobby/stop lifecycle | M7 ✅ |
 | Upload / desktop / browser recording | ✓ | ✓ (streaming, idempotent; Zoom/Teams wired) | M1 ✅ |
 | Speaker diarization + names | ✓ | built (pyannote worker + Soniox fallback, speaker suggestions); needs keys for live | M3 ✅ (code) |
 | Player + click-to-seek transcript, editing | ✓ | ✓ waveform, speaker lanes, range streaming, virtualized transcript, edit/undo | M4 ✅ |
-| Summaries, templates, chapters/topics | ✓ | partial | M5 |
-| Action items mgmt, tasks view | ✓ | partial | M5 |
-| Soundbites/clips, comments | ✓ | ✗ | M5 |
-| Chat over meetings with citations | ✓ | weak | M6 |
-| Global semantic search | ✓ | ILIKE | M6 |
+| Summaries, templates, chapters/topics | ✓ | ✓ Hebrew-native, cited, 11 templates + custom, chapters | M5 ✅ |
+| Action items mgmt, tasks view | ✓ | ✓ owners, he/en relative due dates, Tasks view | M5 ✅ |
+| Soundbites/clips, comments | ✓ | ✓ clips + share, comments, reactions | M5 ✅ |
+| Chat over meetings with citations | ✓ | ✓ streaming Ask, strict citations, private threads | M6 ✅ |
+| Global semantic search | ✓ | ✓ hybrid vector+FTS+trigram, Hebrew normalizer (recall@5 0.94 lexical) | M6 ✅ |
 | Teams/workspaces/roles/sharing | ✓ | workspaces, roles, invites, scoped API keys, visibility | M2 ✅ |
-| Analytics | ✓ | ✗ | M5/M9 |
+| Analytics | ✓ | per-meeting talk time/WPM/questions/fillers/sentiment; dashboard pending | M5 ✅ / M9 |
 | Integrations (Slack, CRM, Notion, Zapier, Outlook) | ✓ | webhooks/RealizeOS | M8 |
 | Live transcript | ✓ | ✗ | M7 (stretch) |
 | Hebrew ASR, RTL, prompts, search, PDF, dates | weak | partial | M3/M6/M9 |
@@ -53,3 +53,4 @@ Plan: [PLAN.md](PLAN.md). One branch + PR per milestone (`parity/mN-*`), stacked
 - 2026-10-13: M6 spec rewritten for the M5 LLM layer (Gemini default, Claude optional). Migration 025: pg_trgm required, pgvector 0.8 optional with lexical fallback and capability detection. Image `pgvector/pgvector:0.8.1-pg17`, the same major version (no downgrade). Vectors store their model and dimensions. Chunks are speaker turns of at most 800 tokens. One Hebrew normalizer is shared by indexing and queries. RRF ranking runs after the visibility filter. Ask streams over SSE with strict citations and per-user threads. Also: MCP pagination, search and ask; a synthetic Hebrew eval with replay. Packages: A index, B search+MCP, C ask, D UI. Migration numbers: M7 is 024, M6 025, M8 026, M9 027.
 - 2026-10-13: M6 Step 0 done on `parity/m6-search`: migration 025 (applied on the embedded PG 18 without pgvector: lexical path, NOTICE, no vector objects), compose on `pgvector/pgvector:0.8.1-pg17`, M8/M9 specs renumbered to 026/027 with a duplicate-version test (024 reserved for M7), frozen contract types, A–D stubs, real `requestMeetingReindex` plus call sites, 501 route stubs behind `withAuthz` with authz coverage, full `.env.example` block. Typecheck, lint and tests green.
 - 2026-10-13: M6 review fixes (branch `m6-review-fixes`): new migration **026_ask_usage.sql** (durable Ask daily-cap counter), so M8 is renumbered to **027** and M9 to **028** (m8.md/m9.md updated; the migrations test asserts 001-026 contiguous).
+- 2026-10-13: M0–M7 merged to main (#16–#25, including the free-tier ASR PR #22). Production deploy stayed gated (`DEPLOY_ENABLED` unset). M8 started on `parity/m8-integrations`.
