@@ -9,7 +9,12 @@ import type { StoredItem, UploadResult } from "@/lib/client/upload-queue/types"
 
 const START = "2026-10-13T10:00:00.000Z"
 
-function setup(responses: Array<UploadResult | Error>, userId = "u_1", storage = createMemoryStorage()) {
+function setup(
+  responses: Array<UploadResult | Error>,
+  userId = "u_1",
+  storage = createMemoryStorage(),
+  workspaceId = "ws_1"
+) {
   let clock = 1_000_000
   const calls: StoredItem[] = []
   const upload = vi.fn(async (item: StoredItem) => {
@@ -20,7 +25,7 @@ function setup(responses: Array<UploadResult | Error>, userId = "u_1", storage =
     if (next instanceof Error) throw next
     return next
   })
-  const queue = createUploadQueue({ storage, userId, upload, now: () => clock, random: () => 0.5 })
+  const queue = createUploadQueue({ storage, userId, workspaceId, upload, now: () => clock, random: () => 0.5 })
 
   return {
     storage,
@@ -85,11 +90,11 @@ describe("upload queue", () => {
     let snapshot = await queue.flush()
 
     expect(snapshot.pending).toBe(1)
-    expect(await storage.getItem("u_1", "cap_1")).toMatchObject({ status: "pending", attempts: 1 })
+    expect(await storage.getItem("u_1|ws_1", "cap_1")).toMatchObject({ status: "pending", attempts: 1 })
 
     snapshot = await queue.flush({ force: true })
     expect(snapshot.pending).toBe(0)
-    expect(await storage.listItems("u_1")).toEqual([])
+    expect(await storage.listItems("u_1|ws_1")).toEqual([])
   })
 
   it("backs off on network errors and 5xx, honouring nextAttemptAt", async () => {
@@ -97,14 +102,14 @@ describe("upload queue", () => {
 
     await record(queue)
     await queue.flush()
-    expect(await storage.getItem("u_1", "cap_1")).toMatchObject({ attempts: 1, lastStatus: 0, nextAttemptAt: 1_005_000 })
+    expect(await storage.getItem("u_1|ws_1", "cap_1")).toMatchObject({ attempts: 1, lastStatus: 0, nextAttemptAt: 1_005_000 })
 
     await queue.flush()
     expect(upload).toHaveBeenCalledTimes(1)
 
     advance(5_000)
     await queue.flush()
-    expect(await storage.getItem("u_1", "cap_1")).toMatchObject({ attempts: 2, lastStatus: 503, nextAttemptAt: 1_035_000 })
+    expect(await storage.getItem("u_1|ws_1", "cap_1")).toMatchObject({ attempts: 2, lastStatus: 503, nextAttemptAt: 1_035_000 })
 
     advance(30_000)
     expect((await queue.flush()).pending).toBe(0)
@@ -210,7 +215,9 @@ describe("upload queue", () => {
   it("builds the ingest form with captureMetadata before the file", async () => {
     const { ingestFormData } = await import("@/lib/client/upload-queue/browser")
     const form = ingestFormData({
+      owner: "u_1|ws_1",
       userId: "u_1",
+      workspaceId: "ws_1",
       captureId: "cap_1",
       title: "Recording",
       startedAt: START,
@@ -245,6 +252,98 @@ describe("upload queue", () => {
     expect(storageGate(150 * MB, 0, 100 * MB)).toBe("low")
     expect(storageGate(10 * MB, 0, 100 * MB)).toBe("refuse")
     expect(storageGate(1000 * MB, 100 * MB, 100 * MB)).toBe("refuse")
+  })
+
+  it("A enqueues, B signs in on the same device: nothing uploads and B sees nothing", async () => {
+    const storage = createMemoryStorage()
+    const alice = setup([], "u_alice", storage)
+
+    await record(alice.queue)
+    await alice.queue.recordChunk({ captureId: "cap_crash", seq: 0, blob: new Blob(["z"]) })
+
+    const bob = setup([ok()], "u_bob", storage)
+
+    expect((await bob.queue.snapshot()).items).toEqual([])
+    expect(await bob.queue.recover({ title: "R" })).toEqual([])
+    await bob.queue.flush({ force: true })
+    expect(bob.upload).not.toHaveBeenCalled()
+
+    // A signs back in: A's items flush to A's workspace.
+    const aliceAgain = setup([ok("m_a"), ok("m_b")], "u_alice", storage)
+
+    await aliceAgain.queue.recover({ title: "R" })
+    expect((await aliceAgain.queue.flush()).pending).toBe(0)
+    expect(aliceAgain.calls.map((item) => [item.userId, item.workspaceId])).toEqual([
+      ["u_alice", "ws_1"],
+      ["u_alice", "ws_1"],
+    ])
+  })
+
+  it("a workspace switch never uploads into the other workspace", async () => {
+    const storage = createMemoryStorage()
+    const inW1 = setup([], "u_1", storage, "ws_1")
+
+    await record(inW1.queue)
+
+    const inW2 = setup([ok()], "u_1", storage, "ws_2")
+
+    expect((await inW2.queue.snapshot()).pending).toBe(0)
+    await inW2.queue.flush({ force: true })
+    expect(inW2.upload).not.toHaveBeenCalled()
+
+    // Back in ws_1 it uploads, carrying ws_1.
+    const back = setup([ok()], "u_1", storage, "ws_1")
+
+    await back.queue.flush()
+    expect(back.calls.map((item) => item.workspaceId)).toEqual(["ws_1"])
+  })
+
+  it("pauses instead of retrying when the server reports a workspace mismatch", async () => {
+    const { queue, upload } = setup([{ status: 409, body: { error: "workspace_mismatch" } }])
+
+    await record(queue)
+    expect((await queue.flush()).pausedForAuth).toBe(true)
+    await queue.flush()
+    expect(upload).toHaveBeenCalledTimes(1)
+  })
+
+  it("clear() is exact per workspace; clearUser() purges every workspace of the user only", async () => {
+    const storage = createMemoryStorage()
+    const w1 = setup([], "u_1", storage, "w1")
+    const w10 = setup([], "u_1", storage, "w10")
+    const other = setup([], "u_2", storage, "w1")
+
+    await record(w1.queue)
+    await record(w10.queue)
+    await record(other.queue)
+    await w1.queue.clear()
+    expect((await w10.queue.snapshot()).pending).toBe(1)
+
+    await w1.queue.clearUser()
+    expect((await w10.queue.snapshot()).pending).toBe(0)
+    expect((await other.queue.snapshot()).pending).toBe(1)
+  })
+
+  it("never uploads a stored record whose owner fields disagree with the session", async () => {
+    const storage = createMemoryStorage()
+    const { queue, upload } = setup([ok()], "u_1", storage)
+
+    await storage.putItem({
+      owner: "u_1|ws_1",
+      userId: "u_2",
+      workspaceId: "ws_9",
+      captureId: "forged",
+      title: "x",
+      startedAt: START,
+      mime: "audio/webm",
+      size: 1,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: null,
+      blob: new Blob(["x"]),
+    })
+    await queue.flush({ force: true })
+    expect(upload).not.toHaveBeenCalled()
   })
 
   it("notifies subscribers with snapshots", async () => {

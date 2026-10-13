@@ -1,13 +1,12 @@
 import type { MetadataRoute } from "next"
 
+import { PWA_BACKGROUND_COLOR, PWA_THEME_COLOR } from "@/lib/pwa/brand"
+
 /**
  * Web app manifest (docs/parity/m9.md D4). Hebrew-first: `lang: "he"`,
  * `dir: "rtl"`; colours are the light brand and canvas tokens
  * (design-system/tokens.css, OKLCH → sRGB). Icons: scripts/generate-pwa-icons.mjs.
  */
-const PWA_THEME_COLOR = "#008073"
-const PWA_BACKGROUND_COLOR = "#f6fafb"
-
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "MeetSum",

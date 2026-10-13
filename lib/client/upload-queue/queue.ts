@@ -20,6 +20,7 @@ import type {
   UploadResult,
   Uploader,
 } from "@/lib/client/upload-queue/types"
+import { ownerKey, userPrefix } from "@/lib/client/upload-queue/types"
 
 /** Retry delays after the 1st, 2nd, 3rd and later failures. */
 export const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000] as const
@@ -57,6 +58,8 @@ export function classifyUploadResponse(result: UploadResult): UploadOutcome {
     return meetingId ? { kind: "done", meetingId } : { kind: "retry", status }
   }
   if (status === 401) return { kind: "auth" }
+  // The session moved to another workspace: pause, never upload elsewhere.
+  if (status === 409 && (result.body as { error?: unknown } | null)?.error === "workspace_mismatch") return { kind: "auth" }
   if (status === 408 || status === 429 || status >= 500) return { kind: "retry", status }
 
   return { kind: "permanent", status }
@@ -71,8 +74,8 @@ export type QueueSnapshot = {
 }
 
 export type UploadQueue = {
-  /** Persists one recorder chunk. */
-  recordChunk(chunk: Omit<ChunkRecord, "userId">): Promise<void>
+  /** Persists one recorder chunk (owner fields are the queue's). */
+  recordChunk(chunk: Omit<ChunkRecord, "owner" | "userId" | "workspaceId">): Promise<void>
   /** Assembles the capture's chunks into a queued item and drops the chunks. */
   finalize(input: { captureId: string; title: string; startedAt: string; mime: string; meetingId?: string | null }): Promise<QueueItem | null>
   /** Enqueues chunks left by a previous session (skips `activeCaptureIds`). */
@@ -83,7 +86,10 @@ export type UploadQueue = {
   /** The stored blob of an item (for "save to device"). */
   blobOf(captureId: string): Promise<Blob | null>
   remove(captureId: string): Promise<void>
+  /** Deletes this user's recordings in this workspace. */
   clear(): Promise<void>
+  /** Deletes this user's recordings in every workspace (logout). */
+  clearUser(): Promise<void>
   subscribe(listener: (snapshot: QueueSnapshot) => void): () => void
 }
 
@@ -100,6 +106,7 @@ function strip(item: StoredItem): QueueItem {
 export function createUploadQueue({
   storage,
   userId,
+  workspaceId,
   upload,
   now = () => Date.now(),
   random = Math.random,
@@ -107,17 +114,20 @@ export function createUploadQueue({
 }: {
   storage: QueueStorage
   userId: string
+  /** The session's workspace: only its items are listed or uploaded. */
+  workspaceId: string
   upload: Uploader
   now?: () => number
   random?: () => number
   withLock?: LockRunner
 }): UploadQueue {
+  const owner = ownerKey(userId, workspaceId)
   const listeners = new Set<(snapshot: QueueSnapshot) => void>()
   let uploading: string | null = null
   let flushing: Promise<QueueSnapshot> | null = null
 
   async function snapshot(): Promise<QueueSnapshot> {
-    const items = (await storage.listItems(userId)).map(strip).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+    const items = (await storage.listItems(owner)).map(strip).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
 
     return {
       items,
@@ -140,14 +150,14 @@ export function createUploadQueue({
     captureId: string,
     fallback: { title: string; startedAt?: string; mime?: string; meetingId?: string | null; recovered?: boolean }
   ): Promise<QueueItem | null> {
-    const existing = await storage.getItem(userId, captureId)
+    const existing = await storage.getItem(owner, captureId)
 
     if (existing) {
-      await storage.deleteChunks(userId, captureId)
+      await storage.deleteChunks(owner, captureId)
       return strip(existing)
     }
 
-    const chunks = await storage.listChunks(userId, captureId)
+    const chunks = await storage.listChunks(owner, captureId)
 
     if (!chunks.length) return null
 
@@ -159,12 +169,14 @@ export function createUploadQueue({
     )
 
     if (blob.size === 0) {
-      await storage.deleteChunks(userId, captureId)
+      await storage.deleteChunks(owner, captureId)
       return null
     }
 
     const item: StoredItem = {
+      owner,
       userId,
+      workspaceId,
       captureId,
       title: fallback.title,
       startedAt: fallback.startedAt ?? first.startedAt ?? new Date(now()).toISOString(),
@@ -181,17 +193,19 @@ export function createUploadQueue({
     // Item first, then chunks: a crash in between leaves both, and the next
     // recover() sees the item and only drops the chunks.
     await storage.putItem(item)
-    await storage.deleteChunks(userId, captureId)
+    await storage.deleteChunks(owner, captureId)
 
     return strip(item)
   }
 
   async function uploadOne(captureId: string, force: boolean): Promise<void> {
-    await withLock(`meetsum-upload:${userId}:${captureId}`, async () => {
+    await withLock(`meetsum-upload:${owner}:${captureId}`, async () => {
       // Re-read under the lock: another tab may have finished it.
-      const item = await storage.getItem(userId, captureId)
+      const item = await storage.getItem(owner, captureId)
 
-      if (!item || item.status === "failed-permanent") return
+      // Defence in depth: never upload a record of another user or workspace.
+      if (!item || item.owner !== owner || item.userId !== userId || item.workspaceId !== workspaceId) return
+      if (item.status === "failed-permanent") return
       if (!force && item.nextAttemptAt !== null && item.nextAttemptAt > now()) return
 
       uploading = captureId
@@ -208,8 +222,8 @@ export function createUploadQueue({
       }
 
       if (outcome.kind === "done") {
-        await storage.deleteItem(userId, captureId)
-        await storage.deleteChunks(userId, captureId)
+        await storage.deleteItem(owner, captureId)
+        await storage.deleteChunks(owner, captureId)
         return
       }
 
@@ -232,7 +246,7 @@ export function createUploadQueue({
   }
 
   async function runFlush(force: boolean): Promise<QueueSnapshot> {
-    const items = (await storage.listItems(userId)).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+    const items = (await storage.listItems(owner)).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
     // A 401 pauses the whole queue until a forced flush (sign-in, retry).
     let paused = !force && items.some((item) => item.status === "paused-auth")
 
@@ -243,7 +257,7 @@ export function createUploadQueue({
 
       await uploadOne(item.captureId, force)
 
-      const after = await storage.getItem(userId, item.captureId)
+      const after = await storage.getItem(owner, item.captureId)
 
       if (after?.status === "paused-auth") paused = true
     }
@@ -254,7 +268,7 @@ export function createUploadQueue({
 
   return {
     async recordChunk(chunk) {
-      await storage.putChunk({ ...chunk, userId })
+      await storage.putChunk({ ...chunk, owner, userId, workspaceId })
     },
     async finalize(input) {
       const item = await assemble(input.captureId, input)
@@ -265,7 +279,7 @@ export function createUploadQueue({
     async recover({ title, activeCaptureIds = [] }) {
       const recovered: QueueItem[] = []
 
-      for (const captureId of await storage.listChunkCaptureIds(userId)) {
+      for (const captureId of await storage.listChunkCaptureIds(owner)) {
         if (activeCaptureIds.includes(captureId)) continue
 
         const item = await assemble(captureId, { title, recovered: true })
@@ -288,15 +302,21 @@ export function createUploadQueue({
     },
     snapshot,
     async blobOf(captureId) {
-      return (await storage.getItem(userId, captureId))?.blob ?? null
+      return (await storage.getItem(owner, captureId))?.blob ?? null
     },
     async remove(captureId) {
-      await storage.deleteItem(userId, captureId)
-      await storage.deleteChunks(userId, captureId)
+      await storage.deleteItem(owner, captureId)
+      await storage.deleteChunks(owner, captureId)
       await notify()
     },
     async clear() {
-      await storage.clearUser(userId)
+      // Exact owner only (a prefix would also match "w1" vs "w10").
+      for (const item of await storage.listItems(owner)) await storage.deleteItem(owner, item.captureId)
+      for (const captureId of await storage.listChunkCaptureIds(owner)) await storage.deleteChunks(owner, captureId)
+      await notify()
+    },
+    async clearUser() {
+      await storage.clearPrefix(userPrefix(userId))
       await notify()
     },
     subscribe(listener) {

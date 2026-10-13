@@ -1,7 +1,9 @@
 /**
  * Browser wiring for the offline recording queue (docs/parity/m9.md D5):
  * IndexedDB storage (memory fallback), Web Locks, and the ingest uploader.
- * One queue per user id per tab.
+ * One queue per (user, workspace) per tab; no credential is ever stored, the
+ * upload uses the live session cookie and names the workspace it was
+ * recorded in, which the server checks against the session.
  */
 import { createIdbStorage } from "@/lib/client/upload-queue/idb-storage"
 import { createMemoryStorage } from "@/lib/client/upload-queue/memory-storage"
@@ -12,6 +14,8 @@ export const INGEST_URL = "/api/desktop-capture/ingest"
 /** Window event the service worker relay and manual retries dispatch. */
 export const FLUSH_UPLOADS_EVENT = "meetsum:flush-uploads"
 export const SW_SYNC_TAG = "meetsum-uploads"
+/** The workspace a queued recording belongs to; the ingest route rejects a mismatch. */
+export const CAPTURE_WORKSPACE_HEADER = "x-meetsum-workspace-id"
 
 /** The multipart body for one queued recording (text fields before the file). */
 export function ingestFormData(item: StoredItem): FormData {
@@ -32,16 +36,29 @@ export function ingestFormData(item: StoredItem): FormData {
 }
 
 export async function ingestUploader(item: StoredItem): Promise<UploadResult> {
-  const response = await fetch(INGEST_URL, { method: "POST", body: ingestFormData(item), credentials: "same-origin" })
+  const response = await fetch(INGEST_URL, {
+    method: "POST",
+    body: ingestFormData(item),
+    credentials: "same-origin",
+    headers: { [CAPTURE_WORKSPACE_HEADER]: item.workspaceId },
+  })
   const body = await response.json().catch(() => null)
 
   return { status: response.status, body }
 }
 
-const webLock: LockRunner = (name, fn) => {
+const webLock: LockRunner = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined
 
-  return locks ? locks.request(name, fn) : fn()
+  if (!locks) return fn()
+
+  let result!: T
+
+  await locks.request(name, async () => {
+    result = await fn()
+  })
+
+  return result
 }
 
 let sharedStorage: QueueStorage | null = null
@@ -58,38 +75,39 @@ function storage(): QueueStorage {
 /** IndexedDB can be blocked (private mode): switch to memory on the first failure. */
 function fallbackOnError(primary: QueueStorage): QueueStorage {
   const memory = createMemoryStorage()
-  let active = primary
-  const wrap =
-    <K extends keyof QueueStorage>(key: K) =>
-    async (...args: Parameters<QueueStorage[K]>) => {
-      try {
-        return await (active[key] as (...a: Parameters<QueueStorage[K]>) => ReturnType<QueueStorage[K]>)(...args)
-      } catch (error) {
-        if (active === memory) throw error
-        active = memory
-        return (memory[key] as (...a: Parameters<QueueStorage[K]>) => ReturnType<QueueStorage[K]>)(...args)
-      }
+  let active: QueueStorage = primary
+
+  async function attempt<T>(call: (storage: QueueStorage) => Promise<T>): Promise<T> {
+    try {
+      return await call(active)
+    } catch (error) {
+      if (active === memory) throw error
+      active = memory
+      return call(memory)
     }
+  }
 
   return {
-    putChunk: wrap("putChunk"),
-    listChunks: wrap("listChunks"),
-    deleteChunks: wrap("deleteChunks"),
-    listChunkCaptureIds: wrap("listChunkCaptureIds"),
-    putItem: wrap("putItem"),
-    getItem: wrap("getItem"),
-    listItems: wrap("listItems"),
-    deleteItem: wrap("deleteItem"),
-    clearUser: wrap("clearUser"),
-  } as QueueStorage
+    putChunk: (chunk) => attempt((storage) => storage.putChunk(chunk)),
+    listChunks: (owner, captureId) => attempt((storage) => storage.listChunks(owner, captureId)),
+    deleteChunks: (owner, captureId) => attempt((storage) => storage.deleteChunks(owner, captureId)),
+    listChunkCaptureIds: (owner) => attempt((storage) => storage.listChunkCaptureIds(owner)),
+    putItem: (item) => attempt((storage) => storage.putItem(item)),
+    getItem: (owner, captureId) => attempt((storage) => storage.getItem(owner, captureId)),
+    listItems: (owner) => attempt((storage) => storage.listItems(owner)),
+    deleteItem: (owner, captureId) => attempt((storage) => storage.deleteItem(owner, captureId)),
+    clearPrefix: (prefix) => attempt((storage) => storage.clearPrefix(prefix)),
+  }
 }
 
-export function getUploadQueue(userId: string): UploadQueue {
-  let queue = queues.get(userId)
+/** The queue of `userId` in `workspaceId`: it never sees another owner's items. */
+export function getUploadQueue(userId: string, workspaceId: string): UploadQueue {
+  const key = `${userId}|${workspaceId}`
+  let queue = queues.get(key)
 
   if (!queue) {
-    queue = createUploadQueue({ storage: storage(), userId, upload: ingestUploader, withLock: webLock })
-    queues.set(userId, queue)
+    queue = createUploadQueue({ storage: storage(), userId, workspaceId, upload: ingestUploader, withLock: webLock })
+    queues.set(key, queue)
   }
 
   return queue

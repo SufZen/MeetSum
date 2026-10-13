@@ -1,7 +1,20 @@
 /**
  * Offline recording queue types (docs/parity/m9.md D5; owner: Package D).
- * Every record carries the user id so a shared device never mixes users.
+ * Every record is partitioned by `owner` = user id + workspace id, captured
+ * when the recording starts, so a shared device never mixes users and a
+ * workspace switch never uploads into the wrong workspace. No credentials
+ * are ever stored: uploads use the live session cookie.
  */
+
+/** The storage partition of one user in one workspace. */
+export function ownerKey(userId: string, workspaceId: string): string {
+  return `${userId}|${workspaceId}`
+}
+
+/** Prefix shared by every partition of a user (logout purge). */
+export function userPrefix(userId: string): string {
+  return `${userId}|`
+}
 
 export type UploadStatus =
   /** Waiting for the next flush (possibly backing off). */
@@ -12,7 +25,9 @@ export type UploadStatus =
   | "failed-permanent"
 
 export type QueueItem = {
+  owner: string
   userId: string
+  workspaceId: string
   captureId: string
   title: string
   /** ISO timestamp of the recording start. */
@@ -34,7 +49,9 @@ export type QueueItem = {
 export type StoredItem = QueueItem & { blob: Blob }
 
 export type ChunkRecord = {
+  owner: string
   userId: string
+  workspaceId: string
   captureId: string
   seq: number
   blob: Blob
@@ -48,16 +65,16 @@ export type ChunkRecord = {
 export interface QueueStorage {
   putChunk(chunk: ChunkRecord): Promise<void>
   /** The capture's chunks sorted by `seq`. */
-  listChunks(userId: string, captureId: string): Promise<ChunkRecord[]>
-  deleteChunks(userId: string, captureId: string): Promise<void>
+  listChunks(owner: string, captureId: string): Promise<ChunkRecord[]>
+  deleteChunks(owner: string, captureId: string): Promise<void>
   /** Capture ids that still have chunks (unfinished or not yet assembled). */
-  listChunkCaptureIds(userId: string): Promise<string[]>
+  listChunkCaptureIds(owner: string): Promise<string[]>
   putItem(item: StoredItem): Promise<void>
-  getItem(userId: string, captureId: string): Promise<StoredItem | undefined>
-  listItems(userId: string): Promise<StoredItem[]>
-  deleteItem(userId: string, captureId: string): Promise<void>
-  /** Deletes every chunk and item of the user (logout after confirmation). */
-  clearUser(userId: string): Promise<void>
+  getItem(owner: string, captureId: string): Promise<StoredItem | undefined>
+  listItems(owner: string): Promise<StoredItem[]>
+  deleteItem(owner: string, captureId: string): Promise<void>
+  /** Deletes every chunk and item whose owner starts with `prefix` (logout after confirmation). */
+  clearPrefix(prefix: string): Promise<void>
 }
 
 export type UploadResult = { status: number; body: unknown }
