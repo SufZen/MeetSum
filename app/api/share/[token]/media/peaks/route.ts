@@ -1,5 +1,6 @@
 import { jsonError } from "@/lib/api/responses"
 import { withPublicRoute } from "@/lib/auth/authz"
+import { lookupClipShare } from "@/lib/clips/store"
 import { serveMeetingPeaks } from "@/lib/media/proxy"
 import { authorizeShareMediaRequest } from "@/lib/sharing/share-media-access"
 
@@ -14,6 +15,18 @@ export const GET = withPublicRoute<{ token: string }>(
   "Public share waveform peaks (opt-in media section); the token plus the share password cookie are the credential.",
   async (request, { params }) => {
     const { token } = await params
+
+    // Same order as the media route: a clip-scope token never reaches the
+    // parent meeting's waveform, whatever its gate outcome.
+    try {
+      const clip = await lookupClipShare(token)
+
+      if (clip.kind !== "not_clip") return jsonError("Not found", 404)
+    } catch (error) {
+      console.error("Clip share lookup failed", (error as Error)?.name ?? error)
+      return jsonError("Not found", 404)
+    }
+
     const access = await authorizeShareMediaRequest(request, token)
 
     if (!access) return jsonError("Not found", 404)

@@ -200,16 +200,30 @@ function mapComment(row: CommentRow): StoredComment {
   }
 }
 
-/** Wire shape: a deleted comment keeps its place but never its body. */
+/**
+ * Wire shape. A deleted comment keeps only its place in the thread: no body,
+ * mentions, anchor quote, author, resolver or edit metadata.
+ */
 function toWire(comment: StoredComment, orphaned = false): MeetingComment {
-  const deleted = Boolean(comment.deletedAt)
-
-  return {
-    ...comment,
-    body: deleted ? "" : comment.body,
-    mentions: deleted ? [] : comment.mentions,
-    ...(orphaned ? { orphaned: true } : {}),
+  if (comment.deletedAt) {
+    return {
+      id: comment.id,
+      workspaceId: comment.workspaceId,
+      meetingId: comment.meetingId,
+      targetType: comment.targetType,
+      targetId: comment.targetId,
+      ...(comment.parentId ? { parentId: comment.parentId } : {}),
+      authorUserId: "",
+      body: "",
+      mentions: [],
+      anchor: {},
+      deletedAt: comment.deletedAt,
+      createdAt: comment.createdAt,
+      ...(orphaned ? { orphaned: true } : {}),
+    }
   }
+
+  return { ...comment, ...(orphaned ? { orphaned: true } : {}) }
 }
 
 async function loadComment(
@@ -261,7 +275,9 @@ export async function listMeetingComments(
   ctx: CommentStoreContext,
   meetingId: string
 ): Promise<CommentListResult & { viewerUserId: string }> {
-  const scope = ctx.scope
+  // Comment threads are user-to-user conversation: like writing, reading
+  // requires a signed-in member (API keys get `user_required`).
+  const scope = memberScope(ctx)
   const meeting = await visibleMeeting(ctx, meetingId)
 
   if (!meeting) throw new CommentError("not_found")

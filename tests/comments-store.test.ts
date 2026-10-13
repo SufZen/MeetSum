@@ -125,6 +125,8 @@ describe("comment store", () => {
     await expect(
       createComment(apiKeyCtx, "m_a", { targetType: "segment", targetId: "s1", body: "x" })
     ).rejects.toEqual(new CommentError("user_required"))
+    // Reading threads is user-only too.
+    await expect(listMeetingComments(apiKeyCtx, "m_a")).rejects.toEqual(new CommentError("user_required"))
   })
 
   it("treats private and foreign meetings as missing", async () => {
@@ -251,6 +253,11 @@ describe("comment store", () => {
     expect(tombstone.body).toBe("")
     expect(tombstone.deletedAt).toBeDefined()
     expect(tombstone.replies).toHaveLength(1)
+    // A tombstone keeps its place only: no quote, author, resolver or edit metadata.
+    expect(tombstone.anchor).toEqual({})
+    expect(tombstone.authorUserId).toBe("")
+    expect(tombstone.resolvedByUserId).toBeUndefined()
+    expect(tombstone.editedAt).toBeUndefined()
     expect(list.threads["chapter:ch_1"][0]).toMatchObject({ orphaned: true, anchor: { quote: "תקציב" } })
     expect(JSON.stringify(list)).not.toContain("secret words")
   })
