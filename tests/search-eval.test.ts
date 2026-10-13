@@ -1,8 +1,7 @@
 /**
  * CI thresholds for the M6 retrieval eval (docs/parity/m6.md, B8) against
- * Package A's REAL normalizer and chunkers. Skipped while A's modules are
- * still the Step 0 stubs (no prefix variants / no chunks); the harness itself
- * is covered with doubles in search-eval-harness.test.ts.
+ * Package A's REAL normalizer and chunkers (no doubles). The harness itself
+ * is also covered with doubles in search-eval-harness.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
@@ -20,11 +19,15 @@ import { runEngine, type EngineReport } from "@/lib/search/eval/run"
 import { hebrewPrefixVariants } from "@/lib/search/hebrew-normalize"
 
 const corpus = loadCorpus()
-const realPackageA =
-  hebrewPrefixVariants("והתקציב").length > 0 &&
-  chunkTranscript({ segments: corpus.meetings[0].transcript ?? [], speakers: corpus.meetings[0].speakers ?? [] }).length > 0
 
-describe.runIf(realPackageA)("search eval thresholds (Package A modules)", () => {
+describe("search eval thresholds (Package A modules)", () => {
+  it("runs on A's real normalizer and chunker, not the Step 0 stubs", () => {
+    expect(hebrewPrefixVariants("והתקציב")).toContain("תקציב")
+    expect(
+      chunkTranscript({ segments: corpus.meetings[0].transcript ?? [], speakers: corpus.meetings[0].speakers ?? [] }).length
+    ).toBeGreaterThan(0)
+  })
+
   const reports: Record<string, EngineReport> = {}
   let pglite: EvalEngine | null = null
 
@@ -66,11 +69,5 @@ describe.runIf(realPackageA)("search eval thresholds (Package A modules)", () =>
 
   it("legacy is reported, not asserted", () => {
     expect(reports.legacy.metrics.overall.n).toBe(corpus.queries.length)
-  })
-})
-
-describe.skipIf(realPackageA)("search eval thresholds (pending Package A)", () => {
-  it("is skipped until A's normalizer and chunker replace the Step 0 stubs", () => {
-    expect(realPackageA).toBe(false)
   })
 })
