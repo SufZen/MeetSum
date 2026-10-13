@@ -2,7 +2,7 @@ import { CheckCircle2Icon, CircleIcon } from "lucide-react"
 
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 import { MEETING_STATUS_FLOW } from "@/lib/meetings/state"
-import { getMeetingWorkStatus } from "@/lib/meetings/work-status"
+import { getMeetingWorkStatus, isBackgroundIndexJob } from "@/lib/meetings/work-status"
 
 const pipeline = [
   ["artifact.import", "Artifact import"],
@@ -33,6 +33,8 @@ const legacyStatusByStage: Record<string, MeetingRecord["status"][]> = {
 const stageAliases: Record<string, string> = {
   "audio.transcribe": "transcribing",
   "summary.generate": "summarizing",
+  // M6: the summarize path's persist step (was the inline "meeting.index").
+  "summary.persist": "summarizing",
   "meeting.index": "indexing",
 }
 
@@ -47,7 +49,9 @@ export function PipelineTimeline({
   const currentIndex = meeting
     ? Math.max(0, MEETING_STATUS_FLOW.indexOf(meeting.status))
     : 0
-  const latestJob = jobs.find((job) => job.meetingId === meeting?.id)
+  const latestJob = jobs.find(
+    (job) => job.meetingId === meeting?.id && !isBackgroundIndexJob(job)
+  )
   const activeStage =
     typeof latestJob?.payload.stage === "string"
       ? latestJob.payload.stage

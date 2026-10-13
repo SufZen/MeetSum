@@ -14,6 +14,7 @@ const taskLabels: Record<string, string> = {
   "audio.transcribe": "Transcription",
   "transcript.clean": "Transcript cleanup",
   "summary.generate": "Summary generation",
+  "summary.persist": "Summary persistence",
   "tasks.extract": "Task extraction",
   "meeting.index": "Memory indexing",
   "quality.review": "Quality review",
