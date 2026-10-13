@@ -9,6 +9,7 @@
 import { z } from "zod"
 
 import { generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
+import { dataBlock } from "@/lib/ai/prompts/data-block"
 import { sha1Hex } from "@/lib/intelligence/normalize"
 import { getEphemeral, onDemandKey, setEphemeral, singleFlight } from "@/lib/intelligence/on-demand"
 import {
@@ -212,13 +213,16 @@ export function prepInstructions(context: PrepContext): string {
   const date = formatDueDate(context.meeting.startedAt) ?? context.meeting.startedAt
   const attendees = context.meeting.attendees.join(", ") || "—"
 
+  // Titles, overviews, decisions and task titles are meeting data: tagged
+  // blocks (neutralized), never instructions.
   if (context.language === "he") {
     return [
       "הכן/י תדריך הכנה קצר לפגישה הקרובה, בעברית עסקית טבעית.",
-      `הפגישה: ${context.meeting.title} (${date}). משתתפים: ${attendees}.`,
+      "הפגישה הקרובה:",
+      dataBlock("meeting", `${context.meeting.title} (${date})\nמשתתפים: ${attendees}`),
       "",
       "פגישות קודמות קשורות:",
-      contextBlock(context),
+      dataBlock("related_meetings", contextBlock(context)),
       "",
       "כללים:",
       "- goal: משפט אחד על מטרת הפגישה.",
@@ -232,10 +236,11 @@ export function prepInstructions(context: PrepContext): string {
 
   return [
     "Write a short prep brief for the upcoming meeting.",
-    `Meeting: ${context.meeting.title} (${date}). Attendees: ${attendees}.`,
+    "Upcoming meeting:",
+    dataBlock("meeting", `${context.meeting.title} (${date})\nAttendees: ${attendees}`),
     "",
     "Related past meetings:",
-    contextBlock(context),
+    dataBlock("related_meetings", contextBlock(context)),
     "",
     "Rules:",
     "- goal: one sentence on what the meeting should achieve.",

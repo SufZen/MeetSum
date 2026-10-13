@@ -15,6 +15,7 @@
 import { z } from "zod"
 
 import { generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
+import { dataBlock } from "@/lib/ai/prompts/data-block"
 import { sha1Hex } from "@/lib/intelligence/normalize"
 import { getEphemeral, onDemandKey, setEphemeral, singleFlight } from "@/lib/intelligence/on-demand"
 import {
@@ -130,12 +131,21 @@ export function followUpInstructions(meeting: MeetingRecord, options: FollowUpVa
   const overview = meeting.summary?.overview ?? meeting.intelligence?.overview ?? ""
   const decisions = meetingDecisions(meeting).slice(0, 10).map((decision) => `- ${clip(decision, 300)}`)
 
+  // Meeting title, overview and decisions are data: one tagged block
+  // (neutralized), never instructions.
   if (options.language === "he") {
     return [
       "נסח/י מייל המשך (follow-up) לפגישה, בעברית עסקית טבעית.",
-      `הפגישה: ${meeting.title} (${date}).`,
-      `סיכום: ${clip(overview, 1500) || "—"}`,
-      decisions.length ? ["החלטות:", ...decisions].join("\n") : "",
+      dataBlock(
+        "meeting_data",
+        [
+          `הפגישה: ${meeting.title} (${date}).`,
+          `סיכום: ${clip(overview, 1500) || "—"}`,
+          decisions.length ? ["החלטות:", ...decisions].join("\n") : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      ),
       "",
       `טון: ${TONE_GUIDE.he[options.tone]}`,
       "החזר/י subject (שורת נושא קצרה), greeting (פתיחה), body (גוף המייל: תודה, סיכום והחלטות) ו-closing (סיום, בלי שם חותם).",
@@ -148,9 +158,16 @@ export function followUpInstructions(meeting: MeetingRecord, options: FollowUpVa
 
   return [
     "Write a follow-up email for the meeting.",
-    `Meeting: ${meeting.title} (${date}).`,
-    `Summary: ${clip(overview, 1500) || "—"}`,
-    decisions.length ? ["Decisions:", ...decisions].join("\n") : "",
+    dataBlock(
+      "meeting_data",
+      [
+        `Meeting: ${meeting.title} (${date}).`,
+        `Summary: ${clip(overview, 1500) || "—"}`,
+        decisions.length ? ["Decisions:", ...decisions].join("\n") : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    ),
     "",
     `Tone: ${TONE_GUIDE.en[options.tone]}`,
     "Return subject (short), greeting, body (thanks, recap and decisions) and closing (no signature name).",

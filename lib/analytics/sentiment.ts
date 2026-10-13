@@ -17,6 +17,7 @@ import type {
   SentimentTurn,
 } from "@/lib/analytics/types"
 import { describeLlmFailure, generateStructured, interactiveLlmOptions } from "@/lib/ai/llm"
+import { dataBlock } from "@/lib/ai/prompts/data-block"
 import type { Chapter } from "@/lib/intelligence"
 import { sha1Hex } from "@/lib/intelligence/normalize"
 import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
@@ -96,7 +97,11 @@ export function buildSpeakerTurns(segments: TranscriptSegment[]): SpeakerTurn[] 
 }
 
 function sentimentInstructions(language: string, turns: SpeakerTurn[]): string {
-  const lines = turns.map((turn) => `[${turn.alias}] ${turn.text.replace(/\s+/g, " ")}`).join("\n")
+  // Turn text is data: a tagged, neutralized block.
+  const lines = dataBlock(
+    "turns",
+    turns.map((turn) => `[${turn.alias}] ${turn.text.replace(/\s+/g, " ")}`).join("\n")
+  )
 
   if (language === "he") {
     return [

@@ -3,6 +3,7 @@
  * with short aliases mapped back to segment ids, M3 resolved speaker names,
  * a token estimate, and 30-minute windows for map-reduce.
  */
+import { neutralizeData } from "@/lib/ai/prompts/data-block"
 import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
 
 export type PromptTranscript = {
@@ -39,7 +40,7 @@ function speakerName(segment: TranscriptSegment, speakers: Map<string, MeetingSp
   const speaker = segment.speakerId ? speakers.get(segment.speakerId) : undefined
   const name = speaker?.displayName?.trim() || segment.speaker?.trim() || speaker?.label
 
-  return (name || "?").replace(/[[\]]/g, "")
+  return neutralizeData((name || "?").replace(/[[\]]/g, ""))
 }
 
 /**
@@ -60,7 +61,8 @@ export function formatTranscriptForPrompt(
 
   ordered.forEach((segment, index) => {
     const alias = options.aliases?.get(segment.id) ?? `s${index + 1}`
-    const text = segment.text.replace(/\s+/g, " ").trim()
+    // Segment text is data: `<` is neutralized so `</transcript>` can't close the block.
+    const text = neutralizeData(segment.text.replace(/\s+/g, " ").trim())
 
     aliasToSegment.set(alias, segment)
     segmentToAlias.set(segment.id, alias)

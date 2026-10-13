@@ -1,6 +1,7 @@
 /**
  * Title / tags / meeting-type instructions (A5), in the output language.
  */
+import { neutralizeData } from "@/lib/ai/prompts/data-block"
 import { MEETING_TYPES } from "@/lib/ai/templates/builtins"
 import { MAX_TOPICS, MEETING_TAG_VALUES, TITLE_MAX_CHARS } from "@/lib/ai/templates/schema"
 
@@ -16,8 +17,8 @@ export function buildTitleInstructions(input: TitlePromptInput): string {
 
   if (input.language === "he") {
     return [
-      `הכותרת הנוכחית: ${input.currentTitle}`,
-      input.participants.length ? `משתתפים: ${input.participants.join(", ")}` : "",
+      `הכותרת הנוכחית: ${neutralizeData(input.currentTitle)}`,
+      input.participants.length ? `משתתפים: ${input.participants.map(neutralizeData).join(", ")}` : "",
       "יש להחזיר:",
       `- title: כותרת תיאורית קצרה בעברית (עד ${TITLE_MAX_CHARS} תווים), בלי מירכאות ובלי תאריך.`,
       `- meetingType: אחד מ: ${types}.`,
@@ -29,8 +30,8 @@ export function buildTitleInstructions(input: TitlePromptInput): string {
   }
 
   return [
-    `Current title: ${input.currentTitle}`,
-    input.participants.length ? `Participants: ${input.participants.join(", ")}` : "",
+    `Current title: ${neutralizeData(input.currentTitle)}`,
+    input.participants.length ? `Participants: ${input.participants.map(neutralizeData).join(", ")}` : "",
     "Return:",
     `- title: a short descriptive title in the output language (at most ${TITLE_MAX_CHARS} characters), no quotes, no date.`,
     `- meetingType: one of ${types}.`,

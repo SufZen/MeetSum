@@ -3,6 +3,7 @@
  * first). They come after the cached prefix, so they may contain the
  * meeting date anchor, participants and template sections.
  */
+import { neutralizeData } from "@/lib/ai/prompts/data-block"
 import { modelSections } from "@/lib/ai/templates/schema"
 import type { SectionSpec, SummaryTemplateDef } from "@/lib/ai/templates/types"
 
@@ -92,13 +93,15 @@ export function buildSummaryInstructions(input: SummaryPromptInput): string {
   const lang = input.language
   const sections = modelSections(input.template)
   const date = formatMeetingDate(input.startedAt, lang, input.timeZone) ?? input.startedAt
-  const participants = input.participants.filter(Boolean)
+  // Title and names are meeting data: `<` neutralized.
+  const participants = input.participants.filter(Boolean).map(neutralizeData)
+  const meetingTitle = neutralizeData(input.meetingTitle)
   const chapters = chapterTarget(input.durationMs)
   const addendum = input.template.promptAddendum[lang === "he" ? "he" : "en"].trim()
 
   if (lang === "he") {
     return [
-      `כותרת הפגישה: ${input.meetingTitle}`,
+      `כותרת הפגישה: ${meetingTitle}`,
       `תאריך הפגישה: ${date}. יש לחשב תאריכים יחסיים ("מחר", "יום ראשון") ביחס לתאריך זה.`,
       participants.length ? `משתתפים: ${participants.join(", ")}` : "",
       addendum,
@@ -118,7 +121,7 @@ export function buildSummaryInstructions(input: SummaryPromptInput): string {
   }
 
   return [
-    `Meeting title: ${input.meetingTitle}`,
+    `Meeting title: ${meetingTitle}`,
     `Meeting date: ${date}. Resolve relative dates ("tomorrow", "Sunday") against this date.`,
     participants.length ? `Participants: ${participants.join(", ")}` : "",
     addendum,
