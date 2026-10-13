@@ -1,0 +1,7 @@
+{
+  "object": "error",
+  "status": 429,
+  "code": "rate_limited",
+  "message": "You have been rate limited. Please try again in a few minutes.",
+  "request_id": "req_fixture_429"
+}

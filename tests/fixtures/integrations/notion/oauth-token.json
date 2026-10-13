@@ -1,0 +1,12 @@
+{
+  "access_token": "ntn_fixture_access_token_000000000000000000000000",
+  "refresh_token": "nrt_fixture_refresh_token_00000000000000000000000",
+  "token_type": "bearer",
+  "bot_id": "b0t1d2e3-0000-4000-8000-000000000001",
+  "workspace_name": "צוות מוצר",
+  "workspace_icon": null,
+  "workspace_id": "w0r1k2s3-0000-4000-8000-000000000002",
+  "owner": { "type": "user", "user": { "object": "user", "id": "u5e6r7-0000-4000-8000-000000000003" } },
+  "duplicated_template_id": null,
+  "request_id": "req_fixture_1"
+}
