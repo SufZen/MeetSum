@@ -257,11 +257,17 @@ export async function updateRule(
     ...(body.filters !== undefined ? { filters: body.filters } : {}),
     ...(body.destination !== undefined ? { destination: body.destination } : {}),
     ...(body.content !== undefined ? { content: mergeContent(body.content, existing.content) } : {}),
-    // Anyone else's edit (or an API key's) clears the private opt-in and makes
-    // the editor the owner: an opt-in can never be set or kept on another
-    // person's behalf. The owner re-enables it with their own edit.
+    // Anyone else's edit (or an API key's) makes the editor the owner and
+    // never keeps the previous owner's opt-in: an opt-in can never be set or
+    // kept on another person's behalf. A signed-in editor's own explicit
+    // `includePrivate: true` in the same save is honoured (it now covers only
+    // the editor's own private meetings, since they are the creator); an API
+    // key always clears it.
     ...(editorChanged
-      ? { includePrivate: false, ...(input.userId ? { createdByUserId: input.userId } : {}) }
+      ? {
+          includePrivate: input.isUserPrincipal && Boolean(input.userId) && body.includePrivate === true,
+          ...(input.userId ? { createdByUserId: input.userId } : {}),
+        }
       : body.includePrivate !== undefined
         ? { includePrivate: body.includePrivate && input.isUserPrincipal }
         : {}),

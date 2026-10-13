@@ -162,6 +162,22 @@ describe("integration rules authorization (re-audit)", () => {
     })
   })
 
+  it("honours another admin's explicit includePrivate:true in the same save (they become the creator)", async () => {
+    await store.createRule(testRule({ id: "intr_theirs", connectionId: "intc_a", includePrivate: true, createdByUserId: "user_admin" }))
+
+    await as("admin", { userId: "user_admin_2" })
+    const response = await patch("intr_theirs", { name: "mine now", includePrivate: true })
+
+    expect(response.status).toBe(200)
+    // The opt-in now covers the EDITOR's own private meetings only (creator = editor).
+    expect((await response.json()).rule).toMatchObject({ includePrivate: true, createdByUserId: "user_admin_2" })
+
+    // An API key still always clears it.
+    await as("admin", { apiKeyCreatedBy: "user_admin_2" })
+    await patch("intr_theirs", { includePrivate: true })
+    expect((await store.getRule("ws_a", "intr_theirs"))?.includePrivate).toBe(false)
+  })
+
   it("honours includePrivate only for the creator's own private meetings while they are owner and member", async () => {
     const rule = { ...testRule({ includePrivate: true, createdByUserId: "user_admin" }), createdAt: "", updatedAt: "" }
     const facts = (ownerUserId: string): MeetingFacts => ({
