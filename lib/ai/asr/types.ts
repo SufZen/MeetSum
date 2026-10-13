@@ -6,6 +6,7 @@
 
 export type AsrProviderId =
   | "runpod-ivrit"
+  | "modal-worker"
   | "soniox"
   | "local-whisper-chunked"
   | "gemini-legacy"

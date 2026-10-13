@@ -2,7 +2,8 @@
 
 GPU worker for diarized Hebrew transcription, used by the `runpod-ivrit`
 provider (`lib/ai/asr/providers/runpod-ivrit.ts`) when
-`RUNPOD_ASR_WORKER=meetsum`.
+`RUNPOD_ASR_WORKER=meetsum`, and by the `modal-worker` provider when deployed
+on Modal (see "Deploy on Modal (free credits)").
 
 Pipeline (`pipeline.py`): fetch audio (presigned URL or base64 blob, capped by
 `MAX_AUDIO_BYTES`) → ffmpeg 16 kHz mono WAV → **faster-whisper**
@@ -46,6 +47,8 @@ over diarization, embeddings (voiceprints) and the output schema.
 | `pipeline.py` | download, ffmpeg, faster-whisper, pyannote (lazy GPU imports) |
 | `merge.py` | pure word→speaker assignment |
 | `schema.py` | `meetsum-asr/v1` input parsing and output building |
+| `modal_app.py` | Modal deployment (submit/poll web API + GPU class), see below |
+| `tests/test_modal_app.py` | pytest: Modal auth / request validation, no `modal` package needed |
 | `tests/test_merge.py` | pytest: merge + schema, no GPU needed |
 | `tests/test_pipeline.py` | pytest: URL/model policy, ffmpeg args, handler error mapping |
 | `test_input.json` | sample job for `runpod` local testing |
@@ -143,6 +146,56 @@ MeetSum records `executionTime × RUNPOD_PRICE_PER_SECOND` (default
 
 Cold starts add queue time (`delayTime`, not billed as execution) but FlashBoot
 plus the baked model keeps them to seconds.
+
+## Deploy on Modal (free credits)
+
+The same worker runs on [Modal](https://modal.com) serverless GPUs through
+`modal_app.py`, used by MeetSum's `modal-worker` provider
+(`lib/ai/asr/providers/modal-worker.ts`). Modal's Starter plan includes a
+monthly compute credit ($30 at the time of writing; check their pricing page),
+which covers dozens of hours of meetings at T4 rates, so a small deployment
+can cost nothing.
+
+```bash
+pip install modal && modal setup          # one-time login
+cd asr-worker
+modal secret create huggingface HF_TOKEN=hf_...          # read token, pyannote terms accepted
+modal secret create meetsum-asr-auth MEETSUM_ASR_TOKEN="$(openssl rand -hex 32)"
+modal deploy modal_app.py                 # prints https://<workspace>--meetsum-asr-web.modal.run
+```
+
+Then in MeetSum's env:
+
+```dotenv
+MODAL_ASR_URL=https://<workspace>--meetsum-asr-web.modal.run
+MODAL_ASR_TOKEN=<the MEETSUM_ASR_TOKEN value>
+# MODAL_PRICE_PER_SECOND=0.000164   # T4 default; 0.000222 for L4
+```
+
+How it is wired:
+
+- **API** (CPU `web` function, FastAPI): `POST /v1/jobs` (`{"input": <meetsum-asr/v1>}`),
+  `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel`, `GET /health`. Modal caps a
+  synchronous web request at ~150 s, so transcription is submit/poll, like
+  RunPod. Every route requires `Authorization: Bearer <MEETSUM_ASR_TOKEN>`;
+  without the secret every request is rejected. Input is validated with
+  `schema.py` before any GPU starts.
+- **GPU** (`AsrWorker` class): `MODAL_ASR_GPU` (default `T4`; `L4` is faster),
+  calls `handler.handler`, so the input policy, error mapping and
+  `bad_media` marker are identical to RunPod. Execution time is returned as
+  `executionTime` for MeetSum's cost record.
+- **Models** are cached in the `meetsum-asr-models` Volume (`HF_HOME=/models/hf`):
+  only the first cold start downloads Whisper (~1.6 GB) and pyannote.
+- **Knobs** (env at deploy time): `MODAL_SCALEDOWN_WINDOW_S` (idle keep-warm,
+  default 120 s, billed), `MODAL_MAX_CONTAINERS` (default 2),
+  `MODAL_JOB_TIMEOUT_S` (default 3600), `ASR_ALLOWED_AUDIO_HOSTS` /
+  `ASR_ALLOWED_MODELS` as above.
+
+Cost: Modal bills the container's whole lifetime (cold start, model load,
+the scale-down window), so the recorded `executionTime × MODAL_PRICE_PER_SECOND`
+is a lower bound. A T4 is slower than RunPod's default GPUs (estimate RTF
+0.1–0.2 with diarization, unmeasured), i.e. roughly $0.06–0.12 per meeting
+hour plus ~1–2 min of cold start per burst.
 
 ## Re-recording fixtures
 

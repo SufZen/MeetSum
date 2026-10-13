@@ -63,6 +63,7 @@ export function getProviderStatus(): ProviderStatus[] {
   const asr = getAsrChainConfig()
   const asrProvider = (id: string) => asr.providers.find((provider) => provider.id === id)
   const runpod = asrProvider("runpod-ivrit")
+  const modal = asrProvider("modal-worker")
   const soniox = asrProvider("soniox")
 
   return [
@@ -73,7 +74,7 @@ export function getProviderStatus(): ProviderStatus[] {
       mode: asr.chain.join(" → ") || "none",
       detail: asr.chain.length
         ? `Hebrew: ${asr.chain.join(" → ")}; other languages: ${asr.nonHebrewChain.join(" → ") || "none"}`
-        : "No ASR provider configured (RunPod, Soniox or local Whisper)",
+        : "No ASR provider configured (RunPod, Modal, Soniox or local Whisper)",
     },
     {
       id: "runpod-ivrit",
@@ -83,6 +84,15 @@ export function getProviderStatus(): ProviderStatus[] {
       detail: runpod?.configured
         ? "Serverless GPU transcription + diarization configured"
         : "Missing RUNPOD_API_KEY / RUNPOD_ASR_ENDPOINT_ID",
+    },
+    {
+      id: "modal-worker",
+      label: "Modal Hebrew ASR (asr-worker)",
+      configured: Boolean(modal?.configured),
+      mode: modal?.model,
+      detail: modal?.configured
+        ? "Serverless GPU transcription + diarization on Modal configured"
+        : "Optional; missing MODAL_ASR_URL / MODAL_ASR_TOKEN",
     },
     {
       id: "soniox",
