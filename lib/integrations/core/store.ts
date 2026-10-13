@@ -156,6 +156,8 @@ export type DeliveryPatch = Partial<
   lastError?: string | null
   completedAt?: string | null
   leaseUntil?: string | null
+  /** Only to scope a reconsiderable skip off the rule's key. */
+  idempotencyKey?: string
 }
 
 export type DeliveryListFilter = {

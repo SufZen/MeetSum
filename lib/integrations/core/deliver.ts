@@ -18,7 +18,7 @@
  */
 import { auditIntegration } from "@/lib/integrations/core/audit"
 import { toConnectionDTO } from "@/lib/integrations/core/connections"
-import { evaluateRule } from "@/lib/integrations/core/dispatcher"
+import { evaluateRule, RECONSIDERABLE_SKIPS, skippedIdempotencyKey } from "@/lib/integrations/core/dispatcher"
 import { integrationLog, isUnrecoverableKind, publicIntegrationError, storedIntegrationError, toProviderError } from "@/lib/integrations/core/errors"
 import { providerFetch } from "@/lib/integrations/core/http"
 import { deliveryBackoffMs } from "@/lib/integrations/core/limits"
@@ -92,6 +92,10 @@ export async function runIntegrationDelivery(
     await store.updateDelivery(ws, delivery.id, {
       status,
       leaseUntil: null,
+      // A skip a later change can undo frees the rule's key (e2e fix #12).
+      ...(status === "skipped" && delivery.origin === "rule" && extra.skipReason && RECONSIDERABLE_SKIPS.has(extra.skipReason)
+        ? { idempotencyKey: skippedIdempotencyKey(delivery.idempotencyKey, extra.skipReason, delivery.id) }
+        : {}),
       completedAt: rt.now().toISOString(),
       ...(extra.skipReason ? { skipReason: extra.skipReason } : {}),
       ...(extra.lastError ? { lastError: extra.lastError } : {}),

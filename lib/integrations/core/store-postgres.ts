@@ -219,6 +219,7 @@ const DELIVERY_COLUMNS: Record<keyof DeliveryPatch, { column: string; cast?: str
   lastError: { column: "last_error" },
   completedAt: { column: "completed_at", cast: "timestamptz" },
   leaseUntil: { column: "lease_until", cast: "timestamptz" },
+  idempotencyKey: { column: "idempotency_key" },
 }
 
 /** `set a = $n, …` from a patch (undefined skipped, null clears). */

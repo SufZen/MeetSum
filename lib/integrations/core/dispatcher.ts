@@ -86,6 +86,18 @@ export function evaluateRule(input: {
   return recap ? { status: "skipped", reason: recap } : { status: "queued" }
 }
 
+/**
+ * Skips that a later change can undo (an opt-in, recipients, the owner's
+ * private opt-in): they never consume the rule's idempotency key, so the
+ * next completion after the change still delivers (M8 e2e fix #12).
+ */
+export const RECONSIDERABLE_SKIPS: ReadonlySet<string> = new Set(["recap_not_opted_in", "recap_off", "no_recipients", "private_meeting"])
+
+/** The idempotency key a skipped outcome is stored under (scoped per outcome). */
+export function skippedIdempotencyKey(baseKey: string, reason: string, scope: string): string {
+  return `${baseKey}:skipped:${reason}:${scope}`
+}
+
 export type DispatchSummary = { queued: number; skipped: number; duplicates: number }
 
 export async function runIntegrationDispatch(
@@ -148,7 +160,14 @@ export async function runIntegrationDispatch(
       eventId: payload.eventId,
       meetingId: payload.meetingId,
       ...(payload.actionItemId ? { actionItemId: payload.actionItemId } : {}),
-      idempotencyKey: ruleIdempotencyKey(rule.id, payload.eventName, payload.meetingId, payload.actionItemId),
+      idempotencyKey:
+        evaluation.status === "skipped" && RECONSIDERABLE_SKIPS.has(evaluation.reason)
+          ? skippedIdempotencyKey(
+              ruleIdempotencyKey(rule.id, payload.eventName, payload.meetingId, payload.actionItemId),
+              evaluation.reason,
+              payload.eventId
+            )
+          : ruleIdempotencyKey(rule.id, payload.eventName, payload.meetingId, payload.actionItemId),
       status: evaluation.status,
       ...(evaluation.status === "skipped" ? { skipReason: evaluation.reason, completedAt: now } : {}),
       maxAttempts: integrationMaxAttempts(),
