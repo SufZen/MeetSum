@@ -3,8 +3,6 @@ import {
   AlertTriangleIcon,
   ActivityIcon,
   CheckCircle2Icon,
-  FileTextIcon,
-  MoreHorizontalIcon,
   NotepadTextIcon,
 } from "lucide-react"
 
@@ -261,7 +259,8 @@ export function MeetingRightRail({
 
       <section className="ms-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Exports & Integrations</h3>
-        <div className="grid grid-cols-5 gap-2">
+        {/* M8 C3: Download (PDF, Markdown, DOCX), Google Docs and Send to… live in one menu. */}
+        <div className="flex flex-wrap items-center gap-2">
           <MeetingExportMenu
             meetingId={meeting?.id}
             title={meeting?.title ?? ""}
@@ -269,42 +268,16 @@ export function MeetingRightRail({
             visibility={meeting?.visibility}
             canManage={canManage}
           />
-          {[
-            {
-              Icon: FileTextIcon,
-              label: "Notion",
-              onClick: undefined,
-              enabled: false,
-            },
-            {
-              Icon: NotepadTextIcon,
-              label: "RealizeOS",
-              onClick: onExportRealizeOS,
-              enabled: Boolean(meeting) && !exporting,
-            },
-          ].map(({ Icon: TypedIcon, label, onClick, enabled }) => (
-            <Button
-              key={label}
-              variant="outline"
-              size="icon"
-              className="size-9 rounded-md"
-              onClick={onClick}
-              disabled={!enabled}
-              title={enabled ? label : `${label} is not available yet`}
-            >
-              <TypedIcon aria-hidden="true" className="size-4" />
-            </Button>
-          ))}
-          <Button variant="outline" size="icon" className="size-9 rounded-md" disabled title="More exports coming next">
-            <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={onExportRealizeOS}
+            disabled={!meeting || exporting}
+          >
+            <NotepadTextIcon aria-hidden="true" className="size-4" />
+            RealizeOS
           </Button>
-        </div>
-        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-2xs text-muted-foreground">
-          <span>PDF</span>
-          <span>MD</span>
-          <span>Notion</span>
-          <span>RealizeOS</span>
-          <span />
         </div>
       </section>
 
