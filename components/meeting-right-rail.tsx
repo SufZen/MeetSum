@@ -3,12 +3,11 @@ import {
   AlertTriangleIcon,
   ActivityIcon,
   CheckCircle2Icon,
-  FileTextIcon,
-  MoreHorizontalIcon,
   NotepadTextIcon,
 } from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
+import { MeetingExportMenu } from "@/components/meetings/meeting-export-menu"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -67,8 +66,7 @@ export function MeetingRightRail({
   exporting,
   suggestingAgents,
   onEditTags,
-  onExportMarkdown,
-  onExportPdf,
+  canManage = false,
   onExportRealizeOS,
   onProcessMeeting,
   onSuggestAgents,
@@ -81,8 +79,8 @@ export function MeetingRightRail({
   exporting?: boolean
   suggestingAgents?: boolean
   onEditTags: () => void
-  onExportMarkdown: () => void
-  onExportPdf: () => void
+  /** `canManageMeeting` for the selected meeting (export menu, M8). */
+  canManage?: boolean
   onExportRealizeOS: () => void
   onProcessMeeting?: () => void
   onSuggestAgents: () => void
@@ -261,55 +259,25 @@ export function MeetingRightRail({
 
       <section className="ms-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Exports & Integrations</h3>
-        <div className="grid grid-cols-5 gap-2">
-          {[
-            {
-              Icon: FileTextIcon,
-              label: "PDF",
-              onClick: onExportPdf,
-              enabled: Boolean(meeting),
-            },
-            {
-              Icon: NotepadTextIcon,
-              label: "MD",
-              onClick: onExportMarkdown,
-              enabled: Boolean(meeting),
-            },
-            {
-              Icon: FileTextIcon,
-              label: "Notion",
-              onClick: undefined,
-              enabled: false,
-            },
-            {
-              Icon: NotepadTextIcon,
-              label: "RealizeOS",
-              onClick: onExportRealizeOS,
-              enabled: Boolean(meeting) && !exporting,
-            },
-          ].map(({ Icon: TypedIcon, label, onClick, enabled }) => (
-            <Button
-              key={label}
-              variant="outline"
-              size="icon"
-              className="size-9 rounded-md"
-              onClick={onClick}
-              disabled={!enabled}
-              title={enabled ? label : `${label} is not available yet`}
-            >
-              <TypedIcon aria-hidden="true" className="size-4" />
-            </Button>
-          ))}
-          <Button variant="outline" size="icon" className="size-9 rounded-md" disabled title="More exports coming next">
-            <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+        {/* M8 C3: Download (PDF, Markdown, DOCX), Google Docs and Send to… live in one menu. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <MeetingExportMenu
+            meetingId={meeting?.id}
+            title={meeting?.title ?? ""}
+            language={meeting?.language ?? ""}
+            visibility={meeting?.visibility}
+            canManage={canManage}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={onExportRealizeOS}
+            disabled={!meeting || exporting}
+          >
+            <NotepadTextIcon aria-hidden="true" className="size-4" />
+            RealizeOS
           </Button>
-        </div>
-        <div className="mt-2 grid grid-cols-5 gap-2 text-center text-2xs text-muted-foreground">
-          <span>PDF</span>
-          <span>MD</span>
-          <span>Notion</span>
-          <span>RealizeOS</span>
-          <span />
         </div>
       </section>
 

@@ -1,0 +1,8 @@
+{
+  "status": "error",
+  "message": "You have reached your secondly limit.",
+  "errorType": "RATE_LIMIT",
+  "correlationId": "c0ffee00-0000-0000-0000-000000000000",
+  "policyName": "SECONDLY",
+  "category": "RATE_LIMITS"
+}

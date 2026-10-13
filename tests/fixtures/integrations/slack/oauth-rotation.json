@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "scope": "chat:write,chat:write.public,channels:read",
+  "token_type": "bot",
+  "access_token": "xoxe.xoxb-fixture-rotating-access",
+  "refresh_token": "xoxe-1-fixture-refresh",
+  "expires_in": 43200,
+  "bot_user_id": "U0BOT",
+  "team": { "id": "T0GRID", "name": "Grid Team" },
+  "enterprise": { "id": "E0GRID", "name": "Grid" }
+}

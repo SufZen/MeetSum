@@ -7,7 +7,8 @@
 import { getCollabBackend, nowIso, type CollabBackend } from "@/lib/clips/db"
 import { createId } from "@/lib/workspaces/tokens"
 
-export type NotificationKind = "mention" | "reply" | "task_assigned"
+/** `integration_reauth` (M8): TS-only, the column has no check constraint. */
+export type NotificationKind = "mention" | "reply" | "task_assigned" | "integration_reauth"
 
 export type EnqueueNotificationInput = {
   workspaceId: string
@@ -18,7 +19,7 @@ export type EnqueueNotificationInput = {
   actorUserId?: string
 }
 
-const KINDS: readonly NotificationKind[] = ["mention", "reply", "task_assigned"]
+const KINDS: readonly NotificationKind[] = ["mention", "reply", "task_assigned", "integration_reauth"]
 /** Payload keys that may be stored (ids, kinds, offsets). */
 const PAYLOAD_KEYS = new Set([
   "meetingId",
@@ -30,6 +31,9 @@ const PAYLOAD_KEYS = new Set([
   "clipId",
   "actorUserId",
   "startMs",
+  // M8 integration_reauth: which connection needs reconnecting (ids only).
+  "connectionId",
+  "provider",
 ])
 
 function sanitizePayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -84,4 +88,23 @@ export async function enqueueNotification(
   )
 
   return result.rows.length ? { id, skipped: false } : { skipped: true }
+}
+
+/**
+ * M8 (Package A): tells a connection's creator that it needs reconnecting.
+ * Ids only (connection id and provider); never a token or provider message.
+ */
+export async function enqueueIntegrationReauthNotification(
+  input: { workspaceId: string; userId: string; connectionId: string; provider: string },
+  backend?: CollabBackend
+): Promise<{ id?: string; skipped: boolean }> {
+  return enqueueNotification(
+    {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      kind: "integration_reauth",
+      payload: { connectionId: input.connectionId, provider: input.provider },
+    },
+    backend
+  )
 }

@@ -57,7 +57,8 @@ export async function deliverInvitation(input: {
   const inviteUrl = buildInviteUrl(input.origin, input.locale, input.token)
   const sender = input.sender ?? getEmailSender()
 
-  if (!sender.isConfigured()) {
+  // The log sender delivers nothing: keep the copy-the-link flow for it.
+  if (!sender.isConfigured() || sender.provider === "log") {
     await input.store
       .recordInvitationSend(input.invitation.id, { error: "email_not_configured" })
       .catch(() => {})

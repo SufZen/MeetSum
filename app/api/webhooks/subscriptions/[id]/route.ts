@@ -8,9 +8,14 @@ import {
   deleteWebhookSubscription,
   updateWebhookSubscription,
   WebhookNotFoundError,
+  WebhookValidationError,
 } from "@/lib/webhooks/management"
 
 function errorResponse(error: unknown, fallback: string) {
+  if (error instanceof WebhookValidationError) {
+    return NextResponse.json({ error: error.code, message: error.message }, { status: 400 })
+  }
+
   return jsonError(
     error instanceof Error ? error.message : fallback,
     error instanceof WebhookNotFoundError ? 404 : 400
@@ -30,6 +35,8 @@ export const PATCH = withAuthz<{ id: string }>(
       enabled?: unknown
       events?: unknown
       rotateSecret?: unknown
+      /** `2` upgrades a v1 subscription to the catalog payloads (one-way). */
+      payloadVersion?: unknown
     }
 
     try {
@@ -47,6 +54,7 @@ export const PATCH = withAuthz<{ id: string }>(
           url: subscription.url,
           enabled: subscription.enabled,
           events: subscription.events,
+          payloadVersion: subscription.payloadVersion,
           secretRotated: Boolean(secret),
         },
       })

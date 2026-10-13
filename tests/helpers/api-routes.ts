@@ -31,6 +31,9 @@ export const PUBLIC_ALLOWLIST = [
   "webhooks/teams/lifecycle POST",
   // M7: Vexa bot webhook, HMAC-signed; workspace resolved from bot_sessions.
   "integrations/vexa/webhook POST",
+  // M8: email recap unsubscribe, signed token; GET never mutates.
+  "email/unsubscribe GET",
+  "email/unsubscribe POST",
 ].sort()
 
 export type RouteFile = { route: string; file: string; source: string }

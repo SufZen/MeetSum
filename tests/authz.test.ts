@@ -44,6 +44,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "api_keys:manage",
   "webhooks:manage",
   "integrations:manage",
+  "integrations:connect",
   "storage:manage",
   "audit:read",
   "ops:read",
@@ -63,6 +64,7 @@ const EXPECTED: Record<WorkspaceRole, Permission[]> = {
     "meeting:create",
     "contexts:write",
     "jobs:write",
+    "integrations:connect",
   ],
   admin: ALL_PERMISSIONS.filter(
     (permission) => permission !== "owners:manage" && permission !== "workspace:delete"

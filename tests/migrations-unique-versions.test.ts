@@ -65,13 +65,16 @@ function doBlocks(sql: string): [number, number][] {
 }
 
 describe("migration versions (M6 Step 0)", () => {
-  it("finds the migrations, including M7's 024 and M6's 025 and 026", () => {
+  it("finds the migrations, including M7's 024, M6's 025 and 026, and M8's 027, 028 and 029", () => {
     const names = migrations.map((file) => file.name)
 
     expect(migrations.length).toBeGreaterThan(20)
     expect(names).toContain("024_meeting_bot.sql")
     expect(names).toContain("025_search_ask.sql")
     expect(names).toContain("026_ask_usage.sql")
+    expect(names).toContain("027_integrations.sql")
+    expect(names).toContain("028_integration_token_generation.sql")
+    expect(names).toContain("029_integration_refresh_lease.sql")
   })
 
   it("never reuses a version number", () => {
@@ -84,10 +87,10 @@ describe("migration versions (M6 Step 0)", () => {
     expect(duplicateVersions(withDuplicate)).toEqual(["025: 025_search_ask.sql, 025_other_branch.sql"])
   })
 
-  it("numbers the migrations contiguously from 001 (001-026)", () => {
+  it("numbers the migrations contiguously from 001 (001-029)", () => {
     expect(versionGaps(migrations)).toEqual([])
     expect(migrations.map((file) => file.version)).toEqual(
-      Array.from({ length: 26 }, (_, index) => String(index + 1).padStart(3, "0"))
+      Array.from({ length: 29 }, (_, index) => String(index + 1).padStart(3, "0"))
     )
     expect(versionGaps(migrations.filter((file) => file.version !== "024"))).toEqual(["024"])
   })

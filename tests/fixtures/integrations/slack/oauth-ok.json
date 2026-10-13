@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "app_id": "A0FIXTURE",
+  "authed_user": { "id": "U0ADMIN" },
+  "scope": "chat:write,chat:write.public,channels:read",
+  "token_type": "bot",
+  "access_token": "xoxb-fixture-access-token",
+  "bot_user_id": "U0BOT",
+  "team": { "id": "T0FIXTURE", "name": "Acme Hebrew Team" },
+  "enterprise": null,
+  "is_enterprise_install": false
+}

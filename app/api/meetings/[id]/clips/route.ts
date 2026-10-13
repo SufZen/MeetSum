@@ -16,6 +16,7 @@ import {
 } from "@/lib/clips/store"
 import { toClipWire, type CreateClipInput } from "@/lib/clips/types"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { emitPlatformEvent } from "@/lib/platform/emit"
 import { rateLimitRequest, type RateLimitConfig } from "@/lib/rate-limit"
 
 const CLIP_CREATE_LIMIT: RateLimitConfig = { maxRequests: 20, windowMs: 3_600_000 }
@@ -109,6 +110,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       targetId: clip.id,
       metadata: { meetingId: id, startMs: clip.startMs, endMs: clip.endMs },
     })
+    await emitPlatformEvent({ workspaceId: ctx.workspace.id, repo: ctx.meetings }, "clip.created", { meetingId: id, clipId: clip.id }).catch(() => {})
 
     return NextResponse.json(
       { clip: toClipWire(clip, canManageClip(ctx, clip, { ownerUserId: undefined })) },

@@ -5,7 +5,8 @@ import {
   meetingNotFound,
 } from "@/app/api/_lib/meeting-access"
 import { withAuthz } from "@/lib/auth/authz"
-import { renderMeetingMarkdown } from "@/lib/meetings/export"
+import { contentDispositionAttachment } from "@/lib/http/content-disposition"
+import { exportLocaleFor, renderMeetingMarkdown } from "@/lib/meetings/export"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export const POST = withAuthz<{ id: string }>(
@@ -22,13 +23,12 @@ export const POST = withAuthz<{ id: string }>(
 
     await ctx.meetings.createExportRecord({ meetingId: id, format: "markdown" })
 
-    return new NextResponse(renderMeetingMarkdown(meeting), {
+    const locale = exportLocaleFor(meeting, new URL(request.url).searchParams.get("locale"))
+
+    return new NextResponse(renderMeetingMarkdown(meeting, { locale }), {
       headers: {
         "content-type": "text/markdown; charset=utf-8",
-        "content-disposition": `attachment; filename="${meeting.title.replace(
-          /[^a-z0-9_-]+/gi,
-          "-"
-        )}.md"`,
+        "content-disposition": contentDispositionAttachment(meeting.title, "md"),
         ...rateLimit.headers,
       },
     })

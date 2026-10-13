@@ -239,6 +239,13 @@ export function CommandCenterShell({
     )
   }, [])
 
+  // M8: `?panel=settings&section=integrations` deep link (OAuth return).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("panel") === "settings") {
+      queueMicrotask(() => setActivePanel("settings"))
+    }
+  }, [])
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const meetingId = params.get("meeting")
@@ -1201,32 +1208,6 @@ export function CommandCenterShell({
     setSidebarRooms(selectRecentRooms(body.rooms ?? []))
   }
 
-  async function downloadExport(format: "pdf" | "markdown") {
-    if (!selectedMeeting) return
-
-    const response = await fetch(
-      `/api/meetings/${selectedMeeting.id}/export/${format}`,
-      { method: "POST" }
-    )
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}))
-      toast.error(body.error ?? `Unable to export ${format}`)
-      return
-    }
-
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement("a")
-    const extension = format === "pdf" ? "pdf" : "md"
-
-    anchor.href = url
-    anchor.download = `${selectedMeeting.title.replace(/[^a-z0-9_-]+/gi, "-")}.${extension}`
-    anchor.click()
-    URL.revokeObjectURL(url)
-    toast.success(`${format.toUpperCase()} exported`)
-  }
-
   function reprocessMeeting(mode: "full" | "summary" | "tasks" | "transcript-cleanup") {
     if (!selectedMeeting) return
 
@@ -1534,8 +1515,7 @@ export function CommandCenterShell({
         exporting={exporting}
         suggestingAgents={suggestingAgents}
         onEditTags={openTagsDialog}
-        onExportMarkdown={() => downloadExport("markdown")}
-        onExportPdf={() => downloadExport("pdf")}
+        canManage={selectedPermissions.canManage}
         onExportRealizeOS={previewRealizeOSPayload}
         onProcessMeeting={processMeeting}
         onSuggestAgents={suggestAgents}

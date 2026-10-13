@@ -65,6 +65,44 @@ function base64Body(value: string): string {
   )
 }
 
+/** Extra header names a message may carry (M8): RFC 8058 unsubscribe, Auto-Submitted, X-MeetSum-*. */
+const FIXED_EXTRA_HEADERS: Record<string, string> = {
+  "list-unsubscribe": "List-Unsubscribe",
+  "list-unsubscribe-post": "List-Unsubscribe-Post",
+  "auto-submitted": "Auto-Submitted",
+}
+const MEETSUM_HEADER = /^x-meetsum-[a-z0-9-]{1,40}$/i
+const MAX_EXTRA_HEADER_LENGTH = 900
+
+/**
+ * The allowlisted extra headers with canonical names and sanitized values
+ * (CR/LF stripped). Any other name, or a value that is empty or too long,
+ * is dropped, so a header can never be injected or overridden.
+ */
+export function allowedExtraHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  for (const [rawName, rawValue] of Object.entries(headers ?? {})) {
+    if (typeof rawName !== "string" || typeof rawValue !== "string") continue
+
+    const lower = rawName.trim().toLowerCase()
+    const name =
+      FIXED_EXTRA_HEADERS[lower] ??
+      (MEETSUM_HEADER.test(lower)
+        ? lower
+            .split("-")
+            .map((part, index) => (index === 1 ? "MeetSum" : part.charAt(0).toUpperCase() + part.slice(1)))
+            .join("-")
+        : undefined)
+    const value = sanitizeHeaderValue(rawValue)
+
+    if (!name || !value || value.length > MAX_EXTRA_HEADER_LENGTH || !/^[\x20-\x7e]*$/.test(value)) continue
+    result[name] = value
+  }
+
+  return result
+}
+
 export type MimeMessageInput = {
   from: string
   fromName?: string
@@ -76,6 +114,8 @@ export type MimeMessageInput = {
   date?: Date
   messageIdDomain?: string
   boundary?: string
+  /** M8: allowlisted extra headers (`allowedExtraHeaders`). */
+  headers?: Record<string, string>
 }
 
 /** RFC 5322 message (text, or multipart/alternative text + html), CRLF line endings. */
@@ -88,6 +128,7 @@ export function buildMimeMessage(input: MimeMessageInput): string {
     `Subject: ${encodeHeaderWord(input.subject)}`,
     `Date: ${(input.date ?? new Date()).toUTCString()}`,
     `Message-ID: <${randomBytes(12).toString("hex")}@${sanitizeHeaderValue(domain)}>`,
+    ...Object.entries(allowedExtraHeaders(input.headers)).map(([name, value]) => `${name}: ${value}`),
     "MIME-Version: 1.0",
   ]
 

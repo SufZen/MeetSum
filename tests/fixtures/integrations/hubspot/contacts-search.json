@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "results": [
+    {
+      "id": "501",
+      "properties": { "createdate": "2026-01-01T00:00:00.000Z", "email": "CEO@client.example", "hs_object_id": "501" },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-09-01T00:00:00.000Z",
+      "archived": false
+    },
+    {
+      "id": "502",
+      "properties": { "createdate": "2026-01-01T00:00:00.000Z", "email": "cfo@client.example", "hs_object_id": "502" },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-09-01T00:00:00.000Z",
+      "archived": false
+    }
+  ]
+}

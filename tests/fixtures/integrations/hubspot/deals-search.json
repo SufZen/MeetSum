@@ -1,0 +1,8 @@
+{
+  "total": 21,
+  "results": [
+    { "id": "9001", "properties": { "dealname": "חידוש חוזה 2027", "dealstage": "contractsent", "amount": "120000" } },
+    { "id": "9002", "properties": { "dealname": "Pilot", "dealstage": "qualifiedtobuy", "amount": null } }
+  ],
+  "paging": { "next": { "after": "20", "link": "?after=20" } }
+}

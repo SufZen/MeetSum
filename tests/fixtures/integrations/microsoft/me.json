@@ -1,0 +1,7 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users(id,mail,userPrincipalName,displayName)/$entity",
+  "id": "0c5d8d2f-1111-4c55-9b2c-000000000001",
+  "mail": "Yossi@Acme.co.il",
+  "userPrincipalName": "yossi@acme.co.il",
+  "displayName": "יוסי כהן"
+}

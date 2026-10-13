@@ -1,0 +1,37 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(event)",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$skiptoken=page2token",
+  "value": [
+    {
+      "id": "AAMkAGteams1",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000SHARED1",
+      "subject": "פגישת היכרות עם לקוח",
+      "isCancelled": false,
+      "isAllDay": false,
+      "sensitivity": "normal",
+      "start": { "dateTime": "2026-10-14T09:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2026-10-14T10:00:00.0000000", "timeZone": "UTC" },
+      "organizer": { "emailAddress": { "name": "Dana", "address": "dana@acme.co.il" } },
+      "attendees": [
+        { "type": "required", "status": { "response": "accepted" }, "emailAddress": { "name": "Yossi", "address": "Yossi@acme.co.il" } },
+        { "type": "required", "status": { "response": "none" }, "emailAddress": { "name": "CEO", "address": "ceo@client.example" } },
+        { "type": "resource", "status": { "response": "accepted" }, "emailAddress": { "name": "Room 1", "address": "room1@acme.co.il" } }
+      ],
+      "location": { "displayName": "Microsoft Teams Meeting" },
+      "locations": [{ "displayName": "Microsoft Teams Meeting" }],
+      "body": { "contentType": "text", "content": "Private notes: door code 4411. Join the meeting." },
+      "isOnlineMeeting": true,
+      "onlineMeeting": {
+        "joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_NjY4YzEzMzQtZjBkZS00OTk1LWE4ZjAtMTIzNDU2Nzg5MDEy%40thread.v2/0?context=%7b%22Tid%22%3a%2272f988bf-86f1-41af-91ab-2d7cd011db47%22%7d"
+      }
+    },
+    {
+      "id": "AAMkAGallday",
+      "iCalUId": "040000008200E00074C5B7101A82E00800000000ALLDAY",
+      "subject": "Holiday",
+      "isAllDay": true,
+      "start": { "dateTime": "2026-10-15T00:00:00.0000000", "timeZone": "UTC" },
+      "end": { "dateTime": "2026-10-16T00:00:00.0000000", "timeZone": "UTC" }
+    }
+  ]
+}

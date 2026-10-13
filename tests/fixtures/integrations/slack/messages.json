@@ -1,0 +1,5 @@
+{
+  "post_ok": { "ok": true, "channel": "C0GENERAL", "ts": "1700000000.000100", "message": { "type": "message" } },
+  "update_ok": { "ok": true, "channel": "C0GENERAL", "ts": "1700000000.000100", "text": "updated" },
+  "permalink": { "ok": true, "channel": "C0GENERAL", "permalink": "https://acme.slack.com/archives/C0GENERAL/p1700000000000100" }
+}

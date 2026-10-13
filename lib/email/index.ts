@@ -1,4 +1,7 @@
-import { buildMimeMessage, toBase64Url } from "@/lib/email/mime"
+import { createHash } from "node:crypto"
+import { appendFileSync } from "node:fs"
+
+import { allowedExtraHeaders, buildMimeMessage, toBase64Url } from "@/lib/email/mime"
 import type {
   EmailMessage,
   EmailProvider,
@@ -48,15 +51,51 @@ export function resolveEmailProvider(env: NodeJS.ProcessEnv = process.env): Emai
   return "log"
 }
 
-export function createLogEmailSender(): EmailSender {
+/**
+ * Dev/e2e only (never in production): the log sender appends each message
+ * as a JSON line to `E2E_EMAIL_CAPTURE_FILE` so browser tests can read it.
+ */
+function captureForE2e(message: EmailMessage, env: NodeJS.ProcessEnv) {
+  const file = env.E2E_EMAIL_CAPTURE_FILE?.trim()
+
+  if (!file || env.NODE_ENV === "production") return
+
+  appendFileSync(
+    file,
+    `${JSON.stringify({
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      headers: allowedExtraHeaders(message.headers),
+      at: new Date().toISOString(),
+    })}\n`,
+    "utf8"
+  )
+}
+
+/**
+ * The log sender: "configured" outside production (dev and e2e use
+ * `MEETSUM_EMAIL_PROVIDER=log` on purpose), never in production, where it
+ * would silently drop real mail (a warning says so). It logs a recipient
+ * count and a short hash only: never the address, subject or body
+ * (invitation emails carry a one-time token).
+ */
+export function createLogEmailSender(env: NodeJS.ProcessEnv = process.env): EmailSender {
   return {
     provider: "log",
-    isConfigured: () => false,
+    isConfigured: () => {
+      if (env.NODE_ENV !== "production") return true
+      console.warn("[email] MEETSUM_EMAIL_PROVIDER resolves to log in production: email is not configured")
+      return false
+    },
     async send(message) {
-      // Never log the body: invitation emails carry a one-time token.
-      console.info("[email] no provider configured; not sent", {
-        to: message.to,
-        subject: message.subject,
+      captureForE2e(message, env)
+      const recipients = (Array.isArray(message.to) ? message.to : [message.to]).filter(Boolean)
+
+      console.info("[email] log provider; not sent", {
+        recipients: recipients.length,
+        toHash: createHash("sha256").update(recipients.join(",").toLowerCase()).digest("hex").slice(0, 12),
       })
 
       return { provider: "log" }
@@ -88,6 +127,7 @@ export function createGmailEmailSender(env: NodeJS.ProcessEnv = process.env): Em
           text: message.text,
           html: message.html,
           replyTo: message.replyTo,
+          headers: message.headers,
         })
       )
       const response = await gmail.users.messages.send({
@@ -127,6 +167,7 @@ export function createSmtpEmailSender(env: NodeJS.ProcessEnv = process.env): Ema
         text: message.text,
         ...(message.html ? { html: message.html } : {}),
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+        ...(message.headers ? { headers: allowedExtraHeaders(message.headers) } : {}),
       })
 
       return { provider: "smtp", messageId: info.messageId }
@@ -140,5 +181,5 @@ export function getEmailSender(env: NodeJS.ProcessEnv = process.env): EmailSende
   if (provider === "smtp") return createSmtpEmailSender(env)
   if (provider === "gmail") return createGmailEmailSender(env)
 
-  return createLogEmailSender()
+  return createLogEmailSender(env)
 }

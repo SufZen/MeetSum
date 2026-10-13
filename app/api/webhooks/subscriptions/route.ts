@@ -8,6 +8,7 @@ import {
   createWebhookSubscription,
   createWebhookTestSignature,
   listWebhookSubscriptions,
+  WebhookValidationError,
 } from "@/lib/webhooks/management"
 
 export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
@@ -25,10 +26,12 @@ export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
 
   if (rateLimit.blocked) return rateLimit.blocked
 
-  const { url, events, secret } = (await request.json().catch(() => ({}))) as {
+  const { url, events, secret, payloadVersion } = (await request.json().catch(() => ({}))) as {
     url?: string
     events?: unknown
     secret?: unknown
+    /** 1 or 2; new subscriptions default to 2 (the event catalog). */
+    payloadVersion?: unknown
   }
 
   if (!url) {
@@ -40,6 +43,7 @@ export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
       url,
       events,
       secret,
+      payloadVersion,
     })
     const { subscription } = created
     const { event, signature } = createWebhookTestSignature(
@@ -55,6 +59,7 @@ export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
       metadata: {
         url: subscription.url,
         events: subscription.events,
+        payloadVersion: subscription.payloadVersion,
         secretRef: subscription.secretRef,
       },
     })
@@ -70,6 +75,10 @@ export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
       { status: 201, headers: { "cache-control": "no-store" } }
     )
   } catch (error) {
+    if (error instanceof WebhookValidationError) {
+      return NextResponse.json({ error: error.code, message: error.message }, { status: 400 })
+    }
+
     return jsonError(
       error instanceof Error ? error.message : "Unable to create webhook subscription",
       400

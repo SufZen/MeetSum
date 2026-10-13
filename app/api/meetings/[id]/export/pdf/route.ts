@@ -5,6 +5,7 @@ import {
   meetingNotFound,
 } from "@/app/api/_lib/meeting-access"
 import { withAuthz } from "@/lib/auth/authz"
+import { contentDispositionAttachment } from "@/lib/http/content-disposition"
 import { renderMeetingPdf } from "@/lib/meetings/export"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
@@ -27,10 +28,7 @@ export const POST = withAuthz<{ id: string }>(
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="${meeting.title.replace(
-          /[^a-z0-9_-]+/gi,
-          "-"
-        )}.pdf"`,
+        "content-disposition": contentDispositionAttachment(meeting.title, "pdf"),
         ...rateLimit.headers,
       },
     })

@@ -17,6 +17,7 @@ import { redactBotError } from "@/lib/bot/redact"
 import type { CalendarEventLike } from "@/lib/bot/types"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
+import { findCanonicalMeetingId, withCalendarDedupeLock } from "@/lib/integrations/microsoft/calendar-dedupe"
 import {
   ensureGoogleIdentity,
   type GoogleWorkspaceTarget,
@@ -1331,11 +1332,15 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
               insert into calendar_events (
                 id, google_identity_id, google_event_id, calendar_id, title,
                 starts_at, ends_at, meet_link, status, organizer_email,
-                attendees, raw
+                attendees, raw, provider, workspace_id, ical_uid
               )
-              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+                'google', $13, $14)
               on conflict (google_identity_id, google_event_id)
               do update set
+                workspace_id = coalesce(calendar_events.workspace_id, excluded.workspace_id),
+                ical_uid = coalesce(excluded.ical_uid, calendar_events.ical_uid),
+                updated_at = now(),
                 calendar_id = excluded.calendar_id,
                 title = excluded.title,
                 starts_at = excluded.starts_at,
@@ -1345,6 +1350,8 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 organizer_email = excluded.organizer_email,
                 attendees = excluded.attendees,
               raw = excluded.raw
+              where calendar_events.workspace_id is null
+                 or calendar_events.workspace_id = excluded.workspace_id
               returning id, (xmax = 0) as inserted
             `,
             [
@@ -1360,12 +1367,20 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
               event.organizer?.email ?? null,
               JSON.stringify(event.attendees ?? []),
               JSON.stringify(event),
+              workspaceId,
+              event.iCalUID ?? null,
             ]
           )
           const calendarEventRow = eventResult.rows[0] as
             | { id?: string; inserted?: boolean }
             | undefined
-          const calendarEventId = calendarEventRow?.id ?? proposedCalendarEventId
+          // M8: a conflicting row of another workspace is never adopted.
+          if (!calendarEventRow?.id) {
+            stats.skipped = (stats.skipped ?? 0) + 1
+            continue
+          }
+
+          const calendarEventId = calendarEventRow.id
           const inserted = Boolean(calendarEventRow?.inserted)
 
           if (inserted) stats.created = (stats.created ?? 0) + 1
@@ -1391,62 +1406,99 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
           }
 
           if (startsAt) {
-            const existingMeeting = await pool.query(
-              `select id from meetings
-               where calendar_event_id = $1 and workspace_id = $2 limit 1`,
-              [calendarEventId, workspaceId]
-            )
-            const meetingId =
-              (existingMeeting.rows[0] as { id?: string } | undefined)?.id ??
-              createHashedId("meet_google", calendarEventId)
-            const participantRecords = calendarParticipants({
-              organizer: event.organizer,
-              attendees: event.attendees as CalendarAttendee[] | null | undefined,
-            })
-            // New meetings belong to the workspace (owner = the subject's user
-            // when known, visibility/language from workspace settings); the
-            // conflict update never touches another workspace's row.
-            const upserted = await pool.query(
-              `
-                insert into meetings (
-                  id, calendar_event_id, title, source, language, status,
-                  retention, started_at, participants, google_meet_link,
-                  workspace_id, owner_user_id, visibility
-                )
-                values ($1, $2, $3, 'google_meet', $7, 'scheduled',
-                  'audio', $4, $5::jsonb, $6,
-                  $8,
-                  (select id from users where lower(email) = lower($9) limit 1),
-                  $10)
-                on conflict (id)
-                do update set
-                  title = excluded.title,
-                  calendar_event_id = excluded.calendar_event_id,
-                  started_at = excluded.started_at,
-                  participants = excluded.participants,
-                  google_meet_link = excluded.google_meet_link
-                where meetings.workspace_id = excluded.workspace_id
-                returning id
-              `,
-              [
-                meetingId,
-                calendarEventId,
-                title,
-                startsAt,
-                JSON.stringify(
-                  participantRecords
-                    .map((participant) => participant.name || participant.email)
-                    .filter(Boolean)
-                ),
-                extractMeetLink(event),
-                importedMeetingLanguage(settings),
-                workspaceId,
-                subject,
-                settings.defaultMeetingVisibility,
-              ]
-            )
+            let meetingId: string | undefined
 
-            if (!upserted.rows.length) continue
+            try {
+              // Canonical check + meeting insert: one transaction under the
+              // dedupe lock (first-sync concurrency, M8 review fix #8).
+              meetingId = await withCalendarDedupeLock(
+                pool,
+                { workspaceId, icalUid: event.iCalUID, startsAt },
+                async (db): Promise<string | undefined> => {
+                  const existingMeeting = await db.query(
+                    `select id from meetings
+                     where calendar_event_id = $1 and workspace_id = $2 limit 1`,
+                    [calendarEventId, workspaceId]
+                  )
+                  const ownMeetingId = (existingMeeting.rows[0] as { id?: string } | undefined)?.id
+
+                  // M8 iCalUID dedupe (shared helper with the Outlook path): only a
+                  // same-workspace row with the same start, bot link and either the
+                  // same owner or a visible meeting with the same organizer counts.
+                  if (
+                    !ownMeetingId &&
+                    (await findCanonicalMeetingId(db, {
+                      workspaceId,
+                      icalUid: event.iCalUID,
+                      startsAt,
+                      calendarEventId,
+                      organizerEmail: event.organizer?.email,
+                      event: event as CalendarEventLike,
+                      owner: { email: subject },
+                    }))
+                  ) {
+                    stats.skipped = (stats.skipped ?? 0) + 1
+                    return undefined
+                  }
+
+                  const meetingId = ownMeetingId ?? createHashedId("meet_google", calendarEventId)
+                  const participantRecords = calendarParticipants({
+                    organizer: event.organizer,
+                    attendees: event.attendees as CalendarAttendee[] | null | undefined,
+                  })
+                  // New meetings belong to the workspace (owner = the subject's user
+                  // when known, visibility/language from workspace settings); the
+                  // conflict update never touches another workspace's row.
+                  const upserted = await db.query(
+                    `
+                      insert into meetings (
+                        id, calendar_event_id, title, source, language, status,
+                        retention, started_at, participants, google_meet_link,
+                        workspace_id, owner_user_id, visibility
+                      )
+                      values ($1, $2, $3, 'google_meet', $7, 'scheduled',
+                        'audio', $4, $5::jsonb, $6,
+                        $8,
+                        (select id from users where lower(email) = lower($9) limit 1),
+                        $10)
+                      on conflict (id)
+                      do update set
+                        title = excluded.title,
+                        calendar_event_id = excluded.calendar_event_id,
+                        started_at = excluded.started_at,
+                        participants = excluded.participants,
+                        google_meet_link = excluded.google_meet_link
+                      where meetings.workspace_id = excluded.workspace_id
+                      returning id
+                    `,
+                    [
+                      meetingId,
+                      calendarEventId,
+                      title,
+                      startsAt,
+                      JSON.stringify(
+                        participantRecords
+                          .map((participant) => participant.name || participant.email)
+                          .filter(Boolean)
+                      ),
+                      extractMeetLink(event),
+                      importedMeetingLanguage(settings),
+                      workspaceId,
+                      subject,
+                      settings.defaultMeetingVisibility,
+                    ]
+                  )
+
+                  return upserted.rows.length ? meetingId : undefined
+                }
+              )
+            } catch (error) {
+              // Fail closed: no meeting (and no bot) when the lock, lookup or insert fails.
+              stats.errors?.push(`dedupe: ${error instanceof Error ? error.name : "error"}`)
+              continue
+            }
+
+            if (!meetingId) continue
 
             await upsertMeetingParticipantsFromCalendar({
               meetingId,

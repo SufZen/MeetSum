@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "id": "31337",
+      "email": "dana@acme.co.il",
+      "firstName": "Dana",
+      "lastName": "Levi",
+      "userId": 901,
+      "archived": false
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "name": "MeetSum → Notion: Meeting Completed",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meetsum-meeting-completed-notion",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Verifies x-meetsum-signature-v2 (t=<unix>,v1=<hex HMAC-SHA256(secret, t + \".\" + rawBody)>)\n// and stops the workflow on a mismatch or a timestamp more than 5 minutes off.\nconst crypto = require('crypto')\nconst secret = $env.MEETSUM_WEBHOOK_SECRET\nif (!secret) throw new Error('Set MEETSUM_WEBHOOK_SECRET to the subscription secret')\nfor (const item of $input.all()) {\n  const headers = item.json.headers ?? {}\n  const raw = item.binary?.data ? Buffer.from(item.binary.data.data, 'base64').toString('utf8') : JSON.stringify(item.json.body)\n  const parts = Object.fromEntries(String(headers['x-meetsum-signature-v2'] ?? '').split(',').map((part) => part.trim().split('=')))\n  const t = Number(parts.t)\n  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) > 300) throw new Error('MeetSum signature: timestamp outside the 5 minute window')\n  const expected = crypto.createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex')\n  const given = Buffer.from(String(parts.v1 ?? ''))\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), given)) throw new Error('MeetSum signature mismatch')\n}\nreturn $input.all()"
+      },
+      "name": "Verify MeetSum signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.name}}",
+              "operation": "equal",
+              "value2": "meeting.completed"
+            },
+            {
+              "value1": "={{$json.body.data.visibility}}",
+              "operation": "notEqual",
+              "value2": "private"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "name": "Only meeting.completed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        690,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": "REPLACE_WITH_NOTION_DATABASE_ID",
+        "title": "={{$json.body.data.title}}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Date|date",
+              "date": "={{$json.body.data.startedAt}}"
+            },
+            {
+              "key": "Language|rich_text",
+              "textContent": "={{$json.body.data.language}}"
+            },
+            {
+              "key": "MeetSum|url",
+              "urlValue": "={{$json.body.data.url}}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "textContent": "={{($json.body.data.overview || '').slice(0, 1900)}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        910,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Notion API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify MeetSum signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify MeetSum signature": {
+      "main": [
+        [
+          {
+            "node": "Only meeting.completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only meeting.completed": {
+      "main": [
+        [
+          {
+            "node": "Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true
+  },
+  "_meta": {
+    "description": "Receives the MeetSum 'meeting.completed' webhook (payload v2), verifies the signature and adds a page to a Notion database (title, date, language, link, overview). For the full recap with action items and Hebrew RTL handling, prefer the built-in Notion integration (Settings → Integrations).",
+    "events": [
+      "meeting.completed"
+    ],
+    "payloadVersion": 2,
+    "setup": [
+      "1. Import this workflow into n8n",
+      "2. Configure your Notion API credential and share the target database with the integration",
+      "3. Set the database id, and make sure it has 'Date' (date), 'Language' (text) and 'MeetSum' (URL) properties, or remove them from the node",
+      "4. In MeetSum, Settings → Integrations → Webhooks (or POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'], payloadVersion: 2 }): create a v2 subscription and copy the secret (shown once)",
+      "5. Set the n8n environment variable MEETSUM_WEBHOOK_SECRET to the subscription secret shown once by MeetSum (allow env access in Code nodes, or paste the secret into the 'Verify MeetSum signature' node).",
+      "6. Activate the workflow"
+    ]
+  }
+}

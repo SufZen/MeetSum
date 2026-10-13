@@ -3,128 +3,208 @@ import { NextResponse } from "next/server"
 import {
   auditActor,
   loadVisibleMeeting,
+  meetingManageForbidden,
   meetingNotFound,
 } from "@/app/api/_lib/meeting-access"
-import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
-import { can, withAuthz } from "@/lib/auth/authz"
+import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
+import { meetingAppUrl } from "@/lib/integrations/core/links"
+import { checkManualPush } from "@/lib/integrations/core/manual-send"
+import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
+import { ruleDestinationSchema } from "@/lib/integrations/core/rules"
+import { ProviderError, type DeliverResult, type RuleDestination } from "@/lib/integrations/core/types"
+import { notionLocaleFor } from "@/lib/integrations/notion/blocks"
+import { getManualExportRuntime, manualExportPrefs, reauthGeneration } from "@/lib/integrations/notion/manual-export-runtime"
+import { notionProvider } from "@/lib/integrations/notion/provider"
 import {
-  buildNotionBlocks,
-  buildNotionProperties,
-} from "@/lib/integrations/notion"
+  isPrivateMeeting,
+  manualIdempotencyKey,
+  providerErrorResponse,
+  readJsonObject,
+} from "@/lib/integrations/notion/route-helpers"
+import { buildMeetingRecap, DEFAULT_RULE_CONTENT } from "@/lib/integrations/recap"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 /**
- * POST /api/meetings/:id/export/notion — Export meeting to Notion.
- * Body: { databaseId: string, token: string }
+ * POST /api/meetings/:id/export/notion `{databaseId?}` (M8 C1).
  *
- * Writes meeting content to an external workspace, so it needs
- * `meeting:write` plus `integrations:manage` (role >= admin). The Notion
- * integration token must come from the request body: there is deliberately
- * no server-wide fallback token (it would let any tenant write into the
- * operator's Notion workspace).
+ * - `meeting:write` + visible (else 404); a private meeting needs
+ *   `canManageMeeting`. No admin check: the token comes only from the
+ *   workspace's Notion OAuth connection, never from the request or a server
+ *   fallback; a body carrying a token is refused (400 `token_not_accepted`).
+ * - No active connection → 409 `notion_not_connected`.
+ * - The shared manual-push checks (`checkManualPush`, as the send route):
+ *   `allowManualSend === false` → 403 `manual_send_disabled`; the single
+ *   privacy gate (a private meeting needs the owner's per-meeting opt-in)
+ *   → 403 `private_meeting_not_opted_in`; a client-supplied `databaseId`
+ *   is checked with Notion (`validateDestination`) → 400
+ *   `invalid_destination`.
+ * - Runs `provider.deliver` synchronously as a manual delivery (idempotency
+ *   key from `Idempotency-Key`): re-exporting updates the tracked page in
+ *   place. Returns `{deliveryId, pageId, url, updated}`.
+ * - Errors map to fixed codes; Notion's messages are never reflected.
  */
-export const POST = withAuthz<{ id: string }>(
-  "meeting:write",
-  async (request, ctx, { params }) => {
-    if (!can(ctx.role, "integrations:manage")) {
-      return NextResponse.json(
-        { error: "Forbidden", permission: "integrations:manage" },
-        { status: 403 }
-      )
-    }
+function notConnected() {
+  return NextResponse.json({ error: "notion_not_connected" }, { status: 409 })
+}
 
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
+export const POST = withAuthz<{ id: string }>("meeting:write", async (request, ctx, { params }) => {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
 
-    if (rateLimit.blocked) return rateLimit.blocked
+  if (rateLimit.blocked) return rateLimit.blocked
 
-    const { id } = await params
-    const meeting = await loadVisibleMeeting(ctx, id)
+  const payload = await readJsonObject(request)
 
-    if (!meeting) return meetingNotFound()
-
-    const body = (await request.json().catch(() => ({}))) as {
-      databaseId?: unknown
-      token?: unknown
-    }
-
-    const databaseId =
-      typeof body.databaseId === "string" ? body.databaseId.trim() : ""
-    const token = typeof body.token === "string" ? body.token.trim() : ""
-
-    if (!databaseId) {
-      return jsonError("databaseId is required", 400)
-    }
-
-    if (!token) {
-      return jsonError(
-        "Notion token required. Pass the Notion integration 'token' in the body.",
-        400
-      )
-    }
-
-    try {
-      const blocks = buildNotionBlocks(meeting)
-      const properties = buildNotionProperties(meeting)
-
-      // Create page in Notion
-      const notionRes = await fetch("https://api.notion.com/v1/pages", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Notion-Version": "2022-06-28",
-        },
-        body: JSON.stringify({
-          parent: { database_id: databaseId },
-          properties,
-          children: blocks,
-        }),
-      })
-
-      if (!notionRes.ok) {
-        const error = await notionRes.json().catch(() => ({}))
-        const message =
-          (error as { message?: string }).message ??
-          `Notion API error: ${notionRes.status}`
-
-        await recordAuditLog({
-          ...auditActor(ctx),
-          action: "meeting.export.notion",
-          targetType: "meeting",
-          targetId: id,
-          metadata: { status: "failed", error: message },
-        })
-
-        return jsonError(
-          message,
-          notionRes.status >= 400 && notionRes.status < 500 ? 400 : 502
-        )
-      }
-
-      const page = (await notionRes.json()) as { id: string; url: string }
-
-      await recordAuditLog({
-        ...auditActor(ctx),
-        action: "meeting.export.notion",
-        targetType: "meeting",
-        targetId: id,
-        metadata: { notionPageId: page.id, notionUrl: page.url },
-      })
-
-      return NextResponse.json(
-        {
-          notionPageId: page.id,
-          notionUrl: page.url,
-          blocksCreated: blocks.length,
-        },
-        { status: 201, headers: rateLimit.headers }
-      )
-    } catch (error) {
-      return jsonError(
-        error instanceof Error ? error.message : "Failed to export to Notion",
-        500
-      )
-    }
+  if (Object.hasOwn(payload, "token")) {
+    return NextResponse.json({ error: "token_not_accepted" }, { status: 400 })
   }
-)
+
+  const { id } = await params
+  const meeting = await loadVisibleMeeting(ctx, id)
+
+  if (!meeting) return meetingNotFound()
+  if (isPrivateMeeting(meeting) && !canManageMeeting(ctx, meeting)) return meetingManageForbidden()
+
+  const runtime = getManualExportRuntime()
+  const workspaceId = ctx.workspace.id
+  const connection = runtime ? await runtime.findActiveConnection(workspaceId, "notion") : undefined
+
+  if (!runtime || !connection || !notionProvider.deliver) return notConnected()
+
+  const requested = typeof payload.databaseId === "string" ? payload.databaseId.trim() : ""
+  const fallback = typeof connection.config.defaultDatabaseId === "string" ? connection.config.defaultDatabaseId : ""
+  const databaseId = requested || fallback
+
+  if (payload.databaseId !== undefined && typeof payload.databaseId !== "string") {
+    return NextResponse.json({ error: "invalid_destination" }, { status: 400 })
+  }
+  if (!databaseId) return NextResponse.json({ error: "notion_database_required" }, { status: 400 })
+
+  const parsed = ruleDestinationSchema.safeParse({ provider: "notion", databaseId, databaseTitle: "" })
+
+  if (!parsed.success) return NextResponse.json({ error: "invalid_destination" }, { status: 400 })
+
+  const destination = parsed.data
+  const validateDestination = notionProvider.validateDestination
+  // The same checks as POST /integrations/send: allowManualSend, the single
+  // privacy gate, and a client-supplied database checked with Notion.
+  const check = await checkManualPush({
+    meeting,
+    connection,
+    destination,
+    clientDestination: Boolean(requested),
+    // The client-supplied database is checked with Notion; the connection
+    // default was set by an admin and is checked when Notion is called.
+    ...(requested && validateDestination
+      ? {
+          validate: (value: RuleDestination) =>
+            validateDestination(value, {
+              workspaceId,
+              connection,
+              getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
+              fetch: runtime.providerFetch,
+            }).catch(async (error: unknown) => {
+              await flagNeedsReauthOnAuth(workspaceId, connection.id, error, reauthGeneration(connection))
+              throw error
+            }),
+        }
+      : {}),
+    getPrefs: () => manualExportPrefs(runtime, workspaceId, meeting.id),
+    ...(ctx.user?.id ? { requestedByUserId: ctx.user.id } : {}),
+  })
+
+  if (!check.ok) {
+    if (check.providerError) return providerErrorResponse("notion", check.providerError)
+    return NextResponse.json(
+      { error: check.code, ...(check.providerCode ? { providerCode: check.providerCode } : {}) },
+      { status: check.status }
+    )
+  }
+
+  const started = await runtime.startManualDelivery({
+    workspaceId,
+    connectionId: connection.id,
+    provider: "notion",
+    meetingId: meeting.id,
+    idempotencyKey: manualIdempotencyKey(request),
+    eventName: "meeting.export",
+    ...(ctx.user?.id ? { requestedByUserId: ctx.user.id } : {}),
+  })
+  const { delivery } = started
+
+  // A replayed key that already succeeded returns the same page.
+  if (started.replayed && delivery.status === "sent") {
+    return NextResponse.json(
+      {
+        deliveryId: delivery.id,
+        pageId: delivery.externalRef.pageId,
+        url: delivery.externalRef.url,
+        updated: delivery.externalRef.updated === true,
+      },
+      { headers: rateLimit.headers }
+    )
+  }
+
+  // The same atomic claim as the delivery worker: only the request that wins
+  // it calls Notion; a concurrent replay or a worker holding it never does.
+  const claimed = await runtime.claimManualDelivery(workspaceId, delivery.id)
+
+  if (!claimed) return NextResponse.json({ error: "export_in_progress", deliveryId: delivery.id }, { status: 409 })
+
+  const content = { ...DEFAULT_RULE_CONTENT, openQuestions: true, transcript: true }
+  const recap = buildMeetingRecap(meeting, {
+    content,
+    links: { meeting: meetingAppUrl(meeting.id, notionLocaleFor(meeting.language)) },
+  })
+  let result: DeliverResult
+
+  try {
+    result = await notionProvider.deliver({
+      workspaceId,
+      delivery: claimed,
+      connection,
+      getAccessToken: () => runtime.getAccessToken(workspaceId, connection.id),
+      destination,
+      content,
+      recap,
+      meeting,
+      progress: started.progress ?? {},
+      saveProgress: (progress) => runtime.saveDeliveryProgress(workspaceId, delivery.id, progress),
+      links: runtime.linkStore(workspaceId, connection.id, meeting.id),
+      fetch: runtime.providerFetch,
+    })
+  } catch (error) {
+    await flagNeedsReauthOnAuth(workspaceId, connection.id, error, reauthGeneration(connection))
+    await runtime
+      .finishManualDelivery(workspaceId, delivery.id, {
+        error: {
+          kind: error instanceof ProviderError ? error.kind : "retryable",
+          message: error instanceof ProviderError ? error.message : "notion_export_failed",
+        },
+      })
+      .catch(() => {})
+
+    return providerErrorResponse("notion", error)
+  }
+
+  await runtime.finishManualDelivery(workspaceId, delivery.id, { result })
+
+  const pageId = String(result.externalRef.pageId ?? "")
+  const url = String(result.externalRef.url ?? "")
+  const updated = result.externalRef.updated === true
+
+  await ctx.meetings.createExportRecord({
+    meetingId: meeting.id,
+    format: "notion",
+    metadata: { deliveryId: delivery.id, pageId },
+  })
+  await recordAuditLog({
+    ...auditActor(ctx),
+    action: "meeting.export.notion",
+    targetType: "meeting",
+    targetId: meeting.id,
+    metadata: { deliveryId: delivery.id, connectionId: connection.id, provider: "notion", updated },
+  })
+
+  return NextResponse.json({ deliveryId: delivery.id, pageId, url, updated }, { headers: rateLimit.headers })
+})

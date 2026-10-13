@@ -5,23 +5,71 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "meetsum-meeting-completed",
-        "options": {}
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
       },
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Verifies x-meetsum-signature-v2 (t=<unix>,v1=<hex HMAC-SHA256(secret, t + \".\" + rawBody)>)\n// and stops the workflow on a mismatch or a timestamp more than 5 minutes off.\nconst crypto = require('crypto')\nconst secret = $env.MEETSUM_WEBHOOK_SECRET\nif (!secret) throw new Error('Set MEETSUM_WEBHOOK_SECRET to the subscription secret')\nfor (const item of $input.all()) {\n  const headers = item.json.headers ?? {}\n  const raw = item.binary?.data ? Buffer.from(item.binary.data.data, 'base64').toString('utf8') : JSON.stringify(item.json.body)\n  const parts = Object.fromEntries(String(headers['x-meetsum-signature-v2'] ?? '').split(',').map((part) => part.trim().split('=')))\n  const t = Number(parts.t)\n  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) > 300) throw new Error('MeetSum signature: timestamp outside the 5 minute window')\n  const expected = crypto.createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex')\n  const given = Buffer.from(String(parts.v1 ?? ''))\n  if (given.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), given)) throw new Error('MeetSum signature mismatch')\n}\nreturn $input.all()"
+      },
+      "name": "Verify MeetSum signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.name}}",
+              "operation": "equal",
+              "value2": "meeting.completed"
+            },
+            {
+              "value1": "={{$json.body.data.visibility}}",
+              "operation": "notEqual",
+              "value2": "private"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "name": "Only meeting.completed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        690,
+        300
+      ]
     },
     {
       "parameters": {
         "channel": "#meetings",
-        "text": "=📋 *Meeting Completed*\n\n*{{$json.payload.title}}*\n\n_{{$json.payload.overview}}_\n\n👥 Participants: {{$json.payload.participantCount}}\n✅ Action Items: {{$json.payload.actionItemCount}}\n📅 {{$json.payload.startedAt}}",
+        "text": "=📋 *Meeting completed*\n\n*{{$json.body.data.title}}*\n\n_{{$json.body.data.overview}}_\n\n👥 Participants: {{$json.body.data.participantCount}}\n✅ Action items: {{$json.body.data.actionItemCount}}\n📅 {{$json.body.data.startedAt}}\n🔗 {{$json.body.data.url}}",
         "otherOptions": {}
       },
       "name": "Slack",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2,
-      "position": [500, 300],
+      "position": [
+        910,
+        300
+      ],
       "credentials": {
         "slackApi": {
           "id": "REPLACE_WITH_CREDENTIAL_ID",
@@ -32,6 +80,28 @@
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify MeetSum signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify MeetSum signature": {
+      "main": [
+        [
+          {
+            "node": "Only meeting.completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only meeting.completed": {
       "main": [
         [
           {
@@ -47,14 +117,18 @@
     "saveExecutionProgress": true
   },
   "_meta": {
-    "description": "Receives MeetSum 'meeting.completed' webhook event and posts a formatted summary to a Slack channel.",
+    "description": "Receives the MeetSum 'meeting.completed' webhook (payload v2), verifies x-meetsum-signature-v2 and posts a summary to a Slack channel. Private meetings arrive with ids only and are skipped by the filter.",
+    "events": [
+      "meeting.completed"
+    ],
+    "payloadVersion": 2,
     "setup": [
       "1. Import this workflow into n8n",
-      "2. Configure your Slack API credential",
-      "3. Set the #channel to your target Slack channel",
-      "4. Copy the webhook URL from the Webhook node",
-      "5. Register the webhook URL in MeetSum: POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'] }",
-      "6. Activate the workflow"
+      "2. Configure your Slack API credential and set the target #channel",
+      "3. Copy the production webhook URL from the Webhook node",
+      "4. In MeetSum, Settings → Integrations → Webhooks (or POST /api/webhooks/subscriptions { url: '<webhook-url>', events: ['meeting.completed'], payloadVersion: 2 }): create a v2 subscription and copy the secret (shown once)",
+      "5. Set the n8n environment variable MEETSUM_WEBHOOK_SECRET to the subscription secret shown once by MeetSum (allow env access in Code nodes, or paste the secret into the 'Verify MeetSum signature' node).",
+      "6. Activate the workflow, then use 'Test webhook' in MeetSum to send a signed example"
     ]
   }
 }

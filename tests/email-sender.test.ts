@@ -135,15 +135,30 @@ describe("provider selection", () => {
     expect(resolveEmailProvider(env({ MEETSUM_EMAIL_PROVIDER: "log", SMTP_HOST: "h" }))).toBe("log")
   })
 
-  it("the log sender is unconfigured and never logs the body", async () => {
+  it("the log sender counts as configured outside production and never logs the body, address or subject", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {})
     const sender = getEmailSender(env({}))
 
     expect(sender.provider).toBe("log")
-    expect(sender.isConfigured()).toBe(false)
-    await sender.send({ to: "a@example.com", subject: "s", text: "secret-token-body" })
-    expect(JSON.stringify(info.mock.calls)).not.toContain("secret-token-body")
+    expect(sender.isConfigured()).toBe(true)
+    await sender.send({ to: "a@example.com", subject: "subject-line", text: "secret-token-body" })
+
+    const logged = JSON.stringify(info.mock.calls)
+
+    expect(logged).not.toContain("secret-token-body")
+    expect(logged).not.toContain("a@example.com")
+    expect(logged).not.toContain("subject-line")
+    expect(logged).toMatch(/recipients.*1/)
     info.mockRestore()
+  })
+
+  it("the log sender is not configured in production, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const sender = getEmailSender(env({ NODE_ENV: "production", MEETSUM_EMAIL_PROVIDER: "log" }))
+
+    expect(sender.isConfigured()).toBe(false)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
 
