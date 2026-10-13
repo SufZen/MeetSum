@@ -6,7 +6,8 @@ import {
 } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
-import { renderMeetingDocx } from "@/lib/meetings/export"
+import { contentDispositionAttachment } from "@/lib/http/content-disposition"
+import { exportLocaleFor, renderMeetingDocx } from "@/lib/meetings/export"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export const POST = withAuthz<{ id: string }>(
@@ -24,16 +25,15 @@ export const POST = withAuthz<{ id: string }>(
     await ctx.meetings.createExportRecord({ meetingId: id, format: "docx" })
 
     try {
-      const docx = await renderMeetingDocx(meeting)
-      const safeTitle =
-        meeting.title.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") ||
-        "meetsum-export"
+      const docx = await renderMeetingDocx(meeting, {
+        locale: exportLocaleFor(meeting, new URL(request.url).searchParams.get("locale")),
+      })
 
       return new NextResponse(new Uint8Array(docx), {
         headers: {
           "content-type":
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "content-disposition": `attachment; filename="${safeTitle}.docx"`,
+          "content-disposition": contentDispositionAttachment(meeting.title, "docx"),
           ...rateLimit.headers,
         },
       })
