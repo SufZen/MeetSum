@@ -133,6 +133,14 @@ export function tokensToWords(tokens: SonioxToken[]): AsrWord[] {
 
 type SonioxTranscription = { id?: string; status?: string; error_message?: string | null; audio_duration_ms?: number }
 
+/**
+ * Explicit "this file cannot be decoded" phrases only; anything vaguer
+ * (e.g. "audio duration exceeds limit") is a retryable provider error so
+ * the router falls through to the next provider.
+ */
+export const SONIOX_BAD_MEDIA =
+  /\b(?:could not|cannot|can't|unable to|failed to) (?:decode|read|parse) (?:the )?(?:audio|file|media)\b|\b(?:audio|file|media) could not be (?:decoded|read|parsed)\b|\bunsupported (?:audio |media |file )?(?:format|codec|file type)\b|\b(?:audio|file|media) (?:is )?corrupt(?:ed)?\b|\bcorrupt(?:ed)? (?:audio|file|media)\b/i
+
 export function createSonioxProvider(deps: AsrProviderDeps = {}): AsrProvider {
   const env = deps.env ?? process.env
   const config = getSonioxConfig(env)
@@ -240,7 +248,7 @@ export function createSonioxProvider(deps: AsrProviderDeps = {}): AsrProvider {
         while (status.status !== "completed") {
           if (status.status === "error") {
             const message = status.error_message ?? "Soniox transcription failed"
-            const badInput = /audio|decode|format|unsupported|invalid file|corrupt/i.test(message)
+            const badInput = SONIOX_BAD_MEDIA.test(message)
 
             throw new AsrError(`Soniox: ${message}`, badInput ? "bad_input" : "server", PROVIDER, !badInput)
           }

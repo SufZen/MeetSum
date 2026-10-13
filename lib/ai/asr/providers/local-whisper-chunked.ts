@@ -232,7 +232,7 @@ export function createLocalWhisperChunkedProvider(deps: AsrProviderDeps = {}): A
           } catch (error) {
             const asrError = toAsrError(error, PROVIDER)
 
-            if (asrError.kind === "bad_input" || asrError.kind === "auth" || req.signal?.aborted) throw asrError
+            if (!asrError.retryable || req.signal?.aborted) throw asrError
             retries += 1
             raw = await transcribeChunk(file, chunk, req, fields)
           }

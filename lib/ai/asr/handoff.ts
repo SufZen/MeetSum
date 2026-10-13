@@ -32,7 +32,8 @@ export type HandoffDeps = {
   uuid?: () => string
 }
 
-export const DEFAULT_RUNPOD_MAX_BLOB_BYTES = 9_000_000
+/** Raw bytes; base64 inflates by 4/3, so the RunPod request stays under ~10 MB. */
+export const DEFAULT_RUNPOD_MAX_BLOB_BYTES = 7_000_000
 
 export function getHandoffMode(env: AsrEnv): HandoffMode {
   const mode = envText(env, "MEETSUM_ASR_MEDIA_HANDOFF")?.toLowerCase()

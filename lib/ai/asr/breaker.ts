@@ -1,5 +1,5 @@
 import { envNumber, type AsrEnv } from "./config"
-import { isMediaSpecific } from "./errors"
+import { isMediaSpecific, redactAsrErrorMessage } from "./errors"
 import type { AsrError, AsrProviderId } from "./types"
 
 /**
@@ -140,9 +140,14 @@ export function createCircuitBreaker(options: BreakerOptions = {}): CircuitBreak
     },
 
     async recordFailure(id, error) {
+      // Identity check first: media-specific flags live on the original error.
       if (isMediaSpecific(error)) return
+      // Provider text can echo presigned handoff URLs or keys; the breaker
+      // state is persisted (Redis) and surfaced by /api/asr/status.
+      const lastError = redactAsrErrorMessage(error.message)
+
       if (error.kind === "auth" || error.kind === "config") {
-        await store.set(id, { failures: 0, openUntil: now() + authCooldownMs, lastError: error.message }, authCooldownMs)
+        await store.set(id, { failures: 0, openUntil: now() + authCooldownMs, lastError }, authCooldownMs)
         return
       }
       if (!error.retryable) return
@@ -151,11 +156,11 @@ export function createCircuitBreaker(options: BreakerOptions = {}): CircuitBreak
       const failures = (state.openUntil && state.openUntil <= now() ? 0 : state.failures) + 1
 
       if (failures >= threshold) {
-        await store.set(id, { failures: 0, openUntil: now() + cooldownMs, lastError: error.message }, cooldownMs)
+        await store.set(id, { failures: 0, openUntil: now() + cooldownMs, lastError }, cooldownMs)
         return
       }
 
-      await store.set(id, { failures, lastError: error.message }, counterTtlMs)
+      await store.set(id, { failures, lastError }, counterTtlMs)
     },
   }
 }

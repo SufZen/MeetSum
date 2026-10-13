@@ -68,7 +68,7 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
     process.env.MEETSUM_ASR_MEDIA_HANDOFF?.trim() !== "blob"
   ) {
     warnings.push(
-      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod receives inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~50 min at 24 kbit/s)"
+      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod receives inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)"
     )
   }
 

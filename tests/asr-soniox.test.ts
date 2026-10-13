@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
-import { createSonioxProvider, tokensToWords, type SonioxToken } from "@/lib/ai/asr/providers/soniox"
+import { createSonioxProvider, SONIOX_BAD_MEDIA, tokensToWords, type SonioxToken } from "@/lib/ai/asr/providers/soniox"
 import type { AsrRequest } from "@/lib/ai/asr/types"
 
 import { fakeExecFile, json, loadFixture, mockFetch, recordingSleep } from "./fixtures/asr/providers/fakes"
@@ -134,6 +134,36 @@ describe("Soniox provider", () => {
 
     await expect(provider(http).transcribe(request())).rejects.toMatchObject({ kind: "bad_input", retryable: false })
     expect(http.requests.some((item) => item.method === "DELETE" && item.url.endsWith("/v1/files/file_abc123"))).toBe(true)
+  })
+
+  it("only treats explicit decode / unsupported-format phrases as bad_input", () => {
+    for (const message of [
+      "Audio could not be decoded",
+      "Failed to decode audio",
+      "Unsupported audio format",
+      "The file is corrupted",
+    ]) {
+      expect(SONIOX_BAD_MEDIA.test(message), message).toBe(true)
+    }
+    for (const message of [
+      "Audio duration exceeds the maximum allowed",
+      "Invalid audio_url parameter",
+      "Internal error while processing audio",
+      "Format of the request is invalid",
+    ]) {
+      expect(SONIOX_BAD_MEDIA.test(message), message).toBe(false)
+    }
+  })
+
+  it("keeps vague audio errors retryable so the router can fall through", async () => {
+    const http = mockFetch(
+      routes({
+        "GET /v1/transcriptions/tr_42": () =>
+          json({ id: "tr_42", status: "error", error_message: "Audio duration exceeds the maximum allowed" }),
+      })
+    )
+
+    await expect(provider(http).transcribe(request())).rejects.toMatchObject({ kind: "server", retryable: true })
   })
 
   it("deletes the uploaded file when creating the transcription fails", async () => {

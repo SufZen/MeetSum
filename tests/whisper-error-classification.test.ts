@@ -83,7 +83,8 @@ describe("ASR error classification", () => {
     expect(classifyHttpStatus(429)).toEqual({ kind: "rate_limit", retryable: true })
     expect(classifyHttpStatus(504)).toEqual({ kind: "timeout", retryable: true })
     expect(classifyHttpStatus(500)).toEqual({ kind: "server", retryable: true })
-    expect(classifyHttpStatus(413)).toEqual({ kind: "bad_input", retryable: false })
+    expect(classifyHttpStatus(413)).toEqual({ kind: "config", retryable: false, mediaSpecific: true })
+    expect(classifyHttpStatus(415)).toEqual({ kind: "config", retryable: false, mediaSpecific: true })
     expect(classifyHttpStatus(404)).toEqual({ kind: "unknown", retryable: false })
   })
 

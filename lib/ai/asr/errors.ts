@@ -39,11 +39,16 @@ export function redactAsrErrorMessage(message: string): string {
 export function classifyHttpStatus(status: number): {
   kind: AsrErrorKind
   retryable: boolean
+  /** A per-provider limit (payload too large, format not accepted). */
+  mediaSpecific?: true
 } {
   if (status === 401 || status === 403) return { kind: "auth", retryable: false }
   if (status === 429) return { kind: "rate_limit", retryable: true }
   if (status === 408 || status === 504) return { kind: "timeout", retryable: true }
-  if (status === 413 || status === 415) return { kind: "bad_input", retryable: false }
+  // 413/415 are this provider's limits, not proof the media is broken: the
+  // next provider may accept it. Never chain-stopping `bad_input`, and
+  // media-specific so the breaker does not open on them.
+  if (status === 413 || status === 415) return { kind: "config", retryable: false, mediaSpecific: true }
   if (status >= 500) return { kind: "server", retryable: true }
 
   return { kind: "unknown", retryable: false }
@@ -94,15 +99,16 @@ export async function throwForResponse(
   context: string
 ): Promise<never> {
   const body = await response.text().catch(() => "")
-  const { kind, retryable } = classifyHttpStatus(response.status)
-
-  throw new AsrError(
+  const { kind, retryable, mediaSpecific } = classifyHttpStatus(response.status)
+  const error = new AsrError(
     redactAsrErrorMessage(`${context} failed with HTTP ${response.status}${body ? `: ${body}` : ""}`),
     kind,
     provider,
     retryable,
     response.status
   )
+
+  throw mediaSpecific ? markMediaSpecific(error) : error
 }
 
 const mediaSpecificErrors = new WeakSet<Error>()

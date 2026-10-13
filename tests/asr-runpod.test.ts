@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
+import { isMediaSpecific } from "@/lib/ai/asr/errors"
 import { createRunpodIvritProvider, normalizeRunpodOutput } from "@/lib/ai/asr/providers/runpod-ivrit"
 import { AsrError, type AsrRequest } from "@/lib/ai/asr/types"
 
@@ -165,7 +166,7 @@ describe("RunPod ivrit provider", () => {
     const remove = vi.fn(async () => undefined)
     const http = mockFetch({
       "POST /ep123/run": () => json(ivrit.run),
-      "GET /ep123/status/job-ivrit-1": () => json({ id: "job-ivrit-1", status: "FAILED", error: "Failed to load audio: ffmpeg decode error" }),
+      "GET /ep123/status/job-ivrit-1": () => json({ id: "job-ivrit-1", status: "FAILED", error: "[bad_media] Failed to decode audio with ffmpeg", output: { error_kind: "bad_media" } }),
     })
     const provider = createRunpodIvritProvider({
       env: { ...env, S3_PUBLIC_ENDPOINT: "https://media.example.com" },
@@ -245,6 +246,32 @@ describe("RunPod ivrit provider", () => {
       const { provider } = setup({ routes: { "POST /ep123/run": () => json({ error: "nope" }, status) } })
 
       await expect(provider.transcribe(request())).rejects.toMatchObject({ kind, retryable, httpStatus: status })
+    }
+  })
+
+  it("maps HTTP 413 to a media-specific provider limit, not chain-stopping bad_input", async () => {
+    const { provider } = setup({ routes: { "POST /ep123/run": () => json({ error: "payload too large" }, 413) } })
+    const error = await provider.transcribe(request()).catch((caught: unknown) => caught)
+
+    expect(error).toMatchObject({ kind: "config", retryable: false, httpStatus: 413 })
+    expect(isMediaSpecific(error as Error)).toBe(true)
+  })
+
+  it("keeps free-text decode errors retryable; only the bad_media marker is bad_input", async () => {
+    for (const [failure, kind, retryable] of [
+      [{ error: "Failed to load audio: ffmpeg decode error" }, "server", true],
+      [{ error: "Invalid input (could not read request): bad" }, "server", true],
+      [{ error: "decode failed", output: { error_kind: "bad_media" } }, "bad_input", false],
+      [{ error: "[bad_media] Failed to decode audio with ffmpeg" }, "bad_input", false],
+    ] as const) {
+      const { provider } = setup({
+        routes: {
+          "POST /ep123/run": () => json(ivrit.run),
+          "GET /ep123/status/job-ivrit-1": () => json({ id: "job-ivrit-1", status: "FAILED", ...failure }),
+        },
+      })
+
+      await expect(provider.transcribe(request()), failure.error).rejects.toMatchObject({ kind, retryable })
     }
   })
 

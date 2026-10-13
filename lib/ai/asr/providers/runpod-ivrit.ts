@@ -263,14 +263,35 @@ type RunpodStatus = {
   executionTime?: number
 }
 
+/** Explicit decode-failure marker from our worker (asr-worker/handler.py). */
+export const RUNPOD_BAD_MEDIA_KIND = "bad_media"
+const BAD_MEDIA_PREFIX = `[${RUNPOD_BAD_MEDIA_KIND}]`
+
+function hasBadMediaMarker(value: unknown, message: string): boolean {
+  if (message.trimStart().startsWith(BAD_MEDIA_PREFIX)) return true
+  if (Array.isArray(value)) return value.some((item) => hasBadMediaMarker(item, ""))
+  if (isRecord(value)) return value.error_kind === RUNPOD_BAD_MEDIA_KIND
+  if (typeof value === "string" && value.trimStart().startsWith("{")) {
+    try {
+      return hasBadMediaMarker(JSON.parse(value), "")
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+/**
+ * Only an explicit `error_kind: "bad_media"` (or its `[bad_media]` message
+ * prefix) from our worker stops the chain as `bad_input`; free-text errors
+ * (including the ivrit image's) stay retryable so the next provider runs.
+ */
 function failureError(status: RunpodStatus): AsrError {
   const raw = status.error ?? findError(status.output) ?? "RunPod job failed"
   const message = typeof raw === "string" ? raw : JSON.stringify(raw)
   const lower = message.toLowerCase()
 
-  if (
-    /decod|ffmpeg|invalid data|could not read|unsupported (format|codec)|no audio|corrupt|failed to load audio/.test(lower)
-  ) {
+  if (hasBadMediaMarker(status.output, message) || hasBadMediaMarker(status.error, message)) {
     return new AsrError(`RunPod could not decode the audio: ${message.slice(0, 300)}`, "bad_input", PROVIDER, false)
   }
   if (/out of memory|cuda/.test(lower)) {
