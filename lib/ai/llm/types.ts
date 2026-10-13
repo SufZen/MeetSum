@@ -144,3 +144,41 @@ export type LlmStatus = {
   /** True when no provider is configured (heuristic summaries only). */
   heuristicOnly?: boolean
 }
+
+/*
+ * M6 streaming chat contract (docs/parity/m6.md, "Shared contracts"; Step 0,
+ * additions only). Frozen after Step 0; `streamText` lives in `./stream`.
+ */
+
+export type LlmChatMessage = { role: "user" | "assistant"; content: string; cache?: boolean }
+
+export type LlmStreamRequest = {
+  task: "chat"
+  ctx: LlmRunContext
+  language: string
+  system: { text: string; cache?: boolean }[]
+  messages: LlmChatMessage[]
+  maxOutputTokens?: number
+  preference?: "auto" | "anthropic" | "gemini"
+  provider?: LlmProviderId
+  model?: string
+  signal?: AbortSignal
+  runMetadata?: Record<string, unknown>
+}
+
+export type LlmStreamEvent =
+  | { type: "start"; provider: LlmProviderId; model: string }
+  | { type: "delta"; text: string }
+  | { type: "fallback"; from: LlmProviderId; to: LlmProviderId; reason: LlmErrorKind }
+  | {
+      type: "done"
+      provider: LlmProviderId
+      model: string
+      text: string
+      usage: LlmUsage
+      costUsd: number | null
+      stopReason?: string
+      latencyMs: number
+      aiRunId?: string
+      attempts: LlmAttempt[]
+    }
