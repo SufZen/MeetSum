@@ -72,6 +72,32 @@ node bin/meetings.mjs export --target markdown
 
 Every API call needs a credential: a browser session or an API key. Create keys in **Admin → API keys**; each key acts on one workspace and has a scope (`read` ⊂ `write` ⊂ `admin`). Set `MEETSUM_API_KEY` for the CLI and MCP server, or pass `--api-key`. A `read` key is enough for the MCP read tools; uploads and processing need `write`; Google sync and workspace administration need `admin`.
 
+## Search
+
+`GET /api/search` runs a Hebrew-aware hybrid search over the meetings the caller can see (`meeting:read`, 60 requests/min per user or key creator):
+
+```bash
+curl -G http://127.0.0.1:3000/api/search \
+  -H "authorization: Bearer $MEETSUM_API_KEY" \
+  --data-urlencode "q=תקציב" --data-urlencode "room=<roomId>" --data-urlencode "from=2026-01-01"
+
+node bin/meetings.mjs search "תקציב" --room <roomId> --from 2026-01-01
+node bin/meetings.mjs ask "מה הוחלט על התקציב?" --room <roomId>
+```
+
+- Params: `q` (≤ 300 chars), `from`/`to` (inclusive dates), repeatable `participant`, `speaker`, `room`, `tag`, `language` (`he|en|mixed`), `type` (meeting type), `source`, `kind` (`transcript|summary|item|action_item|chapter|meta`), `meetingId`; `group=meeting|chunk`, `limit` (≤ 25 meetings / ≤ 50 passages), `hits` (≤ 10 per meeting), `cursor` (from `nextCursor`).
+- Matching folds niqqud, final letters and geresh/gershayim, and strips prefixes (`תקציב` finds `בתקציב`, `והתקציב`); short tokens such as `על`, `AI`, `Q3` stay searchable. Hits carry a snippet, highlight offsets and the segment start for click-to-seek.
+- `mode` is `hybrid` (pgvector + embeddings + full-text + trigram) or `lexical` (no pgvector, no embedding provider or a failed query embedding); `degraded` names the reason. Without Hebrew trigrams (C-locale databases) the trigram leg is skipped.
+- `GET /api/search/facets` lists filter values from visible meetings. `/api/meetings/search` and `/api/memory/search` (deprecated) keep their legacy shapes on top of the same engine.
+- Retrieval quality is tracked by `npm run search:eval` (synthetic Hebrew corpus; report in [docs/parity/search-eval.md](docs/parity/search-eval.md)).
+
+## MCP Server
+
+`npm run mcp` starts the stdio MCP server (`mcp/server.mjs`, tools in `mcp/tools.mjs`). Set `MEETINGS_APP_URL` and `MEETSUM_API_KEY` (a workspace-scoped key; every tool acts on that key's workspace and visibility only). `MEETSUM_MCP_MAX_CHARS` (default 50000) truncates large responses.
+
+- `read` key: `search_meetings` / `search_transcripts` (filters, `cursor` pagination), `ask` (`scope: meeting|room|workspace`, cited answer), `ask_meeting_memory` (alias, meeting scope), `list_meetings`, `get_meeting`, `get_meeting_summary`, `get_transcript_segments` (`offset`/`limit`), `list_action_items` (`status`, `cursor`), `create_followup_draft`.
+- `write` key: `send_context_to_realizeos`.
+
 ## Desktop Capture Companion
 
 MeetSum includes a local Electron companion for mic plus system-audio capture:
