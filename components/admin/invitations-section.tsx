@@ -15,6 +15,7 @@ import {
 } from "@/components/admin/api"
 import { ConfirmDialog } from "@/components/admin/confirm-dialog"
 import {
+  adminErrorMessage,
   formatDateTime,
   invitationStatusLabel,
   roleLabel,
@@ -34,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { useI18n } from "@/components/i18n-provider"
 import { useWorkspace } from "@/components/workspace-context"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -52,9 +54,11 @@ export function InvitationsSection({
   locale: SupportedLocale
 }) {
   const { can } = useWorkspace()
+  const { timeZone } = useI18n()
   const invitations = useAsyncResource(
     listInvitations,
-    [] as WorkspaceInvitation[]
+    [] as WorkspaceInvitation[],
+    (error) => adminErrorMessage(error, t, t.loadFailed)
   )
   const [inviteOpen, setInviteOpen] = useState(false)
   const [email, setEmail] = useState("")
@@ -99,7 +103,7 @@ export function InvitationsSection({
       setEmail("")
       setResult(created)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
     } finally {
       setSending(false)
     }
@@ -113,7 +117,7 @@ export function InvitationsSection({
       if (resent.invitation.id) upsert(resent.invitation)
       setResult(resent)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
     } finally {
       setPendingId(undefined)
     }
@@ -129,7 +133,7 @@ export function InvitationsSection({
       )
       toast.success(t.invitationsRevoked)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
       throw error
     }
   }
@@ -155,7 +159,7 @@ export function InvitationsSection({
         onRetry={() => void invitations.reload()}
       >
         <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[620px] text-sm">
+          <table className="w-full min-w-155 text-sm">
             <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
@@ -206,7 +210,7 @@ export function InvitationsSection({
                     </Badge>
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
-                    {formatDateTime(locale, invitation.expiresAt)}
+                    {formatDateTime({ locale, timeZone }, invitation.expiresAt)}
                   </td>
                   <td className="px-3 py-2">
                     {canManage && invitation.status === "pending" ? (

@@ -6,6 +6,7 @@ import {
   isLegacyLocale,
   type SupportedLocale,
 } from "@/lib/i18n/locales"
+import { isValidTimeZone } from "@/lib/i18n/time-zone"
 import { CONTENT_LANGUAGES, type ContentLanguage } from "@/lib/intelligence/types"
 
 export type AppSettings = {
@@ -35,6 +36,8 @@ export type AppSettings = {
   autoTitleMode: "generic_only" | "always" | "off"
   /** Optional AI features (M5). */
   aiFeatures: { sentiment: boolean; prepBriefs: boolean }
+  /** Workspace time zone (M9); null = MEETSUM_DEFAULT_TIMEZONE. Users may override it. */
+  timeZone: string | null
 }
 
 type AppSettingsRow = {
@@ -59,6 +62,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   summaryLanguageMode: "meeting",
   autoTitleMode: "generic_only",
   aiFeatures: { sentiment: true, prepBriefs: true },
+  timeZone: null,
 }
 
 /** In-memory (non-postgres) settings, keyed by workspace id. */
@@ -182,6 +186,7 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_APP_SETTINGS.autoTitleMode
     ),
     aiFeatures: normalizeAiFeatures(raw.aiFeatures),
+    timeZone: isValidTimeZone(raw.timeZone) ? raw.timeZone : null,
   }
 }
 

@@ -9,6 +9,7 @@
 import { useState } from "react"
 import { InfoIcon, RefreshCwIcon } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { ApiError, requestJson, useJson } from "@/components/intelligence/use-json"
 import type { SpeakerDirectory } from "@/components/player/speaker-directory"
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,7 @@ import type {
   SpeakerAnalytics,
 } from "@/lib/analytics/types"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatTimecode } from "@/lib/i18n/format"
 
 export type AnalyticsCardProps = {
   meetingId: string
@@ -45,20 +47,13 @@ const SENTIMENT_CLASS: Record<SentimentLabel, string> = {
   mixed: "bg-warn-soft text-warn-text",
 }
 
-function duration(ms: number): string {
-  const seconds = Math.round(ms / 1000)
-  const minutes = Math.floor(seconds / 60)
-
-  return minutes ? `${minutes}:${String(seconds % 60).padStart(2, "0")}` : `0:${String(seconds).padStart(2, "0")}`
-}
-
 const numberClass = "font-mono tabular-nums [direction:ltr] [unicode-bidi:isolate]"
 
-export function AnalyticsCard({ meetingId, dictionary: t, directory, canWrite, refreshKey, locale }: AnalyticsCardProps) {
+export function AnalyticsCard({ meetingId, dictionary: t, directory, canWrite, refreshKey }: AnalyticsCardProps) {
   const url = `/api/meetings/${encodeURIComponent(meetingId)}/analytics`
   const { data, setData, error, loading, reload } = useJson<AnalyticsResponse>(url, refreshKey)
   const [sentimentState, setSentimentState] = useState<"idle" | "busy" | "failed">("idle")
-  const format = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  const { fmt } = useI18n()
   const sentimentLabel: Record<SentimentLabel, string> = {
     positive: t.intelSentimentPositive,
     neutral: t.intelSentimentNeutral,
@@ -115,7 +110,7 @@ export function AnalyticsCard({ meetingId, dictionary: t, directory, canWrite, r
               <div key={speaker.speakerId ?? speaker.label} className="grid gap-1">
                 <div className="flex items-baseline justify-between gap-2 text-sm">
                   <bdi className="min-w-0 truncate">{name(speaker)}</bdi>
-                  <span className={`text-xs text-fg-2 ${numberClass}`}>{Math.round(speaker.share * 100)}%</span>
+                  <span className={`text-xs text-fg-2 ${numberClass}`}>{fmt.percent(speaker.share)}</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
                   <div
@@ -147,10 +142,10 @@ export function AnalyticsCard({ meetingId, dictionary: t, directory, canWrite, r
                   <th scope="row" className="py-1 text-start font-medium">
                     <bdi>{name(speaker)}</bdi>
                   </th>
-                  <td className={`py-1 text-end ${numberClass}`}>{format.format(speaker.wpm)}</td>
-                  <td className={`py-1 text-end ${numberClass}`}>{duration(speaker.longestMonologueMs)}</td>
+                  <td className={`py-1 text-end ${numberClass}`}>{fmt.number(speaker.wpm, { maximumFractionDigits: 1 })}</td>
+                  <td className={`py-1 text-end ${numberClass}`}>{formatTimecode(speaker.longestMonologueMs)}</td>
                   <td className={`py-1 text-end ${numberClass}`}>{speaker.questions}</td>
-                  <td className={`py-1 text-end ${numberClass}`}>{format.format(speaker.fillerPer100Words)}</td>
+                  <td className={`py-1 text-end ${numberClass}`}>{fmt.number(speaker.fillerPer100Words, { maximumFractionDigits: 1 })}</td>
                   <td className={`py-1 text-end ${numberClass}`}>{speaker.interruptions}</td>
                 </tr>
               ))}

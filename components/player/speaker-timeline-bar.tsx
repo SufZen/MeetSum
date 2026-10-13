@@ -61,6 +61,7 @@ export function SpeakerTimelineBar({
   return (
     <div dir="ltr" className="grid gap-0.5">
       {lanes.length ? (
+        // a11y-allow: pointer shortcut over an aria-hidden lane chart; the scrubber is the keyboard-accessible seek control
         <div
           aria-hidden
           className={cn(

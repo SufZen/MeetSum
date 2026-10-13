@@ -18,6 +18,7 @@ import {
   type BotStepTone,
 } from "@/components/bot/bot-ui-state"
 import { LiveTranscriptPanel } from "@/components/bot/live-transcript-panel"
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { StopBotDialog } from "@/components/bot/stop-bot-dialog"
 import { Button } from "@/components/ui/button"
 import { LiveDot } from "@/components/ui/meeting-atoms"
@@ -61,6 +62,7 @@ export function BotStatusStrip({
   canWrite: boolean
 }) {
   const bot = useBotSessionsContext()
+  const timeZone = useOptionalI18n()?.timeZone
   const polled = bot.byMeetingId[meetingId]
   const [detail, setDetail] = useState<MeetingBotResponse | null>(null)
   const [busy, setBusy] = useState(false)
@@ -120,7 +122,7 @@ export function BotStatusStrip({
     platform: hint?.params?.platform ? dictionary[hint.params.platform] : "",
     time: hint?.params?.time ? (
       <span className="font-mono tabular-nums [direction:ltr] [unicode-bidi:isolate]">
-        {formatBotJoinTime(hint.params.time, locale)}
+        {formatBotJoinTime(hint.params.time, locale, timeZone)}
       </span>
     ) : (
       ""

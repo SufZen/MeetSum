@@ -5,8 +5,17 @@
  * by `formatMessage`. Hebrew copy follows docs/i18n/hebrew-style.md: plural
  * imperative, no gendered actor verbs, ״/׳ (never ASCII quotes), "…" (never "...").
  */
+import { m9ApiErrorMessages } from "@/lib/i18n/m9/api-error-messages"
+import { m9ContentMeetingMessages } from "@/lib/i18n/m9/content-meeting"
+import { m9ContentOpsMessages } from "@/lib/i18n/m9/content-ops"
+import { m9ContentPagesMessages } from "@/lib/i18n/m9/content-pages"
+
 export const m9CoreMessages = {
   en: {
+    ...m9ApiErrorMessages.en,
+    ...m9ContentMeetingMessages.en,
+    ...m9ContentOpsMessages.en,
+    ...m9ContentPagesMessages.en,
     coreGenericError: "Something went wrong. Try again.",
     coreUnknownErrorCode: "Unexpected error ({code})",
     coreLoading: "Loading…",
@@ -26,6 +35,10 @@ export const m9CoreMessages = {
     coreMinutesCount_other: "{count} minutes",
   },
   he: {
+    ...m9ApiErrorMessages.he,
+    ...m9ContentMeetingMessages.he,
+    ...m9ContentOpsMessages.he,
+    ...m9ContentPagesMessages.he,
     coreGenericError: "משהו השתבש. נסו שוב.",
     coreUnknownErrorCode: "שגיאה לא צפויה ({code})",
     coreLoading: "טוען…",

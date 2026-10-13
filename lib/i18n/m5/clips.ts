@@ -59,7 +59,7 @@ export const clipsMessagesHe: Record<keyof typeof clipsMessagesEn, string> = {
   clipsDialogTitle: "יצירת קליפ",
   clipsDialogDescription: "הקליפ מנגן את הקטע הזה מהפגישה. קישור השיתוף חושף רק את הקליפ.",
   clipsTitleLabel: "כותרת",
-  clipsTitlePlaceholder: "לא חובה — ברירת המחדל היא המילים הראשונות",
+  clipsTitlePlaceholder: "לא חובה\u00A0— ברירת המחדל היא המילים הראשונות",
   clipsRangeLabel: "טווח",
   clipsCancel: "ביטול",
   clipsCreated: "הקליפ נוצר",

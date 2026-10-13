@@ -10,7 +10,10 @@ import {
   getSessionSecret,
   readRequestCookie,
 } from "@/lib/auth/session"
+import { localeCookieOptions } from "@/lib/i18n/cookie"
+import { DEFAULT_LOCALE, LOCALE_COOKIE } from "@/lib/i18n/locales"
 import { saveGoogleWorkspaceOAuthConnection } from "@/lib/google/oauth-tokens"
+import { getUserPreferences } from "@/lib/users/preferences"
 import { isBootstrapEmail } from "@/lib/workspaces/bootstrap"
 import { getWorkspaceStore } from "@/lib/workspaces/store"
 import { normalizeEmail } from "@/lib/workspaces/tokens"
@@ -120,7 +123,12 @@ export const GET = withPublicRoute("Google OAuth redirect target", async (reques
       scope: identity.scope,
     })
 
-    const response = NextResponse.redirect(new URL(returnTo, appUrl))
+    // M9 A1: a stored UI locale becomes the cookie (and the default home's prefix).
+    const userLocale = (await getUserPreferences(user.id)).locale
+    const target = userLocale && returnTo === `/${DEFAULT_LOCALE}` ? `/${userLocale}` : returnTo
+    const response = NextResponse.redirect(new URL(target, appUrl))
+
+    if (userLocale) response.cookies.set(LOCALE_COOKIE, userLocale, localeCookieOptions())
 
     response.cookies.set(session.name, session.value, {
       httpOnly: true,

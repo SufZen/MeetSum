@@ -1,5 +1,7 @@
 import { RefreshCwIcon } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
+import { JOB_STATUS_KEYS, stageLabel } from "@/components/pipeline-timeline"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
@@ -18,13 +20,6 @@ function jobStage(job: JobRecord) {
   return job.name
 }
 
-function formatJobTime(value?: string) {
-  if (!value) return "unknown"
-  const date = new Date(value)
-
-  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString()
-}
-
 export function JobActivityCenter({
   jobs,
   meetings = [],
@@ -36,6 +31,8 @@ export function JobActivityCenter({
   onRetry: (job: JobRecord) => void
   onOpenMeeting?: (meetingId: string) => void
 }) {
+  const { t, fmt } = useI18n()
+  const jobTime = (value?: string) => (value ? fmt.date(value, "dateTime") : "") || t("opsJobsUnknownTime")
   const failedGroups = jobs
     .filter((job) => job.status === "failed" && job.meetingId)
     .reduce<Array<{ meetingId: string; meetingTitle: string; jobs: JobRecord[] }>>(
@@ -44,7 +41,7 @@ export function JobActivityCenter({
         const group = groups.find((item) => item.meetingId === meetingId)
         const meetingTitle =
           meetings.find((meeting) => meeting.id === meetingId)?.title ??
-          "Unknown meeting"
+          t("opsUnknownMeeting")
 
         if (group) {
           group.jobs.push(job)
@@ -65,7 +62,7 @@ export function JobActivityCenter({
   return (
     <section className="ms-card grid gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Job activity</h3>
+        <h3 className="text-sm font-semibold">{t("opsJobsTitle")}</h3>
         <span className="font-mono text-xs text-muted-foreground">
           {jobs.length}
         </span>
@@ -73,11 +70,8 @@ export function JobActivityCenter({
       <div className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h4 className="text-sm font-semibold">Processing recovery</h4>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Failed meeting jobs are grouped here so a stale failure does not hide
-              completed content.
-            </p>
+            <h4 className="text-sm font-semibold">{t("opsJobsRecoveryTitle")}</h4>
+            <p className="mt-1 text-xs text-muted-foreground">{t("opsJobsRecoveryHint")}</p>
           </div>
           <span className="rounded-md bg-warn-soft px-2 py-1 text-xs font-medium text-warn-text">
             {failedGroups.length}
@@ -96,14 +90,14 @@ export function JobActivityCenter({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">
-                        {group.meetingTitle}
+                        <bdi>{group.meetingTitle}</bdi>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-destructive">
-                        {latest.error ?? "Processing failed without a stored error."}
+                      <p dir="auto" className="mt-1 line-clamp-2 text-xs leading-5 text-destructive">
+                        {latest.error ?? t("opsJobsFailedNoError")}
                       </p>
                       <p className="mt-1 text-2xs leading-5 text-muted-foreground">
-                        {jobStage(latest)} · {latest.id} · updated{" "}
-                        {formatJobTime(latest.updatedAt)}
+                        {stageLabel(jobStage(latest), t)} · <bdi className="font-mono">{latest.id}</bdi> ·{" "}
+                        {t("opsJobsUpdated", { time: jobTime(latest.updatedAt) })}
                       </p>
                     </div>
                     <span className="shrink-0 rounded-md border border-line px-2 py-1 text-xs text-muted-foreground">
@@ -118,7 +112,7 @@ export function JobActivityCenter({
                         className="h-8"
                         onClick={() => onOpenMeeting(group.meetingId)}
                       >
-                        Open
+                        {t("opsJobsOpen")}
                       </Button>
                     ) : null}
                     {latest.retryable !== false ? (
@@ -129,7 +123,7 @@ export function JobActivityCenter({
                         onClick={() => onRetry(latest)}
                       >
                         <RefreshCwIcon data-icon="inline-start" />
-                        Retry latest
+                        {t("opsJobsRetryLatest")}
                       </Button>
                     ) : null}
                   </div>
@@ -139,7 +133,7 @@ export function JobActivityCenter({
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-line bg-surface p-3 text-sm text-muted-foreground">
-            No failed meeting jobs need recovery.
+            {t("opsJobsNoFailed")}
           </div>
         )}
       </div>
@@ -149,18 +143,18 @@ export function JobActivityCenter({
             <article key={job.id} className="grid gap-2 rounded-lg border border-line bg-surface-2 p-3">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="truncate font-medium">{job.name}</span>
-                <span className="capitalize text-muted-foreground">
-                  {job.status}
+                <span className="text-muted-foreground">
+                  {t(JOB_STATUS_KEYS[job.status])}
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
-                <span>{jobStage(job)}</span>
-                <span className="font-mono">{job.id}</span>
-                <span>updated {formatJobTime(job.updatedAt)}</span>
+                <span>{stageLabel(jobStage(job), t)}</span>
+                <bdi className="font-mono">{job.id}</bdi>
+                <span>{t("opsJobsUpdated", { time: jobTime(job.updatedAt) })}</span>
               </div>
               <Progress value={progressByStatus[job.status]} />
               {job.error && (
-                <p className="break-words text-xs leading-5 text-destructive">
+                <p dir="auto" className="break-words text-xs leading-5 text-destructive">
                   {job.error}
                 </p>
               )}
@@ -172,15 +166,14 @@ export function JobActivityCenter({
                   onClick={() => onRetry(job)}
                 >
                   <RefreshCwIcon data-icon="inline-start" />
-                  Retry
+                  {t("retry")}
                 </Button>
               )}
             </article>
           ))
         ) : (
           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            No jobs yet. Upload, record, or sync Google Workspace to start the
-            pipeline.
+            {t("opsJobsEmpty")}
           </div>
         )}
       </div>

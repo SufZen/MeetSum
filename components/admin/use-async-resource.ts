@@ -2,15 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
-/** Loads data on mount and exposes loading / error / reload. */
-export function useAsyncResource<T>(loader: () => Promise<T>, initial: T) {
+/**
+ * Loads data on mount and exposes loading / error / reload. `describeError`
+ * turns a failure into the localized text shown to the user.
+ */
+export function useAsyncResource<T>(
+  loader: () => Promise<T>,
+  initial: T,
+  describeError: (error: unknown) => string
+) {
   const loaderRef = useRef(loader)
+  const describeRef = useRef(describeError)
   const [data, setData] = useState<T>(initial)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
 
   useEffect(() => {
     loaderRef.current = loader
+    describeRef.current = describeError
   })
 
   const reload = useCallback(async () => {
@@ -19,9 +28,7 @@ export function useAsyncResource<T>(loader: () => Promise<T>, initial: T) {
     try {
       setData(await loaderRef.current())
     } catch (loadError) {
-      setError(
-        loadError instanceof Error ? loadError.message : String(loadError)
-      )
+      setError(describeRef.current(loadError))
     } finally {
       setLoading(false)
     }
@@ -39,9 +46,7 @@ export function useAsyncResource<T>(loader: () => Promise<T>, initial: T) {
       },
       (loadError: unknown) => {
         if (cancelled) return
-        setError(
-          loadError instanceof Error ? loadError.message : String(loadError)
-        )
+        setError(describeRef.current(loadError))
         setLoading(false)
       }
     )

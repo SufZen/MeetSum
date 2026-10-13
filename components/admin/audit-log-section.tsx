@@ -8,8 +8,9 @@ import {
   type AuditLogFilters,
   type AuditLogView,
 } from "@/components/admin/api"
-import { formatDateTime } from "@/components/admin/labels"
+import { adminErrorMessage, formatDateTime } from "@/components/admin/labels"
 import { SectionState } from "@/components/admin/section-state"
+import { useI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -54,6 +55,7 @@ export function AuditLogSection({
   dictionary: Dictionary
   locale: SupportedLocale
 }) {
+  const { timeZone } = useI18n()
   const [draft, setDraft] = useState<AuditLogFilters>(EMPTY_FILTERS)
   const [logs, setLogs] = useState<AuditLogView[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -72,13 +74,11 @@ export function AuditLogSection({
       setLogs(page.logs)
       setNextCursor(page.nextCursor)
     } catch (loadError) {
-      setError(
-        loadError instanceof Error ? loadError.message : String(loadError)
-      )
+      setError(adminErrorMessage(loadError, t, t.loadFailed))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   // Initial page (state already starts as loading).
   useEffect(() => {
@@ -93,9 +93,7 @@ export function AuditLogSection({
       },
       (loadError: unknown) => {
         if (cancelled) return
-        setError(
-          loadError instanceof Error ? loadError.message : String(loadError)
-        )
+        setError(adminErrorMessage(loadError, t, t.loadFailed))
         setLoading(false)
       }
     )
@@ -103,6 +101,8 @@ export function AuditLogSection({
     return () => {
       cancelled = true
     }
+    // Initial page only; later loads go through `load`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function loadMore() {
@@ -115,9 +115,7 @@ export function AuditLogSection({
       setLogs((current) => [...current, ...page.logs])
       setNextCursor(page.nextCursor)
     } catch (loadError) {
-      setError(
-        loadError instanceof Error ? loadError.message : String(loadError)
-      )
+      setError(adminErrorMessage(loadError, t, t.loadFailed))
     } finally {
       setLoadingMore(false)
     }
@@ -205,7 +203,7 @@ export function AuditLogSection({
         onRetry={() => void load(appliedRef.current)}
       >
         <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-170 text-sm">
             <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
@@ -229,10 +227,7 @@ export function AuditLogSection({
                   className="border-t border-line align-top"
                 >
                   <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                    {formatDateTime(locale, log.createdAt, {
-                      dateStyle: "short",
-                      timeStyle: "medium",
-                    })}
+                    {formatDateTime({ locale, timeZone }, log.createdAt)}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs" dir="ltr">
                     {log.action}

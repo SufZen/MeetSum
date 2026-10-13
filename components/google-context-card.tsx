@@ -1,3 +1,5 @@
+"use client"
+
 import {
   CalendarDaysIcon,
   FileIcon,
@@ -7,28 +9,72 @@ import {
   VideoIcon,
 } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
+import {
+  getMeetingCaptureReadiness,
+  type CaptureReadiness,
+  type CaptureReadinessCheck,
+} from "@/lib/meetings/capture-readiness"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 
-function formatArtifactType(value: string) {
-  if (value === "smart_notes") return "Smart notes"
-  return value[0]?.toUpperCase() + value.slice(1)
+type Translate = (key: string, values?: Record<string, string | number | undefined>) => string
+
+const CHECK_KEYS: Record<CaptureReadinessCheck["key"], string> = {
+  calendar: "mtgCheckCalendar",
+  meet_record: "mtgCheckMeetRecord",
+  recording: "mtgCheckRecording",
+  transcript: "mtgCheckTranscript",
+  smart_notes: "mtgCheckSmartNotes",
+  media: "mtgCheckMedia",
 }
 
-function formatDate(value?: string) {
-  if (!value) return undefined
-  const date = new Date(value)
+const CHECK_STATE_KEYS: Record<CaptureReadinessCheck["state"], string> = {
+  ready: "mtgCheckStateReady",
+  pending: "mtgCheckStatePending",
+  missing: "mtgCheckStateMissing",
+}
 
-  if (Number.isNaN(date.getTime())) return undefined
+/** Localized label of a capture-readiness check (the lib label is English). */
+export function readinessCheckLabel(check: CaptureReadinessCheck, t: Translate): string {
+  return t(CHECK_KEYS[check.key])
+}
 
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date)
+export function readinessCheckState(check: CaptureReadinessCheck, t: Translate): string {
+  return t(CHECK_STATE_KEYS[check.state])
+}
+
+/** Localized title and description of a capture readiness (the lib text is English). */
+export function readinessText(
+  readiness: Pick<CaptureReadiness, "status">,
+  source: MeetingRecord["source"] | undefined,
+  t: Translate
+): { title: string; description: string } {
+  switch (readiness.status) {
+    case "processed":
+      return { title: t("mtgReadinessProcessedTitle"), description: t("mtgReadinessProcessedDescription") }
+    case "ready_to_process":
+      return { title: t("mtgReadinessReadyTitle"), description: t("mtgReadinessReadyDescription") }
+    case "capture_armed":
+      return { title: t("mtgReadinessArmedTitle"), description: t("mtgReadinessArmedDescription") }
+    case "needs_artifact_sync":
+      return { title: t("mtgReadinessNeedsSyncTitle"), description: t("mtgReadinessNeedsSyncDescription") }
+    default:
+      return {
+        title: t("mtgReadinessManualTitle"),
+        description:
+          source === "desktop_recorder"
+            ? t("mtgReadinessManualDesktopDescription")
+            : t("mtgReadinessManualDescription"),
+      }
+  }
+}
+
+const ARTIFACT_TYPE_KEYS: Record<string, string> = {
+  recording: "mtgCheckRecording",
+  transcript: "mtgCheckTranscript",
+  smart_notes: "mtgCheckSmartNotes",
 }
 
 export function GoogleContextCard({
@@ -38,15 +84,19 @@ export function GoogleContextCard({
   meeting: MeetingRecord | null
   onProcessMeeting?: () => void
 }) {
-  const title = meeting?.title ?? "No meeting selected"
+  const { t, plural, fmt, text } = useI18n()
+  const formatDate = (value?: string) => (value ? fmt.date(value, "dateTime") || undefined : undefined)
+  const artifactTypeLabel = (value: string) =>
+    ARTIFACT_TYPE_KEYS[value] ? t(ARTIFACT_TYPE_KEYS[value]) : value.replaceAll("_", " ")
+  const title = meeting ? text(meeting.title, meeting.language) : t("mtgGoogleNoMeeting")
   const conferenceRecords = meeting?.meetConferenceRecords ?? []
   const artifacts = conferenceRecords.flatMap((record) => record.artifacts)
   const recordings = artifacts.filter((artifact) => artifact.artifactType === "recording")
   const transcripts = artifacts.filter((artifact) => artifact.artifactType === "transcript")
   const smartNotes = artifacts.filter((artifact) => artifact.artifactType === "smart_notes")
   const artifactCountLabel = artifacts.length
-    ? `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} linked`
-    : "No artifacts linked"
+    ? plural("mtgGoogleArtifactsLinked", artifacts.length)
+    : t("mtgGoogleNoArtifacts")
   // M4: the detail no longer carries the transcript, only its segment count.
   const segmentCount = meeting?.transcriptSegmentCount ?? meeting?.transcript?.length ?? 0
   const hasProcessSource = Boolean(
@@ -60,49 +110,60 @@ export function GoogleContextCard({
   const primaryConferenceRecord = conferenceRecords[0]
   const importedRecording = meeting?.mediaAssets?.[0]
   const readiness = meeting ? getMeetingCaptureReadiness(meeting) : undefined
+  const readinessCopy = readiness ? readinessText(readiness, meeting?.source, t) : undefined
   const items = [
     {
+      key: "event",
       icon: CalendarDaysIcon,
-      label: "Event",
+      label: t("mtgGoogleEvent"),
       value: title,
+      isTitle: Boolean(meeting),
       detail: meeting ? formatDate(meeting.startedAt) : undefined,
     },
     {
+      key: "meet_record",
       icon: RadioTowerIcon,
-      label: "Meet record",
+      label: t("mtgCheckMeetRecord"),
       value: primaryConferenceRecord
         ? primaryConferenceRecord.conferenceRecordName
-        : "No conference record linked yet",
+        : t("mtgGoogleNoConference"),
+      isTitle: false,
       detail: primaryConferenceRecord
         ? formatDate(primaryConferenceRecord.startTime)
         : undefined,
     },
     {
+      key: "recording",
       icon: VideoIcon,
-      label: "Recording",
+      label: t("mtgCheckRecording"),
       value: importedRecording?.filename
-        ? `${importedRecording.filename} imported`
+        ? t("mtgGoogleRecordingImported", { name: importedRecording.filename })
         : recordings.length
-          ? `${recordings.length} recording artifact${recordings.length === 1 ? "" : "s"} found`
-          : "No recording artifact linked yet",
+          ? plural("mtgGoogleRecordingsFound", recordings.length)
+          : t("mtgGoogleNoRecording"),
+      isTitle: false,
       detail: recordings[0]?.driveFileName,
     },
     {
+      key: "transcript",
       icon: FileTextIcon,
-      label: "Transcript",
+      label: t("mtgCheckTranscript"),
       value: segmentCount
-        ? `${segmentCount} transcript segments in MeetSum`
+        ? plural("mtgGoogleSegments", segmentCount)
         : transcripts.length
-          ? `${transcripts.length} transcript artifact${transcripts.length === 1 ? "" : "s"} found`
-          : "No transcript artifact linked yet",
+          ? plural("mtgGoogleTranscriptsFound", transcripts.length)
+          : t("mtgGoogleNoTranscript"),
+      isTitle: false,
       detail: transcripts[0]?.documentName,
     },
     {
+      key: "smart_notes",
       icon: NotebookTabsIcon,
-      label: "Smart notes",
+      label: t("mtgCheckSmartNotes"),
       value: smartNotes.length
-        ? `${smartNotes.length} smart notes artifact${smartNotes.length === 1 ? "" : "s"} found`
-        : "No smart notes linked yet",
+        ? plural("mtgGoogleSmartNotesFound", smartNotes.length)
+        : t("mtgGoogleNoSmartNotes"),
+      isTitle: false,
       detail: smartNotes[0]?.documentName,
     },
   ]
@@ -110,7 +171,7 @@ export function GoogleContextCard({
   return (
     <section className="rounded-md border border-line bg-surface p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Google Context</h3>
+        <h3 className="text-sm font-semibold">{t("mtgGoogleTitle")}</h3>
         <Badge
           variant="outline"
           className={
@@ -119,22 +180,23 @@ export function GoogleContextCard({
               : "rounded-md"
           }
         >
-          {hasArtifactContext ? "linked" : "pending"}
+          {hasArtifactContext ? t("mtgGoogleLinked") : t("mtgGooglePending")}
         </Badge>
       </div>
       <div className="mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs leading-5 text-muted-foreground">
         <span className="font-medium text-foreground">{artifactCountLabel}</span>
+        {" · "}
         {primaryConferenceRecord?.startTime
-          ? ` · Meet record ${formatDate(primaryConferenceRecord.startTime)}`
-          : " · Sync Meet artifacts after the call to refresh this context."}
+          ? t("mtgGoogleMeetRecordAt", { date: formatDate(primaryConferenceRecord.startTime) ?? "" })
+          : t("mtgGoogleSyncHint")}
       </div>
-      {readiness ? (
+      {readinessCopy ? (
         <div className="mb-4 rounded-md border border-line bg-surface-2 p-3">
           <div className="text-xs font-semibold text-foreground">
-            {readiness.title}
+            {readinessCopy.title}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {readiness.description}
+            {readinessCopy.description}
           </p>
         </div>
       ) : null}
@@ -143,14 +205,16 @@ export function GoogleContextCard({
           const Icon = item.icon
 
           return (
-            <div key={item.label} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3">
+            <div key={item.key} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3">
               <Icon aria-hidden="true" className="mt-0.5 size-5 text-brand-text" />
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-foreground">{item.label}</div>
-                <div className="truncate text-xs text-muted-foreground">{item.value}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {item.isTitle ? <bdi>{item.value}</bdi> : item.value}
+                </div>
                 {item.detail ? (
                   <div className="mt-0.5 truncate text-2xs text-muted-foreground">
-                    {item.detail}
+                    <bdi>{item.detail}</bdi>
                   </div>
                 ) : null}
               </div>
@@ -165,12 +229,12 @@ export function GoogleContextCard({
                 className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text"
                 title={artifact.artifactName}
               >
-                {formatArtifactType(artifact.artifactType)}
+                {artifactTypeLabel(artifact.artifactType)}
               </span>
             ))}
             {artifacts.length > 5 ? (
-              <span className="rounded-sm bg-surface-2 px-2 py-0.5 text-2xs text-muted-foreground">
-                +{artifacts.length - 5}
+              <span className="rounded-sm bg-surface-2 px-2 py-0.5 text-2xs text-muted-foreground [direction:ltr] [unicode-bidi:isolate]">
+                +{fmt.number(artifacts.length - 5)}
               </span>
             ) : null}
           </div>
@@ -183,32 +247,32 @@ export function GoogleContextCard({
           onClick={onProcessMeeting}
           title={
             hasProcessSource
-              ? "Queue processing from the attached media, transcript, or Google Meet recording/transcript/smart-notes artifact"
+              ? t("mtgGoogleProcessHint")
               : hasArtifactContext
-                ? "Artifact metadata is linked. Import the Drive recording, transcript, or smart notes content before processing."
-                : "Sync Meet artifacts or import a recording first."
+                ? t("mtgGoogleImportFirstHint")
+                : t("mtgGoogleSyncFirstHint")
           }
         >
           {(transcripts.length || smartNotes.length || recordings.length) &&
           !segmentCount &&
           !meeting?.mediaAssets?.length
             ? transcripts.length
-              ? "Import transcript artifact"
+              ? t("mtgGoogleImportTranscript")
               : smartNotes.length
-                ? "Import smart notes"
-                : "Import recording artifact"
+                ? t("mtgGoogleImportSmartNotes")
+                : t("mtgGoogleImportRecording")
             : hasProcessSource
               ? transcripts.length || smartNotes.length || recordings.length
-                ? "Process from Google artifacts"
-                : "Process from attached source"
+                ? t("mtgSummaryProcessFromGoogle")
+                : t("mtgGoogleProcessAttached")
             : hasArtifactContext
-              ? "Artifact linked; source needed"
-              : "No Google source attached"}
+              ? t("mtgGoogleSourceNeeded")
+              : t("mtgGoogleNoSource")}
         </Button>
         {!meeting && (
           <div className="flex items-center gap-2 rounded-md border border-dashed border-line p-3 text-xs text-muted-foreground">
             <FileIcon aria-hidden="true" className="size-4" />
-            Select a meeting to see linked Workspace context.
+            {t("mtgGoogleSelectMeeting")}
           </div>
         )}
       </div>

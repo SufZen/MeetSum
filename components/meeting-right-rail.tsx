@@ -1,3 +1,5 @@
+"use client"
+
 import type { ReactNode } from "react"
 import {
   AlertTriangleIcon,
@@ -7,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
+import { useI18n } from "@/components/i18n-provider"
 import { MeetingExportMenu } from "@/components/meetings/meeting-export-menu"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
@@ -14,9 +17,64 @@ import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
 import type {
   JobRecord,
+  MeetingQualityWarning,
   MeetingRecord,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
+
+type I18n = ReturnType<typeof useI18n>
+
+/** Agent suggestion copy by intent (lib/agents/suggestions stores English). */
+const AGENT_INTENT_KEYS: Record<string, { title: string; description: string }> = {
+  export_to_realizeos: { title: "mtgAgentExportRealizeosTitle", description: "mtgAgentExportRealizeosDescription" },
+  draft_followup_email: { title: "mtgAgentFollowupEmailTitle", description: "mtgAgentFollowupEmailDescription" },
+  create_n8n_payload: { title: "mtgAgentN8nPayloadTitle", description: "mtgAgentN8nPayloadDescription" },
+  draft_client_recap: { title: "mtgAgentClientRecapTitle", description: "mtgAgentClientRecapDescription" },
+  extract_crm_notes: { title: "mtgAgentCrmNotesTitle", description: "mtgAgentCrmNotesDescription" },
+}
+
+const AGENT_STATUS_KEYS: Record<SuggestedAgentRun["status"], string> = {
+  suggested: "mtgAgentStatusSuggested",
+  queued: "mtgAgentStatusQueued",
+  sent: "mtgAgentStatusSent",
+  failed: "mtgAgentStatusFailed",
+}
+
+/** Quality warning copy by code (lib/meetings/quality stores English). */
+function qualityWarningText(
+  warning: MeetingQualityWarning,
+  meeting: MeetingRecord | null,
+  provider: string | undefined,
+  { t, plural }: I18n
+): { title: string; detail: string } {
+  switch (warning.code) {
+    case "smart_notes_only":
+      return { title: t("mtgQualitySmartNotesOnlyTitle"), detail: t("mtgQualitySmartNotesOnlyDetail") }
+    case "transcription_fallback":
+      return {
+        title: t("mtgQualityFallbackTitle"),
+        detail: t("mtgQualityFallbackDetail", { provider: provider ?? "—" }),
+      }
+    case "weak_transcript_confidence":
+      return { title: t("mtgQualityWeakConfidenceTitle"), detail: t("mtgQualityWeakConfidenceDetail") }
+    case "no_speaker_diarization":
+      return { title: t("mtgQualityGenericSpeakersTitle"), detail: t("mtgQualityGenericSpeakersDetail") }
+    case "summary_language_mismatch":
+      return { title: t("mtgQualityLanguageMismatchTitle"), detail: t("mtgQualityLanguageMismatchDetail") }
+    case "task_missing_owner_or_due_date": {
+      const count = (meeting?.summary?.actionItems ?? []).filter(
+        (item) => item.status !== "done" && (!item.owner || !item.dueDate)
+      ).length
+
+      return {
+        title: t("mtgQualityTasksIncompleteTitle"),
+        detail: plural("mtgQualityTasksIncompleteDetail", count),
+      }
+    }
+    default:
+      return { title: warning.title, detail: warning.detail }
+  }
+}
 
 function latestAiRun(meeting: MeetingRecord | null, task: string) {
   return meeting?.aiRuns?.find((run) => run.task === task)
@@ -39,11 +97,11 @@ function computeConfidence(meeting: MeetingRecord | null) {
   return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
-function formatLatency(value: number | undefined) {
+function formatLatency(value: number | undefined, { t, fmt }: I18n) {
   if (!value) return undefined
-  if (value < 1000) return `${value}ms`
+  if (value < 1000) return t("mtgRailLatencyMs", { value: fmt.number(value) })
 
-  return `${Math.round(value / 100) / 10}s`
+  return t("mtgRailLatencySeconds", { value: fmt.number(Math.round(value / 100) / 10) })
 }
 
 function tagClass(tag: string) {
@@ -90,8 +148,11 @@ export function MeetingRightRail({
   /** M5 conversation analytics card. */
   analytics?: ReactNode
 }) {
+  const i18n = useI18n()
+  const { t, fmt, text } = i18n
   const confidence = computeConfidence(meeting)
   const percent = confidence ? Math.round(confidence * 100) : undefined
+  const percentLabel = confidence ? fmt.percent(confidence) : ""
   const tags = meeting?.tags ?? []
   const suggestedRuns = meeting?.suggestedAgentRuns ?? []
   const transcriptionRun = latestAiRun(meeting, "audio.transcribe")
@@ -106,6 +167,7 @@ export function MeetingRightRail({
       ? transcriptionRun.metadata.fallbackReason
       : undefined
   const qualityWarnings = meeting?.qualityWarnings ?? []
+  const latency = formatLatency(transcriptionRun?.latencyMs, i18n)
 
   return (
     <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:col-span-2 lg:grid-cols-2 lg:border-t lg:border-line 2xl:col-span-1 2xl:grid-cols-1 2xl:h-full 2xl:border-s 2xl:border-t-0">
@@ -116,27 +178,32 @@ export function MeetingRightRail({
       {analytics}
 
       <section className="ms-card p-4">
-        <h3 className="mb-4 text-sm font-semibold">AI Confidence</h3>
+        <h3 className="mb-4 text-sm font-semibold">{t("mtgRailConfidenceTitle")}</h3>
         {percent ? (
           <div className="flex items-center gap-4">
             <div
-              className="grid size-16 place-items-center rounded-full border-4 border-ok text-lg font-semibold"
-              aria-label={`AI confidence ${percent}%`}
+              role="img"
+              className="grid size-16 place-items-center rounded-full border-4 border-ok text-lg font-semibold [direction:ltr] [unicode-bidi:isolate]"
+              aria-label={t("mtgRailConfidenceAria", { percent: percentLabel })}
             >
-              {percent}%
+              {percentLabel}
             </div>
             <div>
               <div className="font-medium text-ok-text">
-                {percent >= 80 ? "High" : percent >= 60 ? "Medium" : "Low"}
+                {percent >= 80
+                  ? t("mtgRailConfidenceHigh")
+                  : percent >= 60
+                    ? t("mtgRailConfidenceMedium")
+                    : t("mtgRailConfidenceLow")}
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Based on the transcription run
+                {t("mtgRailConfidenceBasis")}
               </p>
             </div>
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
-            Confidence appears after transcription or structured intelligence.
+            {t("mtgRailConfidenceEmpty")}
           </div>
         )}
         <Button
@@ -144,18 +211,14 @@ export function MeetingRightRail({
           size="sm"
           className="mt-2 h-8 px-0 text-brand-text"
           disabled
-          title={
-            percent
-              ? "Detailed quality review is coming in the next slice"
-              : "Run intelligence first"
-          }
+          title={percent ? t("mtgRailDetailsSoon") : t("mtgRailRunIntelligenceFirst")}
         >
-          Details
+          {t("mtgRailDetails")}
         </Button>
       </section>
 
       <section className="ms-card p-4">
-        <h3 className="mb-3 text-sm font-semibold">Provider run</h3>
+        <h3 className="mb-3 text-sm font-semibold">{t("mtgRailProviderRun")}</h3>
         {transcriptionRun || summaryRun ? (
           <div className="grid gap-2">
             {transcriptionRun ? (
@@ -164,18 +227,18 @@ export function MeetingRightRail({
                   <ActivityIcon aria-hidden="true" className="mt-0.5 size-4 text-brand-text" />
                   <div className="min-w-0">
                     <div className="text-sm font-medium">
-                      {transcriptionRun.provider}
+                      <bdi>{transcriptionRun.provider}</bdi>
                     </div>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {transcriptionRun.model ?? "default model"}
-                      {formatLatency(transcriptionRun.latencyMs)
-                        ? ` · ${formatLatency(transcriptionRun.latencyMs)}`
-                        : ""}
+                      {transcriptionRun.model ? <bdi>{transcriptionRun.model}</bdi> : t("mtgRailDefaultModel")}
+                      {latency ? ` · ${latency}` : ""}
                     </p>
                     {fallbackUsed ? (
                       <p className="mt-1 text-xs leading-5 text-warn-text">
-                        Fallback used{attemptedProvider ? ` after ${attemptedProvider}` : ""}.
-                        {fallbackReason ? ` Reason: ${fallbackReason}` : ""}
+                        {attemptedProvider
+                          ? t("mtgRailFallbackUsedAfter", { provider: attemptedProvider })
+                          : t("mtgRailFallbackUsed")}
+                        {fallbackReason ? <> {t("mtgRailFallbackReason", { reason: fallbackReason })}</> : null}
                       </p>
                     ) : null}
                   </div>
@@ -184,52 +247,57 @@ export function MeetingRightRail({
             ) : null}
             {summaryRun ? (
               <div className="rounded-md border border-line bg-surface-2 p-3 text-xs leading-5 text-muted-foreground">
-                Summary: <span className="font-medium text-foreground">{summaryRun.provider}</span>
-                {summaryRun.model ? ` · ${summaryRun.model}` : ""}
+                {t("mtgRailSummaryProvider")}{" "}
+                <bdi className="font-medium text-foreground">{summaryRun.provider}</bdi>
+                {summaryRun.model ? <> · <bdi>{summaryRun.model}</bdi></> : null}
               </div>
             ) : null}
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
-            Provider metadata appears after transcription or summarization.
+            {t("mtgRailProviderEmpty")}
           </div>
         )}
       </section>
 
       {qualityWarnings.length ? (
         <section className="ms-card p-4">
-          <h3 className="mb-3 text-sm font-semibold">Quality review</h3>
+          <h3 className="mb-3 text-sm font-semibold">{t("mtgRailQualityReview")}</h3>
           <div className="grid gap-2">
-            {qualityWarnings.slice(0, 4).map((warning) => (
-              <div
-                key={warning.code}
-                className="rounded-md border border-line bg-surface-2 p-3"
-              >
-                <div className="flex items-start gap-2">
-                  <AlertTriangleIcon
-                    aria-hidden="true"
-                    className={
-                      warning.severity === "warning"
-                        ? "mt-0.5 size-4 text-warn-text"
-                        : "mt-0.5 size-4 text-brand-text"
-                    }
-                  />
-                  <div>
-                    <div className="text-sm font-medium">{warning.title}</div>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {warning.detail}
-                    </p>
+            {qualityWarnings.slice(0, 4).map((warning) => {
+              const copy = qualityWarningText(warning, meeting, transcriptionRun?.provider, i18n)
+
+              return (
+                <div
+                  key={warning.code}
+                  className="rounded-md border border-line bg-surface-2 p-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangleIcon
+                      aria-hidden="true"
+                      className={
+                        warning.severity === "warning"
+                          ? "mt-0.5 size-4 text-warn-text"
+                          : "mt-0.5 size-4 text-brand-text"
+                      }
+                    />
+                    <div>
+                      <div className="text-sm font-medium">{copy.title}</div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {copy.detail}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
       ) : null}
 
       <section className="ms-card p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Tags</h3>
+          <h3 className="text-sm font-semibold">{t("tags")}</h3>
           <Button
             variant="ghost"
             size="sm"
@@ -237,7 +305,7 @@ export function MeetingRightRail({
             onClick={onEditTags}
             disabled={!meeting}
           >
-            Edit
+            {t("mtgRailEditTags")}
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -247,18 +315,18 @@ export function MeetingRightRail({
               variant="secondary"
               className={tagClass(tag)}
             >
-              {tag}
+              <bdi>{tag}</bdi>
             </Badge>
           )) : (
             <span className="text-sm text-muted-foreground">
-              No tags extracted yet.
+              {t("mtgRailNoTags")}
             </span>
           )}
         </div>
       </section>
 
       <section className="ms-card p-4">
-        <h3 className="mb-3 text-sm font-semibold">Exports & Integrations</h3>
+        <h3 className="mb-3 text-sm font-semibold">{t("mtgRailExports")}</h3>
         {/* M8 C3: Download (PDF, Markdown, DOCX), Google Docs and Send to… live in one menu. */}
         <div className="flex flex-wrap items-center gap-2">
           <MeetingExportMenu
@@ -284,9 +352,9 @@ export function MeetingRightRail({
       <section className="ms-card p-4">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold">Suggested agents</h3>
+            <h3 className="text-sm font-semibold">{t("mtgRailAgentsTitle")}</h3>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Approval-gated outputs for follow-up, context, and automations.
+              {t("mtgRailAgentsHint")}
             </p>
           </div>
           <Button
@@ -297,20 +365,24 @@ export function MeetingRightRail({
             disabled={!meeting || suggestingAgents}
           >
             <CitedMark className="size-3.5" />
-            Suggest
+            {t("mtgRailAgentsSuggest")}
           </Button>
         </div>
         {suggestedRuns.length ? (
           <div className="space-y-2">
             {suggestedRuns.slice(0, 4).map((run) => {
-              const title =
-                typeof run.payload.title === "string"
-                  ? run.payload.title
+              const intentKeys =
+                typeof run.payload.intent === "string" ? AGENT_INTENT_KEYS[run.payload.intent] : undefined
+              const title = intentKeys
+                ? t(intentKeys.title)
+                : typeof run.payload.title === "string"
+                  ? text(run.payload.title)
                   : run.target
-              const description =
-                typeof run.payload.description === "string"
-                  ? run.payload.description
-                  : "Approval required before this agent can affect external systems."
+              const description = intentKeys
+                ? t(intentKeys.description)
+                : typeof run.payload.description === "string"
+                  ? text(run.payload.description)
+                  : t("mtgRailAgentApprovalRequired")
               const canApprove = run.status === "suggested"
 
               return (
@@ -326,7 +398,7 @@ export function MeetingRightRail({
                       </p>
                     </div>
                     <Badge variant="secondary" className="rounded-sm">
-                      {run.status}
+                      {AGENT_STATUS_KEYS[run.status] ? t(AGENT_STATUS_KEYS[run.status]) : run.status}
                     </Badge>
                   </div>
                   <Button
@@ -335,14 +407,10 @@ export function MeetingRightRail({
                     className="mt-2 h-8 w-full gap-1.5"
                     onClick={() => onApproveAgentRun(run)}
                     disabled={!canApprove}
-                    title={
-                      canApprove
-                        ? "Approve this suggested agent run"
-                        : "This suggestion has already moved forward"
-                    }
+                    title={canApprove ? t("mtgRailAgentApproveHint") : t("mtgRailAgentAlreadyMoved")}
                   >
                     <CheckCircle2Icon aria-hidden="true" className="size-3.5" />
-                    Approve
+                    {t("mtgRailAgentApprove")}
                   </Button>
                 </div>
               )
@@ -350,7 +418,7 @@ export function MeetingRightRail({
           </div>
         ) : (
           <div className="rounded-md border border-dashed border-line bg-surface-2 p-3 text-sm text-muted-foreground">
-            Suggestions appear after a meeting has transcript or summary content.
+            {t("mtgRailAgentsEmpty")}
           </div>
         )}
       </section>

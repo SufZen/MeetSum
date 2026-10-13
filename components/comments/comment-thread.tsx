@@ -18,6 +18,7 @@ import {
   type CommentsSnapshot,
 } from "@/components/comments/collab-client"
 import { ReactionBar } from "@/components/comments/reaction-bar"
+import { useI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/components/workspace-context"
 import { mentionDisplayName, splitMentions } from "@/lib/comments/mentions"
@@ -60,18 +61,13 @@ function CommentItem({
   canResolve: boolean
   isRoot: boolean
 }) {
-  const { t, locale } = useCollabStrings()
+  const { t } = useCollabStrings()
+  const { fmt } = useI18n()
   const { role } = useWorkspace()
   const [editing, setEditing] = useState(false)
   const mine = comment.authorUserId === snapshot?.viewerUserId
   const canDelete = mine || role === "admin" || role === "owner"
-  const created = new Date(comment.createdAt)
-  const when = Number.isNaN(created.getTime())
-    ? ""
-    : new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-GB", {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(created)
+  const when = fmt.date(comment.createdAt, "dateTime")
 
   const run = async (action: () => Promise<unknown>, success?: string) => {
     try {

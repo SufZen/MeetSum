@@ -11,7 +11,7 @@ import { useState } from "react"
 import dynamic from "next/dynamic"
 import { toast } from "sonner"
 
-import { updateMeetingVisibility } from "@/components/admin/api"
+import { ApiError, updateMeetingVisibility } from "@/components/admin/api"
 import { visibilityLabel } from "@/components/admin/labels"
 import {
   DropdownMenu,
@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useWorkspace } from "@/components/workspace-context"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type {
   MeetingRecord,
@@ -86,7 +87,11 @@ export function MeetingVisibilityControl({
       onChanged(result.visibility)
       toast.success(t.visibilityUpdated)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(
+        error instanceof ApiError
+          ? apiErrorMessage({ error: error.code, message: error.message }, t, t.actionFailed)
+          : t.actionFailed
+      )
       throw error
     } finally {
       setPending(false)

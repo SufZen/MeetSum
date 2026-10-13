@@ -7,31 +7,32 @@
  */
 import { useId, useMemo } from "react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { useSpeakerDirectory } from "@/components/player/speaker-directory"
 import { SpeakerAvatar } from "@/components/ui/meeting-atoms"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 import { speakerColorVar } from "@/lib/player/speaker-colors"
 import { buildTalkTimeRows, type TimelineSegment } from "@/lib/player/speaker-timeline"
-import { formatSpokenDuration } from "@/lib/meetings/duration"
 import { formatClock } from "@/lib/player/time-format"
 import { cn } from "@/lib/utils"
 
 export function TalkTimePanel({
   dictionary: t,
-  locale,
   speakers,
   participants = [],
   segments = [],
   className,
 }: {
   dictionary: Dictionary
-  locale: string
+  /** Kept for callers; formatting follows the I18nProvider locale. */
+  locale?: string
   speakers: readonly MeetingSpeaker[]
   participants?: readonly MeetingParticipant[]
   segments?: readonly TimelineSegment[]
   className?: string
 }) {
+  const { plural, fmt } = useI18n()
   const directory = useSpeakerDirectory(speakers, participants, t.speakersGenericLabel)
   const rows = useMemo(() => buildTalkTimeRows(speakers, segments), [segments, speakers])
   const titleId = useId()
@@ -60,11 +61,11 @@ export function TalkTimePanel({
                 />
                 <bdi className="min-w-0 flex-1 truncate font-medium">{display.name}</bdi>
                 <span className="shrink-0 font-mono text-xs text-fg-2 tabular-nums [direction:ltr] [unicode-bidi:isolate]">
-                  {percent}%
+                  {fmt.percent(row.share)}
                 </span>
                 <time
                   dir="ltr"
-                  aria-label={formatSpokenDuration(row.talkTimeMs, locale)}
+                  aria-label={fmt.duration(row.talkTimeMs)}
                   className="w-14 shrink-0 text-end font-mono text-xs text-fg-3 tabular-nums"
                 >
                   {formatClock(row.talkTimeMs)}
@@ -80,8 +81,10 @@ export function TalkTimePanel({
                 />
               </div>
               <div className="flex flex-wrap gap-x-3 text-xs text-fg-3">
-                {row.wordCount ? <span>{formatMessage(t.talkTimeWords, { count: row.wordCount })}</span> : null}
-                {row.wpm ? <span>{formatMessage(t.talkTimeWpm, { count: row.wpm })}</span> : null}
+                {row.wordCount ? (
+                  <span>{plural("mtgWordCount", row.wordCount, { count: fmt.number(row.wordCount) })}</span>
+                ) : null}
+                {row.wpm ? <span>{formatMessage(t.talkTimeWpm, { count: fmt.number(row.wpm) })}</span> : null}
                 {row.longestMonologueMs ? (
                   <span>
                     {formatMessage(t.talkTimeLongest, { time: "" }).trim()}{" "}

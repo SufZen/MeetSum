@@ -12,6 +12,7 @@
  * - chapter: title plus summary, with its start.
  * `content_hash = sha256(kind + "\0" + text)`.
  */
+import { formatNumericDate } from "@/lib/i18n/format"
 import { estimateTokens } from "@/lib/intelligence/transcript-format"
 import type { MeetingIntelligence, SummaryItem, SummaryItemKind } from "@/lib/intelligence/types"
 import type { ActionItem, MeetingRecord } from "@/lib/meetings/repository"
@@ -61,18 +62,7 @@ function draft(input: DraftInput): ChunkDraft {
 }
 
 function formatMetaDate(iso: string): string | undefined {
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return undefined
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: META_TIME_ZONE,
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).formatToParts(date)
-  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? ""
-
-  return `${part("day")}.${part("month")}.${part("year")}`
+  return formatNumericDate(iso, META_TIME_ZONE) || undefined
 }
 
 function unique(values: (string | undefined)[]): string[] {

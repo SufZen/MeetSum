@@ -164,6 +164,6 @@ describe("groupFailedJobsByMeeting", () => {
     expect(groups).toHaveLength(1)
     // The latest job (j2) should determine the displayed stage and error
     expect(groups[0].latestStage).toBe("summary.generate")
-    expect(groups[0].latestError).toBe("Rate limited")
+    expect(groups[0].latestError).toBe("rateLimit")
   })
 })

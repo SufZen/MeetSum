@@ -77,7 +77,7 @@ export const askMessagesEn = {
 }
 
 export const askMessagesHe: Record<keyof typeof askMessagesEn, string> = {
-  askTitle: "שאלות ל-MeetSum",
+  askTitle: "שאלות ל-\u2060MeetSum",
   askScope: "היקף",
   askScopeMeeting: "הפגישה הזו",
   askScopeRoom: "חדר · {name}",
@@ -131,7 +131,7 @@ export const askMessagesHe: Record<keyof typeof askMessagesEn, string> = {
   askStopped: "העצירה בוצעה לפני שהתשובה נבדקה מול המקורות.",
   askErrorRateLimited: "יותר מדי שאלות כרגע. כדאי להמתין רגע ולנסות שוב.",
   askErrorDailyLimit: "מכסת השאלות היומית נוצלה. היא מתאפסת מחר.",
-  askErrorUnavailable: "מודל ה-AI אינו זמין כרגע. כדאי לנסות שוב בעוד כמה דקות.",
+  askErrorUnavailable: "מודל ה-\u2060AI אינו זמין כרגע. כדאי לנסות שוב בעוד כמה דקות.",
   askErrorNotConfigured: "עדיין לא הוגדר ספק AI לתשובות. מנהל סביבת העבודה יכול להוסיף אותו בהגדרות.",
   askErrorNotFound: "הפגישה או החדר אינם זמינים עוד.",
   askErrorInternal: "משהו השתבש. כדאי לנסות שוב.",

@@ -1,10 +1,9 @@
 /**
  * Hebrew typography and bidi helpers (M9, docs/parity/m9.md "Hebrew
  * typography API"). Canonical module: `lib/integrations/bidi.ts` re-exports
- * these primitives (Package A). Applied at render/export time only, never
- * persisted: stored text, search offsets, clipboard and transcript DOM stay raw.
- *
- * Step 0 ships the real, minimal implementation; Package A completes it.
+ * these primitives (same names, same behaviour). Applied at render/export
+ * time only, never persisted: stored text, search offsets, clipboard and
+ * transcript DOM stay raw.
  */
 
 export const RLM = "‏"
@@ -17,27 +16,47 @@ export const FSI = "⁨"
 export const PDI = "⁩"
 
 const HEBREW = /[֐-׿יִ-ﭏ]/
-const RTL_LETTER = /[֐-ࣿיִ-﷿ﹰ-﻿]/
+/** Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan… and their presentation forms. */
+const STRONG_RTL = /[֐-ࣿיִ-﷿ﹰ-ﻼ]|[\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u
 const LETTER = /\p{L}/u
 const BIDI_CONTROLS = /[‎‏‪-‮⁦-⁩؜⁠]/g
 const CONTROL_CHAR = /[‎‏‪-‮⁦-⁩؜⁠ ]/
-const RTL_LANGUAGES = new Set(["he", "iw", "yi", "ar", "fa"])
+/** LRI, RLI and FSI open an isolate (skipped, UBA rule P2); PDI closes it. */
+const ISOLATE_OPEN = new Set([LRI, RLI, FSI])
+const RTL_LANGUAGES = new Set(["he", "iw", "yi", "ar", "fa", "ur"])
 
 export function hasHebrew(s: string): boolean {
   return HEBREW.test(s)
 }
 
-/** Direction of the first strong (letter) character, or neutral. */
+/**
+ * Direction of the first strong character, or neutral when there is none
+ * (digits, punctuation, emoji). Isolated runs are skipped (UBA P2); RLM and
+ * LRM count as strong.
+ */
 export function firstStrongDirection(s: string): "rtl" | "ltr" | "neutral" {
+  let depth = 0
+
   for (const char of s) {
-    if (RTL_LETTER.test(char)) return "rtl"
+    if (ISOLATE_OPEN.has(char)) {
+      depth += 1
+      continue
+    }
+    if (char === PDI) {
+      if (depth > 0) depth -= 1
+      continue
+    }
+    if (depth > 0) continue
+    if (char === RLM) return "rtl"
+    if (char === LRM) return "ltr"
+    if (STRONG_RTL.test(char)) return "rtl"
     if (LETTER.test(char)) return "ltr"
   }
 
   return "neutral"
 }
 
-/** he, iw, he-*, yi, ar, fa (any region subtag). */
+/** he, iw, yi, ar, fa, ur (any region subtag, `-` or `_`). */
 export function isRtlLanguage(lang?: string | null): boolean {
   if (!lang) return false
 
@@ -93,11 +112,24 @@ export function isolateLtr(s: string): string {
   return `${LRI}${s}${PDI}`
 }
 
-/** RLM prefix when the first strong character is LTR, so the line keeps an RTL base. */
-export function rtlLine(s: string): string {
-  if (s.startsWith(RLM)) return s
+function rtlSingleLine(line: string): string {
+  if (!line) return line
 
-  return firstStrongDirection(s) === "ltr" ? `${RLM}${s}` : s
+  const first = String.fromCodePoint(line.codePointAt(0) as number)
+
+  if (first === RLM || STRONG_RTL.test(first)) return line
+
+  return `${RLM}${line}`
+}
+
+/**
+ * Keeps a line's base RTL in renderers that take the direction from the
+ * first strong character (Slack, Notion, plain text): prefixes RLM unless the
+ * line already starts with an RTL character or RLM. Applied per line; marks
+ * are only ever added at a line start, never inside URLs or tokens.
+ */
+export function rtlLine(s: string): string {
+  return s.split("\n").map(rtlSingleLine).join("\n")
 }
 
 /** Removes U+200E/F, 202A–202E, 2066–2069, 061C and 2060. */

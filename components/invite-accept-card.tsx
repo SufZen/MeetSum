@@ -16,7 +16,7 @@ import {
   getPublicInvitation,
   type PublicInvitation,
 } from "@/components/admin/api"
-import { roleLabel } from "@/components/admin/labels"
+import { adminErrorMessage, roleLabel } from "@/components/admin/labels"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
@@ -79,8 +79,7 @@ export function InviteAcceptCard({
         }
         setState({
           status: "error",
-          message:
-            loadError instanceof Error ? loadError.message : t.loadFailed,
+          message: adminErrorMessage(loadError, t, t.loadFailed),
         })
       }
     )
@@ -88,7 +87,7 @@ export function InviteAcceptCard({
     return () => {
       cancelled = true
     }
-  }, [token, t.loadFailed])
+  }, [token, t])
 
   async function accept() {
     if (state.status !== "ready") return
@@ -107,9 +106,7 @@ export function InviteAcceptCard({
       toast.error(
         acceptError instanceof ApiError && acceptError.status === 403
           ? t.inviteEmailMismatch
-          : acceptError instanceof Error
-            ? acceptError.message
-            : t.actionFailed
+          : adminErrorMessage(acceptError, t, t.actionFailed)
       )
       setAccepting(false)
     }

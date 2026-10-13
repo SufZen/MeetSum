@@ -392,7 +392,7 @@ export function TemplatesSettings({
             <li key={template.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2">
               <span className="min-w-0">
                 <bdi className="font-medium">{template.name}</bdi>
-                <span className="ms-2 font-mono text-xs text-fg-3 [direction:ltr] [unicode-bidi:isolate]">custom:{template.key}</span>
+                <span className="ms-2 font-mono text-xs text-fg-3 [direction:ltr] [unicode-bidi:isolate]">{`custom:${template.key}`}</span>
               </span>
               {!readOnly ? (
                 <span className="flex shrink-0 gap-1">

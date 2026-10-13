@@ -4,6 +4,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { BdiMessage } from "@/components/bot/bdi-message"
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { integrationsApi } from "@/components/integrations/api"
 import { DestinationPicker } from "@/components/integrations/destination-picker"
 import { im } from "@/components/integrations/messages"
@@ -70,6 +71,7 @@ export function ProviderCard({
   /** Provider-specific extras (Outlook sync, Teams status…). */
   children?: React.ReactNode
 }) {
+  const timeZone = useOptionalI18n()?.timeZone
   const [busy, setBusy] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const configured = info?.configured ?? false
@@ -149,7 +151,7 @@ export function ProviderCard({
           </div>
           <div>
             {connection.lastUsedAt ? (
-              <BdiMessage template={t.integrationsLastUsed} values={{ when: <When value={formatWhen(locale, connection.lastUsedAt)} /> }} />
+              <BdiMessage template={t.integrationsLastUsed} values={{ when: <When value={formatWhen(locale, connection.lastUsedAt, timeZone)} /> }} />
             ) : (
               t.integrationsNeverUsed
             )}

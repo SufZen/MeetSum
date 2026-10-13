@@ -17,6 +17,7 @@
  */
 import { isRtlLanguage, isolateLtr } from "@/lib/integrations/bidi"
 import type { MeetingRecap } from "@/lib/integrations/recap"
+import { formatDate as formatDateValue } from "@/lib/i18n/format"
 import { getExportsMessages } from "@/lib/i18n/m8/exports"
 import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 
@@ -75,15 +76,7 @@ function formatTimecode(ms: number): string {
 }
 
 function formatDate(startedAt: string, locale: GoogleDocsLocale, env: NodeJS.ProcessEnv): string {
-  const date = new Date(startedAt)
-
-  if (Number.isNaN(date.getTime())) return startedAt
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: getTaskTimeZone(env),
-  }).format(date)
+  return formatDateValue(startedAt, { locale, timeZone: getTaskTimeZone(env) }, "dateTime") || startedAt
 }
 
 export function buildGoogleDocRequests(
