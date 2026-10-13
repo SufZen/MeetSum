@@ -9,6 +9,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
+import { isNotFoundError } from "@/lib/meetings/repository"
 import {
   checkOwnerIds,
   createActionItemSchema,
@@ -65,8 +66,10 @@ export const POST = withAuthz<{ id: string }>(
       actionItem = await ctx.meetings.createActionItem(id, input, {
         userId: creatorUserId(ctx),
       })
-    } catch {
-      return meetingNotFound()
+    } catch (error) {
+      if (isNotFoundError(error)) return meetingNotFound()
+      console.error("[action-items] create failed", error instanceof Error ? error.name : "error")
+      return jsonError("Failed to create action item", 500)
     }
 
     await recordAuditLog({

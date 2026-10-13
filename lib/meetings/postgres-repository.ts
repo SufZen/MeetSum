@@ -39,7 +39,9 @@ import type {
   TranscriptSegment,
 } from "@/lib/meetings/repository"
 import {
+  ActionItemNotFoundError,
   MeetingExternalIdConflictError,
+  MeetingNotFoundError,
   MeetingScopeError,
   NothingToUndoError,
   SegmentNotFoundError,
@@ -3438,7 +3440,7 @@ export function createPostgresMeetingRepository(
         )
         const row = lookup.rows[0] as { started_at: string | Date } | undefined
 
-        if (!row) throw new Error(`Action item not found: ${id}`)
+        if (!row) throw new ActionItemNotFoundError(id)
         anchor = toIso(row.started_at)
       }
 
@@ -3500,8 +3502,27 @@ export function createPostgresMeetingRepository(
       )
       const row = result.rows[0] as ActionItemRow | undefined
 
-      if (!row) throw new Error(`Action item not found: ${id}`)
+      if (!row) throw new ActionItemNotFoundError(id)
       return mapActionItem(row)
+    },
+
+    async getActionItem(id) {
+      const values: unknown[] = [id]
+      const result = await client.query(
+        `
+          select ${ACTION_ITEM_COLUMNS}
+          from action_items
+          where id = $1
+            and exists (
+              select 1 from meetings m
+              where m.id = action_items.meeting_id and ${scoped("m", values)}
+            )
+        `,
+        values
+      )
+      const row = result.rows[0] as ActionItemRow | undefined
+
+      return row ? mapActionItem(row) : undefined
     },
 
     async createActionItem(meetingId, input, actor) {
@@ -3511,7 +3532,7 @@ export function createPostgresMeetingRepository(
 
       const meetingRow = await selectMeeting(client, "m.id = $1", [meetingId])
 
-      if (!meetingRow) throw new Error(`Meeting not found: ${meetingId}`)
+      if (!meetingRow) throw new MeetingNotFoundError(meetingId)
 
       const dueText = input.dueText?.trim() || null
       const dueOn = isDateOnly(input.dueOn)

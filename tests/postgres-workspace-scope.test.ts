@@ -237,6 +237,7 @@ const invocations: Record<
       { userId: "user_me" }
     ),
   deleteActionItem: (repo) => repo.deleteActionItem("act_1"),
+  getActionItem: (repo) => repo.getActionItem("act_1"),
   setMeetingTemplate: (repo) => repo.setMeetingTemplate("meet_1", "hebrew_business"),
   applyAiTitle: (repo) => repo.applyAiTitle("meet_1", "Budget sync"),
   setMeetingTitle: (repo) => repo.setMeetingTitle("meet_1", "Budget sync", "user"),

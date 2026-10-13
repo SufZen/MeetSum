@@ -202,4 +202,42 @@ describe("POST /api/tasks/bulk", () => {
 
     expect((await post({ ids: ["a_late"], patch: { status: "done" } })).status).toBe(403)
   })
+
+  it("sends no notification for a status-only update of assigned tasks", async () => {
+    await useCtx()
+    const response = await post({ ids: ["b_dana", "a_late"], patch: { status: "done" } })
+
+    expect(response.status).toBe(200)
+    expect(enqueueNotification).not.toHaveBeenCalled()
+  })
+
+  it("notifies only items whose owner actually changes", async () => {
+    await useCtx()
+    const response = await post({ ids: ["b_dana", "a_late"], patch: { ownerUserId: "user_dana" } })
+    const body = (await response.json()) as { updated: ActionItem[] }
+
+    expect(body.updated.map((task) => task.id)).toEqual(["b_dana", "a_late"])
+    expect(enqueueNotification).toHaveBeenCalledTimes(1)
+    expect(enqueueNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user_dana",
+        kind: "task_assigned",
+        payload: expect.objectContaining({ actionItemId: "a_late" }),
+      })
+    )
+  })
+
+  it("reports a storage failure as a 500, not as not found", async () => {
+    const db = await useCtx()
+    const ctx = await createTestCtx({ workspaceId: "ws_a", database: db })
+
+    ctx.meetings.updateActionItem = async () => {
+      throw new Error("connection terminated")
+    }
+    setRouteCtx(ctx)
+
+    const response = await post({ ids: ["a_late"], patch: { status: "done" } })
+
+    expect(response.status).toBe(500)
+  })
 })

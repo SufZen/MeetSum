@@ -173,6 +173,32 @@ describe("PATCH /api/action-items/:id", () => {
     expect((await patch("ai_private", { meetingId: "m_thu", title: "x" })).status).toBe(404)
     expect(db.meetings.get("m_private")?.summary?.actionItems[0].title).toBe("סודי")
   })
+
+  it("reports a storage failure as a 500, not as not found", async () => {
+    const db = seed()
+    const ctx = await createTestCtx({ workspaceId: "ws_a", database: db })
+
+    ctx.meetings.updateActionItem = async () => {
+      throw new Error("connection terminated")
+    }
+    setRouteCtx(ctx)
+
+    expect((await patch("ai_1", { meetingId: "m_thu", title: "x" })).status).toBe(500)
+  })
+})
+
+describe("POST /api/meetings/:id/action-items storage errors", () => {
+  it("reports a storage failure as a 500, not as not found", async () => {
+    const db = seed()
+    const ctx = await createTestCtx({ workspaceId: "ws_a", database: db })
+
+    ctx.meetings.createActionItem = async () => {
+      throw new Error("connection terminated")
+    }
+    setRouteCtx(ctx)
+
+    expect((await create("m_thu", { title: "x" })).status).toBe(500)
+  })
 })
 
 describe("DELETE /api/action-items/:id", () => {

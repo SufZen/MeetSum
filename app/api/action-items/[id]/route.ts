@@ -8,6 +8,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
+import { isNotFoundError } from "@/lib/meetings/repository"
 import {
   actionItemPatchSchema,
   checkOwnerIds,
@@ -65,8 +66,10 @@ export const PATCH = withAuthz<{ id: string }>(
 
     try {
       actionItem = await ctx.meetings.updateActionItem(id, patch)
-    } catch {
-      return notFound()
+    } catch (error) {
+      if (isNotFoundError(error)) return notFound()
+      console.error("[action-items] update failed", error instanceof Error ? error.name : "error")
+      return jsonError("Failed to update action item", 500)
     }
 
     await recordAuditLog({

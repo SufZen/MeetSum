@@ -4,7 +4,7 @@ import { auditActor } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
-import type { ActionItem, ActionItemPatch } from "@/lib/meetings/repository"
+import { isNotFoundError, type ActionItem, type ActionItemPatch } from "@/lib/meetings/repository"
 import {
   bulkTaskSchema,
   listTaskMembers,
@@ -48,22 +48,37 @@ export const POST = withAuthz("meeting:write", async (request, ctx) => {
 
   const updated: ActionItem[] = []
   const notFound: string[] = []
+  const reassigning = typeof input.ownerUserId === "string"
 
   for (const id of [...new Set(ids)]) {
-    try {
-      const item = await ctx.meetings.updateActionItem(id, patch)
+    // The previous owner is captured before the write: only a real change
+    // of assignee notifies (a status-only update never does).
+    const previous = reassigning ? await ctx.meetings.getActionItem(id) : undefined
+    let item: ActionItem
 
-      updated.push(item)
-      await recordAuditLog({
-        ...auditActor(ctx),
-        action: "action_item.updated",
-        targetType: "action_item",
-        targetId: id,
-        metadata: { meetingId: item.meetingId ?? null, fields: Object.keys(patch), bulk: true },
-      })
-      if (item.meetingId) await notifyAssignment(ctx, item, item.meetingId, undefined)
-    } catch {
+    try {
+      item = await ctx.meetings.updateActionItem(id, patch)
+    } catch (error) {
+      // Only "not visible / does not exist" is a not-found; storage errors
+      // surface as 500s.
+      if (!isNotFoundError(error)) {
+        console.error("[tasks] bulk update failed", error instanceof Error ? error.name : "error")
+        return jsonError("Failed to update tasks", 500)
+      }
       notFound.push(id)
+      continue
+    }
+
+    updated.push(item)
+    await recordAuditLog({
+      ...auditActor(ctx),
+      action: "action_item.updated",
+      targetType: "action_item",
+      targetId: id,
+      metadata: { meetingId: item.meetingId ?? null, fields: Object.keys(patch), bulk: true },
+    })
+    if (reassigning && item.meetingId && previous?.ownerUserId !== input.ownerUserId) {
+      await notifyAssignment(ctx, item, item.meetingId, previous?.ownerUserId)
     }
   }
 

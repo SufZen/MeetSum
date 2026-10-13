@@ -287,6 +287,27 @@ export class TranscriptConflictError extends Error {
   }
 }
 
+/** The action item does not exist in a meeting visible to the scope. */
+export class ActionItemNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Action item not found: ${id}`)
+    this.name = "ActionItemNotFoundError"
+  }
+}
+
+/** The meeting does not exist or is not visible to the scope. */
+export class MeetingNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Meeting not found: ${id}`)
+    this.name = "MeetingNotFoundError"
+  }
+}
+
+/** True for the repository's "not visible / does not exist" errors. */
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ActionItemNotFoundError || error instanceof MeetingNotFoundError
+}
+
 /** The segment does not exist in a meeting visible to the scope. */
 export class SegmentNotFoundError extends Error {
   constructor(segmentId: string) {
@@ -849,6 +870,8 @@ export type MeetingRepository = {
   ) => Promise<ActionItem>
   /** M5: true when a visible item was deleted. */
   deleteActionItem: (id: string) => Promise<boolean>
+  /** A visible action item (with `meetingId`), or undefined. */
+  getActionItem: (id: string) => Promise<ActionItem | undefined>
   /** M5: per-meeting summary template; null clears it. */
   setMeetingTemplate: (id: string, templateKey: string | null) => Promise<MeetingRecord>
   /** M5: AI title; a no-op (false) when `title_source='user'`. */
@@ -1272,7 +1295,7 @@ export function createInMemoryMeetingRepository(
   function requireVisibleMeeting(id: string): MeetingRecord {
     const meeting = visibleMeeting(id)
 
-    if (!meeting) throw new Error(`Meeting not found: ${id}`)
+    if (!meeting) throw new MeetingNotFoundError(id)
     return meeting
   }
 
@@ -2430,7 +2453,17 @@ export function createInMemoryMeetingRepository(
         return updatedItem
       }
 
-      throw new Error(`Action item not found: ${id}`)
+      throw new ActionItemNotFoundError(id)
+    },
+
+    async getActionItem(id) {
+      for (const meeting of visibleMeetings()) {
+        const found = (meeting.summary?.actionItems ?? []).find((item) => item.id === id)
+
+        if (found) return { ...found, meetingId: meeting.id, workspaceId: meetingWorkspaceId(meeting) }
+      }
+
+      return undefined
     },
 
     async createActionItem(meetingId, input, actor): Promise<ActionItem> {
