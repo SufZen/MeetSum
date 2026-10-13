@@ -1,11 +1,13 @@
 import type { Metadata } from "next"
 
 import "../../globals.css"
+import { I18nProvider } from "@/components/i18n-provider"
 import { ThemeProvider } from "@/components/theme-provider"
 import { DirectionProvider } from "@/components/ui/direction"
 import { clipShareLocale } from "@/lib/clips/share-payload"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { fontVariables } from "@/lib/fonts"
+import { getRequestI18n } from "@/lib/i18n/server"
 import { cn } from "@/lib/utils"
 
 import { loadClipShare, loadShare } from "./load-share"
@@ -36,6 +38,8 @@ export default async function ShareLayout({
       : clip.kind === "clip_unavailable"
         ? getShareDocumentLocale(undefined)
         : getShareDocumentLocale((await loadShare(token))?.meeting)
+  // Viewer chrome locale (Package B refines: ?lang= → cookie → header → meeting).
+  const i18n = await getRequestI18n()
 
   return (
     <html
@@ -46,7 +50,9 @@ export default async function ShareLayout({
     >
       <body>
         <DirectionProvider direction={dir}>
-          <ThemeProvider>{children}</ThemeProvider>
+          <I18nProvider locale={i18n.locale} dir={i18n.dir} timeZone={i18n.timeZone} messages={i18n.dictionary}>
+            <ThemeProvider>{children}</ThemeProvider>
+          </I18nProvider>
         </DirectionProvider>
       </body>
     </html>

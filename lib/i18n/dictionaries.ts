@@ -13,12 +13,38 @@ import { searchMessagesEn, searchMessagesHe } from "@/lib/i18n/m6/search"
 import { exportsMessagesEn, exportsMessagesHe } from "@/lib/i18n/m8/exports"
 import { integrationsMessagesEn, integrationsMessagesHe } from "@/lib/i18n/m8/integrations"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { m9AnalyticsMessages } from "@/lib/i18n/m9/analytics"
+import { m9CoreMessages } from "@/lib/i18n/m9/core"
+import { m9ExportsMessages } from "@/lib/i18n/m9/exports"
+import { m9NotificationsMessages } from "@/lib/i18n/m9/notifications"
+import { m9OnboardingMessages } from "@/lib/i18n/m9/onboarding"
+import { m9PwaMessages } from "@/lib/i18n/m9/pwa"
+import { m9SettingsMessages } from "@/lib/i18n/m9/settings"
+import { m9ShareMessages } from "@/lib/i18n/m9/share"
+import { m9ShellMessages } from "@/lib/i18n/m9/shell"
 import {
   workspaceMessagesEn,
   workspaceMessagesHe,
 } from "@/lib/i18n/workspace-messages"
 
 export { formatMessage } from "@/lib/i18n/workspace-messages"
+
+/**
+ * M9 message modules (`lib/i18n/m9/*`), each `{ en, he }`, one owner per
+ * module (docs/parity/m9.md, Step 0 item 5). Hebrew may carry extra `_two`
+ * plural keys; `tests/i18n-keys.test.ts` checks parity and collisions.
+ */
+export const M9_MESSAGE_MODULES = {
+  core: m9CoreMessages,
+  settings: m9SettingsMessages,
+  exports: m9ExportsMessages,
+  share: m9ShareMessages,
+  notifications: m9NotificationsMessages,
+  analytics: m9AnalyticsMessages,
+  onboarding: m9OnboardingMessages,
+  shell: m9ShellMessages,
+  pwa: m9PwaMessages,
+} as const
 
 export const dictionaries = {
   en: {
@@ -93,6 +119,15 @@ export const dictionaries = {
     ...askMessagesEn,
     ...integrationsMessagesEn,
     ...exportsMessagesEn,
+    ...m9CoreMessages.en,
+    ...m9SettingsMessages.en,
+    ...m9ExportsMessages.en,
+    ...m9ShareMessages.en,
+    ...m9NotificationsMessages.en,
+    ...m9AnalyticsMessages.en,
+    ...m9OnboardingMessages.en,
+    ...m9ShellMessages.en,
+    ...m9PwaMessages.en,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -166,6 +201,15 @@ export const dictionaries = {
     ...askMessagesHe,
     ...integrationsMessagesHe,
     ...exportsMessagesHe,
+    ...m9CoreMessages.he,
+    ...m9SettingsMessages.he,
+    ...m9ExportsMessages.he,
+    ...m9ShareMessages.he,
+    ...m9NotificationsMessages.he,
+    ...m9AnalyticsMessages.he,
+    ...m9OnboardingMessages.he,
+    ...m9ShellMessages.he,
+    ...m9PwaMessages.he,
   },
 } as const
 

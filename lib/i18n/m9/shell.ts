@@ -1,0 +1,43 @@
+/**
+ * M9 shell messages: dialogs, segment states, landmarks (owner: Package D).
+ */
+export const m9ShellMessages = {
+  en: {
+    shellSkipToContent: "Skip to main content",
+    shellMainNavLabel: "Main navigation",
+    shellErrorTitle: "Something went wrong",
+    shellErrorRetry: "Try again",
+    shellErrorBackToMeetings: "Back to meetings",
+    shellErrorDigest: "Error reference",
+    shellNotFoundTitle: "Page not found",
+    shellNotFoundDescription: "The page doesn’t exist or was moved.",
+    shellMeetingUnavailable: "This meeting isn’t available.",
+    shellLoading: "Loading…",
+    shellRoomNamePrompt: "Room name",
+    shellRoomNameRequired: "Enter a room name",
+    shellRoomNameTooLong: "Up to {max} characters",
+    shellPromptSubmit: "OK",
+    shellPromptCancel: "Cancel",
+    shellConfirmDefault: "Confirm",
+    shellConfirmCancel: "Cancel",
+  },
+  he: {
+    shellSkipToContent: "דלגו לתוכן הראשי",
+    shellMainNavLabel: "ניווט ראשי",
+    shellErrorTitle: "משהו השתבש",
+    shellErrorRetry: "נסו שוב",
+    shellErrorBackToMeetings: "חזרה לפגישות",
+    shellErrorDigest: "מזהה שגיאה",
+    shellNotFoundTitle: "הדף לא נמצא",
+    shellNotFoundDescription: "הדף אינו קיים או שהועבר.",
+    shellMeetingUnavailable: "הפגישה אינה זמינה.",
+    shellLoading: "טוען…",
+    shellRoomNamePrompt: "שם החדר",
+    shellRoomNameRequired: "יש להזין שם לחדר",
+    shellRoomNameTooLong: "עד {max} תווים",
+    shellPromptSubmit: "אישור",
+    shellPromptCancel: "ביטול",
+    shellConfirmDefault: "אישור",
+    shellConfirmCancel: "ביטול",
+  },
+}

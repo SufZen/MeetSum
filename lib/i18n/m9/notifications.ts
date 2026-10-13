@@ -1,0 +1,50 @@
+/**
+ * M9 notifications messages (owner: Package C). One sentence per kind, built
+ * around the object ("אזכור חדש מ־{actor}"), never a gendered actor verb.
+ * The renderer wraps `{actor}`, `{meeting}`, `{workspace}` in <bdi>.
+ */
+export const m9NotificationsMessages = {
+  en: {
+    notifBellLabel: "Notifications",
+    notifBellUnread_one: "{count} unread notification",
+    notifBellUnread_other: "{count} unread notifications",
+    notifBellOverflow: "9+",
+    notifTitle: "Notifications",
+    notifMarkAllRead: "Mark all as read",
+    notifUnread: "Unread",
+    notifEmpty: "No notifications yet",
+    notifMeetingUnavailable: "A meeting you can no longer view",
+    notifKindMention: "New mention from {actor} in {meeting}",
+    notifKindReply: "New reply from {actor} in {meeting}",
+    notifKindTaskAssigned: "New task from {actor} in {meeting}",
+    notifKindIntegrationReauth: "{provider} needs to be reconnected",
+    notifKindInvited: "Invitation to join {workspace}",
+    notifKindMeetingProcessed: "Summary ready: {meeting}",
+    notifKindMeetingFailed: "Processing failed: {meeting}",
+    notifKindBotBlocked: "The meeting bot could not join {meeting}",
+    notifPrefsTitle: "Notifications",
+    notifPrefsDescription: "Choose which notifications appear in the bell.",
+  },
+  he: {
+    notifBellLabel: "התראות",
+    notifBellUnread_one: "התראה אחת שלא נקראה",
+    notifBellUnread_two: "שתי התראות שלא נקראו",
+    notifBellUnread_other: "{count} התראות שלא נקראו",
+    notifBellOverflow: "9+",
+    notifTitle: "התראות",
+    notifMarkAllRead: "סימון הכול כנקרא",
+    notifUnread: "לא נקרא",
+    notifEmpty: "אין התראות עדיין",
+    notifMeetingUnavailable: "פגישה שאינה זמינה עוד",
+    notifKindMention: "אזכור חדש מ־{actor} בפגישה {meeting}",
+    notifKindReply: "תגובה חדשה מ־{actor} בפגישה {meeting}",
+    notifKindTaskAssigned: "משימה חדשה מ־{actor} בפגישה {meeting}",
+    notifKindIntegrationReauth: "נדרש חיבור מחדש של {provider}",
+    notifKindInvited: "הזמנה להצטרף אל {workspace}",
+    notifKindMeetingProcessed: "הסיכום מוכן: {meeting}",
+    notifKindMeetingFailed: "העיבוד נכשל: {meeting}",
+    notifKindBotBlocked: "בוט הפגישה לא הצליח להצטרף אל {meeting}",
+    notifPrefsTitle: "התראות",
+    notifPrefsDescription: "בחרו אילו התראות יופיעו בפעמון.",
+  },
+}

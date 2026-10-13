@@ -7,8 +7,9 @@
 import { getCollabBackend, nowIso, type CollabBackend } from "@/lib/clips/db"
 import { createId } from "@/lib/workspaces/tokens"
 
-/** `integration_reauth` (M8): TS-only, the column has no check constraint. */
-export type NotificationKind = "mention" | "reply" | "task_assigned" | "integration_reauth"
+import type { NotificationKind } from "@/lib/notifications/types"
+
+export type { NotificationKind } from "@/lib/notifications/types"
 
 export type EnqueueNotificationInput = {
   workspaceId: string
@@ -19,6 +20,7 @@ export type EnqueueNotificationInput = {
   actorUserId?: string
 }
 
+/** Kinds written today; Package C enables the M9 kinds (030 adds the check). */
 const KINDS: readonly NotificationKind[] = ["mention", "reply", "task_assigned", "integration_reauth"]
 /** Payload keys that may be stored (ids, kinds, offsets). */
 const PAYLOAD_KEYS = new Set([
