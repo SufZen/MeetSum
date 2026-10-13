@@ -3,20 +3,24 @@ import { NextResponse } from "next/server"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { actorUserId, apiError, auditActor, idempotencyKeyOf, limitFor, readJsonBody } from "@/lib/integrations/core/api"
 import { auditIntegration } from "@/lib/integrations/core/audit"
+import { providerCtx } from "@/lib/integrations/core/connections"
 import { createManualDelivery } from "@/lib/integrations/core/deliveries"
+import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
+import { getProvider } from "@/lib/integrations/core/registry"
 import { getIntegrationQueuePort } from "@/lib/integrations/core/queue"
 import { ruleContentSchema, ruleDestinationSchema } from "@/lib/integrations/core/rules"
 import { getIntegrationStore } from "@/lib/integrations/core/store"
-import type { RuleDestination } from "@/lib/integrations/core/types"
+import { ProviderError, type RuleDestination } from "@/lib/integrations/core/types"
 import { DEFAULT_RULE_CONTENT } from "@/lib/integrations/recap"
 
 /**
  * POST /api/meetings/[id]/integrations/send `{connectionId, destination?, content?}`
  * with an `Idempotency-Key` header (M8 A6) → 202 `{deliveryId}`.
  * The meeting must be visible (else 404); private meetings need
- * `canManageMeeting` (and the deliver-time privacy gate still requires the
- * owner's own send or opt-in); the connection must be an active workspace
- * connection of this workspace with `allowManualSend !== false`. A
+ * `canManageMeeting` AND the owner's per-meeting opt-in (the single privacy
+ * gate, re-run at deliver time); the connection must be an active workspace
+ * connection of this workspace with `allowManualSend !== false`, and the
+ * destination is checked with the provider (`validateDestination`). A
  * repeated key returns the same delivery.
  */
 
@@ -82,6 +86,32 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   const content = ruleContentSchema.partial().safeParse(body.content ?? {})
 
   if (!content.success) return apiError("invalid_content", 400)
+
+  // The single privacy gate: a private meeting needs the owner's opt-in.
+  const prefs = await store.getPrefs(ctx.workspace.id, meeting.id)
+  const privacy = evaluatePrivacyGate({
+    facts: { visibility: meeting.visibility, ...(meeting.ownerUserId ? { ownerUserId: meeting.ownerUserId } : {}) },
+    origin: "manual",
+    ...(prefs ? { prefs } : {}),
+  })
+
+  if (!privacy.allowed) return apiError("private_meeting_not_opted_in", 403)
+
+  // Never post to an id the connection was not checked against.
+  const provider = getProvider(connection.provider)
+
+  if (provider?.validateDestination) {
+    try {
+      await provider.validateDestination(destination, providerCtx(connection, store))
+    } catch (error) {
+      if (error instanceof ProviderError && error.kind === "auth") return apiError("integration_needs_reauth", 409)
+      return apiError("invalid_destination", 400, {
+        ...(error instanceof ProviderError && /^[a-z_]{1,64}$/.test(error.providerCode ?? "") ? { providerCode: error.providerCode } : {}),
+      })
+    }
+  } else if (body.destination !== undefined) {
+    return apiError("destination_not_verifiable", 400)
+  }
 
   const userId = actorUserId(ctx)
   const { delivery, created } = await createManualDelivery(store, getIntegrationQueuePort(), {

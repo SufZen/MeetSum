@@ -19,6 +19,7 @@ export const PATCH = withAuthz<{ id: string }>("integrations:manage", async (req
     workspaceId: ctx.workspace.id,
     ruleId: id,
     userId: actorUserId(ctx),
+    isUserPrincipal: ctx.principal === "user",
     actor: auditActor(ctx),
     body: await readJsonBody(request),
   })

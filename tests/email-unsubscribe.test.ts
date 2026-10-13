@@ -45,7 +45,7 @@ describe("email unsubscribe", () => {
     expect(verifyUnsubscribeToken(`${forged}.${mac}`)).toBeUndefined()
     expect(verifyUnsubscribeToken(`${body}.${mac}x`)).toBeUndefined()
     expect(verifyUnsubscribeToken(value, { ...process.env, MEETSUM_SESSION_SECRET: "another-secret" })).toBeUndefined()
-    expect(unsubscribeUrl(value, { NEXT_PUBLIC_APP_URL: "https://app.test" } as NodeJS.ProcessEnv, "he")).toBe(
+    expect(unsubscribeUrl(value, { NEXT_PUBLIC_APP_URL: "https://app.test" } as unknown as NodeJS.ProcessEnv, "he")).toBe(
       `https://app.test/api/email/unsubscribe?t=${encodeURIComponent(value)}&l=he`
     )
   })

@@ -51,8 +51,13 @@ describe("evaluatePrivacyGate", () => {
     ).toBe(false)
   })
 
-  it("lets the owner send manually; an admin participant cannot", () => {
-    expect(evaluatePrivacyGate({ facts: PRIVATE, origin: "manual", requestedByUserId: "owner" })).toEqual({ allowed: true, via: "owner_manual" })
+  it("never lets a manual send through without the owner's opt-in, whoever sends it", () => {
+    expect(evaluatePrivacyGate({ facts: PRIVATE, origin: "manual", requestedByUserId: "owner" }).allowed).toBe(false)
     expect(evaluatePrivacyGate({ facts: PRIVATE, origin: "manual", requestedByUserId: "admin" }).allowed).toBe(false)
+    expect(
+      evaluatePrivacyGate({ facts: PRIVATE, origin: "manual", requestedByUserId: "admin", prefs: { allowPrivatePush: true, allowPrivateSetByUserId: "owner" } })
+    ).toEqual({ allowed: true, via: "owner_pref" })
+    // A rule-style opt-in never applies to manual sends.
+    expect(evaluatePrivacyGate({ facts: PRIVATE, origin: "manual", rule: { includePrivate: true, createdByUserId: "owner" } }).allowed).toBe(false)
   })
 })

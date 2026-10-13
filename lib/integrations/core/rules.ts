@@ -145,7 +145,14 @@ async function checkDestination(
 
 export async function createRule(
   store: IntegrationStore,
-  input: { workspaceId: string; userId: string | undefined; actor: IntegrationAuditActor; body: unknown }
+  input: {
+    workspaceId: string
+    userId: string | undefined
+    /** Only a signed-in user may opt their own private meetings in (never an API key). */
+    isUserPrincipal: boolean
+    actor: IntegrationAuditActor
+    body: unknown
+  }
 ): Promise<RuleServiceResult> {
   const parsed = createRuleSchema.safeParse(input.body)
 
@@ -177,7 +184,7 @@ export async function createRule(
     destination: body.destination,
     content: mergeContent(body.content),
     // Honoured only for meetings the saving user owns (privacy gate).
-    includePrivate: Boolean(body.includePrivate && input.userId),
+    includePrivate: Boolean(body.includePrivate && input.userId && input.isUserPrincipal),
     ...(input.userId ? { createdByUserId: input.userId } : {}),
   })
 
@@ -198,7 +205,14 @@ export async function createRule(
 
 export async function updateRule(
   store: IntegrationStore,
-  input: { workspaceId: string; ruleId: string; userId: string | undefined; actor: IntegrationAuditActor; body: unknown }
+  input: {
+    workspaceId: string
+    ruleId: string
+    userId: string | undefined
+    isUserPrincipal: boolean
+    actor: IntegrationAuditActor
+    body: unknown
+  }
 ): Promise<RuleServiceResult> {
   const existing = await store.getRule(input.workspaceId, input.ruleId)
 
@@ -227,7 +241,7 @@ export async function updateRule(
     if (!connection || connection.status === "revoked") return { ok: false, status: 409, code: "connection_revoked" }
   }
 
-  const editorChanged = Boolean(input.userId && existing.createdByUserId !== input.userId)
+  const editorChanged = !input.userId || existing.createdByUserId !== input.userId
   const updated = await store.updateRule(input.workspaceId, input.ruleId, {
     ...(body.name !== undefined ? { name: body.name } : {}),
     ...(body.enabled !== undefined ? { enabled: body.enabled, ...(body.enabled ? { disabledReason: null } : {}) } : {}),
@@ -235,11 +249,13 @@ export async function updateRule(
     ...(body.filters !== undefined ? { filters: body.filters } : {}),
     ...(body.destination !== undefined ? { destination: body.destination } : {}),
     ...(body.content !== undefined ? { content: mergeContent(body.content, existing.content) } : {}),
-    // Another admin's edit resets the private opt-in and makes them the owner.
+    // Anyone else's edit (or an API key's) clears the private opt-in and makes
+    // the editor the owner: an opt-in can never be set or kept on another
+    // person's behalf. The owner re-enables it with their own edit.
     ...(editorChanged
-      ? { includePrivate: Boolean(body.includePrivate), createdByUserId: input.userId }
+      ? { includePrivate: false, ...(input.userId ? { createdByUserId: input.userId } : {}) }
       : body.includePrivate !== undefined
-        ? { includePrivate: body.includePrivate }
+        ? { includePrivate: body.includePrivate && input.isUserPrincipal }
         : {}),
   })
 

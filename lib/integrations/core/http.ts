@@ -15,6 +15,7 @@
  * to `<fake>/<host><path>` (the fake server routes on that path). Fake mode
  * is refused in production.
  */
+import { oauthRedirectBase } from "@/lib/integrations/core/oauth-state"
 import { ProviderError, type ProviderFetch, type ProviderId } from "@/lib/integrations/core/types"
 
 export const PROVIDER_HOSTS: Readonly<Record<ProviderId, readonly string[]>> = {
@@ -299,6 +300,9 @@ export function assertIntegrationsBootConfig(env: NodeJS.ProcessEnv = process.en
     env.MS_CLIENT_ID ?? env.AZURE_CLIENT_ID,
   ].some((value) => Boolean(value?.trim()))
 
+  if (anyConfigured && !oauthRedirectBase(env)) {
+    warnings.push("MEETSUM_OAUTH_REDIRECT_BASE must be an origin (https in production); integration OAuth is disabled")
+  }
   if (anyConfigured && isProduction(env) && !env.GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY?.trim()) {
     warnings.push("GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY is unset; integration tokens fall back to the session secret")
   }

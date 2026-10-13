@@ -141,6 +141,44 @@ describe("runIntegrationDelivery", () => {
     expect(deliver).not.toHaveBeenCalled()
   })
 
+  it("re-runs the same gate for a manual send whose meeting turned private after enqueue", async () => {
+    const manual = await rt.store.insertDelivery({
+      id: "intd_manual_flip",
+      workspaceId: "ws_a",
+      connectionId,
+      provider: "slack",
+      origin: "manual",
+      meetingId: "m_a",
+      idempotencyKey: "manual:user_owner:flip",
+      status: "queued",
+      maxAttempts: 5,
+      requestedByUserId: "user_owner",
+      progress: { request: { destination: { provider: "slack", channelId: "C1", channelName: "" }, content: testRule().content } },
+    })
+
+    rt.meetings.set("m_a", testMeetingRecord({ id: "m_a", visibility: "private", ownerUserId: "user_owner" }))
+
+    // Even the owner's own queued send needs the per-meeting opt-in.
+    expect(await runIntegrationDelivery({ workspaceId: "ws_a", deliveryId: manual.delivery.id, finalAttempt: false }, rt)).toEqual({ status: "skipped" })
+    expect(await rt.store.getDelivery("ws_a", manual.delivery.id)).toMatchObject({ skipReason: "private_meeting" })
+    expect(deliver).not.toHaveBeenCalled()
+  })
+
+  it("skips an include_private rule once its creator no longer owns the meeting", async () => {
+    await rt.store.createRule(testRule({ connectionId, includePrivate: true, createdByUserId: "user_owner" }))
+    rt.meetings.set("m_p", testMeetingRecord({ id: "m_p", visibility: "private", ownerUserId: "user_owner" }))
+    await runIntegrationDispatch({ workspaceId: "ws_a", eventName: "meeting.completed", eventId: "evt_p", meetingId: "m_p" }, rt)
+
+    const queuedRow = (await rt.store.listDeliveries("ws_a", { meetingId: "m_p" })).find((row) => row.status === "queued")
+
+    expect(queuedRow).toBeDefined()
+    rt.meetings.set("m_p", testMeetingRecord({ id: "m_p", visibility: "private", ownerUserId: "user_member" }))
+
+    expect(await runIntegrationDelivery({ workspaceId: "ws_a", deliveryId: queuedRow!.id, finalAttempt: false }, rt)).toEqual({ status: "skipped" })
+    expect(await rt.store.getDelivery("ws_a", queuedRow!.id)).toMatchObject({ skipReason: "private_meeting" })
+    expect(deliver).not.toHaveBeenCalled()
+  })
+
   it("skips when the rule owner left after dispatch", async () => {
     const delivery = await queued()
 

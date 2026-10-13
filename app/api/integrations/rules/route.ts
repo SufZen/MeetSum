@@ -23,6 +23,7 @@ export const POST = withAuthz("integrations:manage", async (request, ctx) => {
   const result = await createRule(await getIntegrationStore(), {
     workspaceId: ctx.workspace.id,
     userId: actorUserId(ctx),
+    isUserPrincipal: ctx.principal === "user",
     actor: auditActor(ctx),
     body: await readJsonBody(request),
   })

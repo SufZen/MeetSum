@@ -82,8 +82,12 @@ describe("integration routes", () => {
     jobs = []
     setIntegrationStoreForTesting(store)
     setIntegrationQueuePortForTesting(createRecordingQueue(jobs))
-    setProviderTransportForTesting(async (url) => {
-      if (url.endsWith("/conversations.info")) return Response.json({ ok: true, channel: { is_member: true } })
+    setProviderTransportForTesting(async (url, init) => {
+      if (url.endsWith("/conversations.info")) {
+        return String(init?.body ?? "").includes("CFORGED")
+          ? Response.json({ ok: false, error: "channel_not_found" })
+          : Response.json({ ok: true, channel: { is_member: true } })
+      }
       if (url.endsWith("/conversations.list")) return Response.json({ ok: true, channels: [{ id: "C1", name: "general" }], response_metadata: { next_cursor: "" } })
       if (url.endsWith("/auth.revoke")) return Response.json({ ok: true })
       return Response.json({ ok: false, error: "unknown" })
@@ -92,6 +96,13 @@ describe("integration routes", () => {
       testMeeting({ id: "m_a", title: "פגישה גלויה" }),
       testMeeting({ id: "m_mine_private", visibility: "private", ownerUserId: "user_me" }),
       testMeeting({ id: "m_other_private", visibility: "private", ownerUserId: "user_owner" }),
+      testMeeting({
+        id: "m_shared_private",
+        visibility: "private",
+        ownerUserId: "user_owner",
+        // The in-memory repository derives participants (and their emails) from this list.
+        participants: ["me@example.com"],
+      }),
       testMeeting({ id: "m_b", workspaceId: "ws_b" }),
     ])
     await connection({ id: "intc_a" })
@@ -247,6 +258,17 @@ describe("integration routes", () => {
       const edited = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { name: "Renamed" }), routeParams({ id: rule.id }))).json()
 
       expect(edited.rule).toMatchObject({ name: "Renamed", includePrivate: false, createdByUserId: "user_other_admin" })
+
+      // Another user can never set it on someone else's rule either.
+      await as("admin", "user_third_admin")
+      const forced = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { includePrivate: true }), routeParams({ id: rule.id }))).json()
+
+      expect(forced.rule).toMatchObject({ includePrivate: false, createdByUserId: "user_third_admin" })
+
+      // The (new) owner can opt their own private meetings in with their own edit.
+      const own = await (await patchRule(jsonRequest(`${BASE}/x`, "PATCH", { includePrivate: true }), routeParams({ id: rule.id }))).json()
+
+      expect(own.rule.includePrivate).toBe(true)
     })
 
     it("answers 409 when the rule cap is reached", async () => {
@@ -310,7 +332,44 @@ describe("integration routes", () => {
       await as("member", "user_me")
       expect((await send("m_other_private")).status).toBe(404)
       expect((await send("m_b")).status).toBe(404)
+      // Own private meeting: still needs the per-meeting opt-in.
+      expect((await send("m_mine_private")).status).toBe(403)
+      await store.upsertPrefs("ws_a", "m_mine_private", { allowPrivatePush: true, allowPrivateSetByUserId: "user_me" })
       expect((await send("m_mine_private")).status).toBe(202)
+    })
+
+    it("applies the private matrix: viewer, participant member, non-owner admin, opt-in missing vs present", async () => {
+      await as("viewer", "user_me")
+      expect((await send("m_shared_private")).status).toBe(403)
+
+      // A participant member can see it but cannot manage it.
+      await as("member", "user_me")
+      expect((await send("m_shared_private")).status).toBe(403)
+
+      // A non-owner admin participant can manage it, but the owner has not opted in.
+      await as("admin", "user_me")
+      expect((await send("m_shared_private")).status).toBe(403)
+
+      // An opt-in recorded by someone other than the owner does not count.
+      await store.upsertPrefs("ws_a", "m_shared_private", { allowPrivatePush: true, allowPrivateSetByUserId: "user_me" })
+      expect((await send("m_shared_private")).status).toBe(403)
+
+      await store.upsertPrefs("ws_a", "m_shared_private", { allowPrivatePush: true, allowPrivateSetByUserId: "user_owner" })
+      expect((await send("m_shared_private")).status).toBe(202)
+      expect(jobs).toHaveLength(1)
+    })
+
+    it("refuses a forged destination the provider does not confirm", async () => {
+      await as("member", "user_me")
+
+      const forged = await send("m_a", undefined, { connectionId: "intc_a", destination: { provider: "slack", channelId: "CFORGED", channelName: "x" } })
+
+      expect(forged.status).toBe(400)
+      expect(await forged.json()).toEqual({ error: "invalid_destination", providerCode: "channel_not_found" })
+      expect(
+        (await send("m_a", undefined, { connectionId: "intc_a", destination: { provider: "notion", databaseId: "abcdefgh12", databaseTitle: "" } })).status
+      ).toBe(400)
+      expect(jobs).toHaveLength(0)
     })
 
     it("honours allowManualSend, needs_reauth and requires a destination", async () => {
