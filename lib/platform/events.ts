@@ -12,6 +12,11 @@ export type PlatformEventName =
   | "agent.triggered"
   | "realizeos.export.sent"
   | "realizeos.export.failed"
+  // M8 catalog v2 (lib/platform/event-catalog.ts).
+  | "action_item.updated"
+  | "clip.created"
+  | "bot.status_changed"
+  | "integration.delivery.failed"
 
 export type PlatformEvent<TData extends Record<string, unknown>> = {
   id: string
