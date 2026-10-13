@@ -186,7 +186,14 @@ export function NotificationBell({ locale }: { locale: string }) {
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger
           render={
-            <Button variant="ghost" size="icon" className="relative rounded-full" aria-label={label} title={label} />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative rounded-full"
+              aria-label={label}
+              title={label}
+              data-testid="notification-bell"
+            />
           }
         >
           <BellIcon aria-hidden className="size-5" />
