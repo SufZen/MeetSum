@@ -54,6 +54,42 @@ const TIMECODE_COLUMN = 46
 const COLUMN_GAP = 10
 const DEFAULT_MAX_SEGMENTS = 5000
 
+/**
+ * Work caps for one PDF (M9 follow-up, review "PDF cost"): the summary
+ * sections and each transcript segment are bounded so a pathological meeting
+ * cannot make the export unbounded in CPU or memory. Clipped text ends in "…".
+ */
+export const PDF_LIMITS = {
+  overviewChars: 20_000,
+  actionItems: 200,
+  decisions: 200,
+  openQuestions: 100,
+  chapters: 100,
+  /** One action item, decision, question or chapter title. */
+  itemChars: 1_000,
+  chapterSummaryChars: 2_000,
+  segmentChars: 4_000,
+  /** The transcript loop yields to the event loop every N segments. */
+  yieldEverySegments: 100,
+  /** Text-width cache entries before the oldest are evicted. */
+  widthCacheEntries: 20_000,
+} as const
+
+/** `text` cut to `max` code points, with "…" when cut. */
+export function clipText(text: string, max: number): string {
+  const chars = [...text]
+
+  return chars.length > max ? `${chars.slice(0, max).join("").trimEnd()}…` : text
+}
+
+/** Sets `key` in an insertion-ordered map, evicting the oldest entries above `max`. */
+export function setBounded<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.set(key, value)
+  while (map.size > max) map.delete(map.keys().next().value as K)
+}
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
+
 /** Print colours (PDF content, not UI tokens). */
 const INK = [32, 35, 40] as const
 const MUTED = [107, 114, 128] as const
@@ -145,7 +181,7 @@ class PdfWriter {
 
     if (width === undefined) {
       width = measurePdfText(this.face(font), text, size)
-      this.widths.set(key, width)
+      setBounded(this.widths, key, width, PDF_LIMITS.widthCacheEntries)
     }
 
     return width
@@ -302,7 +338,10 @@ export async function renderMeetingPdfDetailed(
   writer.rule()
 
   // Sections in M5 order.
-  const overview = meeting.intelligence?.overview?.trim() || meeting.summary?.overview?.trim() || ""
+  const overview = clipText(
+    meeting.intelligence?.overview?.trim() || meeting.summary?.overview?.trim() || "",
+    PDF_LIMITS.overviewChars
+  )
 
   if (overview) {
     sectionHeading(writer, t.pdfOverview, chromeBase)
@@ -311,7 +350,7 @@ export async function renderMeetingPdfDetailed(
     }
   }
 
-  const actionItems = meeting.summary?.actionItems ?? []
+  const actionItems = (meeting.summary?.actionItems ?? []).slice(0, PDF_LIMITS.actionItems)
 
   if (actionItems.length) {
     sectionHeading(writer, t.pdfActionItems, chromeBase)
@@ -327,7 +366,7 @@ export async function renderMeetingPdfDetailed(
 
       writer.paragraph(
         [
-          ...bulletSpans(item.title, !isDone, isDone ? "✓" : "•"),
+          ...bulletSpans(clipText(item.title, PDF_LIMITS.itemChars), !isDone, isDone ? "✓" : "•"),
           ...(details.length ? [{ text: `  — ${details.join(" · ")}` }] : []),
         ],
         { base: directionFor(meeting.language, item.title), size: 10.5, indent: 8 },
@@ -336,7 +375,9 @@ export async function renderMeetingPdfDetailed(
     }
   }
 
-  const decisions = meeting.summary?.decisions?.length ? meeting.summary.decisions : (meeting.intelligence?.decisions ?? [])
+  const decisions = (meeting.summary?.decisions?.length ? meeting.summary.decisions : (meeting.intelligence?.decisions ?? []))
+    .slice(0, PDF_LIMITS.decisions)
+    .map((decision) => clipText(decision, PDF_LIMITS.itemChars))
 
   if (decisions.length) {
     sectionHeading(writer, t.pdfDecisions, chromeBase)
@@ -345,7 +386,9 @@ export async function renderMeetingPdfDetailed(
     }
   }
 
-  const openQuestions = meeting.intelligence?.openQuestions ?? []
+  const openQuestions = (meeting.intelligence?.openQuestions ?? [])
+    .slice(0, PDF_LIMITS.openQuestions)
+    .map((question) => clipText(question, PDF_LIMITS.itemChars))
 
   if (openQuestions.length) {
     sectionHeading(writer, t.pdfOpenQuestions, chromeBase)
@@ -354,7 +397,11 @@ export async function renderMeetingPdfDetailed(
     }
   }
 
-  const chapters = meeting.intelligence?.chapters ?? []
+  const chapters = (meeting.intelligence?.chapters ?? []).slice(0, PDF_LIMITS.chapters).map((chapter) => ({
+    ...chapter,
+    title: clipText(chapter.title, PDF_LIMITS.itemChars),
+    summary: chapter.summary ? clipText(chapter.summary, PDF_LIMITS.chapterSummaryChars) : chapter.summary,
+  }))
 
   if (chapters.length) {
     sectionHeading(writer, t.pdfChapters, chromeBase)
@@ -388,10 +435,17 @@ export async function renderMeetingPdfDetailed(
     const lineHeight = 14
     const timecodeFont: PdfFontRef = { family: "mono" as PdfFontFamily, weight: "regular" as PdfFontWeight }
 
+    let rendered = 0
+
     for (const segment of transcript.slice(0, limit)) {
-      const base = directionFor(segment.language ?? meeting.language, segment.text)
+      // Long transcripts must not hold the event loop for the whole export.
+      if (rendered > 0 && rendered % PDF_LIMITS.yieldEverySegments === 0) await yieldToEventLoop()
+      rendered += 1
+
+      const segmentText = clipText(segment.text, PDF_LIMITS.segmentChars)
+      const base = directionFor(segment.language ?? meeting.language, segmentText)
       const lines = writer.layout(
-        [{ text: `${segment.speaker}: `, bold: true }, { text: fixHebrewTypography(segment.text) }],
+        [{ text: `${clipText(segment.speaker, 200)}: `, bold: true }, { text: fixHebrewTypography(segmentText) }],
         { base, size },
         textWidth
       )

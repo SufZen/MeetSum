@@ -1,9 +1,9 @@
 import bidiFactory from "bidi-js"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { fixHebrewTypography } from "@/lib/i18n/hebrew-text"
 import type { MeetingRecord, TranscriptSegment } from "@/lib/meetings/repository"
-import { renderMeetingPdf, renderMeetingPdfDetailed } from "@/lib/pdf/meeting-pdf"
+import { PDF_LIMITS, clipText, renderMeetingPdf, renderMeetingPdfDetailed, setBounded } from "@/lib/pdf/meeting-pdf"
 import { HEBREW_MIXED_CORPUS } from "@/tests/fixtures/hebrew-mixed"
 import { infoValue, parsePdf, visualRtl } from "@/tests/helpers/pdf-text"
 
@@ -214,5 +214,50 @@ describe("renderMeetingPdf limits", () => {
     expect(result.missingGlyphs).toBe(6) // the emoji and the five Arabic letters
     expect(text).toContain("□")
     expect(text).not.toContain("🎉")
+  })
+})
+
+describe("renderMeetingPdf cost caps", () => {
+  it("clips text by code point with an ellipsis", () => {
+    expect(clipText("abc", 5)).toBe("abc")
+    expect(clipText("abcdef", 3)).toBe("abc…")
+    expect(clipText("שלום עולם", 4)).toBe("שלום…")
+  })
+
+  it("bounds an insertion-ordered cache by evicting the oldest entries", () => {
+    const map = new Map<string, number>()
+
+    for (let index = 0; index < 10; index++) setBounded(map, `k${index}`, index, 3)
+    expect([...map.keys()]).toEqual(["k7", "k8", "k9"])
+  })
+
+  it("caps summary sections and segment length, and yields while writing the transcript", async () => {
+    const immediate = vi.spyOn(globalThis, "setImmediate")
+    const many = Array.from({ length: PDF_LIMITS.actionItems + 50 }, (_, index) => ({
+      id: `a${index}`,
+      title: `Task ${index}`,
+      status: "open" as const,
+    }))
+    const huge: MeetingRecord = {
+      ...englishMeeting,
+      summary: {
+        overview: "word ".repeat(PDF_LIMITS.overviewChars),
+        decisions: Array.from({ length: PDF_LIMITS.decisions + 20 }, (_, index) => `Decision ${index}`),
+        actionItems: many,
+      },
+      transcript: Array.from({ length: PDF_LIMITS.yieldEverySegments * 3 }, (_, index) =>
+        segment(index, index === 0 ? "x".repeat(PDF_LIMITS.segmentChars * 3) : `Line ${index}`, "Alice", "en")
+      ),
+    }
+    const pdf = parsePdf(await renderMeetingPdf(huge, { locale: "en", timeZone: "UTC" }))
+    const text = pdf.pages.flatMap((page) => page.lines).join(" | ")
+
+    expect(text).toContain(`Task ${PDF_LIMITS.actionItems - 1}`)
+    expect(text).not.toContain(`Task ${PDF_LIMITS.actionItems}`)
+    expect(text).not.toContain(`Decision ${PDF_LIMITS.decisions}`)
+    expect(text).toContain("…")
+    expect(text.split("x").length - 1).toBeLessThanOrEqual(PDF_LIMITS.segmentChars + 10)
+    expect(immediate.mock.calls.length).toBeGreaterThanOrEqual(2)
+    immediate.mockRestore()
   })
 })
