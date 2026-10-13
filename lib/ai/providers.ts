@@ -5,11 +5,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 
-import { fetch as undiciFetch, FormData as UndiciFormData } from "undici"
-
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
 import { TranscriptionUnavailableError } from "@/lib/ai/asr/errors"
-import { longAsrDispatcher } from "@/lib/ai/asr/http"
 import { transcribeWithRouter, type AsrRouterOptions } from "@/lib/ai/asr/router"
 import type { AsrGlossary, AsrResult } from "@/lib/ai/asr/types"
 import {
@@ -219,16 +216,6 @@ export function getSummaryRunMetadata(provider: SummaryProvider): SummaryRunMeta
   }
 }
 
-function shouldPreferLocalHebrewAsr(meeting: MeetingRecord) {
-  const language = meeting.language.toLowerCase()
-
-  return language === "he" || language === "heb" || language === "iw" || language === "mixed"
-}
-
-function inferSpeaker(participant: string | undefined, index: number) {
-  return participant || `Speaker ${index + 1}`
-}
-
 export type GeminiProviderMode = "gemini-developer-api" | "vertex-ai"
 
 export function getGeminiProviderMode(): GeminiProviderMode {
@@ -289,7 +276,8 @@ function normalizeGeminiSegments(
     .filter((segment) => segment.text?.trim())
     .map((segment, index) => ({
       id: `seg_${crypto.randomUUID()}`,
-      speaker: segment.speaker?.trim() || inferSpeaker(meeting.participants[index], index),
+      // No index-based guessing: a segment without a speaker stays unattributed.
+      speaker: segment.speaker?.trim() ?? "",
       startMs: Math.max(0, Number(segment.startMs ?? index * 5000)),
       endMs: Math.max(
         Number(segment.startMs ?? index * 5000) + 1000,
@@ -303,86 +291,6 @@ function normalizeGeminiSegments(
     }))
 
   return cleanupTranscriptSegments(normalized)
-}
-
-type LocalWhisperSegment = {
-  id?: number | string
-  start?: number
-  end?: number
-  startMs?: number
-  endMs?: number
-  text?: string
-  language?: string
-  confidence?: number
-  speaker?: string
-}
-
-type LocalWhisperResponse = {
-  text?: string
-  language?: string
-  segments?: LocalWhisperSegment[]
-}
-
-function normalizeConfidence(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(1, Math.max(0, value))
-    : fallback
-}
-
-export function normalizeLocalWhisperResponse(
-  raw: string | LocalWhisperResponse,
-  meeting: MeetingRecord
-): TranscriptSegment[] {
-  const parsed =
-    typeof raw === "string"
-      ? raw.trim().startsWith("{")
-        ? (JSON.parse(raw) as LocalWhisperResponse)
-        : ({ text: raw } satisfies LocalWhisperResponse)
-      : raw
-  const responseLanguage = parsed.language ?? meeting.language
-  const segments = Array.isArray(parsed.segments) ? parsed.segments : []
-
-  if (segments.length) {
-    return cleanupTranscriptSegments(
-      segments
-        .filter((segment) => segment.text?.trim())
-        .map((segment, index) => {
-          const startMs =
-            typeof segment.startMs === "number"
-              ? segment.startMs
-              : Math.round(Number(segment.start ?? index * 5) * 1000)
-          const endMs =
-            typeof segment.endMs === "number"
-              ? segment.endMs
-              : Math.round(Number(segment.end ?? index * 5 + 5) * 1000)
-
-          return {
-            id: `seg_${crypto.randomUUID()}`,
-            speaker: segment.speaker?.trim() || inferSpeaker(undefined, index),
-            startMs: Math.max(0, startMs),
-            endMs: Math.max(startMs + 1000, endMs),
-            text: segment.text?.trim() ?? "",
-            confidence: normalizeConfidence(segment.confidence, 0.72),
-            language: segment.language ?? responseLanguage,
-          }
-        })
-    )
-  }
-
-  const text = parsed.text?.trim()
-  if (!text) return []
-
-  return cleanupTranscriptSegments([
-    {
-      id: `seg_${crypto.randomUUID()}`,
-      speaker: inferSpeaker(undefined, 0),
-      startMs: 0,
-      endMs: 5000,
-      text,
-      confidence: 0.72,
-      language: responseLanguage,
-    },
-  ])
 }
 
 function getAudioPrompt(meeting: MeetingRecord, compactTimeline = false) {
@@ -559,240 +467,6 @@ export class HeuristicFallbackProvider
 
   async summarize(meeting: MeetingRecord) {
     return buildMeetingIntelligence(meeting)
-  }
-}
-
-export class LocalWhisperTranscriptionProvider implements TranscriptionProvider {
-  readonly id = "local-whisper"
-  readonly model: string
-  private readonly fallback = new HeuristicFallbackProvider()
-  private lastDiagnostic: WhisperDiagnostic | undefined
-
-  constructor(
-    private readonly config = getLocalWhisperProviderConfig(),
-    private readonly options: {
-      fetch?: typeof fetch
-      downloadMeetingObjectToFile?: typeof downloadMeetingObjectToFile
-    } = {}
-  ) {
-    this.model = config.model
-  }
-
-  getLastDiagnostic() {
-    return this.lastDiagnostic
-  }
-
-  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    const asset = meeting.mediaAssets?.find((item) => item.storageKey)
-    const startTime = Date.now()
-
-    if (!this.config.baseUrl) {
-      this.lastDiagnostic = {
-        success: false,
-        error: "LOCAL_TRANSCRIPTION_URL is required for local Whisper",
-        errorCategory: "config",
-        elapsedMs: 0,
-      }
-      throw new Error("LOCAL_TRANSCRIPTION_URL is required for local Whisper")
-    }
-
-    if (!asset?.storageKey) {
-      this.lastDiagnostic = {
-        success: false,
-        error: "No media asset found",
-        errorCategory: "no_media",
-        elapsedMs: 0,
-      }
-      return this.fallback.transcribe(meeting)
-    }
-
-    let tempDir: string | undefined
-
-    try {
-      tempDir = await mkdtemp(path.join(tmpdir(), "meetsum-whisper-"))
-      const inputPath = path.join(
-        tempDir,
-        safeTempFilename(asset.filename, `${meeting.id}.media`)
-      )
-      await (this.options.downloadMeetingObjectToFile ?? downloadMeetingObjectToFile)(
-        asset.storageKey,
-        inputPath
-      )
-
-      const bytes = await readFile(inputPath)
-      const fileSizeBytes = bytes.length
-      console.log(
-        `[LocalWhisper] Starting transcription for ${meeting.id}`,
-        `file=${asset.filename} size=${(fileSizeBytes / 1024 / 1024).toFixed(1)}MB`,
-        `model=${this.config.model} lang=${this.config.language || meeting.language}`,
-        `timeout=${this.config.timeoutMs}ms`
-      )
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs)
-
-      try {
-        const transcribeUrl = `${this.config.baseUrl}/v1/audio/transcriptions`
-        let response: Response
-
-        if (this.options.fetch) {
-          // Test-injected fetch: use the global FormData/Blob.
-          const formData = new FormData()
-          formData.set(
-            "file",
-            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
-            asset.filename
-          )
-          formData.set("model", this.config.model)
-          formData.set("language", this.config.language || meeting.language)
-          formData.set("response_format", "verbose_json")
-          response = await this.options.fetch(transcribeUrl, {
-            method: "POST",
-            body: formData,
-            signal: controller.signal,
-          })
-        } else {
-          // Real path: build the multipart with undici's OWN FormData/File so
-          // undici's fetch serializes it. A global FormData is not recognized by
-          // the installed undici and serializes to an empty body (HTTP 422).
-          const form = new UndiciFormData()
-          form.set(
-            "file",
-            new Blob([new Uint8Array(bytes)], { type: asset.contentType }),
-            asset.filename ?? `${meeting.id}.media`
-          )
-          form.set("model", this.config.model)
-          form.set("language", this.config.language || meeting.language)
-          form.set("response_format", "verbose_json")
-          response = (await undiciFetch(transcribeUrl, {
-            method: "POST",
-            body: form,
-            signal: controller.signal,
-            dispatcher: longAsrDispatcher,
-          })) as unknown as Response
-        }
-
-        const elapsedMs = Date.now() - startTime
-
-        if (!response.ok) {
-          const body = await response.text().catch(() => "")
-          const error = `Local Whisper transcription failed with ${response.status}: ${body}`
-          console.error(`[LocalWhisper] Failed after ${elapsedMs}ms:`, error)
-          this.lastDiagnostic = {
-            success: false,
-            error,
-            errorCategory: response.status >= 500 ? "server_error" : "client_error",
-            httpStatus: response.status,
-            elapsedMs,
-            fileSizeBytes,
-          }
-          throw new Error(error)
-        }
-
-        const contentType = response.headers.get("content-type") ?? ""
-        const raw = contentType.includes("application/json")
-          ? ((await response.json()) as LocalWhisperResponse)
-          : await response.text()
-        const segments = normalizeLocalWhisperResponse(raw, meeting)
-
-        console.log(
-          `[LocalWhisper] Completed in ${elapsedMs}ms:`,
-          `segments=${segments.length}`,
-          `meeting=${meeting.id}`
-        )
-
-        this.lastDiagnostic = {
-          success: segments.length > 0,
-          elapsedMs,
-          segmentCount: segments.length,
-          fileSizeBytes,
-        }
-
-        return segments.length ? segments : this.fallback.transcribe(meeting)
-      } finally {
-        clearTimeout(timeout)
-      }
-    } catch (error) {
-      const elapsedMs = Date.now() - startTime
-
-      if (!this.lastDiagnostic || this.lastDiagnostic.elapsedMs === 0) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.lastDiagnostic = {
-          success: false,
-          error: message,
-          errorCategory: classifyWhisperError(error),
-          elapsedMs,
-        }
-      }
-
-      throw error
-    } finally {
-      if (typeof tempDir === "string") {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
-      }
-    }
-  }
-}
-
-export class AutoTranscriptionProvider implements TranscriptionProvider {
-  readonly id = "auto"
-  readonly model: string
-  private lastRun: TranscriptionRunMetadata
-
-  constructor(
-    private readonly primary: TranscriptionProvider,
-    private readonly fallback: TranscriptionProvider
-  ) {
-    this.model = primary.model
-    this.lastRun = {
-      provider: primary.id,
-      model: primary.model,
-    }
-  }
-
-  async transcribe(meeting: MeetingRecord): Promise<TranscriptSegment[]> {
-    if (!shouldPreferLocalHebrewAsr(meeting)) {
-      const segments = await this.fallback.transcribe(meeting)
-      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
-      this.lastRun = {
-        ...fallbackRun,
-        fallbackUsed: false,
-      }
-      return segments
-    }
-
-    const startTime = Date.now()
-    try {
-      const segments = await this.primary.transcribe(meeting)
-      this.lastRun = getTranscriptionRunMetadata(this.primary)
-      return segments
-    } catch (error) {
-      const elapsedMs = Date.now() - startTime
-      const errorCategory = classifyWhisperError(error)
-      const fallbackReason = error instanceof Error ? error.message : String(error)
-      console.error(
-        `[AutoTranscriptionProvider] Primary provider '${this.primary.id}' failed after ${elapsedMs}ms`,
-        `category=${errorCategory}`,
-        `falling back to '${this.fallback.id}':`,
-        error
-      )
-      
-      const segments = await this.fallback.transcribe(meeting)
-      const fallbackRun = getTranscriptionRunMetadata(this.fallback)
-      this.lastRun = {
-        ...fallbackRun,
-        fallbackUsed: true,
-        attemptedProvider: this.primary.id,
-        fallbackReason,
-        fallbackCategory: errorCategory,
-        fallbackElapsedMs: elapsedMs,
-      }
-      return segments
-    }
-  }
-
-  getLastRun() {
-    return this.lastRun
   }
 }
 

@@ -100,7 +100,7 @@ export function createGeminiLegacyProvider(deps: GeminiLegacyDeps = {}): AsrProv
 
       const words: AsrWord[] = output.segments.flatMap((segment) =>
         synthesizeWords(segment.text.replace(/^\[uncertain\]\s*/u, ""), segment.startMs, segment.endMs, {
-          speaker: segment.speaker,
+          ...(segment.speaker ? { speaker: segment.speaker } : {}),
           ...(typeof segment.confidence === "number" ? { confidence: segment.confidence } : {}),
         })
       )
