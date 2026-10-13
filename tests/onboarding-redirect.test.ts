@@ -47,7 +47,7 @@ describe("computeOnboardingRedirect", () => {
     expect(await computeOnboardingRedirect(ctx("owner", [{ id: "m1" }]), deps())).toBe(false)
     expect(await computeOnboardingRedirect(ctx("owner"), deps({ workspaceCreatedAt: async () => "2026-09-28T00:00:00Z" }))).toBe(false)
     expect(
-      await computeOnboardingRedirect(ctx("owner"), deps({ env: { MEETSUM_ONBOARDING_ENABLED: "false" } as NodeJS.ProcessEnv }))
+      await computeOnboardingRedirect(ctx("owner"), deps({ env: { MEETSUM_ONBOARDING_ENABLED: "false" } as unknown as NodeJS.ProcessEnv }))
     ).toBe(false)
   })
 

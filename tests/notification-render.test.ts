@@ -71,16 +71,18 @@ describe("notification sentences", () => {
 describe("NotificationItem", () => {
   const render = (notification: NotificationDTO, locale: "he" | "en" = "he") =>
     renderToStaticMarkup(
-      createElement(
-        I18nProvider,
-        {
-          locale,
-          dir: locale === "he" ? "rtl" : "ltr",
-          timeZone: "Asia/Jerusalem",
-          messages: m9NotificationsMessages[locale],
-        },
-        createElement(NotificationItem, { notification, onOpen: () => {}, onAcceptInvitation: () => {}, accepting: false })
-      )
+      createElement(I18nProvider, {
+        locale,
+        dir: locale === "he" ? "rtl" : "ltr",
+        timeZone: "Asia/Jerusalem",
+        messages: m9NotificationsMessages[locale],
+        children: createElement(NotificationItem, {
+          notification,
+          onOpen: () => {},
+          onAcceptInvitation: () => {},
+          accepting: false,
+        }),
+      })
     )
 
   it("wraps names and titles in bdi, labels unread for screen readers and links the target", () => {

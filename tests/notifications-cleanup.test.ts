@@ -29,8 +29,8 @@ afterAll(async () => {
 describe("cleanupReadNotifications", () => {
   it("reads the retention window from the env with a 90-day default", () => {
     expect(notificationsRetentionDays({} as NodeJS.ProcessEnv)).toBe(90)
-    expect(notificationsRetentionDays({ MEETSUM_NOTIFICATIONS_RETENTION_DAYS: "30" } as NodeJS.ProcessEnv)).toBe(30)
-    expect(notificationsRetentionDays({ MEETSUM_NOTIFICATIONS_RETENTION_DAYS: "-1" } as NodeJS.ProcessEnv)).toBe(90)
+    expect(notificationsRetentionDays({ MEETSUM_NOTIFICATIONS_RETENTION_DAYS: "30" } as unknown as NodeJS.ProcessEnv)).toBe(30)
+    expect(notificationsRetentionDays({ MEETSUM_NOTIFICATIONS_RETENTION_DAYS: "-1" } as unknown as NodeJS.ProcessEnv)).toBe(90)
   })
 
   it("dry-runs, then deletes only old read rows", async (context) => {
