@@ -6,7 +6,7 @@ import { buildMeetingMemoryAnswer } from "@/lib/memory"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 export const POST = withAuthz<{ id: string }>(
-  "workspace:read",
+  "meeting:read",
   async (request, ctx, { params }) => {
     const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.share)
 
