@@ -16,6 +16,7 @@ vi.mock("sonner", () => ({ toast: toastMock }))
 
 import { exportMenuModel, MeetingExportMenu } from "@/components/meetings/meeting-export-menu"
 import {
+  DOWNLOAD_URL_TTL_MS,
   downloadExport,
   downloadFilename,
   exportToGoogleDocs,
@@ -122,6 +123,21 @@ describe("downloadExport", () => {
 
     return anchor
   }
+
+  it("revokes the blob URL only after the download had time to start", async () => {
+    vi.useFakeTimers()
+    try {
+      stubDom()
+      const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1])))
+
+      await downloadExport({ id: "m_1", title: "t" }, "pdf", { fetchImpl, locale: "en" })
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(DOWNLOAD_URL_TTL_MS)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:1")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it("downloads DOCX with the Hebrew filename from Content-Disposition", async () => {
     const anchor = stubDom()

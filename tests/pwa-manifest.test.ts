@@ -38,6 +38,9 @@ describe("manifest", () => {
 
   it("has the new-recording shortcut", () => {
     expect(value.shortcuts?.[0]).toMatchObject({ name: "הקלטה חדשה", url: "/?panel=meetings&record=1" })
+    // Hebrew-first like the rest of the manifest (no English description).
+    expect(value.shortcuts?.[0]?.description).toMatch(/[֐-׿]/)
+    expect(value.shortcuts?.[0]?.short_name).toMatch(/[֐-׿]/)
   })
 })
 

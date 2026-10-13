@@ -4,6 +4,7 @@
 export const m9ShellMessages = {
   en: {
     shellSkipToContent: "Skip to main content",
+    shellToastRegionLabel: "Notifications",
     shellMainNavLabel: "Main navigation",
     shellErrorTitle: "Something went wrong",
     shellErrorRetry: "Try again",
@@ -133,6 +134,7 @@ export const m9ShellMessages = {
   },
   he: {
     shellSkipToContent: "דלגו לתוכן הראשי",
+    shellToastRegionLabel: "הודעות מערכת",
     shellMainNavLabel: "ניווט ראשי",
     shellErrorTitle: "משהו השתבש",
     shellErrorRetry: "נסו שוב",

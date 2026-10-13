@@ -57,7 +57,7 @@ export default async function LocaleLayout({
           <I18nProvider locale={i18n.locale} dir={i18n.dir} timeZone={i18n.timeZone} messages={i18n.dictionary}>
             <ThemeProvider>
               {children}
-              <Toaster dir={dir} richColors />
+              <Toaster dir={dir} richColors containerAriaLabel={i18n.dictionary.shellToastRegionLabel} />
               <ServiceWorkerRegistrar />
             </ThemeProvider>
           </I18nProvider>

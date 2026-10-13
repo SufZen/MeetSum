@@ -1602,7 +1602,7 @@ export function CommandCenterShell({
             darkMode={darkMode}
             onToggleDarkMode={toggleDarkMode}
             aiStatus={aiStatus}
-            onInvite={() => setActivePanel("admin")}
+            onInvite={() => navigate({ panel: "admin", adminTab: "invitations" })}
             recorder={browserRecorder}
             recordingMeetingId={null}
             recordOpen={recordSheetOpen}

@@ -1,6 +1,10 @@
 import type { MetadataRoute } from "next"
 
+import { m9PwaMessages } from "@/lib/i18n/m9/pwa"
 import { PWA_BACKGROUND_COLOR, PWA_THEME_COLOR } from "@/lib/pwa/brand"
+
+/** The manifest is Hebrew-first (one manifest for every locale). */
+const he = m9PwaMessages.he
 
 /**
  * Web app manifest (docs/parity/m9.md D4). Hebrew-first: `lang: "he"`,
@@ -26,9 +30,9 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
     shortcuts: [
       {
-        name: "הקלטה חדשה",
-        short_name: "הקלטה",
-        description: "New recording",
+        name: he.pwaShortcutNewRecording,
+        short_name: he.pwaShortcutNewRecordingShort,
+        description: he.pwaShortcutNewRecordingDescription,
         url: "/?panel=meetings&record=1",
         icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
       },
