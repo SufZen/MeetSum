@@ -17,6 +17,7 @@ import {
   type BotStatusReason,
 } from "@/lib/bot/types"
 import type { VexaMeeting, VexaServiceProvenance } from "@/lib/bot/vexa/types"
+import { emitPlatformEvent } from "@/lib/platform/emit"
 
 /**
  * Vexa-status lifecycle (M7 B2), shared by the webhook and reconcile.
@@ -270,12 +271,17 @@ export async function applyVexaSnapshot(
  * and reconcile runs enqueue at most one of each.
  */
 export async function runBotSideEffects(
-  session: Pick<BotSession, "id" | "workspaceId">,
+  // M8: status/meetingId/statusReason feed `bot.status_changed` (type-only widening).
+  session: Pick<BotSession, "id" | "workspaceId"> & Partial<Pick<BotSession, "status" | "meetingId" | "statusReason">>,
   sideEffects: readonly BotSideEffect[],
   deps: { enqueue?: typeof enqueueBotJob; finalizeAttempts?: number } = {}
 ): Promise<void> {
   const enqueue = deps.enqueue ?? enqueueBotJob
   const payload = { sessionId: session.id, workspaceId: session.workspaceId }
+
+  if (sideEffects.includes("notify")) {
+    await emitPlatformEvent({ workspaceId: session.workspaceId }, "bot.status_changed", { sessionId: session.id, meetingId: session.meetingId ?? null, status: session.status ?? null, reason: session.statusReason ?? null }).catch(() => {})
+  }
 
   if (sideEffects.includes("enqueue_consent")) {
     await enqueue("bot.consent", payload, { jobId: `bot.consent:${session.id}` })

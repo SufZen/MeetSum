@@ -33,6 +33,7 @@ import {
 import { insertAiRun } from "@/lib/ai/llm/runs"
 import { cleanupTranscriptSegments, type MeetingIntelligence } from "@/lib/intelligence"
 import { normalizeAutoTitleMode, shouldApplyAiTitle } from "@/lib/intelligence/title"
+import { enqueueIntegrationEvent } from "@/lib/integrations/core/dispatch-hook"
 import { exportMeetingToRealizeOS } from "@/lib/integrations/realizeos"
 import type {
   MediaAsset,
@@ -62,6 +63,7 @@ import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { MediaPreparePermanentError, prepareMediaAsset } from "@/lib/media/prepare"
 import { legacySegmentsToTranscript } from "@/lib/meetings/speakers/transcript-plan"
 import { requestMeetingReindex } from "@/lib/search/index-trigger"
+import { platformEventPayload } from "@/lib/platform/event-payloads"
 import { indexMeeting } from "@/lib/search/indexer"
 import { sweepWorkspaceIndex } from "@/lib/search/index-sweep"
 import { deleteMeetingObjects } from "@/lib/storage/object-storage"
@@ -277,12 +279,20 @@ async function deliverPlatformEvent(
 
     await deliverWebhookEvent({
       eventName,
-      data: platformEventData(scope.workspaceId, data, visibility),
+      data: platformEventData(scope.workspaceId, platformEventPayload(eventName, data), visibility),
       workspaceId: scope.workspaceId,
     })
   } catch {
     // Webhook delivery must never hide the primary processing result.
   }
+  // M8: integration rules (only the rule triggers enqueue; never throws).
+  await enqueueIntegrationEvent({
+    workspaceId: scope.workspaceId,
+    eventName,
+    eventId: `evt_${crypto.randomUUID()}`,
+    meetingId: String(data.meetingId ?? ""),
+    ...(typeof data.actionItemId === "string" ? { actionItemId: data.actionItemId } : {}),
+  }).catch(() => {})
 }
 
 async function recordAiRun(options: {

@@ -5,6 +5,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { isNotFoundError, type ActionItem, type ActionItemPatch } from "@/lib/meetings/repository"
+import { emitPlatformEvent } from "@/lib/platform/emit"
 import {
   bulkTaskSchema,
   listTaskMembers,
@@ -77,6 +78,7 @@ export const POST = withAuthz("meeting:write", async (request, ctx) => {
       targetId: id,
       metadata: { meetingId: item.meetingId ?? null, fields: Object.keys(patch), bulk: true },
     })
+    await emitPlatformEvent({ workspaceId: ctx.workspace.id, repo: ctx.meetings }, "action_item.updated", { meetingId: item.meetingId ?? null, actionItemId: id, changed: Object.keys(patch) }).catch(() => {})
     if (reassigning && item.meetingId && previous?.ownerUserId !== input.ownerUserId) {
       const meeting = await ctx.meetings.getMeeting(item.meetingId, { includeTranscript: false })
 

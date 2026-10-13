@@ -9,6 +9,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { isNotFoundError } from "@/lib/meetings/repository"
+import { emitPlatformEvent } from "@/lib/platform/emit"
 import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import {
   actionItemPatchSchema,
@@ -81,6 +82,7 @@ export const PATCH = withAuthz<{ id: string }>(
       metadata: { meetingId: meeting.id, fields: Object.keys(patch) },
     })
     await notifyAssignment(ctx, actionItem, meeting, current.ownerUserId)
+    await emitPlatformEvent({ workspaceId: ctx.workspace.id, repo: ctx.meetings }, "action_item.updated", { meetingId: meeting.id, actionItemId: id, changed: Object.keys(patch) }).catch(() => {})
 
     await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: meeting.id, reason: "action_items" })
 
