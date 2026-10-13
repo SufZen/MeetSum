@@ -333,12 +333,22 @@ describe("API route authz coverage", () => {
     })
 
     it("rate-limits search and ask with their presets", () => {
-      expect(source("search")).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.search\)/)
-      expect(source("ask")).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.ask\)/)
+      // Search routes may pass a per-principal limiter key as the third argument.
+      for (const route of ["search", "search/facets", "meetings/search", "memory/search"]) {
+        expect(source(route), route).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.search[,)]/)
+      }
+      expect(source("ask")).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.ask[,)]/)
     })
 
-    // Package C moves the compat ask routes onto askOnce; enabled at Integration.
-    it.todo("rate-limits meetings/[id]/ask, rooms/[id]/ask and memory/ask with RATE_LIMIT_PRESETS.ask")
+    it("rate-limits meetings/[id]/ask, rooms/[id]/ask and memory/ask with RATE_LIMIT_PRESETS.ask", () => {
+      for (const route of ["meetings/[id]/ask", "rooms/[id]/ask", "memory/ask"]) {
+        const text = source(route)
+
+        expect(text, route).toBeDefined()
+        expect(text, route).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.ask[,)]/)
+        expect(text, route).not.toMatch(/RATE_LIMIT_PRESETS\.(search|ai|default)/)
+      }
+    })
 
     it("never audits question or answer text", () => {
       for (const route of M6_ROUTES) {
