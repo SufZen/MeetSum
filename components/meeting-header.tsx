@@ -14,8 +14,10 @@ import {
 } from "lucide-react"
 
 import { BotStatusStrip } from "@/components/bot/bot-status-strip"
+import { MeetingIntegrationControls } from "@/components/integrations/meeting-integration-controls"
 import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
 import { directionForLanguage } from "@/components/speaker-display"
+import { useWorkspace } from "@/components/workspace-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -85,6 +87,8 @@ export function MeetingHeader({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [dialogsReady, setDialogsReady] = useState(false)
+  const { me } = useWorkspace()
+  const isOwner = Boolean(me?.user.id && meeting.ownerUserId === me.user.id)
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -276,6 +280,13 @@ export function MeetingHeader({
                     </DropdownMenuItem>
                   </>
                 ) : null}
+                {/* M8 (Package D): private-meeting opt-in and email recap override. */}
+                <MeetingIntegrationControls
+                  meetingId={meeting.id}
+                  visibility={meeting.visibility}
+                  isOwner={isOwner}
+                  canManage={canManage}
+                />
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}

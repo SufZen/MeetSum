@@ -61,6 +61,11 @@ const CompactSearchBox = dynamic(
   () => import("@/components/search/compact-search-box").then((mod) => mod.CompactSearchBox),
   { loading: () => <div aria-busy="true" className="h-10 animate-pulse rounded-md bg-surface-2" /> }
 )
+// M8: Settings → Integrations (Package D), loaded when that section opens.
+const IntegrationsSettings = dynamic(
+  () => import("@/components/integrations/integrations-settings").then((mod) => mod.IntegrationsSettings),
+  { loading: () => <div aria-busy="true" className="ms-card h-48 animate-pulse bg-surface-2" /> }
+)
 const TemplatesSettings = dynamic(
   () => import("@/components/intelligence/template-editor").then((mod) => mod.TemplatesSettings),
   { loading: () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" /> }
@@ -515,7 +520,13 @@ export function OperationalPage({
   // Settings are readable by every member; only admins may change them.
   const settingsReadOnly = !can("settings:write")
   const settingsDisabled = settingsLoading || settingsReadOnly
-  const [settingsSection, setSettingsSection] = useState("Recording & Privacy")
+  // M8 deep link: `?panel=settings&section=integrations` opens Integrations.
+  const [settingsSection, setSettingsSection] = useState(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("section") === "integrations"
+      ? "Integrations"
+      : "Recording & Privacy"
+  )
   const [meetArtifacts, setMeetArtifacts] = useState<MeetArtifactStatusView>()
   const [meetArtifactsLoading, setMeetArtifactsLoading] = useState(false)
   const [meetArtifactsError, setMeetArtifactsError] = useState("")
@@ -2087,6 +2098,7 @@ export function OperationalPage({
             "AI settings",
             "Live meeting",
             "Developer/API",
+            "Integrations",
             "Language",
             "Account/Security",
           ].map((item, index) => (
@@ -2263,6 +2275,7 @@ export function OperationalPage({
             </OpsCard>
           ) : null}
           {settingsSection === "Live meeting" ? <BotRulesSettings dictionary={t} /> : null}
+          {settingsSection === "Integrations" ? <IntegrationsSettings dictionary={t} /> : null}
           {settingsSection === "Developer/API" ? (
             <OpsCard
               icon={KeyRoundIcon}

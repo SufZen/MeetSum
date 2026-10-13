@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { GoogleContextCard } from "@/components/google-context-card"
+import { MeetingExportMenu } from "@/components/meetings/meeting-export-menu"
 import { PipelineTimeline } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -67,8 +68,7 @@ export function MeetingRightRail({
   exporting,
   suggestingAgents,
   onEditTags,
-  onExportMarkdown,
-  onExportPdf,
+  canManage = false,
   onExportRealizeOS,
   onProcessMeeting,
   onSuggestAgents,
@@ -81,8 +81,8 @@ export function MeetingRightRail({
   exporting?: boolean
   suggestingAgents?: boolean
   onEditTags: () => void
-  onExportMarkdown: () => void
-  onExportPdf: () => void
+  /** `canManageMeeting` for the selected meeting (export menu, M8). */
+  canManage?: boolean
   onExportRealizeOS: () => void
   onProcessMeeting?: () => void
   onSuggestAgents: () => void
@@ -262,19 +262,14 @@ export function MeetingRightRail({
       <section className="ms-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Exports & Integrations</h3>
         <div className="grid grid-cols-5 gap-2">
+          <MeetingExportMenu
+            meetingId={meeting?.id}
+            title={meeting?.title ?? ""}
+            language={meeting?.language ?? ""}
+            visibility={meeting?.visibility}
+            canManage={canManage}
+          />
           {[
-            {
-              Icon: FileTextIcon,
-              label: "PDF",
-              onClick: onExportPdf,
-              enabled: Boolean(meeting),
-            },
-            {
-              Icon: NotepadTextIcon,
-              label: "MD",
-              onClick: onExportMarkdown,
-              enabled: Boolean(meeting),
-            },
             {
               Icon: FileTextIcon,
               label: "Notion",
