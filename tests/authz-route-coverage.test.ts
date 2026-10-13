@@ -124,6 +124,16 @@ describe("API route authz coverage", () => {
       "storage/media-assets GET": "storage:manage",
       "storage/media-assets/[id] DELETE": "storage:manage",
       "webhooks/test POST": "webhooks:manage",
+      // M3 speaker mapping and ASR configuration.
+      "meetings/[id]/speakers GET": "meeting:read",
+      "meetings/[id]/speakers POST": "meeting:write",
+      "meetings/[id]/speakers/assign POST": "meeting:write",
+      "meetings/[id]/speakers/[speakerId] PATCH": "meeting:write",
+      "meetings/[id]/speakers/suggest POST": "meeting:write",
+      "meetings/[id]/speakers/merge POST": "meeting:write",
+      "asr/glossary GET": "workspace:read",
+      "asr/glossary PUT": "settings:write",
+      "asr/status GET": "ops:read",
     }
     const permissionPattern = (method: string) =>
       new RegExp(

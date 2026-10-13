@@ -5,6 +5,10 @@ import {
   loadVisibleMeeting,
   meetingNotFound,
 } from "@/app/api/_lib/meeting-access"
+import {
+  confirmSpeaker,
+  findParticipantByName,
+} from "@/app/api/meetings/[id]/speakers/_lib/speaker-mapping"
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
@@ -16,9 +20,41 @@ type SpeakerMapping = {
 }
 
 /**
- * POST /api/meetings/:id/speakers — Assign speakers to persons.
+ * GET /api/meetings/:id/speakers — diarized speakers of the meeting with
+ * their mapping state, the meeting participants and the total talk time.
+ */
+export const GET = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (request, ctx, { params }) => {
+    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+
+    if (rateLimit.blocked) return rateLimit.blocked
+
+    const { id } = await params
+
+    if (!(await loadVisibleMeeting(ctx, id))) return meetingNotFound()
+
+    const [speakers, participants] = await Promise.all([
+      ctx.meetings.listMeetingSpeakers(id),
+      ctx.meetings.listMeetingParticipants(id),
+    ])
+    const totalTalkTimeMs = speakers.reduce(
+      (sum, speaker) => sum + speaker.talkTimeMs,
+      0
+    )
+
+    return NextResponse.json(
+      { speakers, participants, totalTalkTimeMs },
+      { headers: rateLimit.headers }
+    )
+  }
+)
+
+/**
+ * POST /api/meetings/:id/speakers — legacy bulk mapping.
  * Body: { mappings: [{ speaker: "Speaker 1", person: "Alice" }] }
- * Updates transcript segments with the assigned person names.
+ * Confirms each speaker row (participant when the name or email matches,
+ * otherwise a display name). Segments are never rewritten.
  */
 export const POST = withAuthz<{ id: string }>(
   "meeting:write",
@@ -61,75 +97,50 @@ export const POST = withAuthz<{ id: string }>(
       return jsonError("No valid speaker→person mappings provided", 400)
     }
 
-    // Build lookup from speaker label to person name
-    const speakerMap = new Map<string, string>()
-    for (const { speaker, person } of mappings) {
-      speakerMap.set(speaker, person)
+    const [speakers, participants] = await Promise.all([
+      ctx.meetings.listMeetingSpeakers(id),
+      ctx.meetings.listMeetingParticipants(id),
+    ])
+    const applied: Array<{ speakerId: string; label: string; person: string }> = []
+    let segmentsUpdated = 0
+
+    for (const { speaker: label, person } of mappings) {
+      const speaker = speakers.find(
+        (candidate) => candidate.label === label || candidate.displayName === label
+      )
+
+      if (!speaker) continue
+
+      const participant = findParticipantByName(participants, person)
+
+      await confirmSpeaker(ctx, id, speaker, {
+        participant,
+        displayName: participant ? undefined : person,
+      })
+      applied.push({ speakerId: speaker.id, label: speaker.label, person })
+      segmentsUpdated += transcript.filter(
+        (segment) =>
+          segment.speakerId === speaker.id ||
+          (!segment.speakerId && segment.speaker === speaker.label)
+      ).length
     }
 
-    // Apply mappings to transcript segments
-    const updatedSegments = transcript.map((segment) => {
-      const person = speakerMap.get(segment.speaker)
-      return person ? { ...segment, speaker: person } : segment
-    })
-
-    const changedCount = updatedSegments.filter(
-      (s, i) => s.speaker !== transcript[i].speaker
-    ).length
-
-    // Persist updated segments
-    await ctx.meetings.replaceTranscriptSegments(id, updatedSegments)
-
-    await recordAuditLog({
-      ...auditActor(ctx),
-      action: "meeting.reprocessed",
-      targetType: "meeting",
-      targetId: id,
-      metadata: {
-        operation: "speaker_assignment",
-        mappings: Object.fromEntries(speakerMap),
-        segmentsUpdated: changedCount,
-      },
-    })
+    if (applied.length) {
+      await recordAuditLog({
+        ...auditActor(ctx),
+        action: "meeting.speaker.mapped",
+        targetType: "meeting",
+        targetId: id,
+        metadata: { operation: "legacy_bulk", mappings: applied },
+      })
+    }
 
     return NextResponse.json(
       {
-        mappingsApplied: mappings.length,
-        segmentsUpdated: changedCount,
-        totalSegments: updatedSegments.length,
+        mappingsApplied: applied.length,
+        segmentsUpdated,
+        totalSegments: transcript.length,
       },
-      { headers: rateLimit.headers }
-    )
-  }
-)
-
-/**
- * GET /api/meetings/:id/speakers — List unique speaker labels in transcript.
- */
-export const GET = withAuthz<{ id: string }>(
-  "meeting:read",
-  async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
-
-    if (rateLimit.blocked) return rateLimit.blocked
-
-    const { id } = await params
-    const meeting = await loadVisibleMeeting(ctx, id)
-
-    if (!meeting) return meetingNotFound()
-
-    const speakers = new Map<string, number>()
-
-    for (const segment of meeting.transcript ?? []) {
-      speakers.set(segment.speaker, (speakers.get(segment.speaker) ?? 0) + 1)
-    }
-
-    const speakerList = [...speakers.entries()]
-      .map(([label, segmentCount]) => ({ label, segmentCount }))
-      .sort((a, b) => b.segmentCount - a.segmentCount)
-
-    return NextResponse.json(
-      { speakers: speakerList, participants: meeting.participants },
       { headers: rateLimit.headers }
     )
   }
