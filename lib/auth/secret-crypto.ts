@@ -5,7 +5,18 @@ import {
   randomBytes,
 } from "node:crypto"
 
-const VERSION = "v1"
+/**
+ * AES-256-GCM secrets at rest.
+ *
+ * - `v1:iv:tag:ct`: no additional authenticated data (Google tokens, bot
+ *   passcodes, webhook secrets). Still written when no `aad` is given.
+ * - `v2:iv:tag:ct` (M8): bound to `aad`, e.g. `${workspaceId}:${connectionId}:${field}`
+ *   for integration tokens, so a ciphertext copied to another row (or field)
+ *   fails to decrypt. A v2 value needs the same `aad` to decrypt; a missing
+ *   or different one throws.
+ */
+const VERSION_PLAIN = "v1"
+const VERSION_AAD = "v2"
 const ALGORITHM = "aes-256-gcm"
 
 function getSecretKey() {
@@ -23,9 +34,12 @@ function getSecretKey() {
   return createHash("sha256").update(source).digest()
 }
 
-export function encryptSecret(value: string) {
+export function encryptSecret(value: string, aad?: string) {
   const iv = randomBytes(12)
   const cipher = createCipheriv(ALGORITHM, getSecretKey(), iv)
+
+  if (aad !== undefined) cipher.setAAD(Buffer.from(aad, "utf8"))
+
   const encrypted = Buffer.concat([
     cipher.update(value, "utf8"),
     cipher.final(),
@@ -33,18 +47,27 @@ export function encryptSecret(value: string) {
   const tag = cipher.getAuthTag()
 
   return [
-    VERSION,
+    aad !== undefined ? VERSION_AAD : VERSION_PLAIN,
     iv.toString("base64url"),
     tag.toString("base64url"),
     encrypted.toString("base64url"),
   ].join(":")
 }
 
-export function decryptSecret(value: string) {
+export function decryptSecret(value: string, aad?: string) {
   const [version, ivValue, tagValue, encryptedValue] = value.split(":")
 
-  if (version !== VERSION || !ivValue || !tagValue || !encryptedValue) {
+  if (
+    (version !== VERSION_PLAIN && version !== VERSION_AAD) ||
+    !ivValue ||
+    !tagValue ||
+    !encryptedValue
+  ) {
     throw new Error("Unsupported encrypted secret format")
+  }
+
+  if (version === VERSION_AAD && aad === undefined) {
+    throw new Error("Encrypted secret requires its binding context")
   }
 
   const decipher = createDecipheriv(
@@ -53,6 +76,7 @@ export function decryptSecret(value: string) {
     Buffer.from(ivValue, "base64url")
   )
 
+  if (version === VERSION_AAD) decipher.setAAD(Buffer.from(aad as string, "utf8"))
   decipher.setAuthTag(Buffer.from(tagValue, "base64url"))
 
   return Buffer.concat([
