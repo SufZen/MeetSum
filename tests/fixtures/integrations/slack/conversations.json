@@ -1,0 +1,16 @@
+{
+  "page1": {
+    "ok": true,
+    "channels": [
+      { "id": "C0GENERAL", "name": "general", "is_private": false, "is_member": true },
+      { "id": "C0SALES", "name": "sales-team", "is_private": false, "is_member": false },
+      { "id": "C0RANDOM", "name": "random", "is_private": false, "is_member": true }
+    ],
+    "response_metadata": { "next_cursor": "dGVhbTpDMDY=" }
+  },
+  "page2": {
+    "ok": true,
+    "channels": [{ "id": "C0MEETINGS", "name": "meetings", "is_private": false, "is_member": true }],
+    "response_metadata": { "next_cursor": "" }
+  }
+}

@@ -89,3 +89,22 @@ export async function enqueueNotification(
 
   return result.rows.length ? { id, skipped: false } : { skipped: true }
 }
+
+/**
+ * M8 (Package A): tells a connection's creator that it needs reconnecting.
+ * Ids only (connection id and provider); never a token or provider message.
+ */
+export async function enqueueIntegrationReauthNotification(
+  input: { workspaceId: string; userId: string; connectionId: string; provider: string },
+  backend?: CollabBackend
+): Promise<{ id?: string; skipped: boolean }> {
+  return enqueueNotification(
+    {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      kind: "integration_reauth",
+      payload: { connectionId: input.connectionId, provider: input.provider },
+    },
+    backend
+  )
+}

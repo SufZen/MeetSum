@@ -1,0 +1,137 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildSlackRecapMessage > renders a Hebrew recap (snapshot) with RLM on every line and none inside URLs 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "‏סיכום: פגישת מכירות רבעונית",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "elements": [
+        {
+          "text": "‏⁦1 באוק׳ 2026, 10:00⁩ · ⁦45⁩ דק׳ · ⁦3⁩ משתתפים",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+    {
+      "text": {
+        "text": "‏*סקירה*
+‏סקרנו את הצנרת.
+‏הוחלט להתמקד בלקוחות אנטרפרייז.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "‏*משימות*
+‏• לשלוח הצעת מחיר — דנה · עד ⁦2026-10-05⁩
+‏• לתאם הדגמה",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "‏*החלטות*
+‏• להשיק בנובמבר",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "action_id": "meetsum_open",
+          "text": {
+            "emoji": false,
+            "text": "פתיחה ב-MeetSum",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://meetsum.example.com/he?meeting=m1",
+        },
+      ],
+      "type": "actions",
+    },
+  ],
+  "text": "‏סיכום: פגישת מכירות רבעונית
+‏סקרנו את הצנרת.
+‏הוחלט להתמקד בלקוחות אנטרפרייז.
+https://meetsum.example.com/he?meeting=m1",
+}
+`;
+
+exports[`buildSlackRecapMessage > renders an English recap (snapshot) without RLM 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Recap: Quarterly sales sync",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "elements": [
+        {
+          "text": "⁦Oct 1, 2026, 10:00 AM⁩ · ⁦45⁩ min · ⁦3⁩ participants",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+    {
+      "text": {
+        "text": "*Overview*
+We reviewed the pipeline.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "*Action items*
+• לשלוח הצעת מחיר — דנה · due ⁦2026-10-05⁩
+• לתאם הדגמה",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "*Decisions*
+• Launch in November",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "action_id": "meetsum_open",
+          "text": {
+            "emoji": false,
+            "text": "Open in MeetSum",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://meetsum.example.com/he?meeting=m1",
+        },
+      ],
+      "type": "actions",
+    },
+  ],
+  "text": "Recap: Quarterly sales sync
+We reviewed the pipeline.
+https://meetsum.example.com/he?meeting=m1",
+}
+`;
