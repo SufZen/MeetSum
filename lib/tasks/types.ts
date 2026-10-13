@@ -29,7 +29,8 @@ export type TaskListQuery = {
 }
 
 export type TaskRow = ActionItem & {
-  meeting: { id: string; title: string; startedAt: string }
+  /** `language` is the meeting's language (sets the task text direction). */
+  meeting: { id: string; title: string; startedAt: string; language?: string }
 }
 
 export type TaskListPage = {
@@ -53,4 +54,11 @@ export type TaskEnrichContext = {
   speakers: MeetingSpeaker[]
   participants: MeetingParticipant[]
   members: TaskMember[]
+  /**
+   * Transcript segments (id, start, speaker) so a cited segment yields its
+   * start time and source speaker ("I'll send it" → that speaker).
+   */
+  segments?: Array<{ id: string; startMs: number; endMs?: number; speakerId?: string }>
+  /** Speaker-profile aliases for Hebrew<->Latin owner names. */
+  profileAliases?: Array<{ name: string; email?: string; aliases: string[] }>
 }

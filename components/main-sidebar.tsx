@@ -6,6 +6,7 @@ import {
   DatabaseIcon,
   BookOpenIcon,
   FolderPlusIcon,
+  ListChecksIcon,
   SettingsIcon,
   WorkflowIcon,
   ZapIcon,
@@ -130,6 +131,14 @@ export function MainSidebar({
             </Button>
           )
         })}
+        {/* M5: the cross-meeting Tasks view is its own page. */}
+        <Link
+          href={`/${locale}/tasks`}
+          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+        >
+          <ListChecksIcon aria-hidden className="size-4" />
+          {dictionary.navTasks}
+        </Link>
       </nav>
 
       <div className="mt-auto px-3 pb-2">

@@ -147,6 +147,13 @@ describe("API route authz coverage", () => {
       "meetings/[id]/transcript/segments/[segmentId] PATCH": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/undo POST": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/revisions GET": "meeting:read",
+      // M5 action items and the cross-meeting Tasks view.
+      "action-items/[id] PATCH": "meeting:write",
+      "action-items/[id] DELETE": "meeting:write",
+      "meetings/[id]/action-items GET": "meeting:read",
+      "meetings/[id]/action-items POST": "meeting:write",
+      "tasks GET": "meeting:read",
+      "tasks/bulk POST": "meeting:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
