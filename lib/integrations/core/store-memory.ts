@@ -403,6 +403,14 @@ export function createMemoryIntegrationStore(): IntegrationStore {
       return total
     },
 
+    async systemListStaleQueuedDeliveries(before, limit = 100) {
+      return [...deliveries.values()]
+        .filter((row) => row.status === "queued" && Date.parse(row.updatedAt) < before.getTime())
+        .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+        .slice(0, limit)
+        .map((row) => ({ id: row.id, workspaceId: row.workspaceId }))
+    },
+
     async systemDeleteDeliveriesBefore(before) {
       let count = 0
 

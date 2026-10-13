@@ -283,6 +283,11 @@ export interface IntegrationStore {
   countRecapEmailsSince(workspaceId: string, since: Date): Promise<number>
   /** SYSTEM (daily sweep). */
   systemDeleteDeliveriesBefore(before: Date): Promise<number>
+  /**
+   * SYSTEM (tick): `queued` rows not touched since `before`, oldest first,
+   * whose enqueue never reached the queue (Redis was down); re-enqueued.
+   */
+  systemListStaleQueuedDeliveries(before: Date, limit?: number): Promise<Array<Pick<StoredDelivery, "id" | "workspaceId">>>
 
   // Links -----------------------------------------------------------------
   getLink(scope: LinkScope, key: IntegrationLinkKey): Promise<IntegrationLink | undefined>

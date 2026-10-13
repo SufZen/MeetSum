@@ -15,6 +15,7 @@ import { runIntegrationDispatch } from "@/lib/integrations/core/dispatcher"
 import { integrationLog } from "@/lib/integrations/core/errors"
 import { deliveryBackoffMs, deliveryRetentionDays, integrationsConcurrency } from "@/lib/integrations/core/limits"
 import {
+  deliverJobId,
   INTEGRATION_BACKOFF_TYPE,
   INTEGRATIONS_QUEUE,
   closeIntegrationQueue,
@@ -68,8 +69,19 @@ export async function runIntegrationTick(deps: IntegrationJobDeps = {}): Promise
     }
   }
 
+  // Deliveries whose enqueue timed out (Redis down) stay `queued`: hand
+  // them to the queue again once it is back (same job id: BullMQ dedupes a
+  // job that did arrive).
+  for (const row of await store.systemListStaleQueuedDeliveries(new Date(now - STALE_QUEUED_MS))) {
+    await queue.enqueue("integration.deliver", { workspaceId: row.workspaceId, deliveryId: row.id }, { jobId: deliverJobId(row.id) })
+    enqueued += 1
+  }
+
   return enqueued
 }
+
+/** A queued delivery untouched this long never reached the queue. */
+const STALE_QUEUED_MS = 5 * 60_000
 
 export async function runIntegrationProviderJob(
   payload: IntegrationJobPayloads["integration.job"],

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
 import { apiError, auditActor, limitFor } from "@/lib/integrations/core/api"
-import { canRetry, retryDelivery, toVisibleDeliveryDTOs } from "@/lib/integrations/core/deliveries"
+import { canRetry, IntegrationQueueUnavailableError, retryDelivery, toVisibleDeliveryDTOs } from "@/lib/integrations/core/deliveries"
 import { getIntegrationQueuePort } from "@/lib/integrations/core/queue"
 import { getIntegrationStore } from "@/lib/integrations/core/store"
 
@@ -23,7 +23,15 @@ export const POST = withAuthz<{ id: string }>("integrations:manage", async (requ
   if (!row) return apiError("not_found", 404)
   if (!canRetry(row)) return apiError("not_retryable", 409)
 
-  const updated = await retryDelivery(store, getIntegrationQueuePort(), row, auditActor(ctx))
+  let updated: Awaited<ReturnType<typeof retryDelivery>>
+
+  try {
+    updated = await retryDelivery(store, getIntegrationQueuePort(), row, auditActor(ctx))
+  } catch (error) {
+    // Redis down: the row is already reset to queued for the sweeper.
+    if (error instanceof IntegrationQueueUnavailableError) return apiError("queue_unavailable", 503)
+    throw error
+  }
 
   if (!updated) return apiError("not_found", 404)
 

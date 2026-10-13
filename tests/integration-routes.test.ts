@@ -349,6 +349,36 @@ describe("integration routes", () => {
       expect(jobs).toHaveLength(1)
     })
 
+    it("answers 503 queue_unavailable (row kept queued) when the queue hangs, for send and retry", async () => {
+      vi.stubEnv("MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS", "50")
+      setIntegrationQueuePortForTesting({ enqueue: () => new Promise<void>(() => undefined) })
+      await as("member", "user_me")
+
+      const response = await send("m_a", "5b6c7d8e-1d2a-4c3b-9e8f-0a1b2c3d4e5f")
+
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ error: "queue_unavailable" })
+
+      const [row] = await store.listDeliveries("ws_a")
+
+      expect(row).toMatchObject({ status: "queued", origin: "manual" })
+
+      await store.updateDelivery("ws_a", row.id, { status: "failed" })
+      await as("admin", "user_admin")
+      const retried = await retryDelivery(new Request(`${BASE}/x`, { method: "POST" }), routeParams({ id: row.id }))
+
+      expect(retried.status).toBe(503)
+      expect((await store.getDelivery("ws_a", row.id))?.status).toBe("queued")
+      vi.unstubAllEnvs()
+
+      // Once the queue is back, the tick re-enqueues the stale queued row.
+      const recovered: RecordedJob[] = []
+      const { runIntegrationTick } = await import("@/lib/integrations/core/worker")
+
+      await runIntegrationTick({ store, queue: createRecordingQueue(recovered), providers: () => [], now: () => new Date(Date.now() + 10 * 60_000) })
+      expect(recovered).toEqual([{ name: "integration.deliver", payload: { workspaceId: "ws_a", deliveryId: row.id }, jobId: row.id }])
+    })
+
     it("hides invisible meetings (404) and needs manage rights on visible private ones (403)", async () => {
       await as("member", "user_me")
       expect((await send("m_other_private")).status).toBe(404)

@@ -4,7 +4,7 @@ import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { actorUserId, apiError, auditActor, idempotencyKeyOf, limitFor, providerErrorResponse, readJsonBody } from "@/lib/integrations/core/api"
 import { auditIntegration } from "@/lib/integrations/core/audit"
 import { providerCtx } from "@/lib/integrations/core/connections"
-import { createManualDelivery } from "@/lib/integrations/core/deliveries"
+import { createManualDelivery, IntegrationQueueUnavailableError } from "@/lib/integrations/core/deliveries"
 import { checkManualPush } from "@/lib/integrations/core/manual-send"
 import { flagNeedsReauthOnAuth } from "@/lib/integrations/core/reauth"
 import { getProvider } from "@/lib/integrations/core/registry"
@@ -114,7 +114,10 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   }
 
   const userId = actorUserId(ctx)
-  const result = await createManualDelivery(store, getIntegrationQueuePort(), {
+  let result: Awaited<ReturnType<typeof createManualDelivery>>
+
+  try {
+    result = await createManualDelivery(store, getIntegrationQueuePort(), {
     workspaceId: ctx.workspace.id,
     connectionId: connection.id,
     provider: connection.provider,
@@ -122,7 +125,12 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
     ...(userId ? { requestedByUserId: userId } : {}),
     clientKey: idempotencyKeyOf(request),
     request: { destination, content: { ...DEFAULT_RULE_CONTENT, ...content.data } },
-  })
+    })
+  } catch (error) {
+    // Redis down: the delivery row stays queued for the sweeper.
+    if (error instanceof IntegrationQueueUnavailableError) return apiError("queue_unavailable", 503)
+    throw error
+  }
 
   // An Idempotency-Key bound to another meeting/destination/content never replays it.
   if (result.reuse) return apiError("idempotency_key_reuse", 422)

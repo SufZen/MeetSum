@@ -721,6 +721,18 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
       return Number(row?.n ?? 0)
     },
 
+    async systemListStaleQueuedDeliveries(before, limit = 100) {
+      return (
+        await rows(
+          db,
+          `select id, workspace_id from integration_deliveries
+            where status = 'queued' and updated_at < $1::timestamptz
+            order by updated_at asc limit $2`,
+          [before.toISOString(), limit]
+        )
+      ).map((row) => ({ id: String(row.id), workspaceId: String(row.workspace_id) }))
+    },
+
     async systemDeleteDeliveriesBefore(before) {
       return (
         await rows(db, "delete from integration_deliveries where created_at < $1::timestamptz returning id", [before.toISOString()])

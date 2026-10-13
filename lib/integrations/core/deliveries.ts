@@ -15,6 +15,43 @@ import { deliverJobId, type IntegrationQueuePort } from "@/lib/integrations/core
 import type { IntegrationStore, StoredDelivery } from "@/lib/integrations/core/store"
 import type { DeliveryStatus, IntegrationDeliveryDTO } from "@/lib/integrations/core/types"
 
+/** The queue did not accept the job in time (Redis down): the row stays `queued` for the sweeper. */
+export class IntegrationQueueUnavailableError extends Error {
+  constructor() {
+    super("integration queue unavailable")
+    this.name = "IntegrationQueueUnavailableError"
+  }
+}
+
+function enqueueTimeoutMs(): number {
+  const parsed = Number(process.env.MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000
+}
+
+/**
+ * Enqueue bounded like the dispatch and webhook enqueues (5 s): a hung or
+ * failing BullMQ add throws IntegrationQueueUnavailableError instead of
+ * hanging the request.
+ */
+async function boundedEnqueue(work: () => Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    await Promise.race([
+      work(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new IntegrationQueueUnavailableError()), enqueueTimeoutMs())
+        timer.unref?.()
+      }),
+    ])
+  } catch {
+    throw new IntegrationQueueUnavailableError()
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 const STATUSES: readonly DeliveryStatus[] = ["queued", "running", "retrying", "sent", "partial", "skipped", "failed", "cancelled"]
 
 export function isDeliveryStatus(value: string | null): value is DeliveryStatus {
@@ -60,7 +97,10 @@ export async function retryDelivery(
 
   if (!updated) return undefined
 
-  await queue.enqueue("integration.deliver", { workspaceId: row.workspaceId, deliveryId: row.id }, { jobId: deliverJobId(row.id, Date.now()) })
+  // Throws IntegrationQueueUnavailableError (row stays queued) when Redis is down.
+  await boundedEnqueue(() =>
+    queue.enqueue("integration.deliver", { workspaceId: row.workspaceId, deliveryId: row.id }, { jobId: deliverJobId(row.id, Date.now()) })
+  )
   await auditIntegration(actor, "integration.delivery.retried", { type: "integration_delivery", id: row.id }, {
     provider: row.provider,
     deliveryId: row.id,
@@ -157,7 +197,10 @@ export async function createManualDelivery(
   }
 
   if (created) {
-    await queue.enqueue("integration.deliver", { workspaceId: input.workspaceId, deliveryId: delivery.id }, { jobId: deliverJobId(delivery.id) })
+    // Throws IntegrationQueueUnavailableError (row stays queued) when Redis is down.
+    await boundedEnqueue(() =>
+      queue.enqueue("integration.deliver", { workspaceId: input.workspaceId, deliveryId: delivery.id }, { jobId: deliverJobId(delivery.id) })
+    )
   }
   return { delivery, created }
 }
