@@ -24,6 +24,18 @@ vi.mock("@/lib/audit", async (importOriginal) => {
 
 const lookup = vi.hoisted(() => ({ fn: undefined as undefined | ((token: string) => Promise<unknown>) }))
 
+// The shares live in the route context's repository, not the process
+// backend the verify throttle reads: allow every attempt here (the throttle
+// has its own tests in tests/share-verify-limits.test.ts).
+vi.mock("@/lib/meetings/store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/meetings/store")>()),
+  getShareVerifyThrottle: () => ({
+    begin: async () => ({ allowed: true }),
+    fail: async () => ({ failures: 1, notifyOwner: false }),
+    succeed: async () => undefined,
+  }),
+}))
+
 vi.mock("@/lib/sharing/public-share", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sharing/public-share")>()
 
