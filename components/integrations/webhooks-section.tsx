@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { labelOr, webhookEventDescriptionKey } from "@/lib/i18n/label-keys"
 
 const DOCS_URL = "https://github.com/SufZen/MeetSum/blob/main/docs/api-reference.md#event-catalog"
 
@@ -164,7 +165,7 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
         <fieldset className="flex flex-wrap gap-1.5">
           <legend className="sr-only">{t.integrationsWebhooksTestEvent}</legend>
           {v2Events.map((event) => (
-            <label key={event.name} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-fg" title={event.description}>
+            <label key={event.name} className="flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-fg" title={labelOr(t, webhookEventDescriptionKey(event.name), event.description)}>
               <input
                 type="checkbox"
                 className="size-3.5 accent-brand"

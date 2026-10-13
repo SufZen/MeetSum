@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { auditActionKey, labelOr } from "@/lib/i18n/label-keys"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
 /** Common actions offered in the filter (free text is not needed). */
@@ -152,7 +153,7 @@ export function AuditLogSection({
             <NativeSelectOption value="">{t.all}</NativeSelectOption>
             {ACTION_OPTIONS.map((action) => (
               <NativeSelectOption key={action} value={action}>
-                {action}
+                {labelOr(t, auditActionKey(action), action)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
@@ -229,8 +230,14 @@ export function AuditLogSection({
                   <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                     {formatDateTime({ locale, timeZone }, log.createdAt)}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs" dir="ltr">
-                    {log.action}
+                  <td className="px-3 py-2 text-xs">
+                    {t[auditActionKey(log.action) as keyof Dictionary] ? (
+                      <span title={log.action}>{labelOr(t, auditActionKey(log.action), log.action)}</span>
+                    ) : (
+                      <bdi dir="ltr" className="font-mono">
+                        {log.action}
+                      </bdi>
+                    )}
                   </td>
                   <td className="px-3 py-2" dir="auto">
                     <bdi>{log.actor ?? t.auditSystemActor}</bdi>

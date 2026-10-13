@@ -13,6 +13,7 @@ import { searchMessagesEn, searchMessagesHe } from "@/lib/i18n/m6/search"
 import { exportsMessagesEn, exportsMessagesHe } from "@/lib/i18n/m8/exports"
 import { integrationsMessagesEn, integrationsMessagesHe } from "@/lib/i18n/m8/integrations"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { m9AdminLabelMessages } from "@/lib/i18n/m9/admin-labels"
 import { m9AnalyticsMessages } from "@/lib/i18n/m9/analytics"
 import { m9CoreMessages } from "@/lib/i18n/m9/core"
 import { m9ExportsMessages } from "@/lib/i18n/m9/exports"
@@ -44,6 +45,7 @@ export const M9_MESSAGE_MODULES = {
   onboarding: m9OnboardingMessages,
   shell: m9ShellMessages,
   pwa: m9PwaMessages,
+  adminLabels: m9AdminLabelMessages,
 } as const
 
 export const dictionaries = {
@@ -128,6 +130,7 @@ export const dictionaries = {
     ...m9OnboardingMessages.en,
     ...m9ShellMessages.en,
     ...m9PwaMessages.en,
+    ...m9AdminLabelMessages.en,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -210,6 +213,7 @@ export const dictionaries = {
     ...m9OnboardingMessages.he,
     ...m9ShellMessages.he,
     ...m9PwaMessages.he,
+    ...m9AdminLabelMessages.he,
   },
 } as const
 
