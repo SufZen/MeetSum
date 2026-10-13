@@ -70,7 +70,7 @@ export const exportsMessagesHe: Record<keyof typeof exportsMessagesEn, string> =
   exportSendSent: "נשלח אל {provider}",
   exportSendFailed: "לא ניתן לשלוח אל {provider}",
   exportSendSkipped: "לא נשלח אל {provider}",
-  exportSendPrivateHint: "רק מי שמנהל/ת את הפגישה יכול/ה לשלוח פגישה פרטית.",
+  exportSendPrivateHint: "שליחת פגישה פרטית אפשרית רק לבעלי הפגישה.",
   exportSendNone: "אין אפליקציה מחוברת שמאפשרת שליחה. אפשר לחבר אחת בהגדרות ← אינטגרציות.",
   exportSendNeedsDefaultChannel: "קודם יש לבחור ערוץ ברירת מחדל בהגדרות ← אינטגרציות.",
   exportSendNeedsDefaultDatabase: "קודם יש לבחור מסד נתונים ברירת מחדל בהגדרות ← אינטגרציות.",
