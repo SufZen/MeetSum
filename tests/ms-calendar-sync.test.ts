@@ -462,3 +462,133 @@ describe("iCalUID dedupe safety (security review)", () => {
     expect(await meetingsForUid("uid-forged-first")).toHaveLength(2)
   })
 })
+
+/**
+ * Parity: the same dedupe cases run against BOTH sync paths (they share
+ * `findCanonicalMeetingId`). The existing meeting always belongs to the
+ * other provider and, unless stated, to the other user.
+ */
+type ParityCase = {
+  name: string
+  existingOwner: "other" | "self"
+  existingWorkspace?: "ws_1" | "ws_2"
+  visibility: "private" | "workspace"
+  organizer?: string
+  attackerLink?: boolean
+  deduped: boolean
+}
+
+const PARITY_CASES: ParityCase[] = [
+  { name: "another member's private meeting", existingOwner: "other", visibility: "private", deduped: false },
+  { name: "a visible meeting with the same organizer and link", existingOwner: "other", visibility: "workspace", deduped: true },
+  { name: "the same principal's own private meeting", existingOwner: "self", visibility: "private", deduped: true },
+  { name: "a visible meeting with another organizer", existingOwner: "other", visibility: "workspace", organizer: "mallory@evil.example", deduped: false },
+  { name: "a forged UID carrying another meeting link", existingOwner: "other", visibility: "workspace", attackerLink: true, deduped: false },
+  { name: "the same UID in another workspace", existingOwner: "other", existingWorkspace: "ws_2", visibility: "workspace", deduped: false },
+]
+
+const PARITY_USERS = {
+  outlook: { userId: "usr_yossi", email: "yossi@acme.co.il", other: "usr_dana" },
+  google: { userId: "usr_dana", email: "dana@acme.co.il", other: "usr_yossi" },
+} as const
+
+async function seedExisting(path: "outlook" | "google", uid: string, start: string, parity: ParityCase) {
+  const users = PARITY_USERS[path]
+  const owner = parity.existingOwner === "self" ? users.userId : users.other
+  const workspace = parity.existingWorkspace ?? "ws_1"
+  const ceId = `ce_par_${path}_${uid}`
+  const raw = JSON.stringify({ conferenceData: { entryPoints: [{ entryPointType: "video", uri: TEAMS_REAL }] } })
+
+  if (path === "outlook") {
+    // Existing = a Google row (other provider).
+    await (db as PgLike).exec(`
+      insert into workspace_accounts (id, domain, admin_email) values ('wa_par_${workspace}', 'acme.co.il', 'x@acme.co.il') on conflict do nothing;
+      insert into google_identities (id, workspace_account_id, subject_email, workspace_id)
+        values ('gi_par_${workspace}', 'wa_par_${workspace}', 'par@acme.co.il', '${workspace}') on conflict do nothing;
+    `)
+    await (db as PgLike).query(
+      `insert into calendar_events (id, provider, google_identity_id, google_event_id, workspace_id, ical_uid, title, starts_at, organizer_email, raw)
+       values ($1, 'google', $2, $1, $3, $4, 'Existing', $5, 'dana@acme.co.il', $6::jsonb)`,
+      [ceId, `gi_par_${workspace}`, workspace, uid, `${start}Z`, raw]
+    )
+  } else {
+    // Existing = an Outlook row (other provider).
+    const connection = workspace === "ws_2" ? "intc_ms_w2" : "intc_ms_1"
+
+    await (db as PgLike).query(
+      `insert into calendar_events (id, provider, workspace_id, integration_connection_id, external_event_id, ical_uid, title, starts_at, organizer_email, raw)
+       values ($1, 'microsoft', $2, $3, $1, $4, 'Existing', $5, 'dana@acme.co.il', $6::jsonb)`,
+      [ceId, workspace, connection, uid, `${start}Z`, raw]
+    )
+  }
+
+  await (db as PgLike).query(
+    `insert into meetings (id, calendar_event_id, title, source, status, started_at, workspace_id, owner_user_id, visibility)
+     values ($1, $2, 'Existing', 'google_meet', 'scheduled', $3, $4, $5, $6)`,
+    [`m_par_${path}_${uid}`, ceId, `${start}Z`, workspace, workspace === "ws_2" ? "usr_w2" : owner, parity.visibility]
+  )
+}
+
+async function syncIncoming(path: "outlook" | "google", uid: string, start: string, parity: ParityCase) {
+  const organizer = parity.organizer ?? "dana@acme.co.il"
+
+  if (path === "outlook") {
+    const h = harness({
+      routes: singlePage([
+        graphInvite(uid, start, {
+          organizer: { emailAddress: { address: organizer } },
+          ...(parity.attackerLink ? attackerBody : {}),
+        }),
+      ]),
+    })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    return { deduped: stats.deduped === 1, botSyncs: h.botSync.length }
+  }
+
+  holder.googleEvents = [
+    googleEvent({
+      id: `google-${uid}`,
+      iCalUID: uid,
+      organizer: { email: organizer },
+      start: { dateTime: `${start}Z` },
+      end: { dateTime: new Date(Date.parse(`${start}Z`) + 3_600_000).toISOString() },
+      conferenceData: { entryPoints: [{ entryPointType: "video", uri: parity.attackerLink ? ZOOM_ATTACKER : TEAMS_REAL }] },
+    }),
+  ]
+  await pollGoogle("ws_1", PARITY_USERS.google.email)
+
+  const own = await rows(
+    `select m.id from meetings m join calendar_events ce on ce.id = m.calendar_event_id
+      where ce.provider = 'google' and ce.google_event_id = $1 and m.workspace_id = 'ws_1'`,
+    [`google-${uid}`]
+  )
+
+  return { deduped: own.length === 0, botSyncs: holder.googleBotSync.length }
+}
+
+describe.each(["outlook", "google"] as const)("dedupe parity: %s path", (path) => {
+  PARITY_CASES.forEach((parity, index) => {
+    it(`${parity.deduped ? "dedupes" : "keeps both for"} ${parity.name}`, async (context) => {
+      if (!db) return context.skip("PGlite unavailable")
+
+      const uid = `uid-par-${index}`
+      const start = `2026-10-2${path === "outlook" ? 3 : 4}T${String(8 + index).padStart(2, "0")}:00:00`
+
+      await seedExisting(path, uid, start, parity)
+
+      const result = await syncIncoming(path, uid, start, parity)
+
+      expect(result.deduped).toBe(parity.deduped)
+      expect(result.botSyncs).toBe(parity.deduped ? 0 : 1)
+
+      // The existing meeting is never modified or re-owned.
+      const existing = await rows<{ title: string; owner_user_id: string; visibility: string; workspace_id: string }>(
+        "select title, owner_user_id, visibility, workspace_id from meetings where id = $1",
+        [`m_par_${path}_${uid}`]
+      )
+
+      expect(existing[0]).toMatchObject({ title: "Existing", visibility: parity.visibility, workspace_id: parity.existingWorkspace ?? "ws_1" })
+    })
+  })
+})

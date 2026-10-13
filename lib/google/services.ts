@@ -1350,6 +1350,8 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 organizer_email = excluded.organizer_email,
                 attendees = excluded.attendees,
               raw = excluded.raw
+              where calendar_events.workspace_id is null
+                 or calendar_events.workspace_id = excluded.workspace_id
               returning id, (xmax = 0) as inserted
             `,
             [
@@ -1372,7 +1374,13 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
           const calendarEventRow = eventResult.rows[0] as
             | { id?: string; inserted?: boolean }
             | undefined
-          const calendarEventId = calendarEventRow?.id ?? proposedCalendarEventId
+          // M8: a conflicting row of another workspace is never adopted.
+          if (!calendarEventRow?.id) {
+            stats.skipped = (stats.skipped ?? 0) + 1
+            continue
+          }
+
+          const calendarEventId = calendarEventRow.id
           const inserted = Boolean(calendarEventRow?.inserted)
 
           if (inserted) stats.created = (stats.created ?? 0) + 1
@@ -1405,8 +1413,9 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
             )
             const ownMeetingId = (existingMeeting.rows[0] as { id?: string } | undefined)?.id
 
-            // M8 iCalUID dedupe: the same meeting already synced from another
-            // calendar (e.g. Outlook) owns the meeting and the bot session.
+            // M8 iCalUID dedupe (shared helper with the Outlook path): only a
+            // same-workspace row with the same start, bot link and either the
+            // same owner or a visible meeting with the same organizer counts.
             if (
               !ownMeetingId &&
               (await findCanonicalMeetingId(pool, {
