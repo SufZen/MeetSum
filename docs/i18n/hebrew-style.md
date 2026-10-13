@@ -12,8 +12,9 @@ Applies to every `he` value in `lib/i18n/**`. `tests/dictionary-hebrew-lint.test
 ## Punctuation
 - Gershayim and geresh: ״ and ׳ (מנכ״ל, דק׳). Never ASCII `"` or `'` between Hebrew letters.
 - Ellipsis: "…" (one character), never `...`.
-- Prefix before a Latin word or a number: maqaf `־` (ל־Google, ב־14:30). `fixHebrewTypography` adds a word joiner at render time.
+- Prefix before a Latin word or a number: maqaf `־` or hyphen (ל־Google, ב־14:30).
 - Dash with spaces: " — ".
+- **Dictionary values are pre-typeset:** `fixHebrewTypography(value) === value`. In source, write the word joiner after a prefix hyphen before Latin or digits (`"ל-⁠Google"`), a no-break space before a spaced dash (`"סיכום — החלטות"`), and RLM after a Latin word followed by a number. The lint test prints the expected form.
 
 ## Glossary
 פגישה (meeting), תמליל (transcript), סיכום (summary), משימה (action item / task), חדר (room), סביבת עבודה (workspace), הקלטה (recording), דובר (speaker), תדריך (brief), אינטגרציה (integration), התראה (notification).

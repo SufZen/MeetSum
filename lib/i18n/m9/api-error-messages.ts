@@ -159,7 +159,7 @@ export const m9ApiErrorMessages = {
     apiErrQueueUnavailable: "תור העיבוד אינו זמין כרגע.",
     apiErrQuotaUnavailable: "לא ניתן לבדוק את המכסה כרגע.",
     apiErrRateLimited: "יותר מדי בקשות. המתינו רגע ונסו שוב.",
-    apiErrRefusal: "ספק ה־AI דחה את הבקשה.",
+    apiErrRefusal: "ספק ה־\u2060AI דחה את הבקשה.",
     apiErrSentimentDisabled: "ניתוח הסנטימנט כבוי.",
     apiErrSmartNotesOnly: "זמין רק עבור הערות חכמות.",
     apiErrSummaryLanguageMismatch: "שפת הסיכום אינה תואמת לפגישה.",
@@ -177,7 +177,7 @@ export const m9ApiErrorMessages = {
     apiErrUserRequired: "הפעולה דורשת משתמש מחובר ולא מפתח API.",
     apiErrValidationFailed: "חלק מהשדות אינם תקינים.",
     apiErrWeakTranscriptConfidence: "רמת הוודאות של התמליל נמוכה.",
-    apiErrWebhookFailed: "קריאת ה־webhook נכשלה.",
+    apiErrWebhookFailed: "קריאת ה־\u2060webhook נכשלה.",
     apiErrWorkspaceCreationDisabled: "יצירת סביבות עבודה כבויה.",
   },
 }

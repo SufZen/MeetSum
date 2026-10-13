@@ -94,9 +94,9 @@ export const asrMessagesEn = {
 
 export const asrMessagesHe: Record<keyof typeof asrMessagesEn, string> = {
   // Transcript
-  transcriptSearchPlaceholder: "חיפוש בתמלול...",
+  transcriptSearchPlaceholder: "חיפוש בתמליל…",
   transcriptEmptyState:
-    "קטעי התמלול יופיעו כאן אחרי העלאה, ייבוא מ-Drive או עיבוד הקלטה.",
+    "קטעי התמלול יופיעו כאן אחרי העלאה, ייבוא מ-\u2060Drive או עיבוד הקלטה.",
   transcriptNoMatches: "אין קטעי תמלול שמתאימים לחיפוש.",
 
   // Speakers
@@ -107,15 +107,15 @@ export const asrMessagesHe: Record<keyof typeof asrMessagesEn, string> = {
   speakersUnconfirmed: "לא אושר",
   speakersConfirmed: "אושר",
   speakersRejected: "ההצעה נדחתה",
-  speakersSuggestionChip: "מוצע: {name} — {reason}",
+  speakersSuggestionChip: "מוצע: {name}\u00A0— {reason}",
   speakersSuggestionScore: "רמת ביטחון {percent}",
   speakersSuggestionReasons: "למה ההצעה הזו",
   speakersReasonMeetAlignment: "תמלול Meet",
-  speakersReasonSelfIntro: "הציג/ה את עצמו/ה",
-  speakersReasonAddressedByName: "פנו אליו/ה בשם",
-  speakersReasonSingleRemaining: "המשתתף/ת היחיד/ה שנותר/ה",
-  speakersReasonOrganizerOwner: "מארגן/ת הפגישה",
-  speakersReasonWorkspaceMemory: "מוכר/ת מפגישות קודמות",
+  speakersReasonSelfIntro: "הצגה עצמית",
+  speakersReasonAddressedByName: "פנייה בשם",
+  speakersReasonSingleRemaining: "האפשרות היחידה שנותרה",
+  speakersReasonOrganizerOwner: "ארגון הפגישה",
+  speakersReasonWorkspaceMemory: "זיהוי מפגישות קודמות",
   speakersReasonVoiceprint: "התאמת קול",
   speakersConfirm: "אישור",
   speakersConfirmSuggestion: "אישור {name} בתור {speaker}",

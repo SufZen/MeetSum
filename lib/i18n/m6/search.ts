@@ -151,7 +151,7 @@ export const searchMessagesHe: Record<keyof typeof searchMessagesEn, string> = {
   searchPaletteAllResults: "כל התוצאות עבור „{query}”",
   searchPaletteOpenSearch: "פתיחת חיפוש ושאלות",
   searchPaletteEmpty: "אפשר להקליד כדי לחפש בפגישות.",
-  searchPaletteNoMatch: "אין פגישות תואמות. Enter שולח את השאלה ל-MeetSum.",
+  searchPaletteNoMatch: "אין פגישות תואמות. Enter שולח את השאלה ל-\u2060MeetSum.",
   searchShortcut: "Ctrl K",
   searchCompactTitle: "חיפוש ושאלות בכל הפגישות",
   searchCompactBody: "החיפוש מאתר את הרגע המדויק. השאלות נענות עם מקורות שאפשר להשמיע.",

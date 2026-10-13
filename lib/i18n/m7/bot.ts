@@ -297,7 +297,7 @@ export const botMessagesHe: Record<BotMessageKey, string> = {
   botErrorNoLink: "אין לפגישה קישור שהבוט יכול להצטרף אליו. הדביקו קישור כדי לשלוח את הבוט.",
   botErrorDisabled: "בוט הפגישות כבוי. בקשו ממנהל סביבת העבודה להפעיל אותו.",
   botErrorForbidden: "אין לכם הרשאה לפעולה הזו. פנו למנהל סביבת העבודה.",
-  botErrorNetwork: "אין חיבור ל־MeetSum. בדקו את החיבור ונסו שוב.",
+  botErrorNetwork: "אין חיבור ל־\u2060MeetSum. בדקו את החיבור ונסו שוב.",
   botErrorGeneric: "לא הצלחנו לשלוח את הבוט. נסו שוב, או הקליטו מהדפדפן.",
 
   botSettingsTitle: "בוט הפגישות",
@@ -340,7 +340,7 @@ export const botMessagesHe: Record<BotMessageKey, string> = {
   botLegalTitle: "הסכמה להקלטה",
   botLegalBody:
     "אין באמור ייעוץ משפטי. לפי חוק האזנת סתר (1979), הקלטה שמבצע משתתף בשיחה אינה האזנת סתר. חוק הגנת הפרטיות (תיקון 13, בתוקף מאוגוסט 2025) מצפה ליידוע ולשקיפות. MeetSum מודיע על ההקלטה דרך שם הבוט והודעה בצ׳אט. ההקלטות כפופות להגדרות השמירה של סביבת העבודה.",
-  botConsentAck: "אני מאשר/ת שהמשתתפים יידעו שהפגישה מוקלטת",
+  botConsentAck: "אישור שהמשתתפים יודעו שהפגישה מוקלטת",
   botConsentAckDone: "הודעת ההקלטה אושרה",
   botConsentAckRequired: "אשרו את הודעת ההקלטה לפני הפעלת ההצטרפות האוטומטית.",
   botFieldInvalid: "בדקו את הערך הזה.",
@@ -352,7 +352,7 @@ export const botMessagesHe: Record<BotMessageKey, string> = {
   botStatusWebhookMissing: "עדכוני הסטטוס לא מחוברים. הריצו npm run vexa:configure בשרת.",
   botStatusVersion: "גרסת Vexa‏ {version}",
 
-  botLiveLabel: "טיוטה חיה — התמלול הסופי יופק אחרי השיחה",
+  botLiveLabel: "טיוטה חיה\u00A0— התמלול הסופי יופק אחרי השיחה",
   botLiveSpeakerUnknown: "דובר",
 }
 
