@@ -88,7 +88,7 @@ function isLowSurrogate(text: string, index: number) {
 export type Snippet = {
   snippet: string
   highlights: [number, number][]
-  /** Offset of the first highlight in the original text (citation segment). */
+  /** Offset (in the original text) of the match the snippet shows (citation segment, speaker). */
   matchOffset?: number
 }
 
@@ -101,6 +101,7 @@ export function buildSnippet(
   const matches = findMatches(text, nq)
   let spanStart = 0
   let spanEnd = 0
+  let shownOffset: number | undefined
 
   if (matches.length) {
     let best = { i: 0, j: 0, count: 0 }
@@ -113,6 +114,7 @@ export function buildSnippet(
     }
     spanStart = matches[best.i][0]
     spanEnd = Math.min(matches[best.j][1], spanStart + window)
+    shownOffset = matches[best.i][0]
   }
 
   let start = Math.max(0, spanStart - Math.floor((window - (spanEnd - spanStart)) / 2))
@@ -145,7 +147,8 @@ export function buildSnippet(
   return {
     snippet: `${lead}${text.slice(start, end)}${trail}`,
     highlights,
-    matchOffset: matches[0]?.[0],
+    // The match actually shown, so the citation segment and speaker match the snippet.
+    matchOffset: shownOffset,
   }
 }
 

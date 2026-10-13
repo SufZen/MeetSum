@@ -10,6 +10,17 @@ function marked(snippet: string, highlights: [number, number][]) {
 }
 
 describe("buildSnippet", () => {
+  it("returns the offset of the match shown in the snippet, not of the first match in the chunk", () => {
+    // One lone early match, then a dense cluster later: the snippet shows the cluster.
+    const filler = " מילים אחרות לגמרי".repeat(30)
+    const text = `רון: תקציב.${filler}\nדנה: תקציב ועוד תקציב ושוב תקציב`
+    const result = buildSnippet(text, normalizeQuery("תקציב"), { window: 60 })
+    const cluster = text.lastIndexOf("דנה: ") + "דנה: ".length
+
+    expect(result.snippet).toContain("ועוד תקציב")
+    expect(result.matchOffset).toBe(cluster)
+  })
+
   it("highlights the whole prefixed surface word for a bare query", () => {
     const text = "דנה: אנחנו צריכים לדון בתקציב של הרבעון והתקציב השנתי"
     const result = buildSnippet(text, normalizeQuery("תקציב"))
