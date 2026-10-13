@@ -8,6 +8,7 @@ import { type BrowserRecorder, useBrowserRecorder } from "@/components/bot/use-b
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/meeting-atoms"
+import { useOptionalI18n } from "@/components/i18n-provider"
 
 type MeetingRecorderLabels = {
   ready: string
@@ -48,6 +49,8 @@ export function MeetingRecorder({
     onRecordingReady: sharedRecorder ? undefined : (file) => onRecordingReady?.(file),
   })
   const recorder = sharedRecorder ?? ownRecorder
+  const i18n = useOptionalI18n()
+  const storageFullLabel = i18n?.t("pwaStorageFull") ?? labels.unsupported
   const { state, startedAt } = recorder
   const [now, setNow] = useState(() => Date.now())
 
@@ -65,9 +68,10 @@ export function MeetingRecorder({
     }
     if (state === "blocked") return labels.blocked
     if (state === "unsupported") return labels.unsupported
+    if (state === "storage-full") return storageFullLabel
 
     return labels.ready
-  }, [labels, now, startedAt, state])
+  }, [labels, now, startedAt, state, storageFullLabel])
 
   return (
     <div className="flex items-center gap-3 rounded-md border border-line bg-surface p-3">
@@ -92,7 +96,12 @@ export function MeetingRecorder({
         <Button
           size="sm"
           variant="record"
-          onClick={() => void recorder.start({ meetingId: meetingId ?? null })}
+          onClick={(event) => {
+            // Capture starts only from the user's own click or key press
+            // (never from URL state or a scripted click; M9 security review).
+            if (!event.nativeEvent.isTrusted) return
+            void recorder.start({ meetingId: meetingId ?? null })
+          }}
         >
           <MicIcon data-icon="inline-start" />
           {labels.record}

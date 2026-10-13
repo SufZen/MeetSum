@@ -59,6 +59,8 @@ export function TopCommandBar({
   onInvite,
   recorder,
   recordingMeetingId,
+  recordOpen,
+  onRecordOpenChange,
   desktopOpen,
   onDesktopOpenChange,
   onSendBot,
@@ -86,6 +88,9 @@ export function TopCommandBar({
   recorder?: BrowserRecorder
   /** Meeting a browser recording is attached to (dock "Open meeting"). */
   recordingMeetingId?: string | null
+  /** Controlled recorder sheet (`?record=1` opens it; it never starts capture). */
+  recordOpen?: boolean
+  onRecordOpenChange?: (open: boolean) => void
   /** Controlled desktop-import sheet (opened by the blocked-bot fallback). */
   desktopOpen?: boolean
   onDesktopOpenChange?: (open: boolean) => void
@@ -171,6 +176,8 @@ export function TopCommandBar({
                 dictionary={dictionary}
                 pending={pending}
                 mode="record"
+                open={recordOpen}
+                onOpenChange={onRecordOpenChange}
                 onFileChange={onFileChange}
                 onRecordingReady={onRecordingReady}
                 recorder={recorder}

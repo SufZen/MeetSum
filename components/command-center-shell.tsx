@@ -325,15 +325,17 @@ export function CommandCenterShell({
     focusHeading()
   }, [activePanel])
 
-  // `?record=1` (the PWA "New recording" shortcut) starts the browser
-  // recorder once; the parameter is dropped so a reload doesn't restart it.
+  // `?record=1` (the PWA "New recording" shortcut) only OPENS the recorder
+  // sheet. URL state is navigation: capture always needs the user's own click
+  // on Record inside the sheet (no microphone request from a link). The
+  // parameter is dropped at once so it never round-trips or replays.
   const recordRequested = shell.searchParams.get("record") === "1"
-  const startRecordingRef = useRef<() => void>(() => undefined)
+  const [recordSheetOpen, setRecordSheetOpen] = useState(false)
 
   useEffect(() => {
     if (!recordRequested) return
     window.history.replaceState(null, "", `${window.location.pathname}${withoutParams(window.location.search, ["record"])}`)
-    startRecordingRef.current()
+    queueMicrotask(() => setRecordSheetOpen(true))
   }, [recordRequested])
   function openDrivePicker() {
     setDrivePickerReady(true)
@@ -1344,10 +1346,6 @@ export function CommandCenterShell({
   const defaultMeetingsViewClass =
     "grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem-var(--ms-dock-h,0px))] lg:min-h-0 lg:grid-cols-[330px_minmax(0,1fr)] lg:grid-rows-[100%] lg:auto-rows-max lg:overflow-y-auto ms-scrollbar 2xl:grid-cols-[330px_minmax(0,1fr)_270px] 2xl:overflow-hidden"
 
-  useEffect(() => {
-    startRecordingRef.current = () => void browserRecorder.start({ meetingId: null })
-  })
-
   const botEnabled = botSessions.enabled === true
   const meetingTitles = useMemo(
     () => Object.fromEntries(meetingRecords.map((meeting) => [meeting.id, meeting.title])),
@@ -1557,6 +1555,8 @@ export function CommandCenterShell({
             onInvite={() => setActivePanel("admin")}
             recorder={browserRecorder}
             recordingMeetingId={selectedMeeting?.id ?? null}
+            recordOpen={recordSheetOpen}
+            onRecordOpenChange={setRecordSheetOpen}
             desktopOpen={desktopOpen}
             onDesktopOpenChange={setDesktopOpen}
             onSendBot={
