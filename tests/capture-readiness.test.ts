@@ -70,7 +70,9 @@ describe("meeting capture readiness", () => {
 
     expect(readiness.status).toBe("capture_armed")
     expect(readiness.primaryAction).toBe("sync_artifacts")
-    expect(readiness.title).toBe("Capture armed")
+    // M9: codes only; components translate them.
+    expect(readiness).not.toHaveProperty("title")
+    expect(readiness).not.toHaveProperty("description")
   })
 
   it("asks past empty Google meetings to sync artifacts", () => {
@@ -101,7 +103,7 @@ describe("meeting capture readiness", () => {
     )
 
     expect(readiness.status).toBe("ready_to_process")
-    expect(readiness.checks).toContainEqual({ key: "transcript", label: "Transcript", state: "ready" })
+    expect(readiness.checks).toContainEqual({ key: "transcript", state: "ready" })
     expect(
       getMeetingCaptureReadiness(meeting({ source: "upload", transcriptSegmentCount: 0 })).status
     ).toBe("manual_capture")

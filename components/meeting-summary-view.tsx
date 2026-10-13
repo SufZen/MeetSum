@@ -78,7 +78,7 @@ const STAGE_KEYS: Record<string, string> = {
 
 /**
  * Localized title and description of a work status (lib/meetings/work-status
- * builds English text; it is only used here for its kind, stage and action).
+ * returns codes only: kind, stage, job status and action).
  */
 function workStatusText(
   status: MeetingWorkStatus,

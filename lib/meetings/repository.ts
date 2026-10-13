@@ -558,8 +558,8 @@ export type MeetingQualityWarning = {
     | "task_missing_owner_or_due_date"
     | "summary_language_mismatch"
   severity: "info" | "warning"
-  title: string
-  detail: string
+  /** Values for the localized copy (provider, confidencePercent, language, count). */
+  params?: Record<string, string | number>
 }
 
 /**

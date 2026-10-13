@@ -45,7 +45,7 @@ export function readinessCheckState(check: CaptureReadinessCheck, t: Translate):
   return t(CHECK_STATE_KEYS[check.state])
 }
 
-/** Localized title and description of a capture readiness (the lib text is English). */
+/** Localized title and description of a capture readiness (the lib returns codes only). */
 export function readinessText(
   readiness: Pick<CaptureReadiness, "status">,
   source: MeetingRecord["source"] | undefined,

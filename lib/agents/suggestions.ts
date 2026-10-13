@@ -7,42 +7,17 @@ export type MeetingAgentSuggestionInput = {
   payload: Record<string, unknown>
 }
 
-const suggestionCatalog: Array<{
-  intent: string
-  target: SuggestionTarget
-  title: string
-  description: string
-}> = [
-  {
-    intent: "export_to_realizeos",
-    target: "realizeos",
-    title: "Export to RealizeOS",
-    description: "Send structured meeting context into RealizeOS memory.",
-  },
-  {
-    intent: "draft_followup_email",
-    target: "mcp",
-    title: "Draft follow-up email",
-    description: "Prepare a follow-up draft from decisions and open action items.",
-  },
-  {
-    intent: "create_n8n_payload",
-    target: "n8n",
-    title: "Create n8n payload",
-    description: "Prepare a signed automation payload for downstream workflows.",
-  },
-  {
-    intent: "draft_client_recap",
-    target: "mcp",
-    title: "Draft client recap",
-    description: "Turn the summary into a concise client-ready recap.",
-  },
-  {
-    intent: "extract_crm_notes",
-    target: "webhook",
-    title: "Extract CRM notes",
-    description: "Create CRM-ready notes with participants, topics, and next steps.",
-  },
+/**
+ * Suggested agent runs carry an `intent` code; the UI translates it
+ * (`AGENT_INTENT_KEYS` in components/meeting-right-rail.tsx). M9: no English
+ * title or description is stored in the payload.
+ */
+const suggestionCatalog: Array<{ intent: string; target: SuggestionTarget }> = [
+  { intent: "export_to_realizeos", target: "realizeos" },
+  { intent: "draft_followup_email", target: "mcp" },
+  { intent: "create_n8n_payload", target: "n8n" },
+  { intent: "draft_client_recap", target: "mcp" },
+  { intent: "extract_crm_notes", target: "webhook" },
 ]
 
 function hasProcessedMeetingContent(meeting: MeetingRecord) {
@@ -88,8 +63,6 @@ export function buildMeetingAgentSuggestions(
       target: suggestion.target,
       payload: {
         intent: suggestion.intent,
-        title: suggestion.title,
-        description: suggestion.description,
         meetingId: meeting.id,
         meetingTitle: meeting.title,
         meetingStatus: meeting.status,

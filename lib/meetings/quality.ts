@@ -87,8 +87,10 @@ function hasGenericSpeakers(meeting: MeetingRecord, stats?: TranscriptQualitySta
 }
 
 /**
- * Quality warnings of a meeting. `stats` stands in for the transcript when
- * the record was loaded without segments.
+ * Quality warnings of a meeting, as codes and params (M9: components
+ * translate them by code, see `qualityWarningText` in
+ * components/meeting-right-rail.tsx). `stats` stands in for the transcript
+ * when the record was loaded without segments.
  */
 export function deriveMeetingQualityWarnings(
   meeting: MeetingRecord,
@@ -104,23 +106,17 @@ export function deriveMeetingQualityWarnings(
       : undefined
 
   if (hasOnlySmartNotesSource(meeting, stats)) {
-    warnings.push({
-      code: "smart_notes_only",
-      severity: "info",
-      title: "Smart notes source",
-      detail:
-        "This meeting was generated from Google smart notes, not a full transcript or audio recording.",
-    })
+    warnings.push({ code: "smart_notes_only", severity: "info" })
   }
 
   if (fallbackUsed) {
     warnings.push({
       code: "transcription_fallback",
       severity: "warning",
-      title: "Transcription fallback used",
-      detail: attemptedProvider
-        ? `${attemptedProvider} failed, so MeetSum used ${transcriptionRun.provider}.`
-        : `MeetSum used ${transcriptionRun.provider} after the primary transcription path failed.`,
+      params: {
+        provider: transcriptionRun.provider,
+        ...(attemptedProvider ? { attemptedProvider } : {}),
+      },
     })
   }
 
@@ -128,27 +124,19 @@ export function deriveMeetingQualityWarnings(
     warnings.push({
       code: "weak_transcript_confidence",
       severity: "warning",
-      title: "Weak transcript confidence",
-      detail: `Average segment confidence is ${Math.round(confidence * 100)}%. Review transcript details before relying on tasks or decisions.`,
+      params: { confidencePercent: Math.round(confidence * 100) },
     })
   }
 
   if (hasGenericSpeakers(meeting, stats)) {
-    warnings.push({
-      code: "no_speaker_diarization",
-      severity: "info",
-      title: "Speaker names need review",
-      detail:
-        "Speaker labels are generic. Assign participants in the transcript view when speaker ownership matters.",
-    })
+    warnings.push({ code: "no_speaker_diarization", severity: "info" })
   }
 
   if (meeting.intelligence?.generation?.languageCheck === "failed") {
     warnings.push({
       code: "summary_language_mismatch",
       severity: "warning",
-      title: "Summary language mismatch",
-      detail: `The summary is not fully in the expected language (${meeting.intelligence.generation.language ?? "unknown"}) even after a retry. Regenerate or review it.`,
+      params: { language: meeting.intelligence.generation.language ?? "unknown" },
     })
   }
 
@@ -160,8 +148,7 @@ export function deriveMeetingQualityWarnings(
     warnings.push({
       code: "task_missing_owner_or_due_date",
       severity: "info",
-      title: "Tasks need owner or due date",
-      detail: `${incompleteTasks.length} open action item${incompleteTasks.length === 1 ? "" : "s"} need an owner or due date before external automation.`,
+      params: { count: incompleteTasks.length },
     })
   }
 

@@ -40,7 +40,7 @@ const AGENT_STATUS_KEYS: Record<SuggestedAgentRun["status"], string> = {
   failed: "mtgAgentStatusFailed",
 }
 
-/** Quality warning copy by code (lib/meetings/quality stores English). */
+/** Quality warning copy by code and params (lib/meetings/quality returns codes only). */
 function qualityWarningText(
   warning: MeetingQualityWarning,
   meeting: MeetingRecord | null,
@@ -53,7 +53,7 @@ function qualityWarningText(
     case "transcription_fallback":
       return {
         title: t("mtgQualityFallbackTitle"),
-        detail: t("mtgQualityFallbackDetail", { provider: provider ?? "—" }),
+        detail: t("mtgQualityFallbackDetail", { provider: warning.params?.provider ?? provider ?? "—" }),
       }
     case "weak_transcript_confidence":
       return { title: t("mtgQualityWeakConfidenceTitle"), detail: t("mtgQualityWeakConfidenceDetail") }
@@ -62,9 +62,12 @@ function qualityWarningText(
     case "summary_language_mismatch":
       return { title: t("mtgQualityLanguageMismatchTitle"), detail: t("mtgQualityLanguageMismatchDetail") }
     case "task_missing_owner_or_due_date": {
-      const count = (meeting?.summary?.actionItems ?? []).filter(
-        (item) => item.status !== "done" && (!item.owner || !item.dueDate)
-      ).length
+      const count =
+        typeof warning.params?.count === "number"
+          ? warning.params.count
+          : (meeting?.summary?.actionItems ?? []).filter(
+              (item) => item.status !== "done" && (!item.owner || !item.dueDate)
+            ).length
 
       return {
         title: t("mtgQualityTasksIncompleteTitle"),
@@ -72,7 +75,7 @@ function qualityWarningText(
       }
     }
     default:
-      return { title: warning.title, detail: warning.detail }
+      return { title: String(warning.code), detail: "" }
   }
 }
 
