@@ -9,7 +9,6 @@ import {
   KeyRoundIcon,
   LinkIcon,
   RadioTowerIcon,
-  SendIcon,
   ShieldCheckIcon,
   Trash2Icon,
   WorkflowIcon,
@@ -129,47 +128,6 @@ type WebhookEventName =
   | "meeting.process_failed"
   | "realizeos.export.sent"
   | "realizeos.export.failed"
-
-type WebhookSubscriptionView = {
-  id: string
-  url: string
-  events: WebhookEventName[]
-  enabled: boolean
-  secretRef?: string
-  createdAt: string
-}
-
-type WebhookDeliveryView = {
-  id: string
-  subscriptionId: string
-  subscriptionUrl: string
-  eventName: string
-  status: string
-  attempts: number
-  maxAttempts?: number
-  responseStatus?: number
-  responseBody?: string
-  lastError?: string
-  deliveredAt?: string
-  durationMs?: number
-  createdAt: string
-}
-
-type RevealedWebhookSecret = {
-  subscriptionId: string
-  url: string
-  secret: string
-  reason: "created" | "rotated"
-}
-
-const WEBHOOK_RETRYABLE_STATUSES = new Set(["failed", "cancelled"])
-
-function webhookDeliveryBadgeClass(status: string) {
-  if (status === "sent") return "rounded-md bg-brand-soft text-brand-text"
-  if (status === "failed") return "rounded-md bg-destructive/10 text-destructive"
-  if (status === "retrying") return "rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300"
-  return "rounded-md bg-surface text-muted-foreground"
-}
 
 type MediaAssetView = {
   id: string
@@ -499,18 +457,7 @@ export function OperationalPage({
   const [roomLoading, setRoomLoading] = useState(false)
   const [newRoomName, setNewRoomName] = useState("")
   const [roomCreating, setRoomCreating] = useState(false)
-  const [webhookUrl, setWebhookUrl] = useState("")
-  const [webhookEventSelection, setWebhookEventSelection] =
-    useState<WebhookEventName[]>(["meeting.completed", "summary.created"])
-  const [webhookSubscriptions, setWebhookSubscriptions] = useState<
-    WebhookSubscriptionView[]
-  >([])
-  const [webhookDeliveries, setWebhookDeliveries] = useState<
-    WebhookDeliveryView[]
-  >([])
   const [webhookLoading, setWebhookLoading] = useState(false)
-  const [revealedWebhookSecret, setRevealedWebhookSecret] =
-    useState<RevealedWebhookSecret>()
   const [realizeOSStatus, setRealizeOSStatus] = useState<RealizeOSStatusView>()
   const [realizeOSExports, setRealizeOSExports] = useState<RealizeOSExportView[]>([])
   const [mediaAssets, setMediaAssets] = useState<MediaAssetView[]>([])
@@ -639,34 +586,13 @@ export function OperationalPage({
   async function refreshAutomations() {
     setWebhookLoading(true)
     try {
-      const [
-        subscriptionsResponse,
-        deliveriesResponse,
-        realizeOSStatusResponse,
-        realizeOSExportsResponse,
-      ] = await Promise.all([
-        fetch("/api/webhooks/subscriptions"),
-        fetch("/api/webhooks/deliveries?limit=12"),
+      const [realizeOSStatusResponse, realizeOSExportsResponse] = await Promise.all([
         fetch("/api/integrations/realizeos/status"),
         fetch("/api/integrations/realizeos/exports?limit=8"),
       ])
-      const subscriptionsBody = await subscriptionsResponse.json()
-      const deliveriesBody = await deliveriesResponse.json()
       const realizeOSStatusBody = await realizeOSStatusResponse.json()
       const realizeOSExportsBody = await realizeOSExportsResponse.json()
 
-      if (!subscriptionsResponse.ok) {
-        throw new Error(
-          subscriptionsBody.error ?? "Unable to load webhook subscriptions"
-        )
-      }
-
-      if (!deliveriesResponse.ok) {
-        throw new Error(deliveriesBody.error ?? "Unable to load webhook history")
-      }
-
-      setWebhookSubscriptions(subscriptionsBody.subscriptions ?? [])
-      setWebhookDeliveries(deliveriesBody.deliveries ?? [])
       if (realizeOSStatusResponse.ok) {
         setRealizeOSStatus(realizeOSStatusBody.status)
       }
@@ -676,207 +602,6 @@ export function OperationalPage({
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to refresh automations"
-      )
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  function toggleWebhookEvent(eventName: WebhookEventName) {
-    setWebhookEventSelection((current) => {
-      if (current.includes(eventName)) {
-        const next = current.filter((event) => event !== eventName)
-        return next.length ? next : current
-      }
-
-      return [...current, eventName]
-    })
-  }
-
-  async function createWebhookSubscription() {
-    if (!webhookUrl.trim()) {
-      toast.error("Webhook URL is required")
-      return
-    }
-
-    setWebhookLoading(true)
-    try {
-      const response = await fetch("/api/webhooks/subscriptions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          url: webhookUrl.trim(),
-          events: webhookEventSelection,
-        }),
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Unable to create webhook subscription")
-      }
-
-      setWebhookUrl("")
-      if (body.secret && body.subscription) {
-        setRevealedWebhookSecret({
-          subscriptionId: body.subscription.id,
-          url: body.subscription.url,
-          secret: body.secret,
-          reason: "created",
-        })
-      }
-      toast.success("Webhook subscription created")
-      await refreshAutomations()
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to create subscription"
-      )
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  async function setWebhookEnabled(subscription: WebhookSubscriptionView) {
-    setWebhookLoading(true)
-    try {
-      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled: !subscription.enabled }),
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Unable to update webhook subscription")
-      }
-
-      toast.success(subscription.enabled ? "Webhook paused" : "Webhook enabled")
-      await refreshAutomations()
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to update subscription"
-      )
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  async function rotateWebhookSecret(subscription: WebhookSubscriptionView) {
-    const confirmed = window.confirm(
-      "Rotate the signing secret? Receivers must switch to the new secret; deliveries signed with the old one will stop verifying."
-    )
-
-    if (!confirmed) return
-
-    setWebhookLoading(true)
-    try {
-      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rotateSecret: true }),
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Unable to rotate webhook secret")
-      }
-
-      setRevealedWebhookSecret({
-        subscriptionId: subscription.id,
-        url: subscription.url,
-        secret: body.secret,
-        reason: "rotated",
-      })
-      toast.success("Webhook secret rotated")
-      await refreshAutomations()
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to rotate webhook secret"
-      )
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  async function deleteWebhookSubscription(subscription: WebhookSubscriptionView) {
-    const confirmed = window.confirm(
-      `Delete the webhook for ${subscription.url}? Its delivery history is deleted too.`
-    )
-
-    if (!confirmed) return
-
-    setWebhookLoading(true)
-    try {
-      const response = await fetch(`/api/webhooks/subscriptions/${subscription.id}`, {
-        method: "DELETE",
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Unable to delete webhook subscription")
-      }
-
-      if (revealedWebhookSecret?.subscriptionId === subscription.id) {
-        setRevealedWebhookSecret(undefined)
-      }
-      toast.success("Webhook subscription deleted")
-      await refreshAutomations()
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to delete subscription"
-      )
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  async function sendWebhookTest(subscription?: WebhookSubscriptionView) {
-    if (!subscription && !webhookUrl.trim()) {
-      toast.error("Add a webhook URL or choose an existing subscription")
-      return
-    }
-
-    setWebhookLoading(true)
-    try {
-      const response = await fetch("/api/webhooks/test", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          subscription
-            ? { subscriptionId: subscription.id }
-            : { url: webhookUrl.trim(), eventName: webhookEventSelection[0] }
-        ),
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Webhook test failed")
-      }
-
-      toast.success(`Webhook test sent (${body.responseStatus})`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Webhook test failed")
-    } finally {
-      setWebhookLoading(false)
-    }
-  }
-
-  async function retryWebhookDelivery(delivery: WebhookDeliveryView) {
-    setWebhookLoading(true)
-    try {
-      const response = await fetch(`/api/webhooks/deliveries/${delivery.id}/retry`, {
-        method: "POST",
-      })
-      const body = await response.json()
-
-      if (!response.ok) {
-        throw new Error(body.error ?? "Unable to retry webhook delivery")
-      }
-
-      toast.success("Webhook delivery queued for retry")
-      await refreshAutomations()
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to retry delivery"
       )
     } finally {
       setWebhookLoading(false)
@@ -1470,180 +1195,20 @@ export function OperationalPage({
         description="Webhook, n8n, RealizeOS, CLI, and MCP connections should all consume the same structured meeting intelligence."
       >
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+          {/* M8: webhook subscriptions and their delivery log moved to Settings → Integrations. */}
           <OpsCard
             icon={WorkflowIcon}
             title="Webhook subscriptions"
-            description="Create signed outbound webhooks for completed meetings, summaries, and action items."
-            status={webhookLoading ? "syncing" : `${webhookSubscriptions.length} active`}
+            description={t.integrationsWebhooksMovedHint}
           >
-            <div className="grid gap-3">
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-                <Input
-                  className="h-10"
-                  value={webhookUrl}
-                  onChange={(event) => setWebhookUrl(event.target.value)}
-                  placeholder="https://your-n8n-or-system.example/webhook/meetsum"
-                />
-                <Button
-                  className="h-10"
-                  disabled={webhookLoading}
-                  onClick={createWebhookSubscription}
-                >
-                  <SendIcon data-icon="inline-start" data-directional="" className="size-4" />
-                  Add webhook
-                </Button>
-              </div>
-              <Button
-                variant="outline"
-                className="h-9 w-fit"
-                disabled={webhookLoading || !webhookUrl.trim()}
-                onClick={() => sendWebhookTest()}
-              >
-                Send test payload to URL
-              </Button>
-              <div className="flex flex-wrap gap-2">
-                {webhookEvents.map((event) => (
-                  <label
-                    key={event.value}
-                    className="flex h-8 cursor-pointer items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 text-xs font-medium text-foreground"
-                  >
-                    <input
-                      type="checkbox"
-                      className="size-3.5 accent-brand"
-                      checked={webhookEventSelection.includes(event.value)}
-                      onChange={() => toggleWebhookEvent(event.value)}
-                    />
-                    {event.label}
-                  </label>
-                ))}
-              </div>
-              {revealedWebhookSecret ? (
-                <div className="rounded-lg border border-brand bg-brand-soft p-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <KeyRoundIcon className="size-4 text-brand-text" />
-                    {revealedWebhookSecret.reason === "rotated"
-                      ? "New signing secret"
-                      : "Signing secret"}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Copy it now for {revealedWebhookSecret.url}. It is stored
-                    encrypted and will not be shown again. Verify the
-                    x-meetsum-signature header (HMAC-SHA256 of the body) with it.
-                  </p>
-                  <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface px-2 py-1.5 font-mono text-xs text-foreground">
-                      {revealedWebhookSecret.secret}
-                    </code>
-                    <div className="flex shrink-0 gap-2">
-                      <Button
-                        className="h-8"
-                        variant="outline"
-                        onClick={() =>
-                          copyAutomationText(revealedWebhookSecret.secret, "Signing secret")
-                        }
-                      >
-                        Copy
-                      </Button>
-                      <Button
-                        className="h-8"
-                        variant="outline"
-                        onClick={() => setRevealedWebhookSecret(undefined)}
-                      >
-                        Done
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              <div className="grid gap-2">
-                {webhookSubscriptions.map((subscription) => (
-                  <div
-                    key={subscription.id}
-                    className="rounded-lg border border-line bg-surface-2 p-3"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="truncate font-mono text-xs text-foreground">
-                          {subscription.url}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {subscription.events.map((event) => (
-                            <span
-                              key={event}
-                              className="rounded-sm bg-brand-soft px-2 py-0.5 text-2xs font-medium text-brand-text"
-                            >
-                              {event}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Badge
-                          className={
-                            subscription.enabled
-                              ? "rounded-md bg-brand-soft text-brand-text"
-                              : "rounded-md bg-surface text-muted-foreground"
-                          }
-                        >
-                          {subscription.enabled ? "enabled" : "paused"}
-                        </Badge>
-                        {subscription.secretRef === "global" ? (
-                          <Badge
-                            className="rounded-md bg-surface text-muted-foreground"
-                            title="Signed with the shared WEBHOOK_SIGNING_SECRET. Rotate to give this webhook its own secret."
-                          >
-                            shared secret
-                          </Badge>
-                        ) : null}
-                        <Button
-                          className="h-8"
-                          variant="outline"
-                          disabled={webhookLoading}
-                          onClick={() => setWebhookEnabled(subscription)}
-                        >
-                          {subscription.enabled ? "Pause" : "Enable"}
-                        </Button>
-                        <Button
-                          className="h-8"
-                          variant="outline"
-                          disabled={webhookLoading || !subscription.enabled}
-                          onClick={() => sendWebhookTest(subscription)}
-                        >
-                          Test
-                        </Button>
-                        <Button
-                          className="h-8"
-                          variant="outline"
-                          disabled={webhookLoading}
-                          onClick={() => rotateWebhookSecret(subscription)}
-                          title="Rotate signing secret"
-                        >
-                          <KeyRoundIcon className="size-4" />
-                          <span className="sr-only">Rotate signing secret</span>
-                        </Button>
-                        <Button
-                          className="h-8"
-                          variant="outline"
-                          disabled={webhookLoading}
-                          onClick={() => deleteWebhookSubscription(subscription)}
-                          title="Delete webhook"
-                        >
-                          <Trash2Icon className="size-4" />
-                          <span className="sr-only">Delete webhook</span>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {!webhookSubscriptions.length ? (
-                  <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
-                    No webhook subscriptions yet. Add your n8n webhook URL or
-                    another API endpoint to start receiving signed MeetSum
-                    events.
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <Button
+              variant="outline"
+              className="h-9 w-fit"
+              nativeButton={false}
+              render={<a href={`/${memoryLocale}?panel=settings&section=integrations`} />}
+            >
+              {t.integrationsTitle}
+            </Button>
           </OpsCard>
 
           <div className="grid gap-4">
@@ -1753,7 +1318,7 @@ export function OperationalPage({
             <OpsCard
               icon={LinkIcon}
               title="n8n"
-              description="Paste a production n8n webhook URL above. MeetSum will sign each event with x-meetsum-signature."
+              description="Create the webhook in Settings → Integrations. MeetSum signs each event with x-meetsum-signature."
               status="prepared"
             >
               <div className="grid gap-2">
@@ -1774,80 +1339,6 @@ export function OperationalPage({
               </div>
             </OpsCard>
           </div>
-
-          <OpsCard
-            icon={CloudIcon}
-            title="Delivery history"
-            description="Recent webhook attempts with status, response code, and retry clues."
-            status={`${webhookDeliveries.length} recent`}
-          >
-            <div className="grid gap-2">
-              <Button
-                variant="outline"
-                className="h-8 w-fit"
-                disabled={webhookLoading}
-                onClick={refreshAutomations}
-              >
-                Refresh history
-              </Button>
-              {webhookDeliveries.map((delivery) => (
-                <div
-                  key={delivery.id}
-                  className="rounded-lg border border-line bg-surface-2 p-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-foreground">
-                      {delivery.eventName}
-                    </div>
-                    <Badge className={webhookDeliveryBadgeClass(delivery.status)}>
-                      {delivery.status}
-                      {delivery.responseStatus ? ` ${delivery.responseStatus}` : ""}
-                    </Badge>
-                  </div>
-                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                    {delivery.subscriptionUrl}
-                  </div>
-                  {delivery.lastError ? (
-                    <div className="mt-2 rounded-md bg-destructive/10 px-2 py-1 text-xs text-destructive">
-                      {delivery.lastError}
-                    </div>
-                  ) : null}
-                  {delivery.responseBody ? (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-2xs font-medium text-brand-text hover:underline">
-                        Response body
-                      </summary>
-                      <pre className="mt-1.5 max-h-32 overflow-auto rounded-md border border-line bg-surface p-2 font-mono text-2xs leading-4 text-muted-foreground">
-                        {delivery.responseBody}
-                      </pre>
-                    </details>
-                  ) : null}
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      Attempts: {delivery.attempts}
-                      {delivery.maxAttempts ? ` (budget ${delivery.maxAttempts})` : ""}
-                      {delivery.durationMs !== undefined ? ` · ${delivery.durationMs} ms` : ""}
-                    </span>
-                    <Button
-                      variant="outline"
-                      className="h-7"
-                      disabled={
-                        webhookLoading || !WEBHOOK_RETRYABLE_STATUSES.has(delivery.status)
-                      }
-                      onClick={() => retryWebhookDelivery(delivery)}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {!webhookDeliveries.length ? (
-                <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
-                  Delivery attempts will appear after a subscribed event fires.
-                </div>
-              ) : null}
-            </div>
-          </OpsCard>
 
           <div className="xl:col-span-2">
             <JobRecoveryPanel
