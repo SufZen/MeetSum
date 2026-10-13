@@ -58,8 +58,26 @@ export function formatDate(value: DateInput, fmt: Fmt, style: DateStyle = "date"
   const options = DATE_STYLES[style]
   // Hebrew pads the 24-hour clock ("09:00"); English uses "9:00 AM".
   const hour = options.hour && fmt.locale === "en" ? { hour: "numeric" as const } : {}
+  const formatter = new Intl.DateTimeFormat(fmt.locale, { ...baseDateOptions(fmt), ...options, ...hour })
 
-  return new Intl.DateTimeFormat(fmt.locale, { ...baseDateOptions(fmt), ...options, ...hour }).format(date)
+  if (fmt.locale === "en" && (style === "dateTime" || style === "dateTimeLong")) {
+    return englishDateTime(formatter.formatToParts(date))
+  }
+
+  return formatter.format(date)
+}
+
+/**
+ * English date + time always as "Oct 12, 2026, 3:13 PM": assembled from the
+ * parts, so the commas and plain spaces do not depend on the runtime's ICU
+ * data (some builds dropped the commas, and U+202F before "PM" is missing
+ * from PDF fonts).
+ */
+function englishDateTime(parts: Intl.DateTimeFormatPart[]): string {
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? ""
+  const period = part("dayPeriod")
+
+  return `${part("month")} ${part("day")}, ${part("year")}, ${part("hour")}:${part("minute")}${period ? ` ${period}` : ""}`
 }
 
 type ZonedDay = { y: number; m: number; d: number }

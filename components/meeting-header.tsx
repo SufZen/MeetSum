@@ -32,16 +32,12 @@ import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import type { MeetingParticipant, MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
+import { meetingSourceLabel } from "@/lib/meetings/source-label"
 
 type Translate = ReturnType<typeof useI18n>["t"]
 
 function sourceLabel(source: MeetingRecord["source"], t: Translate) {
-  if (source === "google_meet") return "Google Meet"
-  if (source === "pwa_recorder") return t("mtgSourceRecorder")
-  if (source === "desktop_recorder") return t("mtgSourceDesktopRecorder")
-  if (source === "upload") return t("mtgSourceUpload")
-  if (source === "meeting_bot") return t("mtgSourceBot")
-  return source.replaceAll("_", " ")
+  return meetingSourceLabel(source, t)
 }
 
 const ATTENDANCE_KEYS: Record<MeetingParticipant["attendanceStatus"], string> = {

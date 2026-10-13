@@ -158,6 +158,25 @@ describe("renderMeetingPdf (English)", () => {
   })
 })
 
+describe("renderMeetingPdf meta line", () => {
+  it("translates the source and writes the English date with commas", async () => {
+    const en = parsePdf(
+      await renderMeetingPdf({ ...englishMeeting, startedAt: "2026-10-12T12:13:00Z" }, { locale: "en", timeZone: "Asia/Jerusalem" })
+    )
+    const enLines = en.pages.flatMap((page) => page.lines).join(" | ")
+
+    expect(enLines).toContain("Date: Oct 12, 2026, 3:13 PM")
+    expect(enLines).toContain("Source: Upload")
+    expect(enLines).not.toContain("Source: upload")
+
+    const he = parsePdf(await renderMeetingPdf(hebrewMeeting, { locale: "he", timeZone: "Asia/Jerusalem" }))
+    const heLines = he.pages.flatMap((page) => page.lines).join(" | ")
+
+    expect(heLines).toContain(visualRtl("העלאה"))
+    expect(heLines).not.toContain("upload")
+  })
+})
+
 describe("renderMeetingPdf limits", () => {
   it("renders a 2-hour, 2000-segment Hebrew meeting in under 3 s with page numbers", async () => {
     const texts = HEBREW_MIXED_CORPUS.map((entry) => entry.text)

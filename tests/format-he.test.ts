@@ -86,6 +86,14 @@ describe("formatDate", () => {
     expect(formatDate(value, en, "date")).toBe("Oct 13, 2026")
   })
 
+  it("writes English date + time with commas and plain spaces (PDF header)", () => {
+    const value = new Date("2026-10-12T12:13:00Z")
+
+    expect(formatDate(value, en, "dateTime")).toBe("Oct 12, 2026, 3:13 PM")
+    expect(formatDate(value, en, "dateTimeLong")).toBe("October 12, 2026, 3:13 PM")
+    expect(formatDate(new Date("2026-10-12T21:05:00Z"), en, "dateTime")).toBe("Oct 13, 2026, 12:05 AM")
+  })
+
   it("renders both sides of the Jerusalem DST change correctly", () => {
     expect(formatDate(new Date("2026-10-24T22:30:00Z"), he, "time")).toBe("01:30")
     expect(formatDate(new Date("2026-10-24T23:30:00Z"), he, "time")).toBe("01:30")

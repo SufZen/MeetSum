@@ -2,10 +2,12 @@ import PDFDocument from "pdfkit"
 
 import { formatDate, formatDuration, formatTimecode, type Fmt } from "@/lib/i18n/format"
 import { directionFor, fixHebrewTypography, hasHebrew, hebrewList, isolateLtr } from "@/lib/i18n/hebrew-text"
+import { m9ContentMeetingMessages } from "@/lib/i18n/m9/content-meeting"
 import { m9ExportsMessages } from "@/lib/i18n/m9/exports"
 import { resolveTimeZone } from "@/lib/i18n/time-zone"
 import { formatMessage } from "@/lib/i18n/workspace-messages"
 import type { MeetingRecord } from "@/lib/meetings/repository"
+import { meetingSourceLabel } from "@/lib/meetings/source-label"
 import {
   layoutParagraph,
   MISSING_GLYPH,
@@ -280,7 +282,9 @@ export async function renderMeetingPdfDetailed(
   const meta: string[] = [
     `${t.pdfDate}: ${isolateIfLatin(formatDate(meeting.startedAt, fmt, "dateTime"))}`,
     ...(durationMs > 0 ? [`${t.pdfDuration}: ${formatDuration(durationMs, fmt, "long")}`] : []),
-    `${t.pdfSource}: ${isolateLtr(meeting.source)}`,
+    `${t.pdfSource}: ${isolateIfLatin(
+      meetingSourceLabel(meeting.source, (key) => (m9ContentMeetingMessages[locale] as Record<string, string>)[key] ?? key)
+    )}`,
   ]
 
   writer.paragraph(meta.join("  ·  "), { base: chromeBase, size: 9.5, color: MUTED }, 2)
