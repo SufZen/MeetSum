@@ -62,12 +62,25 @@ function deliveryRow(overrides: DeliveryRowOverrides = {}) {
 
 /** Routes SQL to canned results and records every call. */
 function useDatabase(options: {
-  subscriptions?: Array<{ id: string; url: string; events: string[] }>
+  subscriptions?: Array<{
+    id: string
+    url: string
+    events: string[]
+    workspace_id?: string
+  }>
   delivery?: ReturnType<typeof deliveryRow>
 }) {
-  query.mockImplementation(async (sql: string) => {
+  query.mockImplementation(async (sql: string, values?: unknown[]) => {
     if (/from webhook_subscriptions\s+where enabled = true/.test(sql)) {
-      return { rows: options.subscriptions ?? [] }
+      // Honour the mandatory workspace filter like Postgres would.
+      const workspaceId = /workspace_id = \$1/.test(sql) ? values?.[0] : undefined
+      return {
+        rows: (options.subscriptions ?? []).filter(
+          (subscription) =>
+            workspaceId !== undefined &&
+            (subscription.workspace_id ?? "ws_1") === workspaceId
+        ),
+      }
     }
     if (/from webhook_deliveries d\s+left join/.test(sql)) {
       return { rows: options.delivery ? [options.delivery] : [] }
@@ -113,6 +126,7 @@ describe("deliverWebhookEvent", () => {
     })
 
     const result = await deliverWebhookEvent({
+      workspaceId: "ws_1",
       eventName: "summary.created",
       data: { meetingId: "meet_1" },
     })
@@ -151,7 +165,7 @@ describe("deliverWebhookEvent", () => {
       ],
     })
 
-    await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+    await deliverWebhookEvent({ eventName: "summary.created", data: {}, workspaceId: "ws_1" })
 
     const insert = query.mock.calls.find(([sql]) =>
       /insert into webhook_deliveries/.test(sql as string)
@@ -174,6 +188,7 @@ describe("deliverWebhookEvent", () => {
     })
 
     const result = await deliverWebhookEvent({
+      workspaceId: "ws_1",
       eventName: "summary.created",
       data: {},
     })
@@ -193,6 +208,7 @@ describe("deliverWebhookEvent", () => {
     })
 
     const result = await deliverWebhookEvent({
+      workspaceId: "ws_1",
       eventName: "summary.created",
       data: {},
     })
@@ -213,13 +229,14 @@ describe("deliverWebhookEvent", () => {
       })),
     })
 
-    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {}, workspaceId: "ws_1" })
 
     const select = query.mock.calls.find(([sql]) =>
       /from webhook_subscriptions/.test(sql as string)
     )
-    expect(select?.[0]).toMatch(/events \? \$1/)
-    expect(select?.[1]).toEqual(["summary.created", 3])
+    expect(select?.[0]).toMatch(/workspace_id = \$1/)
+    expect(select?.[0]).toMatch(/events \? \$2/)
+    expect(select?.[1]).toEqual(["ws_1", "summary.created", 3])
     expect(queueAdd).toHaveBeenCalledTimes(2)
     expect(result).toMatchObject({ queued: 2, truncated: true })
   })
@@ -236,7 +253,7 @@ describe("deliverWebhookEvent", () => {
       delivery: deliveryRow(),
     })
 
-    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {}, workspaceId: "ws_1" })
 
     // enqueue is tried once, then skipped for the rest
     expect(queueAdd).toHaveBeenCalledTimes(1)
@@ -257,17 +274,72 @@ describe("deliverWebhookEvent", () => {
       ],
     })
 
-    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {} })
+    const result = await deliverWebhookEvent({ eventName: "summary.created", data: {}, workspaceId: "ws_1" })
 
     expect(guardedFetch).not.toHaveBeenCalled()
     expect(result).toMatchObject({ delivered: 0, failed: 1 })
+  })
+
+  it("never delivers a W1 event to a W2 subscription", async () => {
+    useDatabase({
+      subscriptions: [
+        {
+          id: "wh_w1",
+          url: "https://w1.example.com",
+          events: ["summary.created"],
+          workspace_id: "ws_1",
+        },
+        {
+          id: "wh_w2",
+          url: "https://w2.example.com",
+          events: ["summary.created"],
+          workspace_id: "ws_2",
+        },
+      ],
+    })
+
+    await deliverWebhookEvent({
+      eventName: "summary.created",
+      data: { meetingId: "meet_1" },
+      workspaceId: "ws_1",
+    })
+
+    const inserts = query.mock.calls.filter(([sql]) =>
+      /insert into webhook_deliveries/.test(sql as string)
+    )
+    expect(inserts.map(([, values]) => (values as unknown[])[1])).toEqual(["wh_w1"])
+    const envelope = JSON.parse((inserts[0][1] as unknown[])[4] as string)
+    expect(envelope).toMatchObject({
+      name: "summary.created",
+      workspace_id: "ws_1",
+      data: { meetingId: "meet_1" },
+    })
+  })
+
+  it("fails closed without a workspace: no subscription is even queried", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    useDatabase({
+      subscriptions: [
+        { id: "wh_1", url: "https://a.example.com", events: ["summary.created"] },
+      ],
+    })
+
+    // Runtime guard for untyped callers (legacy job payloads).
+    const result = await deliverWebhookEvent({
+      eventName: "summary.created",
+      data: {},
+    } as Parameters<typeof deliverWebhookEvent>[0])
+
+    expect(result).toMatchObject({ queued: 0, delivered: 0, skipped: true })
+    expect(query).not.toHaveBeenCalled()
+    expect(queueAdd).not.toHaveBeenCalled()
   })
 
   it("skips when storage is not postgres", async () => {
     vi.stubEnv("MEETSUM_STORAGE", "memory")
 
     await expect(
-      deliverWebhookEvent({ eventName: "summary.created", data: {} })
+      deliverWebhookEvent({ eventName: "summary.created", data: {}, workspaceId: "ws_1" })
     ).resolves.toMatchObject({ skipped: true })
     expect(query).not.toHaveBeenCalled()
   })
@@ -428,6 +500,23 @@ describe("processWebhookDeliveryJob", () => {
       status: "cancelled",
     })
     expect(guardedFetch).not.toHaveBeenCalled()
+  })
+
+  it("cancels a delivery whose event belongs to another workspace than its subscription", async () => {
+    useDatabase({
+      delivery: {
+        ...deliveryRow(),
+        event_payload: { ...event, workspace_id: "ws_1" },
+        subscription_workspace_id: "ws_2",
+      } as ReturnType<typeof deliveryRow>,
+    })
+
+    await expect(processWebhookDeliveryJob(job)).resolves.toEqual({
+      deliveryId: "whdel_1",
+      status: "cancelled",
+    })
+    expect(guardedFetch).not.toHaveBeenCalled()
+    expect(lastStatusUpdate()[1]).toBe("cancelled")
   })
 
   it("returns cancelled for an unknown delivery id", async () => {

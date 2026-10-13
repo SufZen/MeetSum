@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz, type AuthContext } from "@/lib/auth/authz"
 import {
   GraphSubscriptionError,
   ensureTeamsSubscription,
@@ -9,14 +10,25 @@ import {
   listTeamsSubscriptions,
 } from "@/lib/capture/teams-subscriptions"
 import { CaptureConfigError, RecordingDownloadError } from "@/lib/capture/types"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 
 export const runtime = "nodejs"
 
-/** GET /api/integrations/teams/subscription — Teams subscription status. */
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
+/**
+ * The Teams subscription is instance-level and delivers into the capture
+ * workspace (MEETSUM_CAPTURE_WORKSPACE_ID); only that workspace manages it.
+ */
+function notCaptureWorkspace(ctx: AuthContext) {
+  return ctx.workspace.id !== getCaptureWorkspaceId()
+    ? jsonError("Teams capture is not connected to this workspace", 404)
+    : undefined
+}
 
-  if (unauthorized) return unauthorized
+/** GET /api/integrations/teams/subscription — Teams subscription status. */
+export const GET = withAuthz("integrations:manage", async (_request, ctx) => {
+  const blocked = notCaptureWorkspace(ctx)
+
+  if (blocked) return blocked
 
   const configured = isTeamsSubscriptionConfigured()
   const config = getTeamsSubscriptionConfig()
@@ -28,13 +40,13 @@ export async function GET(request: Request) {
     lifecycleNotificationUrl: config?.lifecycleNotificationUrl,
     subscriptions: configured ? await listTeamsSubscriptions() : [],
   })
-}
+})
 
 /** POST /api/integrations/teams/subscription — create or renew the subscription now. */
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
+export const POST = withAuthz("integrations:manage", async (_request, ctx) => {
+  const blocked = notCaptureWorkspace(ctx)
 
-  if (unauthorized) return unauthorized
+  if (blocked) return blocked
 
   if (!isTeamsSubscriptionConfigured()) {
     return jsonError(
@@ -64,4 +76,4 @@ export async function POST(request: Request) {
       status
     )
   }
-}
+})

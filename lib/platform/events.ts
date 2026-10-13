@@ -17,17 +17,21 @@ export type PlatformEvent<TData extends Record<string, unknown>> = {
   id: string
   name: PlatformEventName
   occurredAt: string
+  /** Workspace the event belongs to (M2); part of the signed envelope. */
+  workspace_id?: string
   data: TData
 }
 
 export function createPlatformEvent<TData extends Record<string, unknown>>(
   name: PlatformEventName,
   data: TData,
+  options: { workspaceId?: string } = {},
 ): PlatformEvent<TData> {
   return {
     id: `evt_${crypto.randomUUID()}`,
     name,
     occurredAt: new Date().toISOString(),
+    ...(options.workspaceId ? { workspace_id: options.workspaceId } : {}),
     data,
   }
 }

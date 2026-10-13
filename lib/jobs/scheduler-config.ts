@@ -44,6 +44,21 @@ export function getGoogleSyncScheduleConfig(
   }
 }
 
+export type RetentionScheduleConfig = {
+  /** MEETSUM_RETENTION_ENFORCE=true turns on the daily media.retention run. */
+  enabled: boolean
+  hours: number
+}
+
+export function getRetentionScheduleConfig(
+  env: Record<string, string | undefined> = process.env
+): RetentionScheduleConfig {
+  return {
+    enabled: env.MEETSUM_RETENTION_ENFORCE === "true",
+    hours: positiveNumber(env.MEETSUM_RETENTION_INTERVAL_HOURS, 24),
+  }
+}
+
 export type CaptureScheduleConfig = {
   teamsSubscriptionRenew: {
     minutes: number

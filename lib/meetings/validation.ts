@@ -13,19 +13,35 @@ const meetingSourceSchema = z.enum([
 const createMeetingSchema = z.object({
   title: z.string().trim().min(1),
   source: meetingSourceSchema,
-  language: z.string().trim().min(2).default("he"),
+  // A blank language counts as omitted (falls back to the default).
+  language: z.preprocess(
+    (value) => (typeof value === "string" && !value.trim() ? undefined : value),
+    z.string().trim().min(2).optional()
+  ),
   startedAt: z.string().datetime({ offset: true }),
   participants: z.array(z.string().trim().min(1)).default([]),
 })
 
-export function parseCreateMeetingInput(payload: unknown): CreateMeetingInput {
+/**
+ * Parses a create-meeting request body. `defaultLanguage` (from the
+ * workspace `meetingLanguageMode`, see resolveDefaultMeetingLanguage) is used
+ * when the body omits `language`. Ownership/visibility are never taken from
+ * the body: callers set them from the authenticated principal.
+ */
+export function parseCreateMeetingInput(
+  payload: unknown,
+  options: { defaultLanguage?: string } = {}
+): CreateMeetingInput {
   const result = createMeetingSchema.safeParse(payload)
 
   if (!result.success) {
     throw new Error("Invalid meeting payload")
   }
 
-  return result.data
+  return {
+    ...result.data,
+    language: result.data.language ?? options.defaultLanguage ?? "he",
+  }
 }
 
 export function parseRequiredString(payload: unknown, field: string): string {

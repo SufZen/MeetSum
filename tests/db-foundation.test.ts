@@ -31,26 +31,29 @@ describe("database migrations", () => {
 describe("Postgres meeting repository", () => {
   it("persists meetings with JSON participants and maps database rows to records", async () => {
     const queries: Array<{ text: string; values: unknown[] }> = []
-    const repository = createPostgresMeetingRepository({
-      query: async (text, values = []) => {
-        queries.push({ text, values })
+    const repository = createPostgresMeetingRepository(
+      {
+        query: async (text, values = []) => {
+          queries.push({ text, values })
 
-        return {
-          rows: [
-            {
-              id: "meet_1",
-              title: values[0],
-              source: values[1],
-              language: values[2],
-              status: "created",
-              retention: "audio",
-              started_at: values[3],
-              participants: values[4],
-            },
-          ],
-        }
+          return {
+            rows: [
+              {
+                id: "meet_1",
+                title: values[0],
+                source: values[1],
+                language: values[2],
+                status: "created",
+                retention: "audio",
+                started_at: values[3],
+                participants: values[4],
+              },
+            ],
+          }
+        },
       },
-    })
+      { kind: "system", workspaceId: "ws_default" }
+    )
 
     const meeting = await repository.createMeeting({
       title: "Workspace sync review",

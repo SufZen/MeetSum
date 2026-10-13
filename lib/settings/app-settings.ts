@@ -8,7 +8,6 @@ import {
 export type AppSettings = {
   defaultLocale: SupportedLocale
   meetingLanguageMode: "auto" | SupportedLocale
-  aiProviderPreference: "gemini-developer-api" | "vertex-ai"
   summaryTemplate: "general" | "sales" | "real-estate" | "product" | "operations" | "legal"
   googleArtifactsFirst: boolean
   pwaRecorderEnabled: boolean
@@ -18,7 +17,8 @@ export type AppSettings = {
   shareActionsByDefault: boolean
   audioRetentionDays: number
   retainVideoByDefault: boolean
-  requireApiKeyForMachines: boolean
+  /** Visibility of newly created meetings (M2). */
+  defaultMeetingVisibility: "workspace" | "private"
 }
 
 type AppSettingsRow = {
@@ -29,7 +29,6 @@ type AppSettingsRow = {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultLocale: DEFAULT_LOCALE,
   meetingLanguageMode: "auto",
-  aiProviderPreference: "gemini-developer-api",
   summaryTemplate: "general",
   googleArtifactsFirst: true,
   pwaRecorderEnabled: true,
@@ -39,10 +38,33 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   shareActionsByDefault: true,
   audioRetentionDays: 180,
   retainVideoByDefault: false,
-  requireApiKeyForMachines: true,
+  defaultMeetingVisibility: "workspace",
 }
 
-const memorySettings: AppSettings = { ...DEFAULT_APP_SETTINGS }
+/** In-memory (non-postgres) settings, keyed by workspace id. */
+const memorySettings = new Map<string, AppSettings>()
+
+function getMemorySettings(workspaceId: string): AppSettings {
+  let settings = memorySettings.get(workspaceId)
+
+  if (!settings) {
+    settings = { ...DEFAULT_APP_SETTINGS }
+    memorySettings.set(workspaceId, settings)
+  }
+
+  return settings
+}
+
+/** Language used for new meetings when the request does not specify one. */
+export const LEGACY_DEFAULT_MEETING_LANGUAGE = "he"
+
+export function resolveDefaultMeetingLanguage(
+  settings: Pick<AppSettings, "meetingLanguageMode">
+): string {
+  return settings.meetingLanguageMode === "auto"
+    ? LEGACY_DEFAULT_MEETING_LANGUAGE
+    : settings.meetingLanguageMode
+}
 
 function isSummaryTemplate(value: unknown): value is AppSettings["summaryTemplate"] {
   return (
@@ -53,12 +75,6 @@ function isSummaryTemplate(value: unknown): value is AppSettings["summaryTemplat
     value === "operations" ||
     value === "legal"
   )
-}
-
-function isAiProviderPreference(
-  value: unknown
-): value is AppSettings["aiProviderPreference"] {
-  return value === "gemini-developer-api" || value === "vertex-ai"
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean) {
@@ -89,9 +105,6 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
   return {
     defaultLocale,
     meetingLanguageMode,
-    aiProviderPreference: isAiProviderPreference(raw.aiProviderPreference)
-      ? raw.aiProviderPreference
-      : DEFAULT_APP_SETTINGS.aiProviderPreference,
     summaryTemplate: isSummaryTemplate(raw.summaryTemplate)
       ? raw.summaryTemplate
       : DEFAULT_APP_SETTINGS.summaryTemplate,
@@ -124,54 +137,59 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
       raw.retainVideoByDefault,
       DEFAULT_APP_SETTINGS.retainVideoByDefault
     ),
-    requireApiKeyForMachines: normalizeBoolean(
-      raw.requireApiKeyForMachines,
-      DEFAULT_APP_SETTINGS.requireApiKeyForMachines
-    ),
+    defaultMeetingVisibility:
+      raw.defaultMeetingVisibility === "private" ? "private" : "workspace",
   }
 }
 
-export async function getAppSettings(): Promise<AppSettings> {
+/** Keys persisted per workspace (removed settings are never written). */
+const SETTING_KEYS = Object.keys(DEFAULT_APP_SETTINGS) as Array<keyof AppSettings>
+
+/** Settings of a workspace, stored in `workspace_settings` (M2). */
+export async function getAppSettings(workspaceId: string): Promise<AppSettings> {
   if (process.env.MEETSUM_STORAGE !== "postgres") {
-    return { ...memorySettings }
+    return { ...getMemorySettings(workspaceId) }
   }
 
   const result = await getDatabasePool().query(
-    "select key, value from app_settings"
+    "select key, value from workspace_settings where workspace_id = $1",
+    [workspaceId]
   )
-  const raw = { ...DEFAULT_APP_SETTINGS }
+  const raw: Record<string, unknown> = { ...DEFAULT_APP_SETTINGS }
 
   for (const row of result.rows as AppSettingsRow[]) {
-    raw[row.key as keyof AppSettings] = row.value as never
+    if ((SETTING_KEYS as string[]).includes(row.key)) raw[row.key] = row.value
   }
 
   return normalizeSettings(raw)
 }
 
 export async function updateAppSettings(
+  workspaceId: string,
   patch: Partial<AppSettings>
 ): Promise<AppSettings> {
-  const current = await getAppSettings()
+  const current = await getAppSettings(workspaceId)
   const next = normalizeSettings({ ...current, ...patch })
 
   if (process.env.MEETSUM_STORAGE !== "postgres") {
-    Object.assign(memorySettings, next)
-    return { ...memorySettings }
+    const settings = getMemorySettings(workspaceId)
+
+    Object.assign(settings, next)
+    return { ...settings }
   }
 
   const pool = getDatabasePool()
-  const entries = Object.entries(next) as Array<[keyof AppSettings, unknown]>
 
-  for (const [key, value] of entries) {
+  for (const key of SETTING_KEYS) {
     await pool.query(
       `
-        insert into app_settings (key, value, updated_at)
-        values ($1, $2::jsonb, now())
-        on conflict (key) do update
+        insert into workspace_settings (workspace_id, key, value, updated_at)
+        values ($1, $2, $3::jsonb, now())
+        on conflict (workspace_id, key) do update
           set value = excluded.value,
               updated_at = now()
       `,
-      [key, JSON.stringify(value)]
+      [workspaceId, key, JSON.stringify(next[key])]
     )
   }
 

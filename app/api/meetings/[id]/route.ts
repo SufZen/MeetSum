@@ -1,24 +1,19 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import {
+  loadVisibleMeeting,
+  meetingNotFound,
+} from "@/app/api/_lib/meeting-access"
+import { withAuthz } from "@/lib/auth/authz"
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(_request)
+export const GET = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (_request, ctx, { params }) => {
+    const { id } = await params
+    const meeting = await loadVisibleMeeting(ctx, id)
 
-  if (unauthorized) {
-    return unauthorized
+    if (!meeting) return meetingNotFound()
+
+    return NextResponse.json({ meeting })
   }
-
-  const { id } = await params
-  const meeting = await meetingRepository.getMeeting(id)
-
-  if (!meeting) {
-    return jsonError("Meeting not found", 404)
-  }
-
-  return NextResponse.json({ meeting })
-}
+)

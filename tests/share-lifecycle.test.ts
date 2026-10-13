@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { meetingRepository } from "@/lib/meetings/store"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
+
+const meetingRepository = getSystemMeetingRepository(DEFAULT_WORKSPACE_ID)
 
 describe("share lifecycle", () => {
   const fakeMeeting = {

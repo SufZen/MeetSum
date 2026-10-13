@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 /**
@@ -13,14 +13,10 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
  *   roomId — Filter by room/context ID
  *   groupBy — "day" | "week" | "month" (default: "day")
  */
-export async function GET(request: Request) {
+export const GET = withAuthz("meeting:read", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
   if (rateLimit.blocked) return rateLimit.blocked
-
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
 
   const url = new URL(request.url)
   const now = new Date()
@@ -35,14 +31,13 @@ export async function GET(request: Request) {
   const to = toParam ? new Date(toParam) : now
 
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-    const { jsonError } = await import("@/lib/api/responses")
     return jsonError("Invalid date format for 'from' or 'to' parameter", 400)
   }
 
   // Fetch all meetings (filtered by room if provided)
   const allMeetings = roomId
-    ? await meetingRepository.listMeetingsByContext(roomId)
-    : await meetingRepository.listMeetings({ limit: 500 })
+    ? await ctx.meetings.listMeetingsByContext(roomId)
+    : await ctx.meetings.listMeetings({ limit: 500 })
 
   // Filter to date range
   const meetings = allMeetings.filter((m) => {
@@ -124,7 +119,7 @@ export async function GET(request: Request) {
     },
     { headers: rateLimit.headers }
   )
-}
+})
 
 function getGroupKey(dateStr: string, groupBy: string): string {
   const date = new Date(dateStr)

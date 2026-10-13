@@ -1,26 +1,47 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { getAppSettings, updateAppSettings } from "@/lib/settings/app-settings"
+import { jsonError } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
+import { withAuthz } from "@/lib/auth/authz"
 import { LOCALE_COOKIE } from "@/lib/i18n/locales"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { getAppSettings, updateAppSettings } from "@/lib/settings/app-settings"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
+export const GET = withAuthz("workspace:read", async (_request, ctx) =>
+  NextResponse.json({ settings: await getAppSettings(ctx.workspace.id) })
+)
 
-  if (unauthorized) return unauthorized
+export const PATCH = withAuthz("settings:write", async (request, ctx) => {
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
-  return NextResponse.json({ settings: await getAppSettings() })
-}
+  if (rateLimit.blocked) return rateLimit.blocked
 
-export async function PATCH(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
+  let patch: Record<string, unknown>
 
   try {
-    const patch = (await request.json()) as Record<string, unknown>
-    const settings = await updateAppSettings(patch)
-    const response = NextResponse.json({ settings })
+    const body = (await request.json()) as unknown
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return jsonError("Settings patch must be an object", 400)
+    }
+
+    patch = body as Record<string, unknown>
+  } catch {
+    return jsonError("Invalid JSON body", 400)
+  }
+
+  try {
+    const settings = await updateAppSettings(ctx.workspace.id, patch)
+
+    await recordAuditLog({
+      action: "admin.settings.updated",
+      ...ctx.audit,
+      targetType: "workspace",
+      targetId: ctx.workspace.id,
+      metadata: { keys: Object.keys(patch) },
+    })
+
+    const response = NextResponse.json({ settings }, { headers: rateLimit.headers })
 
     response.cookies.set(LOCALE_COOKIE, settings.defaultLocale, {
       httpOnly: false,
@@ -37,4 +58,4 @@ export async function PATCH(request: Request) {
       400
     )
   }
-}
+})

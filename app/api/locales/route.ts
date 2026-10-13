@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { withPublicRoute } from "@/lib/auth/authz"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE,
@@ -7,13 +8,15 @@ import {
   getLocaleDirection,
 } from "@/lib/i18n/locales"
 
-export async function GET() {
-  return NextResponse.json({
-    defaultLocale: DEFAULT_LOCALE,
-    cookieName: LOCALE_COOKIE,
-    locales: SUPPORTED_LOCALES.map((locale) => ({
-      code: locale,
-      direction: getLocaleDirection(locale),
-    })),
-  })
-}
+export const GET = withPublicRoute(
+  "Static list of supported UI locales, needed before sign-in.",
+  async () =>
+    NextResponse.json({
+      defaultLocale: DEFAULT_LOCALE,
+      cookieName: LOCALE_COOKIE,
+      locales: SUPPORTED_LOCALES.map((locale) => ({
+        code: locale,
+        direction: getLocaleDirection(locale),
+      })),
+    })
+)

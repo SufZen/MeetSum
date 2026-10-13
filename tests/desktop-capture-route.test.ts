@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { MeetingRepository } from "@/lib/meetings/repository"
+
+import { mockAuthzModule, testAuthContext, testAuthState } from "./helpers/auth-context"
 import { streamedMultipartRequest, wavFile } from "./helpers/multipart"
 
 const mocks = vi.hoisted(() => ({
@@ -21,25 +24,25 @@ vi.mock("@/lib/api/responses", async () => {
   const { NextResponse } = await import("next/server")
 
   return {
-    requireAppAccess: vi.fn(async () => undefined),
     jsonError: (message: string, status = 400) =>
       NextResponse.json({ error: message }, { status }),
   }
 })
 
-vi.mock("@/lib/meetings/store", () => ({
-  meetingRepository: {
-    getMeeting: mocks.getMeeting,
-    createMeeting: mocks.createMeeting,
-    createMeetingIfAbsent: mocks.createMeetingIfAbsent,
-    findMeetingByExternalId: mocks.findMeetingByExternalId,
-    discardMeeting: mocks.discardMeeting,
-    createMediaAsset: mocks.createMediaAsset,
-    findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
-    replaceTranscriptSegments: mocks.replaceTranscriptSegments,
-    listJobs: mocks.listJobs,
-  },
-}))
+/** The route's ctx.meetings (scoped repository) for these tests. */
+const scopedRepository = {
+  getMeeting: mocks.getMeeting,
+  createMeeting: mocks.createMeeting,
+  createMeetingIfAbsent: mocks.createMeetingIfAbsent,
+  findMeetingByExternalId: mocks.findMeetingByExternalId,
+  discardMeeting: mocks.discardMeeting,
+  createMediaAsset: mocks.createMediaAsset,
+  findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
+  replaceTranscriptSegments: mocks.replaceTranscriptSegments,
+  listJobs: mocks.listJobs,
+}
+
+vi.mock("@/lib/auth/authz", async (importOriginal) => mockAuthzModule(importOriginal))
 
 vi.mock("@/lib/jobs/queue", () => ({
   enqueueMeetSumJob: mocks.enqueueMeetSumJob,
@@ -99,6 +102,11 @@ function ingestRequest(form: FormData) {
 describe("desktop capture upload routes", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    testAuthState.ctx = testAuthContext({
+      workspaceId: "ws_1",
+      role: "member",
+      meetings: scopedRepository as unknown as MeetingRepository,
+    })
     mocks.getMeeting.mockImplementation(async (id: string) =>
       id === "meet_known" ? knownMeeting : undefined
     )
@@ -177,6 +185,7 @@ describe("desktop capture upload routes", () => {
       "media.ingest",
       expect.objectContaining({
         meetingId: "meet_known",
+        workspaceId: "ws_1",
         assetId: "asset_1",
         storageKey: "meetings/meet_known/stored-meeting.wav",
         bucket: "meeting-media",
@@ -188,6 +197,21 @@ describe("desktop capture upload routes", () => {
     )
     formDataSpy.mockRestore()
     arrayBufferSpy.mockRestore()
+  })
+
+  it("requires meeting:create (viewers get 403 before any byte is read)", async () => {
+    testAuthState.ctx = testAuthContext({
+      workspaceId: "ws_1",
+      role: "viewer",
+      meetings: scopedRepository as unknown as MeetingRepository,
+    })
+    const { POST } = await import("@/app/api/meetings/[id]/upload/route")
+    const response = await POST(await uploadRequest(formWith({ file: wavFile() })), {
+      params: Promise.resolve({ id: "meet_known" }),
+    })
+
+    expect(response.status).toBe(403)
+    expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
   })
 
   it("returns 404 for unknown meetings before reading the upload", async () => {
@@ -388,7 +412,8 @@ describe("desktop capture upload routes", () => {
   })
 
   it("creates a desktop recorder meeting for unknown companion uploads", async () => {
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -419,6 +444,8 @@ describe("desktop capture upload routes", () => {
       language: "he",
       startedAt: "2026-07-05T09:00:00.000Z",
       participants: [],
+      ownerUserId: "user_member@example.test",
+      visibility: "workspace",
     })
     expect(mocks.replaceTranscriptSegments).toHaveBeenCalledWith(
       "meet_desktop",
@@ -442,7 +469,8 @@ describe("desktop capture upload routes", () => {
   })
 
   it("stores incoming media under _incoming and creates the meeting idempotently by capture id", async () => {
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -498,7 +526,8 @@ describe("desktop capture upload routes", () => {
     mocks.listJobs.mockResolvedValue([
       { id: "job_original", status: "active", payload: { assetId: "asset_original" } },
     ])
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -521,6 +550,29 @@ describe("desktop capture upload routes", () => {
     expect(mocks.discardMeeting).not.toHaveBeenCalled()
   })
 
+  it("answers a captureId held by an invisible meeting with a generic 409 and no meeting info", async () => {
+    const { MeetingExternalIdConflictError } = await import("@/lib/meetings/repository")
+    mocks.createMeetingIfAbsent.mockRejectedValue(new MeetingExternalIdConflictError())
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const response = await ingestRoute.POST(
+      await ingestRequest(
+        formWith({
+          meeting: { title: "Desktop capture", startedAt: "2026-07-05T09:00:00.000Z" },
+          captureMetadata: { captureId: "cap_private" },
+          file: wavFile(),
+        })
+      ),
+      { params: Promise.resolve({}) }
+    )
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "capture_conflict" })
+    // The streamed object is discarded; nothing is attached or enqueued.
+    expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(1)
+    expect(mocks.createMediaAsset).not.toHaveBeenCalled()
+    expect(mocks.enqueueMeetSumJob).not.toHaveBeenCalled()
+  })
+
   it("skips streaming entirely when the capture's media is already stored", async () => {
     mocks.findMeetingByExternalId.mockResolvedValue(desktopMeeting)
     mocks.createMeetingIfAbsent.mockResolvedValue({
@@ -539,7 +591,8 @@ describe("desktop capture upload routes", () => {
     mocks.listJobs.mockResolvedValue([
       { id: "job_original", status: "completed", payload: { assetId: "asset_original" } },
     ])
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -557,7 +610,8 @@ describe("desktop capture upload routes", () => {
 
   it("discards the new meeting and deletes the object when ingestion fails", async () => {
     mocks.enqueueMeetSumJob.mockRejectedValue(new Error("redis down"))
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -576,7 +630,8 @@ describe("desktop capture upload routes", () => {
   })
 
   it("rejects unknown desktop capture payloads without media or transcript before creating a meeting", async () => {
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({
@@ -597,7 +652,8 @@ describe("desktop capture upload routes", () => {
   })
 
   it("deletes the stored object when the meeting payload is invalid", async () => {
-    const { POST } = await import("@/app/api/desktop-capture/ingest/route")
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const POST = (request: Request) => ingestRoute.POST(request, { params: Promise.resolve({}) })
     const response = await POST(
       await ingestRequest(
         formWith({

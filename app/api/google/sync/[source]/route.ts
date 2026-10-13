@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import {
   buildGoogleSyncPlan,
   type GoogleSyncSource,
@@ -18,57 +19,55 @@ const eventBySource: Record<
   drive: "google.drive.recording_found",
 }
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ source: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const POST = withAuthz<{ source: string }>(
+  "integrations:manage",
+  async (request, ctx, { params }) => {
+    const { source } = await params
+    const body = (await request.json().catch(() => ({}))) as {
+      subject?: string
+    }
 
-  if (unauthorized) {
-    return unauthorized
-  }
+    if (!["calendar", "gmail", "drive"].includes(source)) {
+      return jsonError("Unsupported Google source", 400)
+    }
 
-  const { source } = await params
-  const body = (await request.json().catch(() => ({}))) as {
-    subject?: string
-  }
+    const resolved = resolveRequestWorkspaceSubject(ctx, body.subject, {
+      requireWorkspaceSubject: true,
+    })
 
-  if (!["calendar", "gmail", "drive"].includes(source)) {
-    return jsonError("Unsupported Google source", 400)
-  }
+    if ("response" in resolved) return resolved.response
 
-  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+    const { subject } = resolved
 
-  if ("response" in resolved) return resolved.response
+    const syncSource = source as GoogleSyncSource
 
-  const { subject } = resolved
+    if (syncSource === "drive") {
+      return jsonError(
+        "Drive auto-import is disabled. Use /api/google/drive/recordings to review candidates and /api/google/drive/import to import selected files.",
+        409
+      )
+    }
 
-  const syncSource = source as GoogleSyncSource
-
-  if (syncSource === "drive") {
-    return jsonError(
-      "Drive auto-import is disabled. Use /api/google/drive/recordings to review candidates and /api/google/drive/import to import selected files.",
-      409
+    const syncItem = buildGoogleSyncPlan(subject).find(
+      (item) => item.source === syncSource
     )
-  }
-
-  const syncItem = buildGoogleSyncPlan(subject).find(
-    (item) => item.source === syncSource
-  )
-  const job = await enqueueMeetSumJob(`google.${syncSource}.poll`, {
-    subject,
-    source: syncSource,
-  })
-
-  return NextResponse.json({
-    sync: {
-      ...syncItem,
-      status: "queued",
-    },
-    job,
-    event: createPlatformEvent(eventBySource[syncSource], {
+    const job = await enqueueMeetSumJob(`google.${syncSource}.poll`, {
       subject,
       source: syncSource,
-    }),
-  })
-}
+      workspaceId: ctx.workspace.id,
+    })
+
+    return NextResponse.json({
+      sync: {
+        ...syncItem,
+        status: "queued",
+      },
+      job,
+      event: createPlatformEvent(
+        eventBySource[syncSource],
+        { subject, source: syncSource },
+        { workspaceId: ctx.workspace.id }
+      ),
+    })
+  }
+)

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 
+import { withPublicRoute } from "@/lib/auth/authz"
 import { SESSION_COOKIE } from "@/lib/auth/session"
 import { DEFAULT_LOCALE, isSupportedLocale } from "@/lib/i18n/locales"
+import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/workspaces/constants"
 
 function logoutResponse(request: Request, status: 303 | 307) {
   const requested = new URL(request.url).searchParams.get("locale") ?? ""
@@ -14,14 +16,15 @@ function logoutResponse(request: Request, status: 303 | 307) {
   })
 
   response.cookies.delete(SESSION_COOKIE)
+  response.cookies.delete(ACTIVE_WORKSPACE_COOKIE)
   return response
 }
 
 // 303 so the browser follows a POST logout with a GET to the login page.
-export async function POST(request: Request) {
-  return logoutResponse(request, 303)
-}
+export const POST = withPublicRoute("Clearing a session needs no credentials", (request) =>
+  logoutResponse(request, 303)
+)
 
-export async function GET(request: Request) {
-  return logoutResponse(request, 307)
-}
+export const GET = withPublicRoute("Clearing a session needs no credentials", (request) =>
+  logoutResponse(request, 307)
+)

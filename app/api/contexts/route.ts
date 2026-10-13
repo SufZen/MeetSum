@@ -1,26 +1,14 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
+export const GET = withAuthz("workspace:read", async (_request, ctx) =>
+  NextResponse.json({ contexts: await ctx.meetings.listContexts() })
+)
 
-  if (unauthorized) {
-    return unauthorized
-  }
-
-  return NextResponse.json({ contexts: await meetingRepository.listContexts() })
-}
-
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) {
-    return unauthorized
-  }
-
-  const { name, description } = (await request.json()) as {
+export const POST = withAuthz("contexts:write", async (request, ctx) => {
+  const { name, description } = (await request.json().catch(() => ({}))) as {
     name?: string
     description?: string
   }
@@ -29,10 +17,10 @@ export async function POST(request: Request) {
     return jsonError("name is required", 400)
   }
 
-  const context = await meetingRepository.createContext({
+  const context = await ctx.meetings.createContext({
     name: name.trim(),
     description,
   })
 
   return NextResponse.json({ context }, { status: 201 })
-}
+})

@@ -1,45 +1,49 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import {
+  loadVisibleMeeting,
+  meetingNotFound,
+} from "@/app/api/_lib/meeting-access"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { renderMeetingDocx } from "@/lib/meetings/export"
-import { meetingRepository } from "@/lib/meetings/store"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
+export const POST = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (request, ctx, { params }) => {
+    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.exports)
 
-  if (rateLimit.blocked) return rateLimit.blocked
+    if (rateLimit.blocked) return rateLimit.blocked
 
-  const unauthorized = await requireAppAccess(request)
+    const { id } = await params
+    const meeting = await loadVisibleMeeting(ctx, id)
 
-  if (unauthorized) return unauthorized
+    if (!meeting) return meetingNotFound()
 
-  const { id } = await params
-  const meeting = await meetingRepository.getMeeting(id)
+    await ctx.meetings.createExportRecord({ meetingId: id, format: "docx" })
 
-  if (!meeting) return jsonError("Meeting not found", 404)
+    try {
+      const docx = await renderMeetingDocx(meeting)
+      const safeTitle =
+        meeting.title.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") ||
+        "meetsum-export"
 
-  await meetingRepository.createExportRecord({ meetingId: id, format: "docx" })
-
-  try {
-    const docx = await renderMeetingDocx(meeting)
-    const safeTitle = meeting.title.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "meetsum-export"
-
-    return new NextResponse(new Uint8Array(docx), {
-      headers: {
-        "content-type":
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "content-disposition": `attachment; filename="${safeTitle}.docx"`,
-        ...rateLimit.headers,
-      },
-    })
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Failed to generate DOCX export",
-      500
-    )
+      return new NextResponse(new Uint8Array(docx), {
+        headers: {
+          "content-type":
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "content-disposition": `attachment; filename="${safeTitle}.docx"`,
+          ...rateLimit.headers,
+        },
+      })
+    } catch (error) {
+      return jsonError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate DOCX export",
+        500
+      )
+    }
   }
-}
+)

@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   add: vi.fn(),
   close: vi.fn(),
   createJob: vi.fn(),
+  resolveMeetingWorkspaceId: vi.fn(),
+  repositoryWorkspaces: [] as string[],
 }))
 
 vi.mock("bullmq", () => ({
@@ -13,16 +15,28 @@ vi.mock("bullmq", () => ({
 }))
 
 vi.mock("@/lib/meetings/store", () => ({
-  meetingRepository: { createJob: mocks.createJob },
+  getSystemMeetingRepository: (workspaceId: string) => {
+    mocks.repositoryWorkspaces.push(workspaceId)
+    return { createJob: mocks.createJob }
+  },
+  resolveMeetingWorkspaceId: mocks.resolveMeetingWorkspaceId,
 }))
 
-const { closeMeetSumQueue, enqueueMeetSumJob, getJobAttempts } = await import(
-  "@/lib/jobs/queue"
+const { closeMeetSumQueue, enqueueMeetSumJob, getJobAttempts, JobWorkspaceRequiredError } =
+  await import("@/lib/jobs/queue")
+/** Untyped call path (legacy payloads): exercises the runtime workspace guard. */
+const enqueueUntyped = enqueueMeetSumJob as unknown as (
+  name: string,
+  payload: Record<string, unknown>
+) => ReturnType<typeof enqueueMeetSumJob>
+const { getCaptureScheduleConfig, getRetentionScheduleConfig } = await import(
+  "@/lib/jobs/scheduler-config"
 )
-const { getCaptureScheduleConfig } = await import("@/lib/jobs/scheduler-config")
 
 beforeEach(() => {
+  mocks.repositoryWorkspaces.length = 0
   mocks.add.mockReset().mockResolvedValue({})
+  mocks.resolveMeetingWorkspaceId.mockReset().mockResolvedValue("ws_meeting")
   mocks.createJob.mockReset().mockImplementation(async (input) => ({
     id: "job_123",
     ...input,
@@ -31,19 +45,29 @@ beforeEach(() => {
 
 afterEach(async () => {
   delete process.env.MEETSUM_JOB_ATTEMPTS
+  delete process.env.MEETSUM_CAPTURE_WORKSPACE_ID
   await closeMeetSumQueue()
 })
 
 describe("enqueueMeetSumJob", () => {
   it("defaults to 3 attempts with exponential backoff and the record id as jobId", async () => {
-    await enqueueMeetSumJob("media.ingest", { meetingId: "meet_1", assetId: "asset_1" })
+    await enqueueMeetSumJob("media.ingest", {
+      meetingId: "meet_1",
+      workspaceId: "ws_1",
+      assetId: "asset_1",
+    })
 
     expect(mocks.createJob).toHaveBeenCalledWith(
       expect.objectContaining({ name: "media.ingest", meetingId: "meet_1", maxAttempts: 3 })
     )
     expect(mocks.add).toHaveBeenCalledWith(
       "media.ingest",
-      { meetingId: "meet_1", assetId: "asset_1", jobRecordId: "job_123" },
+      {
+        meetingId: "meet_1",
+        workspaceId: "ws_1",
+        assetId: "asset_1",
+        jobRecordId: "job_123",
+      },
       expect.objectContaining({
         jobId: "job_123",
         attempts: 3,
@@ -52,10 +76,47 @@ describe("enqueueMeetSumJob", () => {
     )
   })
 
+  it("records the job in the payload workspace and persists workspaceId in the payload", async () => {
+    await enqueueMeetSumJob("google.calendar.poll", { workspaceId: "ws_2" })
+
+    expect(mocks.repositoryWorkspaces).toEqual(["ws_2"])
+    expect(mocks.createJob.mock.calls[0][0].payload).toMatchObject({ workspaceId: "ws_2" })
+    expect(mocks.resolveMeetingWorkspaceId).not.toHaveBeenCalled()
+  })
+
+  it("resolves the workspace from the meeting when the payload has none", async () => {
+    await enqueueUntyped("meeting.summarize", { meetingId: "meet_2" })
+
+    expect(mocks.resolveMeetingWorkspaceId).toHaveBeenCalledWith("meet_2")
+    expect(mocks.repositoryWorkspaces).toEqual(["ws_meeting"])
+    expect(mocks.add.mock.calls[0][1]).toMatchObject({ workspaceId: "ws_meeting" })
+  })
+
+  it("refuses to enqueue a job it cannot attribute to a workspace", async () => {
+    mocks.resolveMeetingWorkspaceId.mockResolvedValue(undefined)
+
+    await expect(
+      enqueueUntyped("google.drive.poll", { subject: "a@example.test" })
+    ).rejects.toBeInstanceOf(JobWorkspaceRequiredError)
+    await expect(
+      enqueueUntyped("media.ingest", { meetingId: "meet_missing" })
+    ).rejects.toBeInstanceOf(JobWorkspaceRequiredError)
+    expect(mocks.createJob).not.toHaveBeenCalled()
+    expect(mocks.add).not.toHaveBeenCalled()
+  })
+
+  it("attributes Teams subscription renewal to the capture workspace", async () => {
+    process.env.MEETSUM_CAPTURE_WORKSPACE_ID = "ws_capture"
+
+    await enqueueMeetSumJob("teams.subscription.renew", { scheduled: true })
+
+    expect(mocks.repositoryWorkspaces).toEqual(["ws_capture"])
+  })
+
   it("reads attempts from MEETSUM_JOB_ATTEMPTS and persists them as maxAttempts", async () => {
     process.env.MEETSUM_JOB_ATTEMPTS = "5"
 
-    await enqueueMeetSumJob("meeting.summarize", { meetingId: "meet_2" })
+    await enqueueMeetSumJob("meeting.summarize", { meetingId: "meet_2", workspaceId: "ws_1" })
 
     expect(mocks.createJob).toHaveBeenCalledWith(
       expect.objectContaining({ maxAttempts: 5 })
@@ -77,5 +138,14 @@ describe("getCaptureScheduleConfig", () => {
       getCaptureScheduleConfig({ MEETSUM_TEAMS_SUBSCRIPTION_RENEW_MINUTES: "60" })
         .teamsSubscriptionRenew.minutes
     ).toBe(60)
+  })
+})
+
+describe("getRetentionScheduleConfig", () => {
+  it("only enforces retention when MEETSUM_RETENTION_ENFORCE=true", () => {
+    expect(getRetentionScheduleConfig({})).toEqual({ enabled: false, hours: 24 })
+    expect(getRetentionScheduleConfig({ MEETSUM_RETENTION_ENFORCE: "true" }).enabled).toBe(
+      true
+    )
   })
 })

@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { syncMeetArtifacts } from "@/lib/google/meet-artifacts"
 import { createPlatformEvent } from "@/lib/platform/events"
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const POST = withAuthz("meeting:create", async (request, ctx) => {
   const body = (await request.json().catch(() => ({}))) as {
     subject?: string
     limit?: number
   }
-  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+  const resolved = resolveRequestWorkspaceSubject(ctx, body.subject)
 
   if ("response" in resolved) return resolved.response
 
@@ -23,17 +20,23 @@ export async function POST(request: Request) {
   try {
     const result = await syncMeetArtifacts({
       subject,
+      workspaceId: ctx.workspace.id,
       limit: body.limit,
+      scope: toRepoScope(ctx),
     })
 
     return NextResponse.json({
       ...result,
-      event: createPlatformEvent("google.drive.recording_found", {
-        subject,
-        source: "meet-artifacts",
-        discovered: result.discovered,
-        artifacts: result.recordings + result.transcripts + result.smartNotes,
-      }),
+      event: createPlatformEvent(
+        "google.drive.recording_found",
+        {
+          subject,
+          source: "meet-artifacts",
+          discovered: result.discovered,
+          artifacts: result.recordings + result.transcripts + result.smartNotes,
+        },
+        { workspaceId: ctx.workspace.id }
+      ),
     })
   } catch (error) {
     return jsonError(
@@ -41,4 +44,4 @@ export async function POST(request: Request) {
       500
     )
   }
-}
+})

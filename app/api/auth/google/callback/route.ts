@@ -1,57 +1,126 @@
 import { NextResponse } from "next/server"
 
+import { recordAuditLog } from "@/lib/audit"
+import { withPublicRoute } from "@/lib/auth/authz"
 import { exchangeGoogleCodeForIdentity, getGoogleOAuthConfig } from "@/lib/auth/google"
+import { localeOfPath, parseInviteReturnTo, safeReturnTo } from "@/lib/auth/return-to"
 import {
   OAUTH_STATE_COOKIE,
   createSessionCookie,
   getSessionSecret,
-  getAllowedEmails,
+  readRequestCookie,
 } from "@/lib/auth/session"
 import { saveGoogleWorkspaceOAuthConnection } from "@/lib/google/oauth-tokens"
+import { isBootstrapEmail } from "@/lib/workspaces/bootstrap"
+import { getWorkspaceStore } from "@/lib/workspaces/store"
+import { normalizeEmail } from "@/lib/workspaces/tokens"
 
-function safeReturnTo(value: string | undefined): string {
-  return value?.startsWith("/") && !value.startsWith("//") ? value : "/en"
+function splitState(stored: string | undefined): [string, string | undefined] {
+  const value = stored ?? ""
+  const index = value.indexOf(":")
+
+  return index < 0 ? [value, undefined] : [value.slice(0, index), value.slice(index + 1)]
 }
 
-export async function GET(request: Request) {
+export const GET = withPublicRoute("Google OAuth redirect target", async (request) => {
   const requestUrl = new URL(request.url)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? requestUrl.origin
-  const loginUrl = new URL("/en/login", appUrl)
   const state = requestUrl.searchParams.get("state")
   const code = requestUrl.searchParams.get("code")
-  const stored = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((item) => item.trim())
-    .find((item) => item.startsWith(`${OAUTH_STATE_COOKIE}=`))
-    ?.slice(OAUTH_STATE_COOKIE.length + 1)
-  const [storedState, storedReturnTo] = decodeURIComponent(stored ?? "").split(":")
+  const [storedState, storedReturnTo] = splitState(
+    readRequestCookie(request, OAUTH_STATE_COOKIE)
+  )
+  const returnTo = safeReturnTo(storedReturnTo)
+  const loginUrl = new URL(`/${localeOfPath(returnTo)}/login`, appUrl)
+  const redirectWithError = (url: URL, error: string) => {
+    url.searchParams.set("error", error)
+    const response = NextResponse.redirect(url)
 
-  if (!code || !state || state !== storedState) {
-    loginUrl.searchParams.set("error", "oauth_state")
-    return NextResponse.redirect(loginUrl)
+    response.cookies.delete(OAUTH_STATE_COOKIE)
+    return response
+  }
+
+  if (!code || !state || !storedState || state !== storedState) {
+    return redirectWithError(loginUrl, "oauth_state")
   }
 
   try {
-    const identity = await exchangeGoogleCodeForIdentity(
-      code,
-      getGoogleOAuthConfig()
-    )
-    const session = createSessionCookie(identity, {
-      secret: getSessionSecret(),
-      allowedEmails: getAllowedEmails(),
+    const identity = await exchangeGoogleCodeForIdentity(code, getGoogleOAuthConfig())
+    const email = normalizeEmail(identity.email)
+    const store = getWorkspaceStore()
+    const user = await store.upsertUser({
+      email,
+      name: identity.name,
+      picture: identity.picture,
+      login: true,
     })
 
+    if (user.disabledAt) {
+      await recordAuditLog({
+        action: "auth.login.denied",
+        // Instance-level: the user belongs to no workspace here.
+        workspaceId: null,
+        actor: email,
+        actorUserId: user.id,
+        metadata: { reason: "disabled" },
+      })
+      return redirectWithError(loginUrl, "no_access")
+    }
+
+    if (isBootstrapEmail(email)) {
+      await store.ensureBootstrap()
+    }
+
+    const memberships = await store.listMembershipsForUser(user.id)
+    let allowed = memberships.length > 0
+
+    if (!allowed) {
+      const invite = parseInviteReturnTo(returnTo)
+      const found = invite ? await store.findInvitationByToken(invite.token) : undefined
+
+      if (invite && found && found.invitation.status === "pending") {
+        if (normalizeEmail(found.invitation.email) !== email) {
+          await recordAuditLog({
+            action: "auth.login.denied",
+            workspaceId: found.workspace.id,
+            actor: email,
+            actorUserId: user.id,
+            targetType: "invitation",
+            targetId: found.invitation.id,
+            metadata: { reason: "email_mismatch" },
+          })
+          return redirectWithError(new URL(returnTo, appUrl), "email_mismatch")
+        }
+
+        allowed = true
+      }
+    }
+
+    if (!allowed) {
+      await recordAuditLog({
+        action: "auth.login.denied",
+        // Instance-level: the user belongs to no workspace here.
+        workspaceId: null,
+        actor: email,
+        actorUserId: user.id,
+        metadata: { reason: "no_access" },
+      })
+      return redirectWithError(loginUrl, "no_access")
+    }
+
+    const session = createSessionCookie(
+      { userId: user.id, email, name: identity.name, picture: identity.picture },
+      { secret: getSessionSecret() }
+    )
+
     await saveGoogleWorkspaceOAuthConnection({
-      subject: identity.email,
+      subject: email,
       googleUserId: identity.googleUserId,
       refreshToken: identity.refreshToken,
       scope: identity.scope,
     })
 
-    const response = NextResponse.redirect(
-      new URL(safeReturnTo(storedReturnTo), appUrl)
-    )
+    const response = NextResponse.redirect(new URL(returnTo, appUrl))
 
     response.cookies.set(session.name, session.value, {
       httpOnly: true,
@@ -63,8 +132,8 @@ export async function GET(request: Request) {
     response.cookies.delete(OAUTH_STATE_COOKIE)
 
     return response
-  } catch {
-    loginUrl.searchParams.set("error", "unauthorized")
-    return NextResponse.redirect(loginUrl)
+  } catch (error) {
+    console.error("[auth] Google callback failed", error)
+    return redirectWithError(loginUrl, "unauthorized")
   }
-}
+})

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type { Queryable } from "@/lib/db/client"
 import type {
   ActionItem,
@@ -18,8 +19,15 @@ import type {
   MeetingRecord,
   MeetingRepository,
   MeetingShare,
+  MeetingVisibility,
+  RepoScope,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
+import {
+  MeetingExternalIdConflictError,
+  MeetingScopeError,
+} from "@/lib/meetings/repository"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { deriveMeetingQualityWarnings } from "@/lib/meetings/quality"
 import {
@@ -38,10 +46,12 @@ type MeetingRow = {
   retention: MeetingRecord["retention"]
   started_at: string | Date
   participants: string[] | string
-  is_favorite?: boolean
   language_metadata?: MeetingRecord["languageMetadata"]
   external_source?: string | null
   external_id?: string | null
+  workspace_id?: string | null
+  owner_user_id?: string | null
+  visibility?: MeetingVisibility | null
 }
 
 type TranscriptRow = {
@@ -252,9 +262,13 @@ function normalizeSort(value?: MeetingListSortMode): MeetingListSortMode {
   return "smart"
 }
 
-function buildMeetingListClauses(options: MeetingListOptions) {
-  const clauses: string[] = []
+/**
+ * WHERE clause of meeting lists. The scope predicate is always the first
+ * clause, so no list query can ever run without it.
+ */
+function buildMeetingListClauses(scope: RepoScope, options: MeetingListOptions) {
   const values: unknown[] = []
+  const clauses: string[] = [meetingScopeSql(scope, "m", values)]
 
   if (options.status && options.status !== "all") {
     if (options.status === "usable") {
@@ -268,7 +282,15 @@ function buildMeetingListClauses(options: MeetingListOptions) {
         `m.status in ('indexing', 'summarizing', 'transcribing', 'media_uploaded')`
       )
     } else if (options.status === "favorites") {
-      clauses.push(`m.is_favorite = true`)
+      // Favorites are per user; API keys and system scope have none.
+      if (scope.kind === "member") {
+        values.push(scope.userId)
+        clauses.push(
+          `exists (select 1 from meeting_favorites mf where mf.meeting_id = m.id and mf.user_id = $${values.length})`
+        )
+      } else {
+        clauses.push("false")
+      }
     } else {
       values.push(options.status)
       clauses.push(`m.status = $${values.length}`)
@@ -300,14 +322,15 @@ function buildMeetingListClauses(options: MeetingListOptions) {
           select 1
           from meeting_tags mt
           join tags t on t.id = mt.tag_id
-          where mt.meeting_id = m.id and t.name ilike $${queryIndex}
+          where mt.meeting_id = m.id and t.workspace_id = m.workspace_id
+            and t.name ilike $${queryIndex}
         )
       )
     `)
   }
 
   return {
-    whereSql: clauses.length ? `where ${clauses.join(" and ")}` : "",
+    whereSql: `where ${clauses.join(" and ")}`,
     values,
   }
 }
@@ -357,10 +380,13 @@ function mapMeetingRow(row: MeetingRow): MeetingRecord {
     retention: row.retention,
     startedAt: toIso(row.started_at),
     participants: parseJsonArray(row.participants),
-    isFavorite: row.is_favorite ?? false,
+    isFavorite: false,
     languageMetadata: row.language_metadata,
     externalSource: row.external_source ?? undefined,
     externalId: row.external_id ?? undefined,
+    workspaceId: row.workspace_id ?? undefined,
+    ownerUserId: row.owner_user_id ?? undefined,
+    visibility: row.visibility ?? undefined,
   }
 }
 
@@ -531,11 +557,41 @@ const ACTION_ITEM_COLUMNS = `
   original_title, completed_at
 `
 
-const MEETING_COLUMNS = `
-  id, title, source, language, status, retention, started_at,
-  participants, is_favorite, language_metadata, external_source, external_id
+/** Meeting columns, qualified with `alias` (is_favorite is per user, M2). */
+function meetingColumns(alias = "m") {
+  return [
+    "id",
+    "title",
+    "source",
+    "language",
+    "status",
+    "retention",
+    "started_at",
+    "participants",
+    "language_metadata",
+    "external_source",
+    "external_id",
+    "workspace_id",
+    "owner_user_id",
+    "visibility",
+  ]
+    .map((column) => `${alias}.${column}`)
+    .join(", ")
+}
+
+const SHARE_COLUMNS = `
+  id, meeting_id, token, visibility, revoked, expires_at,
+  included_sections, created_by, created_at, updated_at
 `
 
+/**
+ * Stable participant row id. A hash of the full key: truncating base64 of
+ * `${meetingId}:${name}` made every participant of a meeting share one id
+ * (the meeting id fills the prefix), so all but the first were dropped.
+ */
+export function participantRowId(meetingId: string, key: string): string {
+  return `participant_${createHash("sha256").update(`${meetingId}:${key}`).digest("hex").slice(0, 32)}`
+}
 async function insertCalendarParticipants(
   db: Queryable,
   meetingId: string,
@@ -557,9 +613,7 @@ async function insertCalendarParticipants(
         on conflict do nothing
       `,
       [
-        `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
-          .toString("base64url")
-          .slice(0, 40)}`,
+        participantRowId(meetingId, email ?? name),
         meetingId,
         name,
         email,
@@ -605,10 +659,147 @@ export async function withTransaction<T>(
   }
 }
 
+function mapSuggestedAgentRun(row: SuggestedAgentRunRow): SuggestedAgentRun {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    target: row.target,
+    payload: row.payload ?? {},
+    response: row.response ?? {},
+    status: row.status,
+    lastError: row.last_error ?? undefined,
+    createdAt: toIso(row.created_at),
+  }
+}
+
+function mapContext(row: ContextRow): MeetingContext {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    color: row.color ?? undefined,
+    kind: row.kind ?? undefined,
+    createdAt: toIso(row.created_at),
+  }
+}
+
+const JOB_COLUMNS = `
+  id, name, status, meeting_id, payload, result, error,
+  attempts, max_attempts, retry_of_job_id, started_at,
+  completed_at, created_at, updated_at
+`
+
+const MEDIA_ASSET_COLUMNS = `
+  id, meeting_id, storage_key, filename, content_type,
+  size_bytes, retention, source, source_file_id,
+  checksum_sha256, metadata, created_at
+`
+
+const PARTICIPANT_COLUMNS = `
+  id, meeting_id, name, email, role, source, attendance_status,
+  speaker_label, confidence, created_at, updated_at
+`
+
+const SUGGESTED_RUN_COLUMNS = `
+  id, meeting_id, target, payload, response, status, last_error, created_at
+`
+
+function pushValue(values: unknown[], value: unknown): string {
+  values.push(value)
+  return `$${values.length}`
+}
+
+/**
+ * Meeting repository restricted to `scope` (M2). Every statement that reads
+ * or writes `meetings` carries the scope predicate (lib/meetings/visibility);
+ * meeting-id methods check the meeting first (`assertMeetingInScope`), and
+ * child-id methods (action items, participants, agent runs) join back to a
+ * visible meeting so a foreign id behaves exactly like a missing one.
+ * Workspace-owned tables (jobs, contexts, tags, media assets) are filtered by
+ * `workspace_id`.
+ */
 export function createPostgresMeetingRepository(
-  client: Queryable
+  client: Queryable,
+  scope: RepoScope
 ): MeetingRepository {
+  const workspaceId = scope.workspaceId
+  const favoriteUserId = scope.kind === "member" ? scope.userId : undefined
+  const defaultOwnerUserId =
+    scope.kind === "member"
+      ? scope.userId
+      : scope.kind === "api_key"
+        ? scope.ownerUserId
+        : undefined
+
+  function scoped(alias: string, values: unknown[]): string {
+    return meetingScopeSql(scope, alias, values)
+  }
+
+  async function assertMeetingInScope(db: Queryable, meetingId: string) {
+    const values: unknown[] = [meetingId]
+    const result = await db.query(
+      `select m.id from meetings m where m.id = $1 and ${scoped("m", values)}`,
+      values
+    )
+
+    if (!result.rows.length) throw new Error(`Meeting not found: ${meetingId}`)
+  }
+
+  async function selectMeeting(
+    db: Queryable,
+    whereSql: string,
+    whereValues: unknown[]
+  ): Promise<MeetingRow | undefined> {
+    const values = [...whereValues]
+    const result = await db.query(
+      `
+        select ${meetingColumns("m")}
+        from meetings m
+        where ${whereSql} and ${scoped("m", values)}
+        limit 1
+      `,
+      values
+    )
+
+    return result.rows[0] as MeetingRow | undefined
+  }
+
+  async function upsertWorkspaceTag(db: Queryable, meetingId: string, tag: string) {
+    await db.query(
+      `
+        insert into tags (id, name, workspace_id)
+        values ($1, $2, $3)
+        on conflict (workspace_id, name) do nothing
+      `,
+      [createId("tag"), tag, workspaceId]
+    )
+    await db.query(
+      `
+        insert into meeting_tags (meeting_id, tag_id)
+        select $1, t.id from tags t
+        where t.workspace_id = $3 and t.name = $2
+        on conflict do nothing
+      `,
+      [meetingId, tag, workspaceId]
+    )
+  }
+
+  async function setLinkVisibility(db: Queryable, meetingId: string) {
+    const values: unknown[] = [meetingId]
+
+    await db.query(
+      `
+        update meetings m
+        set visibility = 'link'
+        where m.id = $1 and ${scoped("m", values)}
+      `,
+      values
+    )
+  }
+
   async function hydrateMeeting(base: MeetingRecord): Promise<MeetingRecord> {
+    const meetArtifactValues: unknown[] = [base.id]
+    const meetArtifactScope = scoped("m2", meetArtifactValues)
     const [
       transcriptResult,
       summaryResult,
@@ -621,6 +812,7 @@ export function createPostgresMeetingRepository(
       participantsResult,
       meetArtifactsResult,
       aiRunsResult,
+      favoriteResult,
     ] = await Promise.all([
       client.query(
         `
@@ -663,20 +855,20 @@ export function createPostgresMeetingRepository(
           select t.name
           from meeting_tags mt
           join tags t on t.id = mt.tag_id
-          where mt.meeting_id = $1
+          where mt.meeting_id = $1 and t.workspace_id = $2
           order by t.name asc
         `,
-        [base.id]
+        [base.id, workspaceId]
       ),
       client.query(
         `
           select c.id, c.name, c.description, c.color, c.kind, c.created_at
           from meeting_contexts mc
           join contexts c on c.id = mc.context_id
-          where mc.meeting_id = $1
+          where mc.meeting_id = $1 and c.workspace_id = $2
           order by c.name asc
         `,
-        [base.id]
+        [base.id, workspaceId]
       ),
       client.query(
         `
@@ -690,7 +882,7 @@ export function createPostgresMeetingRepository(
       ),
       client.query(
         `
-          select id, meeting_id, target, payload, response, status, last_error, created_at
+          select ${SUGGESTED_RUN_COLUMNS}
           from suggested_agent_runs
           where meeting_id = $1
           order by created_at desc
@@ -699,19 +891,16 @@ export function createPostgresMeetingRepository(
       ),
       client.query(
         `
-          select id, meeting_id, storage_key, filename, content_type,
-                 size_bytes, retention, source, source_file_id,
-                 checksum_sha256, metadata, created_at
+          select ${MEDIA_ASSET_COLUMNS}
           from media_assets
-          where meeting_id = $1
+          where meeting_id = $1 and workspace_id = $2
           order by created_at desc
         `,
-        [base.id]
+        [base.id, workspaceId]
       ),
       client.query(
         `
-          select id, meeting_id, name, email, role, source, attendance_status,
-                 speaker_label, confidence, created_at, updated_at
+          select ${PARTICIPANT_COLUMNS}
           from meeting_participants
           where meeting_id = $1
           order by
@@ -745,11 +934,12 @@ export function createPostgresMeetingRepository(
           left join drive_files df on df.id = ma.drive_file_id
           where mcr.meeting_id = $1
              or mcr.calendar_event_id = (
-              select calendar_event_id from meetings where id = $1
+              select m2.calendar_event_id from meetings m2
+              where m2.id = $1 and ${meetArtifactScope}
              )
           order by mcr.start_time desc nulls last, ma.created_at desc
         `,
-        [base.id]
+        meetArtifactValues
       ),
       client.query(
         `
@@ -762,6 +952,16 @@ export function createPostgresMeetingRepository(
         `,
         [base.id]
       ),
+      favoriteUserId
+        ? client.query(
+            `
+              select 1 as favorite
+              from meeting_favorites
+              where user_id = $1 and meeting_id = $2
+            `,
+            [favoriteUserId, base.id]
+          )
+        : Promise.resolve({ rows: [] as unknown[] }),
     ])
 
     const transcript = (transcriptResult.rows as TranscriptRow[]).map(
@@ -809,6 +1009,7 @@ export function createPostgresMeetingRepository(
 
     const hydrated: MeetingRecord = {
       ...base,
+      isFavorite: favoriteResult.rows.length > 0,
       transcript,
       summary: latestSummary
         ? {
@@ -818,26 +1019,10 @@ export function createPostgresMeetingRepository(
           }
         : undefined,
       tags: (tagsResult.rows as TagRow[]).map((row) => row.name),
-      contexts: (contextsResult.rows as ContextRow[]).map((context) => ({
-        id: context.id,
-        name: context.name,
-        description: context.description ?? undefined,
-        color: context.color ?? undefined,
-        kind: context.kind ?? undefined,
-        createdAt: toIso(context.created_at),
-      })),
+      contexts: (contextsResult.rows as ContextRow[]).map(mapContext),
       intelligence,
       suggestedAgentRuns: (suggestedRunsResult.rows as SuggestedAgentRunRow[]).map(
-        (run) => ({
-          id: run.id,
-          meetingId: run.meeting_id,
-          target: run.target,
-          payload: run.payload ?? {},
-          response: run.response ?? {},
-          status: run.status,
-          lastError: run.last_error ?? undefined,
-          createdAt: toIso(run.created_at),
-        })
+        mapSuggestedAgentRun
       ),
       mediaAssets: (mediaAssetsResult.rows as MediaAssetRow[]).map(mapMediaAsset),
       meetConferenceRecords: mapMeetConferenceRecords(
@@ -869,46 +1054,174 @@ export function createPostgresMeetingRepository(
     }
   }
 
+  async function getScopedMeeting(id: string) {
+    const row = await selectMeeting(client, "m.id = $1", [id])
+
+    return row ? hydrateMeeting(mapMeetingRow(row)) : undefined
+  }
+
+  async function requireScopedMeeting(id: string) {
+    const meeting = await getScopedMeeting(id)
+
+    if (!meeting) throw new Error(`Meeting not found: ${id}`)
+    return meeting
+  }
+
+  async function insertMeeting(
+    input: CreateMeetingInput,
+    onConflictSql = ""
+  ): Promise<MeetingRow | undefined> {
+    const result = await client.query(
+      `
+        insert into meetings as m (
+          id, title, source, language, status, retention, started_at, participants,
+          external_source, external_id, workspace_id, owner_user_id, visibility
+        )
+        values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb, $7, $8, $9, $10, $11)
+        ${onConflictSql}
+        returning ${meetingColumns("m")}
+      `,
+      [
+        input.title,
+        input.source,
+        input.language,
+        input.startedAt,
+        JSON.stringify(input.participants ?? []),
+        createId("meet"),
+        input.externalSource ?? null,
+        input.externalId ?? null,
+        workspaceId,
+        input.ownerUserId ?? defaultOwnerUserId ?? null,
+        input.visibility ?? "workspace",
+      ]
+    )
+
+    return result.rows[0] as MeetingRow | undefined
+  }
+
+  async function updateScopedMeeting(
+    db: Queryable,
+    meetingId: string,
+    setSql: string,
+    setValues: unknown[]
+  ): Promise<MeetingRow | undefined> {
+    // setValues occupy $2.., the meeting id is $1.
+    const values: unknown[] = [meetingId, ...setValues]
+    const result = await db.query(
+      `
+        update meetings m
+        set ${setSql}
+        where m.id = $1 and ${scoped("m", values)}
+        returning ${meetingColumns("m")}
+      `,
+      values
+    )
+
+    return result.rows[0] as MeetingRow | undefined
+  }
+
+  /**
+   * Jobs are workspace rows; a job linked to a meeting is visible only while
+   * that meeting is (same rule as every other meeting child).
+   */
+  function jobScopeSql(values: unknown[]): string {
+    return (
+      `jobs.workspace_id = ${pushValue(values, workspaceId)} and ` +
+      `(jobs.meeting_id is null or exists (select 1 from meetings m ` +
+      `where m.id = jobs.meeting_id and ${scoped("m", values)}))`
+    )
+  }
+
+  async function findScopedJob(id: string) {
+    const values: unknown[] = [id]
+    const result = await client.query(
+      `
+        select ${JOB_COLUMNS}
+        from jobs
+        where id = $1 and ${jobScopeSql(values)}
+        limit 1
+      `,
+      values
+    )
+
+    return result.rows[0] ? mapJob(result.rows[0] as JobRow) : undefined
+  }
+
+  async function updateScopedParticipant(
+    participantId: string,
+    patch: Parameters<MeetingRepository["updateMeetingParticipant"]>[1],
+    meetingId?: string
+  ): Promise<MeetingParticipant> {
+    const values: unknown[] = [
+      participantId,
+      patch.name ?? null,
+      patch.email ?? null,
+      patch.role ?? null,
+      patch.attendanceStatus ?? null,
+      patch.speakerLabel ?? null,
+    ]
+    const meetingFilter = meetingId
+      ? `and meeting_participants.meeting_id = ${pushValue(values, meetingId)}`
+      : ""
+    const result = await client.query(
+      `
+        update meeting_participants
+        set name = coalesce($2, name),
+            email = coalesce($3, email),
+            role = coalesce($4, role),
+            attendance_status = coalesce($5, attendance_status),
+            speaker_label = coalesce($6, speaker_label),
+            updated_at = now()
+        where id = $1
+          ${meetingFilter}
+          and exists (
+            select 1 from meetings m
+            where m.id = meeting_participants.meeting_id and ${scoped("m", values)}
+          )
+        returning ${PARTICIPANT_COLUMNS}
+      `,
+      values
+    )
+    const row = result.rows[0] as ParticipantRow | undefined
+
+    if (!row) throw new Error(`Participant not found: ${participantId}`)
+    return mapParticipant(row)
+  }
+
+  async function latestShare(meetingId: string, activeOnly: boolean) {
+    const result = await client.query(
+      `
+        select ${SHARE_COLUMNS}
+        from meeting_shares
+        where meeting_id = $1
+        ${activeOnly ? "and revoked = false" : ""}
+        order by created_at desc
+        limit 1
+      `,
+      [meetingId]
+    )
+
+    return result.rows[0] as MeetingShareRow | undefined
+  }
+
   return {
     async findMeetingByExternalId(source, externalId) {
-      const result = await client.query(
-        `
-          select ${MEETING_COLUMNS}
-          from meetings
-          where external_source = $1 and external_id = $2
-          limit 1
-        `,
+      const row = await selectMeeting(
+        client,
+        "m.external_source = $1 and m.external_id = $2",
         [source, externalId]
       )
-      const row = result.rows[0] as MeetingRow | undefined
 
       return row ? hydrateMeeting(mapMeetingRow(row)) : undefined
     },
 
     async createMeetingIfAbsent(input) {
-      const result = await client.query(
-        `
-          insert into meetings (
-            id, title, source, language, status, retention, started_at, participants,
-            external_source, external_id
-          )
-          values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb, $7, $8)
-          on conflict (external_source, external_id) where external_id is not null
-            do nothing
-          returning ${MEETING_COLUMNS}
-        `,
-        [
-          input.title,
-          input.source,
-          input.language,
-          input.startedAt,
-          JSON.stringify(input.participants ?? []),
-          createId("meet"),
-          input.externalSource,
-          input.externalId,
-        ]
+      const row = await insertMeeting(
+        input,
+        `on conflict (workspace_id, external_source, external_id)
+           where external_id is not null
+           do nothing`
       )
-      const row = result.rows[0] as MeetingRow | undefined
 
       if (row) {
         const meeting = mapMeetingRow(row)
@@ -922,39 +1235,49 @@ export function createPostgresMeetingRepository(
         input.externalId
       )
 
-      if (!existing) {
-        throw new Error(
-          `Meeting ${input.externalSource}:${input.externalId} conflicted but could not be loaded`
-        )
-      }
+      if (!existing) throw new MeetingExternalIdConflictError()
 
       return { meeting: existing, created: false }
     },
 
     async discardMeeting(id) {
       return withTransaction(client, async (tx) => {
+        const guardValues: unknown[] = [id]
         const guard = await tx.query(
           `
-            select id
+            select m.id
             from meetings m
             where m.id = $1
+              and ${scoped("m", guardValues)}
               and not exists (select 1 from transcript_segments where meeting_id = m.id)
               and not exists (select 1 from summaries where meeting_id = m.id)
-            for update
+            for update of m
           `,
-          [id]
+          guardValues
         )
 
         if (!guard.rows.length) return false
 
-        await tx.query(`update jobs set meeting_id = null where meeting_id = $1`, [id])
+        await tx.query(
+          `update jobs set meeting_id = null where meeting_id = $1 and workspace_id = $2`,
+          [id, workspaceId]
+        )
         await tx.query(`update ai_runs set meeting_id = null where meeting_id = $1`, [id])
-        await tx.query(`delete from media_assets where meeting_id = $1`, [id])
+        await tx.query(
+          `delete from media_assets where meeting_id = $1 and workspace_id = $2`,
+          [id, workspaceId]
+        )
         await tx.query(`delete from meeting_participants where meeting_id = $1`, [id])
         await tx.query(`delete from meeting_tags where meeting_id = $1`, [id])
         await tx.query(`delete from action_items where meeting_id = $1`, [id])
         await tx.query(`delete from speakers where meeting_id = $1`, [id])
-        await tx.query(`delete from meetings where id = $1`, [id])
+        await tx.query(`delete from meeting_favorites where meeting_id = $1`, [id])
+        const deleteValues: unknown[] = [id]
+
+        await tx.query(
+          `delete from meetings m where m.id = $1 and ${scoped("m", deleteValues)}`,
+          deleteValues
+        )
 
         return true
       })
@@ -968,7 +1291,7 @@ export function createPostgresMeetingRepository(
       const limit = normalizeLimit(options.limit)
       const offset = normalizeOffset(options.offset)
       const sort = normalizeSort(options.sort)
-      const { whereSql, values } = buildMeetingListClauses(options)
+      const { whereSql, values } = buildMeetingListClauses(scope, options)
       const countResult = await client.query(
         `
           select count(*)::int as total
@@ -982,13 +1305,12 @@ export function createPostgresMeetingRepository(
       const offsetIndex = values.length + 2
       const result = await client.query(
         `
-        select m.id, m.title, m.source, m.language, m.status, m.retention, m.started_at,
-               m.participants, m.is_favorite, m.language_metadata
+        select ${meetingColumns("m")}
         from meetings m
         left join lateral (
           select max(j.created_at) as last_job_at
           from jobs j
-          where j.meeting_id = m.id
+          where j.meeting_id = m.id and j.workspace_id = m.workspace_id
         ) recent_job on true
         left join lateral (
           select max(df.imported_at) as imported_at
@@ -1021,44 +1343,12 @@ export function createPostgresMeetingRepository(
     },
 
     async getMeeting(id: string) {
-      const result = await client.query(
-        `
-          select ${MEETING_COLUMNS}
-          from meetings
-          where id = $1
-          limit 1
-        `,
-        [id]
-      )
-
-      const row = result.rows[0] as MeetingRow | undefined
-
-      return row ? hydrateMeeting(mapMeetingRow(row)) : undefined
+      return getScopedMeeting(id)
     },
 
     async createMeeting(input: CreateMeetingInput) {
-      const result = await client.query(
-        `
-          insert into meetings (
-            id, title, source, language, status, retention, started_at, participants,
-            external_source, external_id
-          )
-          values ($6, $1, $2, $3, 'created', 'audio', $4, $5::jsonb, $7, $8)
-          returning ${MEETING_COLUMNS}
-        `,
-        [
-          input.title,
-          input.source,
-          input.language,
-          input.startedAt,
-          JSON.stringify(input.participants ?? []),
-          createId("meet"),
-          input.externalSource ?? null,
-          input.externalId ?? null,
-        ]
-      )
-
-      const meeting = mapMeetingRow(result.rows[0] as MeetingRow)
+      const row = await insertMeeting(input)
+      const meeting = mapMeetingRow(row as MeetingRow)
 
       await insertCalendarParticipants(client, meeting.id, input.participants ?? [])
 
@@ -1066,70 +1356,73 @@ export function createPostgresMeetingRepository(
     },
 
     async updateMeetingStatus(id: string, status: MeetingStatus) {
-      const result = await client.query(
-        `
-          update meetings
-          set status = $2
-          where id = $1
-          returning id, title, source, language, status, retention, started_at,
-                    participants, is_favorite, language_metadata
-        `,
-        [id, status]
-      )
-      const row = result.rows[0] as MeetingRow | undefined
+      const row = await updateScopedMeeting(client, id, "status = $2", [status])
 
       if (!row) throw new Error(`Meeting not found: ${id}`)
       return hydrateMeeting(mapMeetingRow(row))
     },
 
     async createMediaAsset(input) {
+      // The asset inherits the workspace of a meeting this scope can see; a
+      // foreign meeting id inserts nothing.
+      const values: unknown[] = [
+        createId("asset"),
+        input.meetingId,
+        input.storageKey,
+        input.filename ?? null,
+        input.contentType,
+        input.sizeBytes,
+        input.retention ?? "audio",
+        input.source ?? null,
+        input.sourceFileId ?? null,
+        input.checksumSha256 ?? null,
+        JSON.stringify(input.metadata ?? {}),
+      ]
       const result = await client.query(
         `
           insert into media_assets (
             id, meeting_id, storage_key, filename, content_type, size_bytes,
-            retention, source, source_file_id, checksum_sha256, metadata
+            retention, source, source_file_id, checksum_sha256, metadata,
+            workspace_id
           )
-          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
-          returning id, meeting_id, storage_key, filename, content_type,
-                    size_bytes, retention, source, source_file_id,
-                    checksum_sha256, metadata, created_at
+          select $1, m.id, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, m.workspace_id
+          from meetings m
+          where m.id = $2 and ${scoped("m", values)}
+          returning ${MEDIA_ASSET_COLUMNS}
         `,
-        [
-          createId("asset"),
-          input.meetingId,
-          input.storageKey,
-          input.filename ?? null,
-          input.contentType,
-          input.sizeBytes,
-          input.retention ?? "audio",
-          input.source ?? null,
-          input.sourceFileId ?? null,
-          input.checksumSha256 ?? null,
-          JSON.stringify(input.metadata ?? {}),
-        ]
+        values
       )
+      const row = result.rows[0] as MediaAssetRow | undefined
 
-      await client.query(`update meetings set status = 'media_uploaded' where id = $1`, [
-        input.meetingId,
-      ])
+      if (!row) throw new Error(`Meeting not found: ${input.meetingId}`)
 
-      return mapMediaAsset(result.rows[0] as MediaAssetRow)
+      await updateScopedMeeting(client, input.meetingId, "status = 'media_uploaded'", [])
+
+      return mapMediaAsset(row)
     },
 
     async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
-      const scoped = Boolean(options.meetingId)
+      const values: unknown[] = [source, sourceFileId, workspaceId]
+      const meetingFilter = options.meetingId
+        ? `and a.meeting_id = ${pushValue(values, options.meetingId)}`
+        : ""
       const result = await client.query(
         `
-          select id, meeting_id, storage_key, filename, content_type,
-                 size_bytes, retention, source, source_file_id,
-                 checksum_sha256, metadata, created_at
-          from media_assets
-          where source = $1 and source_file_id = $2
-          ${scoped ? "and meeting_id = $3" : ""}
-          order by created_at desc
+          select ${MEDIA_ASSET_COLUMNS
+            .split(",")
+            .map((column) => `a.${column.trim()}`)
+            .join(", ")}
+          from media_assets a
+          where a.source = $1 and a.source_file_id = $2 and a.workspace_id = $3
+          ${meetingFilter}
+          and exists (
+            select 1 from meetings m
+            where m.id = a.meeting_id and ${scoped("m", values)}
+          )
+          order by a.created_at desc
           limit 1
         `,
-        scoped ? [source, sourceFileId, options.meetingId] : [source, sourceFileId]
+        values
       )
 
       const row = result.rows[0] as MediaAssetRow | undefined
@@ -1138,6 +1431,7 @@ export function createPostgresMeetingRepository(
 
     async replaceTranscriptSegments(meetingId, segments) {
       await withTransaction(client, async (tx) => {
+        await assertMeetingInScope(tx, meetingId)
         await tx.query(`delete from transcript_segments where meeting_id = $1`, [
           meetingId,
         ])
@@ -1193,9 +1487,7 @@ export function createPostgresMeetingRepository(
                 updated_at = now()
             `,
             [
-              `participant_${Buffer.from(`${meetingId}:${speakerLabel}`)
-                .toString("base64url")
-                .slice(0, 40)}`,
+              participantRowId(meetingId, speakerLabel),
               meetingId,
               speakerLabel,
             ]
@@ -1213,6 +1505,8 @@ export function createPostgresMeetingRepository(
       model = "heuristic-v1"
     ) {
       return withTransaction(client, async (tx) => {
+        await assertMeetingInScope(tx, meetingId)
+
         const existingResult = await tx.query(
           `
             select ${ACTION_ITEM_COLUMNS}
@@ -1323,13 +1617,11 @@ export function createPostgresMeetingRepository(
           `,
           [runId, meetingId, provider, model, JSON.stringify(persisted)]
         )
-        await tx.query(
-          `
-            update meetings
-            set language_metadata = $2::jsonb, status = 'completed'
-            where id = $1
-          `,
-          [meetingId, JSON.stringify(intelligence.languageMetadata)]
+        await updateScopedMeeting(
+          tx,
+          meetingId,
+          "language_metadata = $2::jsonb, status = 'completed'",
+          [JSON.stringify(intelligence.languageMetadata)]
         )
 
         const summaryResult = await tx.query(
@@ -1361,26 +1653,7 @@ export function createPostgresMeetingRepository(
 
         await tx.query(`delete from meeting_tags where meeting_id = $1`, [meetingId])
         for (const tag of intelligence.tags) {
-          const tagId = `tag_${tag}`
-          await tx.query(
-            `
-              insert into tags (id, name)
-              values ($1, $2)
-              on conflict (name) do nothing
-            `,
-            [tagId, tag]
-          )
-          await tx.query(
-            `
-              insert into meeting_tags (meeting_id, tag_id)
-              values (
-                $1,
-                coalesce((select id from tags where name = $2), $3)
-              )
-              on conflict do nothing
-            `,
-            [meetingId, tag, tagId]
-          )
+          await upsertWorkspaceTag(tx, meetingId, tag)
         }
 
         return persisted
@@ -1393,6 +1666,15 @@ export function createPostgresMeetingRepository(
         patch.owner !== undefined ||
         patch.dueDate !== undefined ||
         patch.priority !== undefined
+      const values: unknown[] = [
+        id,
+        patch.title ?? null,
+        patch.owner ?? null,
+        patch.status ?? null,
+        coerceDueDate(patch.dueDate),
+        patch.priority ?? null,
+        contentEdited,
+      ]
       const result = await client.query(
         `
           update action_items
@@ -1409,17 +1691,13 @@ export function createPostgresMeetingRepository(
               end,
               updated_at = now()
           where id = $1
+            and exists (
+              select 1 from meetings m
+              where m.id = action_items.meeting_id and ${scoped("m", values)}
+            )
           returning ${ACTION_ITEM_COLUMNS}
         `,
-        [
-          id,
-          patch.title ?? null,
-          patch.owner ?? null,
-          patch.status ?? null,
-          coerceDueDate(patch.dueDate),
-          patch.priority ?? null,
-          contentEdited,
-        ]
+        values
       )
       const row = result.rows[0] as ActionItemRow | undefined
 
@@ -1429,34 +1707,55 @@ export function createPostgresMeetingRepository(
 
     async createJob(input) {
       const nowId = input.id ?? createId("job")
+      const values: unknown[] = [
+        nowId,
+        input.name,
+        input.status ?? "queued",
+        input.meetingId ?? null,
+        JSON.stringify(input.payload ?? {}),
+        input.retryOfJobId ?? null,
+        input.maxAttempts ?? null,
+        workspaceId,
+      ]
+      // The job links its meeting only when this scope can see it; a foreign
+      // or missing meeting id leaves meeting_id null (the payload keeps it,
+      // and the worker's workspace-scoped lookup then fails permanently).
       const result = await client.query(
         `
-          insert into jobs (id, name, status, meeting_id, payload, retry_of_job_id, max_attempts)
-          values ($1, $2, $3, $4, $5::jsonb, $6, coalesce($7::integer, 3))
+          insert into jobs (
+            id, name, status, meeting_id, payload, retry_of_job_id, max_attempts,
+            workspace_id
+          )
+          values (
+            $1, $2, $3,
+            (select m.id from meetings m where m.id = $4 and ${scoped("m", values)}),
+            $5::jsonb, $6, coalesce($7::integer, 3), $8
+          )
           on conflict (id) do update
             set status = excluded.status,
                 payload = excluded.payload,
                 max_attempts = excluded.max_attempts,
                 updated_at = now()
-          returning id, name, status, meeting_id, payload, result, error,
-                    attempts, max_attempts, retry_of_job_id, started_at,
-                    completed_at, created_at, updated_at
+            where jobs.workspace_id = excluded.workspace_id
+          returning ${JOB_COLUMNS}
         `,
-        [
-          nowId,
-          input.name,
-          input.status ?? "queued",
-          input.meetingId ?? null,
-          JSON.stringify(input.payload ?? {}),
-          input.retryOfJobId ?? null,
-          input.maxAttempts ?? null,
-        ]
+        values
       )
+      const row = result.rows[0] as JobRow | undefined
 
-      return mapJob(result.rows[0] as JobRow)
+      // A conflicting id owned by another workspace updates nothing.
+      if (!row) throw new Error(`Job id already in use: ${nowId}`)
+      return mapJob(row)
     },
 
     async updateJob(id, patch) {
+      const values: unknown[] = [
+        id,
+        patch.status ?? null,
+        patch.result ? JSON.stringify(patch.result) : null,
+        patch.error ?? null,
+        patch.attempts ?? null,
+      ]
       const result = await client.query(
         `
           update jobs
@@ -1473,18 +1772,10 @@ export function createPostgresMeetingRepository(
                 else completed_at
               end,
               updated_at = now()
-          where id = $1
-          returning id, name, status, meeting_id, payload, result, error,
-                    attempts, max_attempts, retry_of_job_id, started_at,
-                    completed_at, created_at, updated_at
+          where id = $1 and ${jobScopeSql(values)}
+          returning ${JOB_COLUMNS}
         `,
-        [
-          id,
-          patch.status ?? null,
-          patch.result ? JSON.stringify(patch.result) : null,
-          patch.error ?? null,
-          patch.attempts ?? null,
-        ]
+        values
       )
       const row = result.rows[0] as JobRow | undefined
 
@@ -1493,41 +1784,25 @@ export function createPostgresMeetingRepository(
     },
 
     async getJob(id) {
-      const result = await client.query(
-        `
-          select id, name, status, meeting_id, payload, result, error,
-                 attempts, max_attempts, retry_of_job_id, started_at,
-                 completed_at, created_at, updated_at
-          from jobs
-          where id = $1
-          limit 1
-        `,
-        [id]
-      )
-
-      return result.rows[0] ? mapJob(result.rows[0] as JobRow) : undefined
+      return findScopedJob(id)
     },
 
     async listJobs(filters = {}) {
-      const clauses: string[] = []
       const values: unknown[] = []
+      const clauses = [jobScopeSql(values)]
 
       if (filters.meetingId) {
-        values.push(filters.meetingId)
-        clauses.push(`meeting_id = $${values.length}`)
+        clauses.push(`meeting_id = ${pushValue(values, filters.meetingId)}`)
       }
       if (filters.status) {
-        values.push(filters.status)
-        clauses.push(`status = $${values.length}`)
+        clauses.push(`status = ${pushValue(values, filters.status)}`)
       }
 
       const result = await client.query(
         `
-          select id, name, status, meeting_id, payload, result, error,
-                 attempts, max_attempts, retry_of_job_id, started_at,
-                 completed_at, created_at, updated_at
+          select ${JOB_COLUMNS}
           from jobs
-          ${clauses.length ? `where ${clauses.join(" and ")}` : ""}
+          where ${clauses.join(" and ")}
           order by created_at desc
           limit 100
         `,
@@ -1551,12 +1826,7 @@ export function createPostgresMeetingRepository(
       meetingId: string,
       question: string
     ): Promise<MeetingAnswer> {
-      const meeting = await this.getMeeting(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
+      const meeting = await requireScopedMeeting(meetingId)
       const normalizedQuestion = question.toLowerCase()
       const tokens = normalizedQuestion
         .split(/\s+/)
@@ -1584,26 +1854,24 @@ export function createPostgresMeetingRepository(
     },
 
     async getMeetingIntelligence(meetingId: string) {
+      const values: unknown[] = [meetingId]
       const result = await client.query(
         `
-          select output
-          from intelligence_runs
-          where meeting_id = $1
-          order by created_at desc
+          select ir.output
+          from intelligence_runs ir
+          join meetings m on m.id = ir.meeting_id
+          where ir.meeting_id = $1 and ${scoped("m", values)}
+          order by ir.created_at desc
           limit 1
         `,
-        [meetingId]
+        values
       )
 
       return (result.rows[0] as IntelligenceRunRow | undefined)?.output
     },
 
     async runMeetingIntelligence(meetingId: string) {
-      const meeting = await this.getMeeting(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
+      const meeting = await requireScopedMeeting(meetingId)
 
       await this.updateMeetingStatus(meetingId, "summarizing")
       const intelligence = buildMeetingIntelligence(meeting)
@@ -1613,44 +1881,42 @@ export function createPostgresMeetingRepository(
     },
 
     async listContexts(): Promise<MeetingContext[]> {
-      const result = await client.query(`
-        select id, name, description, color, kind, created_at
-        from contexts
-        order by name asc
-      `)
+      const result = await client.query(
+        `
+          select id, name, description, color, kind, created_at
+          from contexts
+          where workspace_id = $1
+          order by name asc
+        `,
+        [workspaceId]
+      )
 
-      return (result.rows as ContextRow[]).map((context) => ({
-        id: context.id,
-        name: context.name,
-        description: context.description ?? undefined,
-        color: context.color ?? undefined,
-        kind: context.kind ?? undefined,
-        createdAt: toIso(context.created_at),
-      }))
+      return (result.rows as ContextRow[]).map(mapContext)
     },
 
     async createContext(input: CreateContextInput): Promise<MeetingContext> {
       const result = await client.query(
         `
-          insert into contexts (id, name, description)
-          values ($1, $2, $3)
+          insert into contexts (id, name, description, workspace_id)
+          values ($1, $2, $3, $4)
           returning id, name, description, color, kind, created_at
         `,
-        [createId("ctx"), input.name, input.description ?? null]
+        [createId("ctx"), input.name, input.description ?? null, workspaceId]
       )
-      const row = result.rows[0] as ContextRow
 
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        color: row.color ?? undefined,
-        kind: row.kind ?? undefined,
-        createdAt: toIso(row.created_at),
-      }
+      return mapContext(result.rows[0] as ContextRow)
     },
 
     async linkMeetingContext(meetingId: string, contextId: string) {
+      await assertMeetingInScope(client, meetingId)
+
+      const context = await client.query(
+        `select id from contexts where id = $1 and workspace_id = $2`,
+        [contextId, workspaceId]
+      )
+
+      if (!context.rows.length) throw new Error(`Context not found: ${contextId}`)
+
       await client.query(
         `
           insert into meeting_contexts (meeting_id, context_id)
@@ -1660,52 +1926,53 @@ export function createPostgresMeetingRepository(
         [meetingId, contextId]
       )
 
-      const meeting = await this.getMeeting(meetingId)
-
-      if (!meeting) {
-        throw new Error(`Meeting not found: ${meetingId}`)
-      }
-
-      return meeting
+      return requireScopedMeeting(meetingId)
     },
 
     async listRooms(): Promise<Array<MeetingContext & { meetingCount: number }>> {
-      const result = await client.query(`
-        select c.id, c.name, c.description, c.color, c.kind, c.created_at,
-               count(mc.meeting_id)::int as meeting_count
-        from contexts c
-        left join meeting_contexts mc on mc.context_id = c.id
-        group by c.id, c.name, c.description, c.color, c.kind, c.created_at
-        order by c.name asc
-      `)
+      // Counts only meetings this scope can see.
+      const values: unknown[] = [workspaceId]
+      const visible = scoped("m", values)
+      const result = await client.query(
+        `
+          select c.id, c.name, c.description, c.color, c.kind, c.created_at,
+                 count(mc.meeting_id)::int as meeting_count
+          from contexts c
+          left join meeting_contexts mc
+            on mc.context_id = c.id
+           and exists (
+             select 1 from meetings m
+             where m.id = mc.meeting_id and ${visible}
+           )
+          where c.workspace_id = $1
+          group by c.id, c.name, c.description, c.color, c.kind, c.created_at
+          order by c.name asc
+        `,
+        values
+      )
 
       return result.rows.map((row) => {
         const context = row as ContextRow & { meeting_count: number }
 
         return {
-          id: context.id,
-          name: context.name,
-          description: context.description ?? undefined,
-          color: context.color ?? undefined,
-          kind: context.kind ?? undefined,
-          createdAt: toIso(context.created_at),
+          ...mapContext(context),
           meetingCount: Number(context.meeting_count ?? 0),
         }
       })
     },
 
     async listMeetingsByContext(contextId: string): Promise<MeetingRecord[]> {
+      const values: unknown[] = [contextId]
       const result = await client.query(
         `
-          select m.id, m.title, m.source, m.language, m.status, m.retention,
-                 m.started_at, m.participants, m.is_favorite, m.language_metadata
+          select ${meetingColumns("m")}
           from meetings m
           join meeting_contexts mc on mc.meeting_id = m.id
-          where mc.context_id = $1
+          where mc.context_id = $1 and ${scoped("m", values)}
           order by m.started_at desc
           limit 100
         `,
-        [contextId]
+        values
       )
       const bases = result.rows.map((row) => mapMeetingRow(row as MeetingRow))
 
@@ -1713,9 +1980,7 @@ export function createPostgresMeetingRepository(
     },
 
     async updateMeetingTags(meetingId: string, tags: string[]) {
-      const meeting = await this.getMeeting(meetingId)
-
-      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
+      await assertMeetingInScope(client, meetingId)
 
       const normalizedTags = [...new Set(tags.map((tag) => tag.trim()))].filter(
         Boolean
@@ -1726,65 +1991,50 @@ export function createPostgresMeetingRepository(
       ])
 
       for (const tag of normalizedTags) {
-        const tagId = `tag_${tag.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`
-
-        await client.query(
-          `
-            insert into tags (id, name)
-            values ($1, $2)
-            on conflict (name) do nothing
-          `,
-          [tagId, tag]
-        )
-        await client.query(
-          `
-            insert into meeting_tags (meeting_id, tag_id)
-            values ($1, coalesce((select id from tags where name = $2), $3))
-            on conflict do nothing
-          `,
-          [meetingId, tag, tagId]
-        )
+        await upsertWorkspaceTag(client, meetingId, tag)
       }
 
-      const updated = await this.getMeeting(meetingId)
-
-      if (!updated) throw new Error(`Meeting not found: ${meetingId}`)
-      return updated
+      return requireScopedMeeting(meetingId)
     },
 
     async updateMeetingFavorite(meetingId: string, favorite: boolean) {
-      const result = await client.query(
-        `
-          update meetings
-          set is_favorite = $2, updated_at = now()
-          where id = $1
-          returning id, title, source, language, status, retention, started_at,
-                    participants, is_favorite, language_metadata
-        `,
-        [meetingId, favorite]
-      )
-      const row = result.rows[0] as MeetingRow | undefined
+      if (!favoriteUserId) {
+        throw new MeetingScopeError(
+          "Favorites are per user and need a signed-in member",
+          400
+        )
+      }
 
-      if (!row) throw new Error(`Meeting not found: ${meetingId}`)
-      return hydrateMeeting(mapMeetingRow(row))
+      await assertMeetingInScope(client, meetingId)
+
+      if (favorite) {
+        await client.query(
+          `
+            insert into meeting_favorites (user_id, meeting_id)
+            values ($1, $2)
+            on conflict do nothing
+          `,
+          [favoriteUserId, meetingId]
+        )
+      } else {
+        await client.query(
+          `delete from meeting_favorites where user_id = $1 and meeting_id = $2`,
+          [favoriteUserId, meetingId]
+        )
+      }
+
+      return requireScopedMeeting(meetingId)
     },
 
     async createMeetingShare(input): Promise<MeetingShare> {
-      const existing = await client.query(
-        `
-          select id, meeting_id, token, visibility, revoked, expires_at,
-                 included_sections, created_by, created_at, updated_at
-          from meeting_shares
-          where meeting_id = $1 and revoked = false
-          order by created_at desc
-          limit 1
-        `,
-        [input.meetingId]
-      )
+      await assertMeetingInScope(client, input.meetingId)
 
-      if (existing.rows[0]) {
-        return mapMeetingShare(existing.rows[0] as MeetingShareRow)
-      }
+      // A share link only works while the meeting is `link`-visible.
+      await setLinkVisibility(client, input.meetingId)
+
+      const existing = await latestShare(input.meetingId, true)
+
+      if (existing) return mapMeetingShare(existing)
 
       const result = await client.query(
         `
@@ -1792,8 +2042,7 @@ export function createPostgresMeetingRepository(
             id, meeting_id, token, included_sections, created_by
           )
           values ($1, $2, $3, $4::jsonb, $5)
-          returning id, meeting_id, token, visibility, revoked, expires_at,
-                    included_sections, created_by, created_at, updated_at
+          returning ${SHARE_COLUMNS}
         `,
         [
           createId("share"),
@@ -1815,25 +2064,45 @@ export function createPostgresMeetingRepository(
       return mapMeetingShare(result.rows[0] as MeetingShareRow)
     },
 
+    async updateMeetingVisibility(meetingId, visibility): Promise<MeetingRecord> {
+      const row = await withTransaction(client, async (tx) => {
+        const updated = await updateScopedMeeting(
+          tx,
+          meetingId,
+          "visibility = $2",
+          [visibility]
+        )
+
+        if (!updated) return undefined
+
+        // Leaving `link` revokes every active share in the same transaction.
+        if (visibility !== "link") {
+          await tx.query(
+            `
+              update meeting_shares
+              set revoked = true, updated_at = now()
+              where meeting_id = $1 and revoked = false
+            `,
+            [meetingId]
+          )
+        }
+
+        return updated
+      })
+
+      if (!row) throw new Error(`Meeting not found: ${meetingId}`)
+      return hydrateMeeting(mapMeetingRow(row))
+    },
+
     async updateMeetingShare(meetingId, patch): Promise<MeetingShare> {
+      await assertMeetingInScope(client, meetingId)
+
       // Operate on the latest ACTIVE share so an edit never silently mutates a
       // revoked link. The one exception is an explicit un-revoke
       // (patch.revoked === false), which must be able to reactivate the latest
       // (revoked) share.
       const wantsUnrevoke = patch.revoked === false
-      const existing = await client.query(
-        `
-          select id, meeting_id, token, visibility, revoked, expires_at,
-                 included_sections, created_by, created_at, updated_at
-          from meeting_shares
-          where meeting_id = $1
-          ${wantsUnrevoke ? "" : "and revoked = false"}
-          order by created_at desc
-          limit 1
-        `,
-        [meetingId]
-      )
-      const current = existing.rows[0] as MeetingShareRow | undefined
+      const current = await latestShare(meetingId, !wantsUnrevoke)
 
       if (patch.regenerate) {
         if (current) {
@@ -1856,6 +2125,8 @@ export function createPostgresMeetingRepository(
         })
       }
 
+      if (wantsUnrevoke) await setLinkVisibility(client, meetingId)
+
       const result = await client.query(
         `
           update meeting_shares
@@ -1863,8 +2134,7 @@ export function createPostgresMeetingRepository(
               included_sections = coalesce($3::jsonb, included_sections),
               updated_at = now()
           where id = $1
-          returning id, meeting_id, token, visibility, revoked, expires_at,
-                    included_sections, created_by, created_at, updated_at
+          returning ${SHARE_COLUMNS}
         `,
         [
           current.id,
@@ -1879,32 +2149,36 @@ export function createPostgresMeetingRepository(
     },
 
     async getShareByToken(token) {
+      const values: unknown[] = [token]
       const result = await client.query(
         `
-          select id, meeting_id, token, visibility, revoked, expires_at,
-                 included_sections, created_by, created_at, updated_at
-          from meeting_shares
-          where token = $1 and revoked = false
+          select ${SHARE_COLUMNS
+            .split(",")
+            .map((column) => `s.${column.trim()}`)
+            .join(", ")}
+          from meeting_shares s
+          join meetings m on m.id = s.meeting_id
+          where s.token = $1
+            and s.revoked = false
+            and (s.expires_at is null or s.expires_at > now())
+            and m.visibility = 'link'
+            and ${scoped("m", values)}
           limit 1
         `,
-        [token]
+        values
       )
       const row = result.rows[0] as MeetingShareRow | undefined
-      const share = row ? mapMeetingShare(row) : undefined
-      const expired =
-        share?.expiresAt && new Date(share.expiresAt).getTime() < Date.now()
 
-      if (!share || expired) return undefined
+      if (!row) return undefined
 
-      const meeting = await this.getMeeting(share.meetingId)
+      const meeting = await getScopedMeeting(row.meeting_id)
 
-      return meeting ? { share, meeting } : undefined
+      return meeting ? { share: mapMeetingShare(row), meeting } : undefined
     },
 
     async listMeetingParticipants(meetingId) {
-      const meeting = await this.getMeeting(meetingId)
+      const meeting = await requireScopedMeeting(meetingId)
 
-      if (!meeting) throw new Error(`Meeting not found: ${meetingId}`)
       if (
         meeting.participantDetails?.length &&
         !meeting.participantDetails.every((participant) =>
@@ -1928,9 +2202,7 @@ export function createPostgresMeetingRepository(
             on conflict (id) do nothing
           `,
           [
-            `participant_${Buffer.from(`${meetingId}:${email ?? name}`)
-              .toString("base64url")
-              .slice(0, 40)}`,
+            participantRowId(meetingId, email ?? name),
             meetingId,
             name,
             email,
@@ -1940,7 +2212,7 @@ export function createPostgresMeetingRepository(
       }
 
       if (meeting.participants.length) {
-        const refreshed = await this.getMeeting(meetingId)
+        const refreshed = await getScopedMeeting(meetingId)
 
         return refreshed?.participantDetails ?? []
       }
@@ -1949,42 +2221,19 @@ export function createPostgresMeetingRepository(
     },
 
     async updateMeetingParticipant(participantId, patch) {
-      const result = await client.query(
-        `
-          update meeting_participants
-          set name = coalesce($2, name),
-              email = coalesce($3, email),
-              role = coalesce($4, role),
-              attendance_status = coalesce($5, attendance_status),
-              speaker_label = coalesce($6, speaker_label),
-              updated_at = now()
-          where id = $1
-          returning id, meeting_id, name, email, role, source, attendance_status,
-                    speaker_label, confidence, created_at, updated_at
-        `,
-        [
-          participantId,
-          patch.name ?? null,
-          patch.email ?? null,
-          patch.role ?? null,
-          patch.attendanceStatus ?? null,
-          patch.speakerLabel ?? null,
-        ]
-      )
-      const row = result.rows[0] as ParticipantRow | undefined
-
-      if (!row) throw new Error(`Participant not found: ${participantId}`)
-      return mapParticipant(row)
+      return updateScopedParticipant(participantId, patch)
     },
 
     async assignSpeakerToParticipant(meetingId, speakerLabel, participantId) {
-      const participant = await this.updateMeetingParticipant(participantId, {
-        speakerLabel,
-      })
+      await assertMeetingInScope(client, meetingId)
 
-      if (participant.meetingId !== meetingId) {
-        throw new Error(`Participant not found: ${participantId}`)
-      }
+      // The participant must belong to `meetingId`: checked in the UPDATE
+      // itself, so a participant of another meeting is never modified.
+      const participant = await updateScopedParticipant(
+        participantId,
+        { speakerLabel },
+        meetingId
+      )
 
       await client.query(
         `
@@ -1999,6 +2248,8 @@ export function createPostgresMeetingRepository(
     },
 
     async createExportRecord(input): Promise<ExportRecord> {
+      await assertMeetingInScope(client, input.meetingId)
+
       const result = await client.query(
         `
           insert into export_records (id, meeting_id, format, status, metadata)
@@ -2017,38 +2268,34 @@ export function createPostgresMeetingRepository(
     },
 
     async approveAgentRun(id): Promise<SuggestedAgentRun> {
+      const values: unknown[] = [id]
       const result = await client.query(
         `
           update suggested_agent_runs
           set status = 'queued'
           where id = $1
-          returning id, meeting_id, target, payload, response, status,
-                    last_error, created_at
+            and exists (
+              select 1 from meetings m
+              where m.id = suggested_agent_runs.meeting_id and ${scoped("m", values)}
+            )
+          returning ${SUGGESTED_RUN_COLUMNS}
         `,
-        [id]
+        values
       )
       const row = result.rows[0] as SuggestedAgentRunRow | undefined
 
       if (!row) throw new Error(`Agent run not found: ${id}`)
-      return {
-        id: row.id,
-        meetingId: row.meeting_id,
-        target: row.target,
-        payload: row.payload ?? {},
-        response: row.response ?? {},
-        status: row.status,
-        lastError: row.last_error ?? undefined,
-        createdAt: toIso(row.created_at),
-      }
+      return mapSuggestedAgentRun(row)
     },
 
     async createSuggestedAgentRun(input): Promise<SuggestedAgentRun> {
+      await assertMeetingInScope(client, input.meetingId)
+
       const result = await client.query(
         `
           insert into suggested_agent_runs (id, meeting_id, target, payload, status)
           values ($1, $2, $3, $4::jsonb, 'suggested')
-          returning id, meeting_id, target, payload, response, status,
-                    last_error, created_at
+          returning ${SUGGESTED_RUN_COLUMNS}
         `,
         [
           createId("agent_suggestion"),
@@ -2057,18 +2304,51 @@ export function createPostgresMeetingRepository(
           JSON.stringify(input.payload),
         ]
       )
-      const row = result.rows[0] as SuggestedAgentRunRow
 
-      return {
-        id: row.id,
-        meetingId: row.meeting_id,
-        target: row.target,
-        payload: row.payload ?? {},
-        response: row.response ?? {},
-        status: row.status,
-        lastError: row.last_error ?? undefined,
-        createdAt: toIso(row.created_at),
-      }
+      return mapSuggestedAgentRun(result.rows[0] as SuggestedAgentRunRow)
+    },
+  }
+}
+
+/**
+ * Cross-workspace share-token lookup for the public share pages. The token is
+ * the capability: it resolves only while the share is active and unexpired
+ * AND the meeting's visibility is `link`; the meeting is then loaded through
+ * a system repository of its own workspace.
+ */
+export function createPostgresShareLookup(client: Queryable): {
+  getShareByToken: MeetingRepository["getShareByToken"]
+} {
+  return {
+    async getShareByToken(token) {
+      const result = await client.query(
+        `
+          select s.id, s.meeting_id, s.token, s.visibility, s.revoked,
+                 s.expires_at, s.included_sections, s.created_by,
+                 s.created_at, s.updated_at,
+                 m.workspace_id as meeting_workspace_id
+          from meeting_shares s
+          join meetings m on m.id = s.meeting_id
+          where s.token = $1
+            and s.revoked = false
+            and (s.expires_at is null or s.expires_at > now())
+            and m.visibility = 'link'
+          limit 1
+        `,
+        [token]
+      )
+      const row = result.rows[0] as
+        | (MeetingShareRow & { meeting_workspace_id: string })
+        | undefined
+
+      if (!row) return undefined
+
+      const meeting = await createPostgresMeetingRepository(client, {
+        kind: "system",
+        workspaceId: row.meeting_workspace_id,
+      }).getMeeting(row.meeting_id)
+
+      return meeting ? { share: mapMeetingShare(row), meeting } : undefined
     },
   }
 }

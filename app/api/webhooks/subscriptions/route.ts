@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
+import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import {
   createWebhookSubscription,
@@ -9,28 +10,20 @@ import {
   listWebhookSubscriptions,
 } from "@/lib/webhooks/management"
 
-export async function GET(request: Request) {
+export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
-  const subscriptions = await listWebhookSubscriptions()
+  const subscriptions = await listWebhookSubscriptions(ctx.workspace.id)
 
   return NextResponse.json({ subscriptions }, { headers: rateLimit.headers })
-}
+})
 
-export async function POST(request: Request) {
+export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
-
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
 
   const { url, events, secret } = (await request.json().catch(() => ({}))) as {
     url?: string
@@ -43,13 +36,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    const created = await createWebhookSubscription({ url, events, secret })
+    const created = await createWebhookSubscription(ctx.workspace.id, {
+      url,
+      events,
+      secret,
+    })
     const { subscription } = created
     const { event, signature } = createWebhookTestSignature(
       subscription.url,
-      created.secret
+      created.secret,
+      ctx.workspace.id
     )
     await recordAuditLog({
+      ...ctx.audit,
       action: "webhook.subscription.created",
       targetType: "webhook_subscription",
       targetId: subscription.id,
@@ -76,4 +75,4 @@ export async function POST(request: Request) {
       400
     )
   }
-}
+})

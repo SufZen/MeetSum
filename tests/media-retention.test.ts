@@ -1,153 +1,173 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
-type RetentionPolicy = {
-  audioMaxDays: number
-  videoRetention: "opt-in" | "all" | "none"
-  dryRun: boolean
+const mocks = vi.hoisted(() => ({
+  retentionDays: 30,
+}))
+
+vi.mock("@/lib/settings/app-settings", () => ({
+  getAppSettings: vi.fn(async () => ({ audioRetentionDays: mocks.retentionDays })),
+}))
+
+vi.mock("@/lib/storage/object-storage", () => ({
+  deleteMeetingObject: vi.fn(),
+}))
+
+vi.mock("@/lib/audit", () => ({ recordAuditLog: vi.fn() }))
+
+const { applyMediaRetention, planMediaRetention } = await import("@/lib/storage/retention")
+
+const now = new Date("2026-10-12T00:00:00.000Z")
+
+function candidateRows() {
+  return [
+    {
+      id: "asset_old",
+      meeting_id: "meet_1",
+      storage_key: "meetings/meet_1/old.m4a",
+      content_type: "audio/mp4",
+      size_bytes: "1000",
+      created_at: "2026-08-01T00:00:00.000Z",
+    },
+    {
+      id: "asset_video",
+      meeting_id: "meet_2",
+      storage_key: "meetings/meet_2/old.mp4",
+      content_type: "video/mp4",
+      size_bytes: 5000,
+      created_at: new Date("2026-08-02T00:00:00.000Z"),
+    },
+  ]
 }
 
-type MediaCandidate = {
-  id: string
-  meetingId: string
-  storageKey: string
-  contentType: string
-  sizeBytes: number
-  createdAt: string
+function database(rows = candidateRows()) {
+  return {
+    query: vi.fn(async (sql: string, values?: unknown[]) => {
+      void values
+      return /from media_assets a/.test(sql) ? { rows } : { rows: [] }
+    }),
+  }
 }
 
-function getExpiredMedia(
-  candidates: MediaCandidate[],
-  policy: RetentionPolicy,
-  now: Date = new Date()
-): MediaCandidate[] {
-  return candidates.filter((item) => {
-    const ageMs = now.getTime() - new Date(item.createdAt).getTime()
-    const ageDays = ageMs / (1000 * 60 * 60 * 24)
+beforeEach(() => {
+  mocks.retentionDays = 30
+})
 
-    const isAudio = item.contentType.startsWith("audio/")
-    const isVideo = item.contentType.startsWith("video/")
+describe("planMediaRetention", () => {
+  it("selects media of completed meetings of one workspace older than the window", async () => {
+    const db = database()
 
-    if (isAudio && ageDays > policy.audioMaxDays) return true
-    if (isVideo && policy.videoRetention === "none") return true
+    const plan = await planMediaRetention({ workspaceId: "ws_1", db, now })
 
-    return false
-  })
-}
-
-const now = new Date("2026-06-15T00:00:00Z")
-
-const sampleMedia: MediaCandidate[] = [
-  {
-    id: "m1",
-    meetingId: "mtg_1",
-    storageKey: "audio/old.wav",
-    contentType: "audio/wav",
-    sizeBytes: 50000000,
-    createdAt: "2025-12-01T00:00:00Z", // 197 days old
-  },
-  {
-    id: "m2",
-    meetingId: "mtg_2",
-    storageKey: "audio/recent.wav",
-    contentType: "audio/wav",
-    sizeBytes: 30000000,
-    createdAt: "2026-06-01T00:00:00Z", // 14 days old
-  },
-  {
-    id: "m3",
-    meetingId: "mtg_3",
-    storageKey: "video/meeting.mp4",
-    contentType: "video/mp4",
-    sizeBytes: 500000000,
-    createdAt: "2026-05-01T00:00:00Z", // 45 days old
-  },
-  {
-    id: "m4",
-    meetingId: "mtg_4",
-    storageKey: "application/pdf",
-    contentType: "application/pdf",
-    sizeBytes: 100000,
-    createdAt: "2025-01-01T00:00:00Z", // 531 days old
-  },
-]
-
-describe("media retention enforcement", () => {
-  it("expires audio files older than policy threshold", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 180, videoRetention: "opt-in", dryRun: false },
-      now
-    )
-
-    expect(expired).toHaveLength(1)
-    expect(expired[0].id).toBe("m1") // 197 days old, exceeds 180
+    const [sql, values] = db.query.mock.calls[0]
+    expect(sql).toMatch(/m\.workspace_id = \$1/)
+    expect(sql).toMatch(/a\.workspace_id = \$1/)
+    expect(sql).toMatch(/m\.status = 'completed'/)
+    expect(sql).toMatch(/a\.created_at < \$2/)
+    expect(values).toEqual(["ws_1", "2026-09-12T00:00:00.000Z", 500])
+    expect(plan).toMatchObject({
+      workspaceId: "ws_1",
+      retentionDays: 30,
+      totalBytes: 6000,
+    })
+    expect(plan.candidates.map((item) => item.id)).toEqual(["asset_old", "asset_video"])
   })
 
-  it("retains recent audio files", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 180, videoRetention: "opt-in", dryRun: false },
-      now
-    )
+  it("uses each workspace's own audioRetentionDays", async () => {
+    mocks.retentionDays = 7
+    const db = database()
 
-    const recent = expired.find((e) => e.id === "m2")
-    expect(recent).toBeUndefined() // 14 days old, within 180
+    await planMediaRetention({ workspaceId: "ws_2", db, now })
+
+    expect(db.query.mock.calls[0][1]).toEqual(["ws_2", "2026-10-05T00:00:00.000Z", 500])
   })
 
-  it("does not expire video when policy is opt-in", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 180, videoRetention: "opt-in", dryRun: false },
-      now
-    )
+  it("keeps everything when retention is 0 (disabled)", async () => {
+    mocks.retentionDays = 0
+    const db = database()
 
-    const video = expired.find((e) => e.id === "m3")
-    expect(video).toBeUndefined()
+    const plan = await planMediaRetention({ workspaceId: "ws_1", db, now })
+
+    expect(plan.candidates).toEqual([])
+    expect(db.query).not.toHaveBeenCalled()
   })
 
-  it("expires all video when policy is none", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 180, videoRetention: "none", dryRun: false },
-      now
-    )
+  it("requires a workspace", async () => {
+    await expect(
+      planMediaRetention({ workspaceId: "", db: database(), now })
+    ).rejects.toThrow(/workspaceId/)
+  })
+})
 
-    const video = expired.find((e) => e.id === "m3")
-    expect(video).toBeDefined()
+describe("applyMediaRetention", () => {
+  it("is a dry run unless execute is set", async () => {
+    const db = database()
+    const deleteObject = vi.fn()
+
+    const result = await applyMediaRetention({ workspaceId: "ws_1", db, now, deleteObject })
+
+    expect(result).toMatchObject({ dryRun: true, candidates: 2, deleted: 0 })
+    expect(deleteObject).not.toHaveBeenCalled()
+    expect(db.query).toHaveBeenCalledTimes(1)
   })
 
-  it("never expires non-media files (PDF, etc)", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 1, videoRetention: "none", dryRun: false },
-      now
-    )
+  it("deletes objects then rows (keeping transcripts) and audits the run", async () => {
+    const db = database()
+    const deleteObject = vi.fn()
+    const audit = vi.fn(async () => undefined)
 
-    const pdf = expired.find((e) => e.id === "m4")
-    expect(pdf).toBeUndefined()
+    const result = await applyMediaRetention({
+      workspaceId: "ws_1",
+      execute: true,
+      db,
+      now,
+      deleteObject,
+      audit,
+    })
+
+    expect(deleteObject.mock.calls.map(([key]) => key)).toEqual([
+      "meetings/meet_1/old.m4a",
+      "meetings/meet_2/old.mp4",
+    ])
+    const deletes = db.query.mock.calls.filter(([sql]) => /delete from/.test(sql as string))
+    expect(deletes.map(([sql]) => sql)).toEqual([
+      "delete from media_assets where id = $1 and workspace_id = $2",
+      "delete from media_assets where id = $1 and workspace_id = $2",
+    ])
+    expect(deletes.map(([, values]) => values)).toEqual([
+      ["asset_old", "ws_1"],
+      ["asset_video", "ws_1"],
+    ])
+    expect(result).toMatchObject({ deleted: 2, deletedBytes: 6000, errors: [] })
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws_1",
+        action: "media.retention.deleted",
+        metadata: expect.objectContaining({ deleted: 2, retentionDays: 30 }),
+      })
+    )
   })
 
-  it("respects custom audio threshold", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 7, videoRetention: "opt-in", dryRun: false },
-      now
-    )
+  it("keeps the row when the object cannot be deleted", async () => {
+    const db = database()
+    const deleteObject = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("S3 down"))
+      .mockResolvedValueOnce(undefined)
 
-    // Both audio files are older than 7 days
-    const audioExpired = expired.filter((e) =>
-      e.contentType.startsWith("audio/")
-    )
-    expect(audioExpired).toHaveLength(2)
-  })
+    const result = await applyMediaRetention({
+      workspaceId: "ws_1",
+      execute: true,
+      db,
+      now,
+      deleteObject,
+      audit: vi.fn(async () => undefined),
+    })
 
-  it("returns empty when no media exceeds policy", () => {
-    const expired = getExpiredMedia(
-      sampleMedia,
-      { audioMaxDays: 999, videoRetention: "opt-in", dryRun: false },
-      now
-    )
-
-    expect(expired).toHaveLength(0)
+    expect(result.deleted).toBe(1)
+    expect(result.errors).toEqual(["asset_old: S3 down"])
+    const deletes = db.query.mock.calls.filter(([sql]) => /delete from/.test(sql as string))
+    expect(deletes.map(([, values]) => (values as unknown as string[])[0])).toEqual([
+      "asset_video",
+    ])
   })
 })

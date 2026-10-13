@@ -1,8 +1,6 @@
 import { cache } from "react"
 
-import { meetingRepository } from "@/lib/meetings/store"
+import { lookupPublicShare } from "@/lib/sharing/public-share"
 
 /** Per-request memoized share lookup shared by the share layout and page. */
-export const loadShare = cache((token: string) =>
-  meetingRepository.getShareByToken(token)
-)
+export const loadShare = cache((token: string) => lookupPublicShare(token))

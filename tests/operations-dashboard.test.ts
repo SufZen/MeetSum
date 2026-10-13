@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+import { gatherOperationalMetrics } from "@/lib/ops/operations"
 
 /**
  * Operations dashboard type validation tests.
@@ -94,5 +96,31 @@ describe("operations dashboard", () => {
     }
 
     expect(metrics.storage.totalStorageEstimateBytes).toBe(tenGigabytes)
+  })
+})
+
+describe("gatherOperationalMetrics", () => {
+  it("filters every aggregate by the workspace", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (/FROM jobs/.test(sql)) {
+        return { rows: [{ completed: "3", failed: "1", pending: "2", active: "0" }] }
+      }
+      return { rows: [{}] }
+    })
+
+    const metrics = await gatherOperationalMetrics("ws_2", { db: { query } })
+
+    expect(query).toHaveBeenCalledTimes(6)
+    for (const [sql, values] of query.mock.calls as unknown as Array<[string, unknown[]]>) {
+      expect(sql).toMatch(/workspace_id = \$1/)
+      expect(values).toEqual(["ws_2"])
+    }
+    expect(metrics.jobs).toEqual({ completed: 3, failed: 1, pending: 2, active: 0 })
+  })
+
+  it("requires a workspace", async () => {
+    await expect(gatherOperationalMetrics("", { db: { query: vi.fn() } })).rejects.toThrow(
+      /workspaceId/
+    )
   })
 })

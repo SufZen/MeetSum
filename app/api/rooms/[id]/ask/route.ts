@@ -1,36 +1,35 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { buildMeetingMemoryAnswer } from "@/lib/memory"
-import { meetingRepository } from "@/lib/meetings/store"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.share)
+export const POST = withAuthz<{ id: string }>(
+  "workspace:read",
+  async (request, ctx, { params }) => {
+    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.share)
 
-  if (rateLimit.blocked) return rateLimit.blocked
+    if (rateLimit.blocked) return rateLimit.blocked
 
-  const unauthorized = await requireAppAccess(request)
+    const { id } = await params
+    const body = (await request.json().catch(() => ({}))) as {
+      question?: unknown
+    }
+    const question =
+      typeof body.question === "string" ? body.question.trim() : ""
 
-  if (unauthorized) return unauthorized
+    if (!question) return jsonError("Question is required", 400)
 
-  const { id } = await params
-  const body = (await request.json().catch(() => ({}))) as { question?: unknown }
-  const question = typeof body.question === "string" ? body.question.trim() : ""
+    const rooms = await ctx.meetings.listRooms()
+    const room = rooms.find((item) => item.id === id)
 
-  if (!question) return jsonError("Question is required", 400)
+    if (!room) return jsonError("Room not found", 404)
 
-  const rooms = await meetingRepository.listRooms()
-  const room = rooms.find((item) => item.id === id)
+    const meetings = await ctx.meetings.listMeetingsByContext(id)
 
-  if (!room) return jsonError("Room not found", 404)
-
-  const meetings = await meetingRepository.listMeetingsByContext(id)
-
-  return NextResponse.json(buildMeetingMemoryAnswer(question, meetings), {
-    headers: rateLimit.headers,
-  })
-}
+    return NextResponse.json(buildMeetingMemoryAnswer(question, meetings), {
+      headers: rateLimit.headers,
+    })
+  }
+)

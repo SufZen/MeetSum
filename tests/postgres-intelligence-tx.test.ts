@@ -2,10 +2,18 @@ import { describe, expect, it, vi } from "vitest"
 
 import { buildMeetingIntelligence, type SmartTask } from "@/lib/intelligence"
 import { createPostgresMeetingRepository } from "@/lib/meetings/postgres-repository"
+import type { RepoScope } from "@/lib/meetings/repository"
+
+const scope: RepoScope = { kind: "system", workspaceId: "ws_default" }
 
 type Responder = (text: string, values: unknown[]) => { rows: unknown[] }
 
-function createFakePool(responder: Responder) {
+function createFakePool(baseResponder: Responder) {
+  // The scope check (assertMeetingInScope) finds the meeting.
+  const responder: Responder = (text, values) =>
+    /select m\.id from meetings m/.test(text)
+      ? { rows: [{ id: "meet_1" }] }
+      : baseResponder(text, values)
   const statements: string[] = []
   const release = vi.fn()
   const connection = {
@@ -92,7 +100,7 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
       if (/insert into summaries/.test(text)) return { rows: [{ id: "summary_1" }] }
       return { rows: [] }
     })
-    const repository = createPostgresMeetingRepository(pool)
+    const repository = createPostgresMeetingRepository(pool, scope)
 
     const result = await repository.upsertMeetingIntelligence("meet_1", {
       ...intelligenceBase,
@@ -109,7 +117,10 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
     expect(statements[0]).toBe("begin")
     expect(statements.at(-1)).toBe("commit")
     expect(release).toHaveBeenCalledTimes(1)
-    expect(statements[1]).toMatch(/for update$/)
+    expect(statements[1]).toMatch(/^select m\.id from meetings m where m\.id = \$1/)
+    expect(statements.find((text) => /from action_items/.test(text))).toMatch(
+      /for update$/
+    )
 
     const deleteCall = connection.query.mock.calls.find(([text]) =>
       /delete from action_items/.test(text)
@@ -144,7 +155,7 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
       if (/insert into summaries/.test(text)) return { rows: [{ id: "summary_1" }] }
       return { rows: [] }
     })
-    const repository = createPostgresMeetingRepository(pool)
+    const repository = createPostgresMeetingRepository(pool, scope)
 
     await expect(
       repository.upsertMeetingIntelligence("meet_1", {
@@ -163,14 +174,17 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
 describe("Postgres updateActionItem", () => {
   it("marks content edits as user-edited and tracks completion", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = []
-    const repository = createPostgresMeetingRepository({
-      query: async (text, values = []) => {
-        calls.push({ text, values })
-        return {
-          rows: [actionRow({ id: "act_1", title: "Renamed", edited_by_user: true })],
-        }
+    const repository = createPostgresMeetingRepository(
+      {
+        query: async (text, values = []) => {
+          calls.push({ text, values })
+          return {
+            rows: [actionRow({ id: "act_1", title: "Renamed", edited_by_user: true })],
+          }
+        },
       },
-    })
+      scope
+    )
 
     const item = await repository.updateActionItem("act_1", { title: "Renamed" })
     await repository.updateActionItem("act_1", { status: "done" })

@@ -1,34 +1,25 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { toRepoScope, withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { listDriveRecordings } from "@/lib/google/services"
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const GET = withAuthz("meeting:create", async (request, ctx) => {
   const searchParams = new URL(request.url).searchParams
   const limit = Number(searchParams.get("limit") ?? 25)
   const cursor = searchParams.get("cursor") ?? undefined
   const query = searchParams.get("query") ?? undefined
   const includeImported = searchParams.get("includeImported") === "true"
-  const resolved = await resolveRequestWorkspaceSubject(
-    searchParams.get("subject")
-  )
+  const resolved = resolveRequestWorkspaceSubject(ctx, searchParams.get("subject"))
 
   if ("response" in resolved) return resolved.response
 
-  const { subject } = resolved
-
   try {
-    const result = await listDriveRecordings(subject, {
-      limit,
-      cursor,
-      query,
-      includeImported,
-    })
+    const result = await listDriveRecordings(
+      { subject: resolved.subject, workspaceId: ctx.workspace.id },
+      { limit, cursor, query, includeImported, scope: toRepoScope(ctx) }
+    )
 
     return NextResponse.json(result)
   } catch (error) {
@@ -37,4 +28,4 @@ export async function GET(request: Request) {
       500
     )
   }
-}
+})

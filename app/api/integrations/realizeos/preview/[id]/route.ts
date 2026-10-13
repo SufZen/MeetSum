@@ -1,30 +1,26 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { createRealizeOSPayload } from "@/lib/integrations/realizeos"
-import { meetingRepository } from "@/lib/meetings/store"
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const unauthorized = await requireAppAccess(request)
+export const GET = withAuthz<{ id: string }>(
+  "meeting:read",
+  async (_request, ctx, { params }) => {
+    const { id } = await params
+    const meeting = await ctx.meetings.getMeeting(id)
 
-  if (unauthorized) return unauthorized
+    if (!meeting) return jsonError("Meeting not found", 404)
 
-  const { id } = await params
-  const meeting = await meetingRepository.getMeeting(id)
+    try {
+      const payload = createRealizeOSPayload(meeting)
 
-  if (!meeting) return jsonError("Meeting not found", 404)
-
-  try {
-    const payload = createRealizeOSPayload(meeting)
-
-    return NextResponse.json(payload)
-  } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Unable to build RealizeOS payload",
-      400
-    )
+      return NextResponse.json(payload)
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unable to build RealizeOS payload",
+        400
+      )
+    }
   }
-}
+)

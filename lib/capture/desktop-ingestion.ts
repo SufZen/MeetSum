@@ -66,7 +66,14 @@ function assertIsoDate(value: unknown, field: string): string {
   return parsed.toISOString()
 }
 
-export function parseDesktopMeetingInput(payload: unknown): {
+/**
+ * `defaultLanguage` is the workspace's meeting language
+ * (resolveDefaultMeetingLanguage(settings)) used when the companion sends none.
+ */
+export function parseDesktopMeetingInput(
+  payload: unknown,
+  options: { defaultLanguage?: string } = {}
+): {
   meeting: CreateMeetingInput
   endedAt?: string
 } {
@@ -91,7 +98,7 @@ export function parseDesktopMeetingInput(payload: unknown): {
     meeting: {
       title,
       source,
-      language: optionalString(input.language) ?? "he",
+      language: optionalString(input.language) ?? options.defaultLanguage ?? "he",
       startedAt: assertIsoDate(input.startedAt, "startedAt"),
       participants,
     },

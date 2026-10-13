@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 import pg from "pg"
 
 import { listMigrationFiles, runMigrations } from "../lib/db/migrations"
+import { ensureBootstrapWorkspace } from "../lib/workspaces/bootstrap"
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -51,6 +52,16 @@ try {
         .join(", ")}`
     )
   }
+
+  // M2: idempotent bootstrap of ws_default (owner/admins from the env
+  // allowlist, DWD subject, legacy ownership/favorites/api-key creators).
+  const bootstrap = await ensureBootstrapWorkspace(client, process.env)
+
+  console.log(
+    bootstrap.ownerUserId
+      ? `Bootstrap: ws_default ready (${Object.keys(bootstrap.userIds).length} allowlisted user(s))`
+      : "Bootstrap: skipped (no GOOGLE_WORKSPACE_SUBJECT or MEETSUM_ALLOWED_EMAILS)"
+  )
 } finally {
   await client.end()
 }

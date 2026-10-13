@@ -111,6 +111,9 @@ Export as PDF. **Rate limit:** 20 req/min.
 ### `POST /api/meetings/:id/export/docx`
 Export as DOCX (Word). Returns `.docx` file download. **Rate limit:** 20 req/min.
 
+### `POST /api/meetings/:id/export/notion`
+Create a page for the meeting in a Notion database. Body: `{ databaseId, token }` — `token` is the caller's Notion integration token and is **required** (there is no server-wide `NOTION_TOKEN` fallback). Requires `meeting:write` and `integrations:manage` (role admin or owner; API keys need the `admin` scope); a private meeting must also be visible to the caller (else 404). **Rate limit:** 20 req/min.
+
 ---
 
 ## Rooms
@@ -209,6 +212,14 @@ The URL must be `https` (plain `http` only outside production or for allowlisted
 
 Deliveries are signed with that secret (`x-meetsum-signature`, HMAC-SHA256 hex of the JSON body) and carry `x-meetsum-event` and `x-meetsum-delivery`. Redirects are not followed.
 
+**Private meetings.** Meeting events (`summary.created`, `action_item.created`, `meeting.completed`, `meeting.process_failed`) for a meeting whose visibility is `private` carry a minimal payload, because webhook subscribers (admins) must not read private meetings:
+
+```json
+{ "meetingId": "meet_…", "workspace_id": "ws_…", "visibility": "private" }
+```
+
+Only non-content identifiers are kept (`actionItemId`, `jobId`, `jobName`, `attempts`, `permanent`, `mode` where the event has them); `title`, `tags`, action item text/owner/priority and error text are omitted. `workspace` and `link` meetings receive the full payload. A meeting whose visibility cannot be read is treated as private.
+
 ### `PATCH /api/webhooks/subscriptions/:id`
 Update subscription. Body: `{ url?, enabled?, events?, rotateSecret? }`. With `rotateSecret: true` the response includes the new `secret` once.
 
@@ -222,7 +233,7 @@ List webhook deliveries. Query: `subscriptionId`, `limit`. Statuses: `queued`, `
 Re-queue a failed or cancelled delivery. **Rate limit:** 30 req/min, plus 3 req/min per delivery. A delivery has a lifetime cap of `MEETSUM_WEBHOOK_MAX_TOTAL_ATTEMPTS` (20) attempts.
 
 ### `POST /api/webhooks/test`
-Send a test webhook event.
+Send a test webhook event. Body: `{ subscriptionId }` (signed with that subscription's secret) or `{ url }` (ad-hoc URL, signed with a fresh throwaway secret returned once as `secret` in the response; the global `WEBHOOK_SIGNING_SECRET` is never used for ad-hoc URLs).
 
 ---
 

@@ -1,24 +1,26 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { resolveRequestWorkspaceSubject } from "@/lib/google/request-subject"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
-
+export const POST = withAuthz("integrations:manage", async (request, ctx) => {
   const body = (await request.json().catch(() => ({}))) as {
     subject?: string
   }
-  const resolved = await resolveRequestWorkspaceSubject(body.subject)
+  const resolved = resolveRequestWorkspaceSubject(ctx, body.subject, {
+    requireWorkspaceSubject: true,
+  })
 
   if ("response" in resolved) return resolved.response
 
   const { subject } = resolved
   const jobs = await Promise.all([
-    enqueueMeetSumJob("google.calendar.poll", { subject, source: "calendar" }),
+    enqueueMeetSumJob("google.calendar.poll", {
+      subject,
+      source: "calendar",
+      workspaceId: ctx.workspace.id,
+    }),
   ])
 
   return NextResponse.json(
@@ -32,4 +34,4 @@ export async function POST(request: Request) {
     },
     { status: 202 }
   )
-}
+})

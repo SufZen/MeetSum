@@ -8,7 +8,7 @@ export type GoogleOAuthConfig = {
   redirectUri: string
 }
 
-export type GoogleOAuthIdentity = SessionIdentity & {
+export type GoogleOAuthIdentity = Omit<SessionIdentity, "userId"> & {
   googleUserId?: string
   refreshToken?: string | null
   scope?: string | null

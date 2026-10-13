@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server"
 
-import { jsonError, requireAppAccess } from "@/lib/api/responses"
+import { auditActor, creatorUserId } from "@/app/api/_lib/meeting-access"
+import { jsonError } from "@/lib/api/responses"
+import { recordAuditLog } from "@/lib/audit"
+import { withAuthz } from "@/lib/auth/authz"
 import type { MeetingListSortMode } from "@/lib/meetings/repository"
-import { meetingRepository } from "@/lib/meetings/store"
 import { parseCreateMeetingInput } from "@/lib/meetings/validation"
 import { createPlatformEvent } from "@/lib/platform/events"
+import {
+  getAppSettings,
+  resolveDefaultMeetingLanguage,
+} from "@/lib/settings/app-settings"
 
 const pageSizes = [5, 10, 20] as const
 const sortModes = ["smart", "recent", "oldest", "title", "status"] as const
@@ -12,9 +18,7 @@ const sortModes = ["smart", "recent", "oldest", "title", "status"] as const
 function parseLimit(value: string | null) {
   const numeric = Number(value ?? 5)
 
-  return pageSizes.includes(numeric as (typeof pageSizes)[number])
-    ? numeric
-    : 5
+  return pageSizes.includes(numeric as (typeof pageSizes)[number]) ? numeric : 5
 }
 
 function parseOffset(value: string | null) {
@@ -29,20 +33,14 @@ function parseSort(value: string | null): MeetingListSortMode {
     : "smart"
 }
 
-export async function GET(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) {
-    return unauthorized
-  }
-
+export const GET = withAuthz("meeting:read", async (request, ctx) => {
   const searchParams = new URL(request.url).searchParams
   const query = searchParams.get("query")?.trim()
   const status = searchParams.get("status")?.trim() || "all"
   const limit = parseLimit(searchParams.get("limit"))
   const offset = parseOffset(searchParams.get("offset"))
   const sort = parseSort(searchParams.get("sort"))
-  const result = await meetingRepository.listMeetingsPage({
+  const result = await ctx.meetings.listMeetingsPage({
     limit,
     offset,
     query,
@@ -54,19 +52,18 @@ export async function GET(request: Request) {
     meetings: result.meetings,
     page: result.page,
   })
-}
+})
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) {
-    return unauthorized
-  }
-
+export const POST = withAuthz("meeting:create", async (request, ctx) => {
+  const settings = await getAppSettings(ctx.workspace.id)
   let input
 
   try {
-    input = parseCreateMeetingInput(await request.json())
+    // Workspace default language (`meetingLanguageMode`) when the body
+    // omits one.
+    input = parseCreateMeetingInput(await request.json(), {
+      defaultLanguage: resolveDefaultMeetingLanguage(settings),
+    })
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Invalid meeting payload",
@@ -74,10 +71,24 @@ export async function POST(request: Request) {
     )
   }
 
-  const meeting = await meetingRepository.createMeeting(input)
+  const meeting = await ctx.meetings.createMeeting({
+    ...input,
+    ownerUserId: creatorUserId(ctx),
+    visibility: settings.defaultMeetingVisibility,
+  })
+  await recordAuditLog({
+    ...auditActor(ctx),
+    action: "meeting.created",
+    targetType: "meeting",
+    targetId: meeting.id,
+    metadata: {
+      source: meeting.source,
+      visibility: settings.defaultMeetingVisibility,
+    },
+  })
   const event = createPlatformEvent("meeting.created", {
     meetingId: meeting.id,
   })
 
   return NextResponse.json({ meeting, event }, { status: 201 })
-}
+})

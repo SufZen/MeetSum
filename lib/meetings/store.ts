@@ -1,16 +1,29 @@
-import { getDatabasePool } from "@/lib/db/client"
+import { getDatabasePool, type Queryable } from "@/lib/db/client"
 import { DEMO_MEETINGS } from "@/lib/meetings/demo-data"
 import {
+  createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
+  createInMemoryShareLookup,
+  type InMemoryMeetingDatabase,
   type MeetingRepository,
+  type RepoScope,
 } from "@/lib/meetings/repository"
-import { createPostgresMeetingRepository } from "@/lib/meetings/postgres-repository"
+import {
+  createPostgresMeetingRepository,
+  createPostgresShareLookup,
+} from "@/lib/meetings/postgres-repository"
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
-export function createMeetingRepositoryFromEnv(
+/** Where meetings live; scoped repositories are cheap views over it. */
+export type MeetingBackend =
+  | { kind: "postgres"; client: Queryable }
+  | { kind: "memory"; db: InMemoryMeetingDatabase }
+
+export function createMeetingBackendFromEnv(
   env: NodeJS.ProcessEnv = process.env
-): MeetingRepository {
+): MeetingBackend {
   if (env.MEETSUM_STORAGE === "postgres") {
-    return createPostgresMeetingRepository(getDatabasePool())
+    return { kind: "postgres", client: getDatabasePool() }
   }
 
   // The in-memory repository serves demo data and discards all writes. In
@@ -29,32 +42,87 @@ export function createMeetingRepositoryFromEnv(
     )
   }
 
-  return createInMemoryMeetingRepository(DEMO_MEETINGS)
+  return { kind: "memory", db: createInMemoryMeetingDatabase(DEMO_MEETINGS) }
 }
 
-let cachedRepository: MeetingRepository | undefined
-
-export function getMeetingRepository(): MeetingRepository {
-  cachedRepository ??= createMeetingRepositoryFromEnv()
-
-  return cachedRepository
+/** Repository of `backend` restricted to `scope`. */
+export function createScopedMeetingRepository(
+  backend: MeetingBackend,
+  scope: RepoScope
+): MeetingRepository {
+  return backend.kind === "postgres"
+    ? createPostgresMeetingRepository(backend.client, scope)
+    : createInMemoryMeetingRepository(backend.db, scope)
 }
 
 /**
- * Lazily resolved repository. Resolving at first use (instead of at module
- * load) keeps `next build` — which imports every route module while
- * collecting page data — from requiring runtime-only configuration such as
- * MEETSUM_STORAGE / DATABASE_URL. Production misconfiguration is still caught
- * at boot by instrumentation.ts (lib/ops/environment) and on first use here.
+ * Resolved at first use (not at module load) so `next build`, which imports
+ * every route module while collecting page data, does not need runtime-only
+ * configuration such as MEETSUM_STORAGE / DATABASE_URL. Production
+ * misconfiguration is still caught at boot by instrumentation.ts and on
+ * first use here.
  */
-export const meetingRepository: MeetingRepository = new Proxy(
-  {} as MeetingRepository,
-  {
-    get(_target, property) {
-      const repository = getMeetingRepository()
-      const value = Reflect.get(repository, property, repository)
+let cachedBackend: MeetingBackend | undefined
 
-      return typeof value === "function" ? value.bind(repository) : value
-    },
+function getMeetingBackend(): MeetingBackend {
+  cachedBackend ??= createMeetingBackendFromEnv()
+
+  return cachedBackend
+}
+
+/**
+ * Repository restricted to what `scope` may see (M2). Built per call: a
+ * repository is never shared across scopes.
+ */
+export function getScopedMeetingRepository(scope: RepoScope): MeetingRepository {
+  return createScopedMeetingRepository(getMeetingBackend(), scope)
+}
+
+/**
+ * Repository for background work (worker, signed webhooks) filtered by
+ * workspace only.
+ */
+export function getSystemMeetingRepository(workspaceId: string): MeetingRepository {
+  return getScopedMeetingRepository({ kind: "system", workspaceId })
+}
+
+/**
+ * Cross-workspace share-token lookup used by the public share pages. A token
+ * resolves only while its share is active/unexpired and the meeting is
+ * `link`-visible; the returned meeting carries its `workspaceId` so callers
+ * can apply that workspace's `publicSharingEnabled` setting.
+ */
+export type ShareLookup = Pick<MeetingRepository, "getShareByToken">
+
+export function getShareLookup(): ShareLookup {
+  const backend = getMeetingBackend()
+
+  return backend.kind === "postgres"
+    ? createPostgresShareLookup(backend.client)
+    : createInMemoryShareLookup(backend.db)
+}
+
+/**
+ * Workspace owning a meeting, or undefined when the meeting does not exist.
+ * Deliberately unscoped: the worker uses it to pick the system repository of
+ * a job that predates workspace-aware payloads. Never expose it to clients.
+ */
+export async function resolveMeetingWorkspaceId(
+  meetingId: string
+): Promise<string | undefined> {
+  const backend = getMeetingBackend()
+
+  if (backend.kind === "memory") {
+    const meeting = backend.db.meetings.get(meetingId)
+
+    return meeting ? (meeting.workspaceId ?? DEFAULT_WORKSPACE_ID) : undefined
   }
-)
+
+  const result = await backend.client.query(
+    "select workspace_id from meetings where id = $1",
+    [meetingId]
+  )
+  const row = result.rows[0] as { workspace_id?: string | null } | undefined
+
+  return row ? (row.workspace_id ?? DEFAULT_WORKSPACE_ID) : undefined
+}

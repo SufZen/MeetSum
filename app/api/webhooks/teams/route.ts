@@ -4,8 +4,11 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { parseCaptureEvents } from "@/lib/capture/registry"
 import { teamsCaptureAdapter } from "@/lib/capture/teams"
-import { meetingRepository } from "@/lib/meetings/store"
+import { withPublicRoute } from "@/lib/auth/authz"
+import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { getSystemMeetingRepository } from "@/lib/meetings/store"
+import { getAppSettings } from "@/lib/settings/app-settings"
 
 export const runtime = "nodejs"
 
@@ -27,8 +30,16 @@ function validationResponse(request: Request) {
  * - Subscription validation (validationToken echo)
  * - Batched change notifications for new recordings: one meeting (created
  *   idempotently per recording id) + one `media.ingest` job per recording.
+ *
+ * Public (Graph clientState is verified); recordings land in the capture
+ * workspace (MEETSUM_CAPTURE_WORKSPACE_ID) through its system repository.
  */
-export async function POST(request: Request) {
+export const POST = withPublicRoute(
+  "Microsoft Graph notifications: authenticated by the subscription clientState",
+  handleTeamsWebhook
+)
+
+async function handleTeamsWebhook(request: Request) {
   const validation = validationResponse(request)
 
   if (validation) return validation
@@ -63,14 +74,18 @@ export async function POST(request: Request) {
   const accepted: string[] = []
   const duplicates: string[] = []
   let failed = 0
+  const workspaceId = getCaptureWorkspaceId()
+  const repository = getSystemMeetingRepository(workspaceId)
+  const settings = await getAppSettings(workspaceId)
 
   for (const event of events) {
     let meetingId: string | undefined
     let created = false
 
     try {
-      const outcome = await meetingRepository.createMeetingIfAbsent({
+      const outcome = await repository.createMeetingIfAbsent({
         ...teamsCaptureAdapter.toMeetingInput(event),
+        visibility: settings.defaultMeetingVisibility,
         externalSource: "teams",
         externalId: event.externalId,
       })
@@ -85,6 +100,7 @@ export async function POST(request: Request) {
 
       await enqueueMeetSumJob("media.ingest", {
         meetingId,
+        workspaceId,
         platform: "teams",
         externalId: event.externalId,
         captureEvent: event,
@@ -92,6 +108,8 @@ export async function POST(request: Request) {
       accepted.push(meetingId)
 
       await recordAuditLog({
+        workspaceId,
+        actor: "teams",
         action: "capture.teams.recording",
         targetType: "meeting",
         targetId: meetingId,
@@ -104,7 +122,7 @@ export async function POST(request: Request) {
       failed += 1
 
       if (created && meetingId) {
-        await meetingRepository.discardMeeting(meetingId).catch(() => false)
+        await repository.discardMeeting(meetingId).catch(() => false)
       }
 
       console.error("[teams] notification processing failed", error)

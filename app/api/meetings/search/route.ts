@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server"
 
-import { requireAppAccess, jsonError } from "@/lib/api/responses"
-import { meetingRepository } from "@/lib/meetings/store"
+import { jsonError } from "@/lib/api/responses"
+import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 
 /**
  * GET /api/meetings/search — Search meetings by title, participant, or tag.
+ * Only meetings visible to the caller (scoped repository) are searched.
  *
  * Query params:
  *   q      — Search query (searches title, participant names)
@@ -14,14 +15,10 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
  *   source — Filter by source (google_meet, manual_upload, etc.)
  *   limit  — Max results (default: 20, max: 100)
  */
-export async function GET(request: Request) {
+export const GET = withAuthz("meeting:read", async (request, ctx) => {
   const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
   if (rateLimit.blocked) return rateLimit.blocked
-
-  const unauthorized = await requireAppAccess(request)
-
-  if (unauthorized) return unauthorized
 
   const url = new URL(request.url)
   const q = url.searchParams.get("q")?.toLowerCase().trim()
@@ -29,14 +26,20 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status")?.trim()
   const source = url.searchParams.get("source")?.trim()
   const rawLimit = Number(url.searchParams.get("limit") ?? 20)
-  const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 20 : rawLimit, 1), 100)
+  const limit = Math.min(
+    Math.max(Number.isNaN(rawLimit) ? 20 : rawLimit, 1),
+    100
+  )
 
   if (!q && !tag && !status && !source) {
-    return jsonError("At least one search parameter (q, tag, status, source) is required", 400)
+    return jsonError(
+      "At least one search parameter (q, tag, status, source) is required",
+      400
+    )
   }
 
   try {
-    const allMeetings = await meetingRepository.listMeetings({ limit: 500 })
+    const allMeetings = await ctx.meetings.listMeetings({ limit: 500 })
 
     const results = allMeetings
       .filter((m) => {
@@ -44,15 +47,22 @@ export async function GET(request: Request) {
           const titleMatch = m.title.toLowerCase().includes(q)
           const participantMatch =
             (m.participantDetails?.some(
-              (p) => p.name.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q)
-            ) ?? false) ||
+              (p) =>
+                p.name.toLowerCase().includes(q) ||
+                p.email?.toLowerCase().includes(q)
+            ) ??
+              false) ||
             m.participants.some((p) => p.toLowerCase().includes(q))
-          const overviewMatch = m.summary?.overview?.toLowerCase().includes(q) ?? false
+          const overviewMatch =
+            m.summary?.overview?.toLowerCase().includes(q) ?? false
 
           if (!titleMatch && !participantMatch && !overviewMatch) return false
         }
 
-        if (tag && !(m.tags ?? []).some((t) => String(t).toLowerCase() === tag)) {
+        if (
+          tag &&
+          !(m.tags ?? []).some((t) => String(t).toLowerCase() === tag)
+        ) {
           return false
         }
 
@@ -90,4 +100,4 @@ export async function GET(request: Request) {
       500
     )
   }
-}
+})

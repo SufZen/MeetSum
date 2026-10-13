@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto"
 
-import { createDelegatedGoogleClient, getWorkspaceSubject } from "@/lib/google/auth"
+import { createDelegatedGoogleClient } from "@/lib/google/auth"
+import {
+  ensureGoogleIdentity,
+  type GoogleWorkspaceTarget,
+} from "@/lib/google/identity"
 import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
-import type { TranscriptSegment } from "@/lib/meetings/repository"
+import type { RepoScope, TranscriptSegment } from "@/lib/meetings/repository"
+import { meetingScopeSql } from "@/lib/meetings/visibility"
 
 type SyncStatus = "idle" | "running" | "completed" | "failed"
 
@@ -334,43 +339,13 @@ async function getDriveAccessToken(subject: string) {
   return getGoogleAccessToken(subject, GOOGLE_WORKSPACE_SCOPES.drive)
 }
 
-export async function getMeetGoogleIdentityId(subject: string) {
-  const pool = getDatabasePool()
-  const workspaceAccountId = "workspace_realization"
-  const normalizedSubject = subject.trim().toLowerCase()
-
-  await pool.query(
-    `
-      insert into workspace_accounts (id, domain, admin_email)
-      values ($1, $2, $3)
-      on conflict (id) do nothing
-    `,
-    [
-      workspaceAccountId,
-      normalizedSubject.split("@")[1] ?? "realization.co.il",
-      process.env.GOOGLE_WORKSPACE_ADMIN_EMAIL ?? normalizedSubject,
-    ]
-  )
-
-  const identityId = createId("gident", normalizedSubject)
-  const result = await pool.query(
-    `
-      insert into google_identities (
-        id, workspace_account_id, subject_email, sync_enabled
-      )
-      values ($1, $2, $3, true)
-      on conflict (workspace_account_id, subject_email)
-      do update set sync_enabled = excluded.sync_enabled
-      returning id
-    `,
-    [identityId, workspaceAccountId, normalizedSubject]
-  )
-
-  return (result.rows[0] as { id?: string } | undefined)?.id ?? identityId
+/** The workspace's Google identity for `subject` (see lib/google/identity). */
+export async function getMeetGoogleIdentityId(target: GoogleWorkspaceTarget) {
+  return ensureGoogleIdentity(target)
 }
 
 async function setMeetSyncState(
-  subject: string,
+  target: GoogleWorkspaceTarget,
   patch: {
     status: SyncStatus
     lastError?: string | null
@@ -379,7 +354,7 @@ async function setMeetSyncState(
   }
 ) {
   const pool = getDatabasePool()
-  const identityId = await getMeetGoogleIdentityId(subject)
+  const identityId = await getMeetGoogleIdentityId(target)
   const id = createSyncStateId(identityId, "meet")
 
   await pool.query(
@@ -512,6 +487,7 @@ async function listTranscriptEntriesForArtifact(
 
 async function findMeetCalendarMatch(options: {
   identityId: string
+  workspaceId: string
   startTime?: string
   endTime?: string
 }) {
@@ -525,6 +501,7 @@ async function findMeetCalendarMatch(options: {
       select ce.id, ce.title, ce.starts_at, m.id as meeting_id
       from calendar_events ce
       left join meetings m on m.calendar_event_id = ce.id
+        and m.workspace_id = $4
       where ce.google_identity_id = $1
         and ce.starts_at between ($2::timestamptz - interval '4 hours')
                             and (coalesce($3::timestamptz, $2::timestamptz) + interval '4 hours')
@@ -532,7 +509,12 @@ async function findMeetCalendarMatch(options: {
       order by abs(extract(epoch from (ce.starts_at - $2::timestamptz))) asc
       limit 1
     `,
-    [options.identityId, startDate.toISOString(), safeIso(options.endTime) ?? null]
+    [
+      options.identityId,
+      startDate.toISOString(),
+      safeIso(options.endTime) ?? null,
+      options.workspaceId,
+    ]
   )
 
   return result.rows[0] as
@@ -542,6 +524,7 @@ async function findMeetCalendarMatch(options: {
 
 async function upsertConferenceRecord(options: {
   identityId: string
+  workspaceId: string
   record: MeetApiRecord
 }) {
   if (!options.record.name) return undefined
@@ -549,6 +532,7 @@ async function upsertConferenceRecord(options: {
   const pool = getDatabasePool()
   const match = await findMeetCalendarMatch({
     identityId: options.identityId,
+    workspaceId: options.workspaceId,
     startTime: options.record.startTime,
     endTime: options.record.endTime,
   })
@@ -571,6 +555,9 @@ async function upsertConferenceRecord(options: {
         expire_time = excluded.expire_time,
         raw = excluded.raw,
         updated_at = now()
+      -- conference_record_name is globally unique: a record first stored by
+      -- another workspace's identity is left untouched (no row returned).
+      where meet_conference_records.google_identity_id = excluded.google_identity_id
       returning id, meeting_id, calendar_event_id
     `,
     [
@@ -663,14 +650,34 @@ async function upsertMeetArtifact(options: {
   return true
 }
 
+/** Visibility scope for a Meet listing: the caller's, else system scope. */
+function meetListingScope(options: { workspaceId: string; scope?: RepoScope }): RepoScope {
+  if (options.scope && options.scope.workspaceId !== options.workspaceId) {
+    throw new Error("Visibility scope does not match the Google workspace target")
+  }
+
+  return options.scope ?? { kind: "system", workspaceId: options.workspaceId }
+}
+
+/**
+ * Persisted conference records of the subject's identity. Records linked to a
+ * meeting the caller cannot see (directly, or through the calendar event of
+ * such a meeting) are omitted, so private meeting titles/ids never leak.
+ */
 export async function listPersistedMeetArtifacts(options: {
-  subject?: string
+  subject: string
+  workspaceId: string
   limit?: number
   meetingId?: string
-} = {}): Promise<PersistedMeetConferenceRecord[]> {
-  const subject = options.subject ?? getWorkspaceSubject()
-  const identityId = await getMeetGoogleIdentityId(subject)
-  const values: unknown[] = [identityId]
+  /** Caller's visibility scope (defaults to system scope). */
+  scope?: RepoScope
+}): Promise<PersistedMeetConferenceRecord[]> {
+  const scope = meetListingScope(options)
+  const identityId = await getMeetGoogleIdentityId({
+    subject: options.subject,
+    workspaceId: options.workspaceId,
+  })
+  const values: unknown[] = [identityId, options.workspaceId]
   const meetingFilter = options.meetingId
     ? (() => {
         values.push(options.meetingId)
@@ -678,19 +685,32 @@ export async function listPersistedMeetArtifacts(options: {
           and (
             mcr.meeting_id = $${values.length}
             or mcr.calendar_event_id = (
-              select calendar_event_id from meetings where id = $${values.length}
+              select calendar_event_id from meetings
+              where id = $${values.length} and workspace_id = $2
             )
           )
         `
       })()
     : ""
+  const visibleMeeting = meetingScopeSql(scope, "m", values)
+  const hiddenCalendarMeeting =
+    scope.kind === "system"
+      ? ""
+      : `
+        and not exists (
+          select 1 from meetings mh
+          where mh.calendar_event_id = mcr.calendar_event_id
+            and mcr.calendar_event_id is not null
+            and mh.workspace_id = $2
+            and not coalesce(${meetingScopeSql(scope, "mh", values)}, false)
+        )`
   values.push(Math.max(1, Math.min(options.limit ?? 10, 50)))
   const result = await getDatabasePool().query(
     `
       select
         mcr.id,
         mcr.conference_record_name,
-        mcr.meeting_id,
+        m.id as meeting_id,
         m.title as meeting_title,
         mcr.calendar_event_id,
         ce.title as calendar_title,
@@ -718,11 +738,13 @@ export async function listPersistedMeetArtifacts(options: {
       from meet_conference_records mcr
       left join meet_artifacts ma on ma.conference_record_id = mcr.id
       left join drive_files df on df.id = ma.drive_file_id
-      left join meetings m on m.id = mcr.meeting_id
+      left join meetings m on m.id = mcr.meeting_id and m.workspace_id = $2
       left join calendar_events ce on ce.id = mcr.calendar_event_id
       where mcr.google_identity_id = $1
+        and (mcr.meeting_id is null or ${visibleMeeting})
+        ${hiddenCalendarMeeting}
         ${meetingFilter}
-      group by mcr.id, m.title, ce.title
+      group by mcr.id, m.id, m.title, ce.title
       order by mcr.start_time desc nulls last, mcr.updated_at desc
       limit $${values.length}
     `,
@@ -786,11 +808,28 @@ export async function listPersistedMeetArtifacts(options: {
   })
 }
 
+/**
+ * Artifacts linked to a workspace meeting, restricted to conference records
+ * of that workspace's Google identities.
+ */
+const ARTIFACT_MEETING_SCOPE = `
+        and mcr.google_identity_id in (
+          select id from google_identities where workspace_id = $2
+        )
+        and (
+          mcr.meeting_id = $1
+          or mcr.calendar_event_id = (
+            select calendar_event_id from meetings
+            where id = $1 and workspace_id = $2
+          )
+        )`
+
 export async function listMeetingTranscriptArtifactCandidates(options: {
   meetingId: string
+  workspaceId: string
   artifactIds?: string[]
 }): Promise<MeetTranscriptArtifactCandidate[]> {
-  const values: unknown[] = [options.meetingId]
+  const values: unknown[] = [options.meetingId, options.workspaceId]
   const idFilter =
     options.artifactIds?.length
       ? (() => {
@@ -811,12 +850,7 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
       from meet_artifacts ma
       join meet_conference_records mcr on mcr.id = ma.conference_record_id
       where ma.artifact_type in ('transcript', 'smart_notes')
-        and (
-          mcr.meeting_id = $1
-          or mcr.calendar_event_id = (
-            select calendar_event_id from meetings where id = $1
-          )
-        )
+        ${ARTIFACT_MEETING_SCOPE}
         ${idFilter}
       order by
         case ma.artifact_type when 'transcript' then 0 else 1 end,
@@ -855,6 +889,7 @@ export async function listMeetingTranscriptArtifactCandidates(options: {
 
 export async function listMeetingRecordingArtifactCandidates(options: {
   meetingId: string
+  workspaceId: string
   artifactIds?: string[]
 }): Promise<
   Array<{
@@ -863,7 +898,7 @@ export async function listMeetingRecordingArtifactCandidates(options: {
     driveFileId?: string
   }>
 > {
-  const values: unknown[] = [options.meetingId]
+  const values: unknown[] = [options.meetingId, options.workspaceId]
   const idFilter =
     options.artifactIds?.length
       ? (() => {
@@ -881,12 +916,7 @@ export async function listMeetingRecordingArtifactCandidates(options: {
       from meet_artifacts ma
       join meet_conference_records mcr on mcr.id = ma.conference_record_id
       where ma.artifact_type = 'recording'
-        and (
-          mcr.meeting_id = $1
-          or mcr.calendar_event_id = (
-            select calendar_event_id from meetings where id = $1
-          )
-        )
+        ${ARTIFACT_MEETING_SCOPE}
         ${idFilter}
       order by ma.start_time asc nulls last, ma.created_at asc
     `,
@@ -932,13 +962,15 @@ async function fetchDriveTextExport(token: string, fileId: string) {
 }
 
 export async function importMeetRecordingArtifactsForMeeting(options: {
-  subject?: string
+  subject: string
+  workspaceId: string
   meetingId: string
   artifactIds?: string[]
 }): Promise<MeetRecordingArtifactImportResult> {
-  const subject = options.subject ?? getWorkspaceSubject()
+  const { subject, workspaceId } = options
   const candidates = await listMeetingRecordingArtifactCandidates({
     meetingId: options.meetingId,
+    workspaceId,
     artifactIds: options.artifactIds,
   })
   const artifactIds = candidates.map((candidate) => candidate.id)
@@ -956,7 +988,7 @@ export async function importMeetRecordingArtifactsForMeeting(options: {
     )
   }
 
-  const imported = await importDriveRecordings(subject, driveFileIds, {
+  const imported = await importDriveRecordings({ subject, workspaceId }, driveFileIds, {
     preferredMeetingId: options.meetingId,
   })
 
@@ -971,13 +1003,15 @@ export async function importMeetRecordingArtifactsForMeeting(options: {
 }
 
 export async function importMeetTranscriptArtifactsForMeeting(options: {
-  subject?: string
+  subject: string
+  workspaceId: string
   meetingId: string
   artifactIds?: string[]
 }): Promise<MeetTranscriptArtifactImportResult> {
-  const subject = options.subject ?? getWorkspaceSubject()
+  const { subject } = options
   const candidates = await listMeetingTranscriptArtifactCandidates({
     meetingId: options.meetingId,
+    workspaceId: options.workspaceId,
     artifactIds: options.artifactIds,
   })
 
@@ -1041,12 +1075,15 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
 }
 
 export async function listMeetArtifacts(options: {
-  subject?: string
+  subject: string
+  workspaceId: string
   limit?: number
   pageToken?: string
   meetingId?: string
-} = {}): Promise<MeetArtifactListResult> {
-  const subject = options.subject ?? getWorkspaceSubject()
+  /** Caller's visibility scope (defaults to system scope). */
+  scope?: RepoScope
+}): Promise<MeetArtifactListResult> {
+  const { subject, workspaceId, scope } = options
   const limit = Math.max(1, Math.min(options.limit ?? 20, 50))
 
   try {
@@ -1056,8 +1093,10 @@ export async function listMeetArtifacts(options: {
         conferenceRecords: [],
         persistedRecords: await listPersistedMeetArtifacts({
           subject,
+          workspaceId,
           limit,
           meetingId: options.meetingId,
+          scope,
         }),
         setup: setupState(true),
       }
@@ -1070,7 +1109,9 @@ export async function listMeetArtifacts(options: {
     })
     const persistedRecords = await listPersistedMeetArtifacts({
       subject,
+      workspaceId,
       limit: 10,
+      scope,
     })
 
     return {
@@ -1089,8 +1130,10 @@ export async function listMeetArtifacts(options: {
       conferenceRecords: [],
       persistedRecords: await listPersistedMeetArtifacts({
         subject,
+        workspaceId,
         limit: 10,
         meetingId: options.meetingId,
+        scope,
       }).catch(() => []),
       setup: setupState(false, message),
     }
@@ -1098,13 +1141,17 @@ export async function listMeetArtifacts(options: {
 }
 
 export async function syncMeetArtifacts(options: {
-  subject?: string
+  subject: string
+  workspaceId: string
   limit?: number
-} = {}): Promise<MeetArtifactSyncResult> {
-  const subject = options.subject ?? getWorkspaceSubject()
+  /** Caller's visibility scope for the returned records (defaults to system). */
+  scope?: RepoScope
+}): Promise<MeetArtifactSyncResult> {
+  const { subject, workspaceId, scope } = options
+  const target = { subject, workspaceId }
   const limit = Math.max(1, Math.min(options.limit ?? 10, 25))
 
-  await setMeetSyncState(subject, { status: "running" })
+  await setMeetSyncState(target, { status: "running" })
 
   const stats = {
     source: "meet",
@@ -1117,14 +1164,18 @@ export async function syncMeetArtifacts(options: {
   }
 
   try {
-    const identityId = await getMeetGoogleIdentityId(subject)
+    const identityId = await getMeetGoogleIdentityId(target)
     const live = await listConferenceRecordsFromGoogle({ subject, limit })
 
     for (const record of live.conferenceRecords) {
       if (!record.name) continue
 
       stats.discovered += 1
-      const persisted = await upsertConferenceRecord({ identityId, record })
+      const persisted = await upsertConferenceRecord({
+        identityId,
+        workspaceId,
+        record,
+      })
 
       if (!persisted) continue
 
@@ -1158,13 +1209,13 @@ export async function syncMeetArtifacts(options: {
       }
     }
 
-    await setMeetSyncState(subject, {
+    await setMeetSyncState(target, {
       status: "completed",
       stats,
       nextPollAt: new Date(Date.now() + 30 * 60 * 1000),
     })
 
-    const records = await listPersistedMeetArtifacts({ subject, limit: 10 })
+    const records = await listPersistedMeetArtifacts({ ...target, limit: 10, scope })
 
     return {
       subject,
@@ -1187,7 +1238,7 @@ export async function syncMeetArtifacts(options: {
     const message =
       error instanceof Error ? error.message : "Unable to sync Meet artifacts"
 
-    await setMeetSyncState(subject, {
+    await setMeetSyncState(target, {
       status: "failed",
       lastError: message,
       stats: { ...stats, error: message },
