@@ -6,7 +6,7 @@ function httpError(status: number, headers?: Record<string, string>, message = `
   return Object.assign(new Error(message), { status, ...(headers ? { headers } : {}) })
 }
 
-const options = (sleep = vi.fn(async () => {})) => ({ maxRetries: 5, timeoutMs: 5_000, sleep, random: () => 1 })
+const options = (sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {})) => ({ maxRetries: 5, timeoutMs: 5_000, sleep, random: () => 1 })
 
 describe("classifyEmbeddingError", () => {
   it("maps HTTP statuses to kinds and retry decisions", () => {
@@ -38,7 +38,7 @@ describe("backoffDelayMs", () => {
 
 describe("withEmbeddingRetry", () => {
   it("honours Retry-After on 429", async () => {
-    const sleep = vi.fn(async () => {})
+    const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {})
     const fn = vi.fn().mockRejectedValueOnce(httpError(429, { "retry-after": "2" })).mockResolvedValueOnce("ok")
 
     await expect(withEmbeddingRetry(fn, options(sleep))).resolves.toEqual({ value: "ok", attempts: 2 })
@@ -46,7 +46,7 @@ describe("withEmbeddingRetry", () => {
   })
 
   it("backs off exponentially on 5xx and gives up after maxRetries", async () => {
-    const sleep = vi.fn(async () => {})
+    const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {})
     const fn = vi.fn().mockRejectedValue(httpError(500))
 
     await expect(withEmbeddingRetry(fn, { ...options(sleep), maxRetries: 3 })).rejects.toMatchObject({ kind: "server" })
@@ -55,7 +55,7 @@ describe("withEmbeddingRetry", () => {
   })
 
   it("never retries a 400", async () => {
-    const sleep = vi.fn(async () => {})
+    const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {})
     const fn = vi.fn().mockRejectedValue(httpError(400))
 
     await expect(withEmbeddingRetry(fn, options(sleep))).rejects.toMatchObject({ kind: "bad_request", retryable: false })
@@ -86,7 +86,7 @@ describe("withEmbeddingRetry", () => {
   })
 
   it("passes a per-attempt timeout signal and treats its expiry as a retryable timeout", async () => {
-    const sleep = vi.fn(async () => {})
+    const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {})
     const fn = vi
       .fn()
       .mockImplementationOnce(

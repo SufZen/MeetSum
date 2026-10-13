@@ -54,7 +54,7 @@ function meeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
     title: "סקירת תקציב",
     source: "upload",
     language: "he",
-    status: "ready",
+    status: "completed",
     retention: "audio",
     startedAt: "2026-10-12T07:30:00.000Z",
     participants: [],

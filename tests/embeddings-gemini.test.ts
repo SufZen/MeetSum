@@ -66,7 +66,7 @@ describe("Gemini embedding provider", () => {
 
     await provider.embed([{ text: "מה הוחלט על התקציב?", title: "x" }], { task: "RETRIEVAL_QUERY" })
 
-    expect((embedContent.mock.calls[0][0] as { config: Record<string, unknown> }).config).not.toHaveProperty("title")
+    expect((embedContent.mock.calls[0][0] as unknown as { config: Record<string, unknown> }).config).not.toHaveProperty("title")
   })
 
   it("batches by MEETSUM_EMBEDDING_BATCH_SIZE and keeps input order", async () => {

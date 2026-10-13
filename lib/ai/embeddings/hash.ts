@@ -44,7 +44,7 @@ export function hashEmbed(text: string, dimensions = HASH_EMBEDDING_KEY.dimensio
   for (const token of stems.split(" ").filter(Boolean)) add(token, VARIANT_WEIGHT)
 
   // An empty text still gets a unit vector (cosine distance stays defined).
-  if (vector.every((value) => value === 0)) vector[0] = 1
+  if (!vector.some((value) => value !== 0)) vector[0] = 1
 
   return l2Normalize(vector)
 }
