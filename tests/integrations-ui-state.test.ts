@@ -386,6 +386,27 @@ describe("review fixes: localized codes and default destination names", () => {
     expect(state.sourceLabelKey("outlook_calendar")).toBe("integrationsSourceOutlookCalendar")
     expect(state.sendErrorKey("private_meeting_not_opted_in")).toBe("integrationsSendPrivateNotOptedIn")
     expect(state.sendErrorKey("queue_unavailable")).toBe("integrationsSendQueueUnavailable")
+    expect(state.sendErrorKey("destination_required", "slack")).toBe("integrationsSendNeedsDefaultChannel")
+    expect(state.sendErrorKey("destination_required", "notion")).toBe("integrationsSendNeedsDefaultDatabase")
+    expect(state.sendErrorKey("destination_required")).toBe("integrationsSendNeedsDefaultDestination")
+    expect(state.sendErrorKey("invalid_destination", "slack")).toBe("integrationsSendInvalidDestination")
+    expect(state.sendErrorKey("integration_needs_reauth")).toBe("integrationsSkipNeedsReauth")
+    expect(state.sendErrorKey("manual_send_disabled")).toBe("integrationsSkipManualSendDisabled")
+    expect(state.sendErrorKey("provider_rate_limited")).toBe("integrationsSendRateLimited")
+    expect(state.sendErrorKey("unknown", undefined, 429)).toBe("integrationsSendRateLimited")
+    expect(state.sendErrorKey("toString")).toBe("integrationsStatusFailed")
+    expect(state.sendErrorKey("something_new")).toBe("integrationsStatusFailed")
+  })
+
+  it("gates manual sends on a default destination and names the email rule in the UI language", async () => {
+    const state = await import("@/components/integrations/state")
+
+    expect(state.hasDefaultDestination({ provider: "slack", config: {} })).toBe(false)
+    expect(state.hasDefaultDestination({ provider: "slack", config: { defaultChannelId: "C1" } })).toBe(true)
+    expect(state.hasDefaultDestination({ provider: "notion", config: { defaultDatabaseId: "" } })).toBe(false)
+    expect(state.hasDefaultDestination({ provider: "hubspot", config: {} })).toBe(true)
+    expect(state.ruleDisplayName({ provider: "email", name: "Email recap" }, { integrationsSectionEmailRecap: "סיכום במייל" })).toBe("סיכום במייל")
+    expect(state.ruleDisplayName({ provider: "slack", name: "My rule" }, { integrationsSectionEmailRecap: "x" })).toBe("My rule")
   })
 
   it("keeps the default destination's name in the connection config", async () => {

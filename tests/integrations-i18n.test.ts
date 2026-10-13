@@ -9,8 +9,9 @@ const LATIN_ONLY = new Set(["integrationsProviderSlack", "integrationsProviderNo
 describe("M8 integrations messages", () => {
   const keys = Object.keys(integrationsMessagesEn) as (keyof typeof integrationsMessagesEn)[]
 
-  it("keeps the frozen 200 keys plus the two Integration-step webhook keys and the 33 review-fix keys", () => {
-    expect(keys).toHaveLength(235)
+  it("keeps the frozen 200 keys plus the two Integration-step webhook keys and the 43 review-fix keys", () => {
+    expect(keys).toHaveLength(245)
+    expect(keys).toEqual(expect.arrayContaining(["integrationsSendNeedsDefaultChannel", "integrationsSendInvalidDestination", "integrationsClose"]))
     expect(keys).toEqual(expect.arrayContaining(["integrationsWebhookUrlLabel", "integrationsSendPrivateNotOptedIn", "integrationsErrorKindRetryable"]))
     expect(keys).toEqual(expect.arrayContaining(["integrationsWebhookAdd", "integrationsWebhookRotateSecret"]))
     expect(Object.keys(integrationsMessagesHe).sort()).toEqual([...keys].sort())

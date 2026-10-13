@@ -552,11 +552,64 @@ export function sourceLabelKey(source: string): IntegrationsMessageKey | null {
   return SOURCE_KEYS[source] ?? null
 }
 
-/** The manual-send error code as a message key (generic "failed" otherwise). */
-export function sendErrorKey(code: string | undefined): IntegrationsMessageKey {
-  if (code === "private_meeting_not_opted_in") return "integrationsSendPrivateNotOptedIn"
-  if (code === "queue_unavailable") return "integrationsSendQueueUnavailable"
+const SEND_ERROR_KEYS: Record<string, IntegrationsMessageKey> = {
+  private_meeting_not_opted_in: "integrationsSendPrivateNotOptedIn",
+  queue_unavailable: "integrationsSendQueueUnavailable",
+  invalid_destination: "integrationsSendInvalidDestination",
+  destination_provider_mismatch: "integrationsSendInvalidDestination",
+  provider_invalid: "integrationsSendInvalidDestination",
+  provider_not_found: "integrationsSendInvalidDestination",
+  destination_not_verifiable: "integrationsSendDestinationNotVerifiable",
+  integration_needs_reauth: "integrationsSkipNeedsReauth",
+  manual_send_disabled: "integrationsSkipManualSendDisabled",
+  integration_not_configured: "integrationsErrorNotConfigured",
+  provider_forbidden: "integrationsErrorKindForbidden",
+  provider_rate_limited: "integrationsSendRateLimited",
+  provider_retryable: "integrationsSendProviderUnavailable",
+  provider_unavailable: "integrationsSendProviderUnavailable",
+  provider_error: "integrationsSendProviderUnavailable",
+  forbidden: "integrationsSendForbidden",
+  not_found: "integrationsSendNotFound",
+  connection_required: "integrationsSendNotFound",
+}
+
+/** The hint for a provider whose manual send needs a default destination first. */
+export function missingDefaultDestinationKey(provider: string | undefined): IntegrationsMessageKey {
+  if (provider === "slack") return "integrationsSendNeedsDefaultChannel"
+  if (provider === "notion") return "integrationsSendNeedsDefaultDatabase"
+
+  return "integrationsSendNeedsDefaultDestination"
+}
+
+/**
+ * Whether "Send to…" can send to this connection without a destination in the
+ * request: Slack and Notion need a default channel / database (the send route
+ * answers `destination_required` otherwise); HubSpot works without a deal.
+ */
+export function hasDefaultDestination(connection: Pick<IntegrationConnectionDTO, "provider" | "config">): boolean {
+  const destination = DEFAULT_DESTINATIONS[connection.provider]
+
+  if (!destination || connection.provider === "hubspot") return true
+  const value = connection.config[destination.idKey]
+
+  return typeof value === "string" && value.length > 0
+}
+
+/** The manual-send error code as a localized message key (generic "failed" otherwise). */
+export function sendErrorKey(code: string | undefined, provider?: string, status?: number): IntegrationsMessageKey {
+  if (code === "destination_required") return missingDefaultDestinationKey(provider)
+  if (code && Object.hasOwn(SEND_ERROR_KEYS, code)) return SEND_ERROR_KEYS[code]
+  if (status === 429) return "integrationsSendRateLimited"
+
   return "integrationsStatusFailed"
+}
+
+/** A rule's display name: the singleton email rule is named by the UI, in the viewer's language. */
+export function ruleDisplayName(
+  rule: Pick<IntegrationRuleDTO, "provider" | "name">,
+  t: Pick<Record<IntegrationsMessageKey, string>, "integrationsSectionEmailRecap">
+): string {
+  return rule.provider === "email" ? t.integrationsSectionEmailRecap : rule.name
 }
 
 /** The skip reason's message key, or `integrationsSkipOther` (rendered with `{reason}`). */

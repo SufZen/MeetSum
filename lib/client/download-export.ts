@@ -101,7 +101,13 @@ export async function exportToGoogleDocs(
 
 export type SendTargetProvider = "slack" | "notion" | "hubspot"
 
-export type SendTarget = { connectionId: string; provider: SendTargetProvider; accountLabel: string }
+/**
+ * `needsDefault`: Slack / Notion have no default channel / database yet, so a
+ * send without a destination would fail with `destination_required`.
+ */
+export type SendTarget = { connectionId: string; provider: SendTargetProvider; accountLabel: string; needsDefault?: true }
+
+const DEFAULT_ID_KEYS: Partial<Record<SendTargetProvider, string>> = { slack: "defaultChannelId", notion: "defaultDatabaseId" }
 
 const SEND_PROVIDERS: readonly SendTargetProvider[] = ["slack", "notion", "hubspot"]
 
@@ -119,7 +125,7 @@ export function sendTargetsFrom(payload: unknown): SendTarget[] {
       provider?: unknown
       status?: unknown
       accountLabel?: unknown
-      config?: { allowManualSend?: unknown }
+      config?: Record<string, unknown> & { allowManualSend?: unknown }
     }
 
     if (
@@ -131,11 +137,17 @@ export function sendTargetsFrom(payload: unknown): SendTarget[] {
       return []
     }
 
+    const provider = connection.provider as SendTargetProvider
+    const idKey = DEFAULT_ID_KEYS[provider]
+    const defaultId = idKey ? connection.config?.[idKey] : undefined
+    const needsDefault = Boolean(idKey) && !(typeof defaultId === "string" && defaultId)
+
     return [
       {
         connectionId: connection.id,
-        provider: connection.provider as SendTargetProvider,
+        provider,
         accountLabel: typeof connection.accountLabel === "string" ? connection.accountLabel : "",
+        ...(needsDefault ? { needsDefault: true as const } : {}),
       },
     ]
   })

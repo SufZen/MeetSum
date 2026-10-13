@@ -191,8 +191,24 @@ describe("Google Docs and Send to helpers", () => {
         ],
       })
     ).toEqual([
-      { connectionId: "c1", provider: "slack", accountLabel: "Acme" },
-      { connectionId: "c5", provider: "notion", accountLabel: "צוות" },
+      { connectionId: "c1", provider: "slack", accountLabel: "Acme", needsDefault: true },
+      { connectionId: "c5", provider: "notion", accountLabel: "צוות", needsDefault: true },
+    ])
+  })
+
+  it("marks Slack/Notion targets without a default destination (HubSpot needs none)", () => {
+    expect(
+      sendTargetsFrom({
+        connections: [
+          { id: "s", provider: "slack", status: "active", accountLabel: "A", config: { defaultChannelId: "C1" } },
+          { id: "n", provider: "notion", status: "active", accountLabel: "B", config: { defaultDatabaseId: "" } },
+          { id: "h", provider: "hubspot", status: "active", accountLabel: "C", config: {} },
+        ],
+      })
+    ).toEqual([
+      { connectionId: "s", provider: "slack", accountLabel: "A" },
+      { connectionId: "n", provider: "notion", accountLabel: "B", needsDefault: true },
+      { connectionId: "h", provider: "hubspot", accountLabel: "C" },
     ])
   })
 

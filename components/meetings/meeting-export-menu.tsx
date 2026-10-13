@@ -228,17 +228,32 @@ export function MeetingExportMenu({
             <DropdownMenuGroup>
               <DropdownMenuLabel>{t.exportSendTo}</DropdownMenuLabel>
               {targets?.length ? (
-                targets.map((target) => (
-                  <DropdownMenuItem key={target.connectionId} onClick={() => send(target)}>
-                    <SendIcon aria-hidden="true" />
-                    <span>{providerLabel(t, target.provider)}</span>
-                    {target.accountLabel ? (
-                      <span className="ms-auto truncate text-xs text-muted-foreground">
-                        <bdi>{target.accountLabel}</bdi>
-                      </span>
-                    ) : null}
-                  </DropdownMenuItem>
-                ))
+                targets.map((target) => {
+                  const hintId = `export-send-hint-${target.connectionId}`
+
+                  return (
+                    <DropdownMenuItem
+                      key={target.connectionId}
+                      disabled={target.needsDefault}
+                      aria-describedby={target.needsDefault ? hintId : undefined}
+                      className={target.needsDefault ? "flex-wrap" : undefined}
+                      onClick={() => send(target)}
+                    >
+                      <SendIcon aria-hidden="true" />
+                      <span>{providerLabel(t, target.provider)}</span>
+                      {target.accountLabel ? (
+                        <span className="ms-auto truncate text-xs text-muted-foreground">
+                          <bdi>{target.accountLabel}</bdi>
+                        </span>
+                      ) : null}
+                      {target.needsDefault ? (
+                        <span id={hintId} className="basis-full text-xs text-muted-foreground" data-testid="send-needs-default">
+                          {target.provider === "slack" ? t.exportSendNeedsDefaultChannel : t.exportSendNeedsDefaultDatabase}
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  )
+                })
               ) : (
                 <DropdownMenuItem disabled>{targets ? t.exportSendNone : t.exportSendChooseDestination}</DropdownMenuItem>
               )}

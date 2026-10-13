@@ -9,8 +9,10 @@ import { integrationsApi, type MeetingPrefsResponse } from "@/components/integra
 import { im } from "@/components/integrations/messages"
 import {
   DELIVERY_STATUS_KEYS,
+  hasDefaultDestination,
   isTerminalDelivery,
   manualSendTargets,
+  missingDefaultDestinationKey,
   meetingControlsState,
   newIdempotencyKey,
   PROVIDER_LABEL_KEYS,
@@ -116,7 +118,7 @@ export function MeetingIntegrationControls({
     const result = await integrationsApi.sendMeeting(meetingId, connection.id, newIdempotencyKey())
 
     if (!result.ok) {
-      toast.error(`${providerName}: ${im(t, sendErrorKey(result.code))}`)
+      toast.error(`${providerName}: ${im(t, sendErrorKey(result.code, connection.provider, result.status))}`)
       return
     }
     toast.info(`${providerName}: ${t.integrationsStatusQueued}`)
@@ -153,12 +155,29 @@ export function MeetingIntegrationControls({
               {t.exportSendTo}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
-              {targets.map((connection) => (
-                <DropdownMenuItem key={connection.id} onClick={() => void send(connection)}>
-                  <span>{t[PROVIDER_LABEL_KEYS[connection.provider]]}</span>
-                  <bdi className="ms-auto text-xs text-fg-3">{connection.accountLabel}</bdi>
-                </DropdownMenuItem>
-              ))}
+              {targets.map((connection) => {
+                // Slack / Notion need a default channel / database first (else `destination_required`).
+                const ready = hasDefaultDestination(connection)
+                const hintId = `send-hint-${connection.id}`
+
+                return (
+                  <DropdownMenuItem
+                    key={connection.id}
+                    disabled={!ready}
+                    aria-describedby={ready ? undefined : hintId}
+                    className={ready ? undefined : "flex-wrap"}
+                    onClick={() => void send(connection)}
+                  >
+                    <span>{t[PROVIDER_LABEL_KEYS[connection.provider]]}</span>
+                    <bdi className="ms-auto text-xs text-fg-3">{connection.accountLabel}</bdi>
+                    {ready ? null : (
+                      <span id={hintId} className="basis-full text-xs text-fg-3" data-testid="send-needs-default">
+                        {t[missingDefaultDestinationKey(connection.provider)]}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )
+              })}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         ) : null}
