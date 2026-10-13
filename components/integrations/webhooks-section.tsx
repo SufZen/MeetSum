@@ -91,7 +91,8 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
   }
 
   async function create() {
-    if (!/^https:\/\//i.test(url.trim())) {
+    // The server's SSRF guard decides (https, or http for allowlisted hosts only).
+    if (!/^https?:\/\//i.test(url.trim())) {
       toast.error(t.integrationsSaveFailed)
       return
     }
