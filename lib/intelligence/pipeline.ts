@@ -647,6 +647,11 @@ export async function runIntelligencePipeline(
   const cleaned = cleanupTranscriptSegments(segments)
   const itemTexts = (kind: SummaryItemKind) =>
     items.filter((item) => item.kind === kind).map((item) => item.text)
+  // No citation, no claim: the legacy claim arrays (exports, search, prep,
+  // follow-up) only carry cited items; the UI shows uncited ones flagged
+  // from `items`.
+  const citedTexts = (kind: SummaryItemKind) =>
+    items.filter((item) => item.kind === kind && item.refs.length > 0).map((item) => item.text)
   const generation: IntelligenceGeneration = {
     provider: lastResult.provider,
     model: lastResult.model,
@@ -664,11 +669,11 @@ export async function runIntelligencePipeline(
   const intelligence: MeetingIntelligence = {
     version: 2,
     overview: output.overview.trim(),
-    decisions: itemTexts("decision"),
+    decisions: citedTexts("decision"),
     actionItems: enriched,
-    risks: itemTexts("risk"),
+    risks: citedTexts("risk"),
     openQuestions: itemTexts("open_question"),
-    commitments: itemTexts("commitment"),
+    commitments: citedTexts("commitment"),
     followUpDraft: output.followUpDraft?.trim() ?? "",
     timestampedQuotes: quotes.length
       ? quotes

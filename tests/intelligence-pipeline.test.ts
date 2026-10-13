@@ -320,6 +320,38 @@ describe("fallbacks and routing", () => {
   })
 })
 
+describe("no citation, no claim", () => {
+  it("drops uncited decisions, risks and commitments from the legacy arrays but keeps the flagged items", async () => {
+    const summary = {
+      ...outputFixture.summary,
+      decisions: [
+        ...outputFixture.summary.decisions,
+        { text: "החלטה בלי מקור", refs: [] },
+        { text: "החלטה עם מקור מומצא", refs: ["s99"] },
+      ],
+      risks: [...outputFixture.summary.risks, { text: "סיכון בלי מקור", refs: [] }],
+      commitments: [
+        { text: "התחייבות עם מקור", refs: ["s4"] },
+        { text: "התחייבות בלי מקור", refs: [] },
+      ],
+    }
+
+    setLlmProvidersForTesting({
+      gemini: provider("gemini", standardHandler(summary)),
+      anthropic: provider("anthropic", () => null, false),
+    })
+    const { intelligence } = await runIntelligencePipeline(meeting(), { settings })
+    const items = intelligence.items ?? []
+
+    expect(intelligence.decisions).toEqual(["מעבירים את כל הלקוחות ל-Supabase עד סוף החודש"])
+    expect(intelligence.risks).toEqual(["הספק עלול לא לעמוד בזמנים"])
+    expect(intelligence.commitments).toEqual(["התחייבות עם מקור"])
+    // The UI still shows the flagged (uncited) lines from `items`.
+    expect(items.find((item) => item.text === "החלטה בלי מקור")).toMatchObject({ kind: "decision", refs: [] })
+    expect(items.find((item) => item.text === "סיכון בלי מקור")).toMatchObject({ kind: "risk", refs: [] })
+  })
+})
+
 describe("action item ids", () => {
   it("derives action item ids from the meeting, so the same title in two meetings never collides", async () => {
     setLlmProvidersForTesting({

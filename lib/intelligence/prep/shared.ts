@@ -42,8 +42,22 @@ export function actionItemOwner(item: Pick<ActionItem, "owner" | "ownerText">): 
   return owner || undefined
 }
 
-/** Decisions of a meeting: V2/legacy intelligence, else the summary. */
+/**
+ * Decisions of a meeting: V2/legacy intelligence, else the summary. For an
+ * LLM summary with V2 items only cited decisions count (no citation, no
+ * claim), including rows stored before the legacy array was filtered.
+ */
 export function meetingDecisions(meeting: MeetingRecord): string[] {
+  const intelligence = meeting.intelligence
+  const items = intelligence?.items
+
+  if (items?.length && intelligence?.generation && intelligence.generation.provider !== "heuristic") {
+    return items
+      .filter((item) => item.kind === "decision" && item.refs.length > 0)
+      .map((item) => item.text.trim())
+      .filter(Boolean)
+  }
+
   const decisions = meeting.intelligence?.decisions?.length
     ? meeting.intelligence.decisions
     : (meeting.summary?.decisions ?? [])

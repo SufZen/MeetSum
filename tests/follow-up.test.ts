@@ -111,6 +111,28 @@ describe("generateFollowUpEmail", () => {
     expect(prompt).not.toContain("<system>")
   })
 
+  it("feeds only cited decisions of an LLM summary to the model (no citation, no claim)", async () => {
+    const withItems = testMeeting({
+      ...meeting,
+      summary: { ...meeting.summary!, decisions: ["החלטה מצוטטת", "החלטה בלי מקור"] },
+      intelligence: {
+        decisions: ["החלטה מצוטטת", "החלטה בלי מקור"],
+        items: [
+          { id: "si_1", kind: "decision", text: "החלטה מצוטטת", refs: [{ segmentId: "seg_1", startMs: 0 }] },
+          { id: "si_2", kind: "decision", text: "החלטה בלי מקור", refs: [] },
+        ],
+        generation: { provider: "gemini", model: "gemini-3.8-flash", promptVersion: "m5.1" },
+      } as unknown as MeetingRecord["intelligence"],
+    })
+
+    await generateFollowUpEmail(scope, withItems, { language: "he", tone: "formal", includeActionItems: false, canWrite: true })
+
+    const prompt = (generateStructured.mock.calls[0][0] as LlmStructuredRequest<FollowUpOutput>).instructions
+
+    expect(prompt).toContain("החלטה מצוטטת")
+    expect(prompt).not.toContain("החלטה בלי מקור")
+  })
+
   it("assembles the model prose with the stored action items", async () => {
     const variant = await generateFollowUpEmail(scope, meeting, {
       language: "he",
