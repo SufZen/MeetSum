@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app-shell"
 import { NoWorkspaceState } from "@/components/no-workspace-state"
 import { can, canManageMeeting, getServerAuthState } from "@/lib/auth/authz"
 import { resolveShellDeepLink } from "@/lib/client/shell-deep-link"
-import { parseShellUrl } from "@/lib/client/shell-url"
+import { hasShellIntent, parseShellUrl } from "@/lib/client/shell-url"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { shouldRedirectToOnboarding } from "@/lib/onboarding/redirect"
@@ -47,8 +47,9 @@ export default async function Page({
   const { ctx } = auth
   const user = auth.session.user
 
-  // M9 onboarding (Package C): fresh owner/admin workspaces go to the wizard.
-  if (await shouldRedirectToOnboarding(ctx).catch(() => false)) {
+  // M9 onboarding (Package C): fresh owner/admin workspaces go to the wizard,
+  // unless the URL is a deep link or an OAuth callback (never drop those).
+  if (!hasShellIntent(query) && (await shouldRedirectToOnboarding(ctx).catch(() => false))) {
     redirect(`/${supportedLocale}/onboarding`)
   }
   // Lightweight inbox rows; the selected meeting's detail and transcript are

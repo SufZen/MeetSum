@@ -96,6 +96,18 @@ function oneOf<T extends string>(values: readonly T[], value: string | null): T 
   return value !== null && (values as readonly string[]).includes(value) ? (value as T) : undefined
 }
 
+/**
+ * True when the URL asks the shell for something specific (a shell param, a
+ * one-shot `record`, or an `integration_error` coming back from an OAuth
+ * callback). The onboarding redirect is skipped then, so deep links and
+ * callbacks are never dropped.
+ */
+export function hasShellIntent(input: SearchParamsInput | null | undefined): boolean {
+  const params = toSearchParams(input)
+
+  return [...SHELL_PARAMS, ...ONE_SHOT_PARAMS, "integration_error"].some((name) => params.has(name))
+}
+
 const MEETING_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 /** Parses shell state; invalid values fall back to the defaults. */

@@ -69,3 +69,31 @@ describe("computeOnboardingRedirect", () => {
     expect(await computeOnboardingRedirect(ctx("owner"), deps({ progress: broken }))).toBe(false)
   })
 })
+
+describe("onboarding redirect keeps deep links (M9 follow-up)", () => {
+  it("hasShellIntent is true for any shell param, record or integration_error", async () => {
+    const { hasShellIntent } = await import("@/lib/client/shell-url")
+
+    for (const query of [
+      { meeting: "m_1" },
+      { panel: "settings" },
+      { tab: "transcript" },
+      { t: "90" },
+      { adminTab: "invitations" },
+      { section: "integrations" },
+      { record: "1" },
+      { integration_error: "denied" },
+    ]) {
+      expect(hasShellIntent(query), JSON.stringify(query)).toBe(true)
+    }
+    expect(hasShellIntent({})).toBe(false)
+    expect(hasShellIntent({ utm_source: "mail" })).toBe(false)
+  })
+
+  it("the home page checks it before redirecting", async () => {
+    const { readFileSync } = await import("node:fs")
+    const source = readFileSync(new URL("../app/[locale]/(home)/page.tsx", import.meta.url), "utf8")
+
+    expect(source).toContain("!hasShellIntent(query) && (await shouldRedirectToOnboarding(ctx)")
+  })
+})
