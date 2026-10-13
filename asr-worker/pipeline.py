@@ -12,12 +12,17 @@ import subprocess
 import tempfile
 import time
 import wave
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit
 
 from merge import assign_speakers
 from schema import AsrJob, build_output
 
 ASR_MODEL = os.environ.get("ASR_MODEL", "ivrit-ai/whisper-large-v3-turbo-ct2")
+# Model MeetSum requests for non-Hebrew meetings (RUNPOD_ASR_MODEL_MULTILINGUAL).
+ASR_MODEL_MULTILINGUAL = os.environ.get("ASR_MODEL_MULTILINGUAL", "large-v3-turbo")
+# ffmpeg may only read local files/pipes (no http, hls, concat tricks).
+FFMPEG_INPUT_PROTOCOLS = ["-protocol_whitelist", "file,pipe"]
 DIARIZATION_MODEL = os.environ.get("DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1")
 MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", str(1024 * 1024 * 1024)))
 DOWNLOAD_TIMEOUT_S = int(os.environ.get("DOWNLOAD_TIMEOUT_S", "300"))
@@ -29,7 +34,48 @@ _diarization_pipeline: Any = None
 
 
 class MediaError(RuntimeError):
-    """The audio could not be fetched or decoded (permanent for this job)."""
+    """The audio could not be fetched (or is too large) for this job."""
+
+
+class MediaDecodeError(MediaError):
+    """ffmpeg could not decode the audio. The only error MeetSum treats as
+    permanent `bad_input` (handler.py adds `error_kind: "bad_media"`)."""
+
+
+class JobRejected(RuntimeError):
+    """The job asks for something this worker does not allow (URL, model)."""
+
+
+def _env_list(name: str) -> List[str]:
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+def allowed_models() -> Set[str]:
+    """`ASR_ALLOWED_MODELS` (comma-separated), default ASR_MODEL + the multilingual model."""
+    configured = _env_list("ASR_ALLOWED_MODELS")
+    if configured:
+        return set(configured)
+    return {os.environ.get("ASR_MODEL", ASR_MODEL), os.environ.get("ASR_MODEL_MULTILINGUAL", ASR_MODEL_MULTILINGUAL)}
+
+
+def resolve_model(requested: Optional[str]) -> str:
+    model = requested or os.environ.get("ASR_MODEL", ASR_MODEL)
+    if model not in allowed_models():
+        raise JobRejected(f"Model {model!r} is not allowed (set ASR_ALLOWED_MODELS)")
+    return model
+
+
+def validate_audio_url(url: str) -> str:
+    """https only; when `ASR_ALLOWED_AUDIO_HOSTS` is set the host must be listed
+    (exact match, or a suffix match for entries starting with ".")."""
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise JobRejected("Audio URL must use https")
+    host = parts.hostname.lower()
+    allowed = [entry.lower() for entry in _env_list("ASR_ALLOWED_AUDIO_HOSTS")]
+    if allowed and not any(host == entry or (entry.startswith(".") and host.endswith(entry)) for entry in allowed):
+        raise JobRejected(f"Audio host {host!r} is not in ASR_ALLOWED_AUDIO_HOSTS")
+    return url
 
 
 def _ms(started: float) -> int:
@@ -44,8 +90,13 @@ def _ms(started: float) -> int:
 def download_audio(url: str, destination: str, max_bytes: int = MAX_AUDIO_BYTES) -> int:
     import requests  # lazy: keeps tests dependency-free
 
+    validate_audio_url(url)
     total = 0
-    with requests.get(url, stream=True, timeout=(15, DOWNLOAD_TIMEOUT_S)) as response:
+    # Redirects are not followed: a presigned URL never redirects, and
+    # following one could reach hosts outside the allowlist.
+    with requests.get(url, stream=True, timeout=(15, DOWNLOAD_TIMEOUT_S), allow_redirects=False) as response:
+        if 300 <= response.status_code < 400:
+            raise MediaError(f"Failed to download audio: redirect (HTTP {response.status_code}) not followed")
         if response.status_code >= 400:
             raise MediaError(f"Failed to download audio: HTTP {response.status_code}")
         length = response.headers.get("content-length")
@@ -67,15 +118,15 @@ def download_audio(url: str, destination: str, max_bytes: int = MAX_AUDIO_BYTES)
 def to_wav16k(source: str, destination: str) -> None:
     try:
         subprocess.run(
-            ["ffmpeg", "-hide_banner", "-nostats", "-y", "-i", source, "-vn", "-ac", "1", "-ar", "16000",
-             "-c:a", "pcm_s16le", destination],
+            ["ffmpeg", "-hide_banner", "-nostats", "-y", *FFMPEG_INPUT_PROTOCOLS, "-i", source, "-vn", "-ac", "1",
+             "-ar", "16000", "-c:a", "pcm_s16le", destination],
             check=True,
             capture_output=True,
             timeout=FFMPEG_TIMEOUT_S,
         )
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or b"").decode("utf-8", "replace")[-400:]
-        raise MediaError(f"Failed to decode audio with ffmpeg: {detail}") from error
+        raise MediaDecodeError(f"Failed to decode audio with ffmpeg: {detail}") from error
 
 
 def wav_duration_s(path: str) -> float:
@@ -111,7 +162,7 @@ def get_whisper(model_name: str):
 
 
 def transcribe(wav_path: str, job: AsrJob) -> Tuple[List[Dict[str, Any]], str]:
-    model = get_whisper(job.model or ASR_MODEL)
+    model = get_whisper(resolve_model(job.model))
     # Anti-hallucination settings validated on real Hebrew meetings (see
     # docs/runbooks/laptop-hebrew-asr/app.py): no conditioning on previous
     # text, VAD, and confidence thresholds.
@@ -200,6 +251,10 @@ def diarize(wav_path: str, job: AsrJob) -> Tuple[List[Dict[str, Any]], List[Dict
 def run_job(job: AsrJob) -> Dict[str, Any]:
     timings: Dict[str, int] = {}
     warnings: List[str] = list(job.warnings)
+    # Policy checks before any download or GPU work.
+    job.model = resolve_model(job.model)
+    if job.audio.type == "url":
+        validate_audio_url(job.audio.url or "")
     with tempfile.TemporaryDirectory(prefix="meetsum-asr-") as workdir:
         source = os.path.join(workdir, "input.media")
         wav = os.path.join(workdir, "audio.wav")

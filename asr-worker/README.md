@@ -14,9 +14,25 @@ each word to a speaker (max overlap → nearest turn within 500 ms → previous
 speaker) → `meetsum-asr/v1` JSON (`schema.py`).
 
 If diarization fails the transcript is still returned (`diarization: "none"`
-plus a `diarization_failed` warning). Decode/download failures return
-`{"error": ...}` (RunPod marks the job FAILED; MeetSum treats decode errors
-as permanent `bad_input`, everything else as retryable).
+plus a `diarization_failed` warning). Failures return `{"error": ...}`
+(RunPod marks the job FAILED). Only an ffmpeg decode failure adds
+`"error_kind": "bad_media"` (and a `[bad_media]` message prefix); MeetSum
+treats exactly that as permanent `bad_input`. Download failures, policy
+rejections (`Rejected: ...`) and worker errors stay retryable, so MeetSum's
+next provider can try.
+
+## Input policy
+
+- **Audio URLs**: `https` only, redirects are never followed, and when
+  `ASR_ALLOWED_AUDIO_HOSTS` is set (comma-separated; an entry starting with
+  `.` matches subdomains, e.g. `media.example.com,.r2.cloudflarestorage.com`)
+  the host must be listed. Set it to your `S3_PUBLIC_ENDPOINT` host in
+  production.
+- **Models**: `job.model` must be in `ASR_ALLOWED_MODELS` (comma-separated),
+  default `ASR_MODEL` plus `ASR_MODEL_MULTILINGUAL` (`large-v3-turbo`, what
+  MeetSum sends for non-Hebrew meetings). Anything else is rejected before
+  download.
+- **ffmpeg** only reads local files and pipes (`-protocol_whitelist file,pipe`).
 
 The default `RUNPOD_ASR_WORKER=ivrit` instead targets the public ivrit-ai
 RunPod image (see "Alternative" below); this worker exists for full control
@@ -30,7 +46,8 @@ over diarization, embeddings (voiceprints) and the output schema.
 | `pipeline.py` | download, ffmpeg, faster-whisper, pyannote (lazy GPU imports) |
 | `merge.py` | pure word→speaker assignment |
 | `schema.py` | `meetsum-asr/v1` input parsing and output building |
-| `tests/test_merge.py` | pytest, no GPU needed |
+| `tests/test_merge.py` | pytest: merge + schema, no GPU needed |
+| `tests/test_pipeline.py` | pytest: URL/model policy, ffmpeg args, handler error mapping |
 | `test_input.json` | sample job for `runpod` local testing |
 
 ## Tests (no GPU)
@@ -90,7 +107,7 @@ cached weights.
 | Execution timeout | 3600 s |
 | Container disk | 20 GB |
 | Network volume (optional) | mounted at `/models` for the pyannote cache |
-| Env | `HF_TOKEN` (secret), optional `MAX_AUDIO_BYTES`, `ASR_COMPUTE_TYPE=float16` |
+| Env | `HF_TOKEN` (secret), `ASR_ALLOWED_AUDIO_HOSTS=<S3_PUBLIC_ENDPOINT host>`, optional `ASR_ALLOWED_MODELS`, `ASR_MODEL_MULTILINGUAL`, `MAX_AUDIO_BYTES`, `ASR_COMPUTE_TYPE=float16` |
 
 MeetSum side (`.env`):
 
@@ -98,7 +115,7 @@ MeetSum side (`.env`):
 RUNPOD_API_KEY=...                 # RunPod API key with endpoint access only
 RUNPOD_ASR_ENDPOINT_ID=<endpoint id>
 RUNPOD_ASR_WORKER=meetsum
-S3_PUBLIC_ENDPOINT=https://media.example.com   # presigned handoff (else ≤ 9 MB base64 blobs)
+S3_PUBLIC_ENDPOINT=https://media.example.com   # presigned handoff (else ≤ 7 MB raw audio as base64 blobs)
 ```
 
 `RUNPOD_ASR_TIMEOUT_MS` defaults to max(10 min, 0.5 × duration + 5 min);
