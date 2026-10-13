@@ -10,7 +10,9 @@
  * (lib/jobs/queue.ts defaults), so the next edit enqueues a new run; an
  * edit made while a run is active is caught by the sweeper, because the
  * run records its start as `search_indexed_at`. It never throws: a failure
- * is logged and the index sweeper (`search.index.sweep`) catches up.
+ * is logged and the index sweeper (`search.index.sweep`) catches up. The
+ * enqueue is bounded (`MEETSUM_INDEX_ENQUEUE_TIMEOUT_MS`, default 1 s) so a
+ * Redis outage doesn't add the client's connect timeout to every edit.
  *
  * Only the Postgres storage keeps a search index; with in-memory storage
  * (demo, tests) search runs on the fly and this is a no-op.
@@ -60,6 +62,26 @@ export function meetingIndexJobId(meetingId: string): string {
   return `meeting.index-${meetingId.replace(/:/g, "_")}`
 }
 
+const DEFAULT_ENQUEUE_TIMEOUT_MS = 1_000
+
+/** Upper bound on the enqueue inside an edit request (a Redis outage must not add seconds to a rename). */
+export function indexEnqueueTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const parsed = Number(env.MEETSUM_INDEX_ENQUEUE_TIMEOUT_MS)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ENQUEUE_TIMEOUT_MS
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error("enqueue timed out"), { name: "TimeoutError" })), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
+
 function describeFailure(error: unknown): string {
   return error instanceof Error ? error.name || "Error" : "unknown error"
 }
@@ -103,7 +125,8 @@ export async function requestMeetingReindex({
   }
 
   try {
-    await enqueueMeetingIndexJob({ workspaceId, meetingId, reason }, { delay: indexDebounceMs() })
+    // Bounded: on a timeout the sweeper catches up (search_requested_at is set).
+    await withTimeout(enqueueMeetingIndexJob({ workspaceId, meetingId, reason }, { delay: indexDebounceMs() }), indexEnqueueTimeoutMs())
   } catch (error) {
     console.warn("[search] reindex enqueue failed", reason, describeFailure(error))
   }

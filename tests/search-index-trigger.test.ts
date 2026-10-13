@@ -42,6 +42,18 @@ describe("requestMeetingReindex (M6 Step 0)", () => {
     )
   })
 
+  it("bounds the enqueue so a Redis outage doesn't stall the edit route", async () => {
+    vi.stubEnv("MEETSUM_INDEX_ENQUEUE_TIMEOUT_MS", "50")
+    mocks.enqueue.mockReturnValue(new Promise(() => {}))
+    const query = vi.fn().mockResolvedValue({ rows: [] })
+    const started = Date.now()
+
+    await requestMeetingReindex({ workspaceId: "ws_1", meetingId: "m_1", reason: "renamed", db: { query } })
+
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(console.warn).toHaveBeenCalledWith("[search] reindex enqueue failed", "renamed", "TimeoutError")
+  })
+
   it("never throws: database and queue failures are logged", async () => {
     const query = vi.fn().mockRejectedValue(new Error("relation does not exist"))
     mocks.enqueue.mockRejectedValue(new Error("queue_unavailable"))
