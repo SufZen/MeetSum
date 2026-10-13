@@ -19,6 +19,7 @@
  * `.secrets/e2e-m8.env`): E2E_M8_W1_OWNER_SESSION, E2E_M8_W1_MEMBER_SESSION,
  * E2E_M8_W2_OWNER_SESSION, E2E_M8_W1_WORKSPACE_ID, E2E_M8_W2_WORKSPACE_ID,
  * E2E_M8_HEBREW_MEETING_ID, E2E_M8_PRIVATE_MEETING_ID, E2E_M8_CALENDAR_MEETING_ID,
+ * E2E_M8_RECAP_MEETING_ID,
  * E2E_M8_ICAL_UID, E2E_M8_MEMBER_EMAIL.
  *
  * Fake-server inspection contract (Package A, scripts/fake-providers.ts):
@@ -119,12 +120,55 @@ function card(page: Page, provider: string) {
   return page.locator(`article[data-provider="${provider}"]`)
 }
 
+const PROVIDER_NAMES: Record<string, string> = {
+  slack: he.integrationsProviderSlack,
+  notion: he.integrationsProviderNotion,
+  hubspot: he.integrationsProviderHubspot,
+  microsoft: he.integrationsProviderMicrosoft,
+}
+
 /** Connect / Reconnect is a full-page navigation; the fake authorize page auto-approves. */
 async function connect(page: Page, provider: string) {
-  await card(page, provider).getByRole("button", { name: new RegExp(he.integrationsConnect) }).click()
+  // The exact accessible name ("חיבור: Slack"): a substring match would also hit "בדיקת החיבור".
+  await card(page, provider)
+    .getByRole("button", { name: `${he.integrationsConnect}: ${PROVIDER_NAMES[provider]}`, exact: true })
+    .click()
   await page.waitForURL(/section=integrations/, { timeout: 30_000 })
   await expect(page.getByTestId("integrations-settings")).toBeVisible()
   await expect(card(page, provider).getByTestId("integration-account").locator("bdi")).toBeVisible()
+}
+
+/** Picks the first option as the connection's default destination and waits until it is saved. */
+async function setDefaultDestination(page: Page, provider: "slack" | "notion") {
+  const providerCard = card(page, provider)
+  const saved = page.waitForResponse(
+    (response) => /\/api\/integrations\/connections\/[^/]+$/.test(new URL(response.url()).pathname) && response.request().method() === "PATCH"
+  )
+
+  await providerCard.getByText(he.integrationsDefaultDestination).click()
+  await providerCard.getByRole("list").getByRole("button").first().click()
+  expect((await saved).status()).toBe(200)
+  // The summary shows the saved name once the card reloads the connection.
+  await expect(providerCard.locator("summary bdi")).toBeVisible()
+}
+
+const ORIGIN_HEADERS = (baseURL: string | undefined) => ({ origin: baseURL || "http://localhost:3000" })
+
+/** Renames a meeting through the API: a real content change for the next re-send. */
+async function renameMeeting(page: Page, baseURL: string | undefined, meetingId: string, title: string) {
+  const response = await page.request.patch(`/api/meetings/${encodeURIComponent(meetingId)}`, {
+    data: { title },
+    headers: ORIGIN_HEADERS(baseURL),
+  })
+
+  expect(response.status()).toBe(200)
+}
+
+async function meetingTitle(page: Page, meetingId: string): Promise<string> {
+  const response = await page.request.get(`/api/meetings/${encodeURIComponent(meetingId)}`)
+  const body = (await response.json()) as { meeting?: { title?: string }; title?: string }
+
+  return body.meeting?.title ?? body.title ?? ""
 }
 
 async function openMeeting(page: Page, meetingId: string, locale: "he" | "en" = "he") {
@@ -197,6 +241,7 @@ test.describe.serial("M8 integrations with fake providers", () => {
   })
 
   test("2. a Slack rule posts the Hebrew recap once completed", async ({ page, context, baseURL }) => {
+    test.setTimeout(180_000)
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     await page.getByRole("button", { name: he.integrationsRuleNew }).click()
@@ -244,24 +289,37 @@ test.describe.serial("M8 integrations with fake providers", () => {
     expect((await fakeRequests("slack", "chat.postMessage")).length).toBe(before)
   })
 
-  test("4. Notion: send twice creates one page, then updates it", async ({ page, context, baseURL }) => {
+  test("4. Notion: one page; an unchanged re-send is a no-op, a changed one updates it", async ({ page, context, baseURL }) => {
+    test.setTimeout(180_000)
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     await connect(page, "notion")
     // Pick a default database so the manual send has a destination.
-    await card(page, "notion").getByText(he.integrationsDefaultDestination).click()
-    await card(page, "notion").getByRole("list").getByRole("button").first().click()
+    await setDefaultDestination(page, "notion")
+
+    const pagePosts = async () => (await fakeRequests("notion", "/v1/pages")).filter((request) => request.method === "POST")
+    const pagePatches = async () => (await fakeRequests("notion", "/v1/pages/")).filter((request) => request.method === "PATCH")
 
     await openMeeting(page, env.E2E_M8_HEBREW_MEETING_ID)
     await sendFromMeeting(page, he.integrationsProviderNotion)
+    expect(await pagePosts()).toHaveLength(1)
+    const patchesAfterCreate = (await pagePatches()).length
+
+    // Unchanged content: the content hash matches, so nothing is created or patched.
     await sendFromMeeting(page, he.integrationsProviderNotion)
+    expect(await pagePosts()).toHaveLength(1)
+    expect(await pagePatches()).toHaveLength(patchesAfterCreate)
 
-    const created = await fakeRequests("notion", "/v1/pages")
+    // Changed content: the same page is patched, no second page.
+    const title = await meetingTitle(page, env.E2E_M8_HEBREW_MEETING_ID)
 
-    expect(created.filter((request) => request.method === "POST")).toHaveLength(1)
-    const pageId = (created.find((request) => request.method === "PATCH")?.path ?? "").split("/").pop()
+    await renameMeeting(page, baseURL, env.E2E_M8_HEBREW_MEETING_ID, `${title} (עודכן)`)
+    await sendFromMeeting(page, he.integrationsProviderNotion)
+    expect(await pagePosts()).toHaveLength(1)
+    const patches = await pagePatches()
 
-    expect(pageId).toBeTruthy()
+    expect(patches.length).toBeGreaterThan(patchesAfterCreate)
+    expect(new Set(patches.map((request) => request.path.split("/").pop())).size).toBe(1)
     for (const request of await fakeRequests("notion")) {
       for (const match of JSON.stringify(request.body ?? {}).matchAll(/"content":"((?:[^"\\]|\\.)*)"/g)) {
         expect(JSON.parse(`"${match[1]}"`).length).toBeLessThanOrEqual(2000)
@@ -269,36 +327,67 @@ test.describe.serial("M8 integrations with fake providers", () => {
     }
   })
 
-  test("5. HubSpot: engagement and tasks once, re-send patches", async ({ page, context, baseURL }) => {
+  test("5. HubSpot: engagement and tasks once; unchanged re-send is a no-op, a changed one patches", async ({ page, context, baseURL }) => {
+    test.setTimeout(180_000)
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     await connect(page, "hubspot")
+
+    const engagements = async (method: string) =>
+      (await fakeRequests("hubspot", "/crm/v3/objects/meetings")).filter(
+        (request) => request.method === method && !request.path.includes("/search")
+      )
+    const taskCreates = async () => (await fakeRequests("hubspot", "/crm/v3/objects/tasks/batch/create")).length
+
     await openMeeting(page, env.E2E_M8_HEBREW_MEETING_ID)
     await sendFromMeeting(page, he.integrationsProviderHubspot)
-    expect((await fakeRequests("hubspot", "/crm/v3/objects/meetings")).filter((r) => r.method === "POST")).toHaveLength(1)
-    const taskBatches = (await fakeRequests("hubspot", "/crm/v3/objects/tasks/batch/create")).length
+    expect(await engagements("POST")).toHaveLength(1)
+    const taskBatches = await taskCreates()
 
     expect(taskBatches).toBeGreaterThan(0)
+    const patchesAfterCreate = (await engagements("PATCH")).length
+
+    // Unchanged content: no new engagement, no PATCH, no new tasks.
     await sendFromMeeting(page, he.integrationsProviderHubspot)
-    expect((await fakeRequests("hubspot", "/crm/v3/objects/meetings")).filter((r) => r.method === "PATCH").length).toBeGreaterThan(0)
-    expect((await fakeRequests("hubspot", "/crm/v3/objects/tasks/batch/create")).length).toBe(taskBatches)
+    expect(await engagements("POST")).toHaveLength(1)
+    expect(await engagements("PATCH")).toHaveLength(patchesAfterCreate)
+    expect(await taskCreates()).toBe(taskBatches)
+
+    // Changed content: the same engagement is patched; tasks are not duplicated.
+    const title = await meetingTitle(page, env.E2E_M8_HEBREW_MEETING_ID)
+
+    await renameMeeting(page, baseURL, env.E2E_M8_HEBREW_MEETING_ID, `${title} (שוב)`)
+    await sendFromMeeting(page, he.integrationsProviderHubspot)
+    expect(await engagements("POST")).toHaveLength(1)
+    const patches = await engagements("PATCH")
+
+    expect(patches.length).toBeGreaterThan(patchesAfterCreate)
+    expect(new Set(patches.map((request) => request.path.split("/").pop())).size).toBe(1)
+    expect(await taskCreates()).toBe(taskBatches)
+
+    // Restore the seeded title (the remaining tests and later runs read it).
+    await renameMeeting(page, baseURL, env.E2E_M8_HEBREW_MEETING_ID, title.replace(/ \(עודכן\)$/, ""))
   })
 
   test("6. Outlook sync as the W1 member creates one meeting per iCalUID", async ({ page, context, baseURL }) => {
+    test.setTimeout(240_000)
     await signIn(context, baseURL, "w1Member")
     await openIntegrations(page, "he")
     await connect(page, "microsoft")
     await card(page, "microsoft").getByRole("switch", { name: he.integrationsOutlookSync }).click()
     await expect(card(page, "microsoft").getByRole("switch", { name: he.integrationsOutlookSync })).toBeChecked()
 
-    // calendarSync runs every MEETSUM_MS_CALENDAR_SYNC_MINUTES (1 in e2e).
+    // calendarSync runs every MEETSUM_MS_CALENDAR_SYNC_MINUTES (1 in e2e). The fake
+    // calendar has only the shared event, so with a working dedupe no Outlook meeting
+    // appears: wait for the sync itself (`config.lastSync`) instead.
     await expect
       .poll(
         async () => {
-          const response = await page.request.get("/api/meetings?limit=200")
-          const body = (await response.json()) as { meetings?: { id: string; source: string }[] }
+          const response = await page.request.get("/api/integrations/connections")
+          const body = (await response.json()) as { connections?: { provider: string; status: string; config?: { lastSync?: { at?: string; events?: number } } }[] }
+          const microsoft = (body.connections ?? []).find((item) => item.provider === "microsoft" && item.status !== "revoked")
 
-          return (body.meetings ?? []).filter((meeting) => meeting.source === "outlook_calendar").length
+          return microsoft?.config?.lastSync?.at ? (microsoft.config.lastSync.events ?? 0) : -1
         },
         { timeout: 150_000, intervals: [5_000] }
       )
@@ -312,12 +401,15 @@ test.describe.serial("M8 integrations with fake providers", () => {
       (meeting) => meeting.id === env.E2E_M8_CALENDAR_MEETING_ID || meeting.title === "פגישת לקוח (Outlook)"
     )
 
-    // The seeded Google row owns the iCalUID, so Outlook reuses that meeting.
+    // The seeded Google row owns the iCalUID, so Outlook reuses that meeting: exactly one.
     expect(sameEvent).toHaveLength(1)
     expect(sameEvent[0].id).toBe(env.E2E_M8_CALENDAR_MEETING_ID)
+    expect((body.meetings ?? []).filter((meeting) => meeting.source === "outlook_calendar")).toHaveLength(0)
   })
 
   test("7. email recap: opt-in meeting, RTL email, unsubscribe", async ({ page, context, baseURL }) => {
+    test.setTimeout(240_000)
+    test.skip(!env.E2E_M8_RECAP_MEETING_ID, "E2E env is missing E2E_M8_RECAP_MEETING_ID (re-run npm run integrations:e2e-seed)")
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     const recap = page.locator("section", { has: page.locator("#integrations-email-recap-title") })
@@ -326,11 +418,14 @@ test.describe.serial("M8 integrations with fake providers", () => {
     await recap.getByRole("button", { name: he.integrationsRuleSave }).click()
     await expect(page.getByText(he.integrationsSaved).first()).toBeVisible()
 
-    await openMeeting(page, env.E2E_M8_HEBREW_MEETING_ID)
-    await meetingMenu(page)
-    await page.getByRole("menuitemradio", { name: he.integrationsMeetingEmailRecapOn }).click()
-    await expect(page.getByText(he.integrationsMeetingSaved)).toBeVisible()
-    await page.keyboard.press("Escape")
+    // Opt both meetings in: the second one is completed after the unsubscribe.
+    for (const meetingId of [env.E2E_M8_HEBREW_MEETING_ID, env.E2E_M8_RECAP_MEETING_ID]) {
+      await openMeeting(page, meetingId)
+      await meetingMenu(page)
+      await page.getByRole("menuitemradio", { name: he.integrationsMeetingEmailRecapOn }).click()
+      await expect(page.getByText(he.integrationsMeetingSaved).first()).toBeVisible()
+      await page.keyboard.press("Escape")
+    }
 
     const before = emails().length
 
@@ -355,8 +450,23 @@ test.describe.serial("M8 integrations with fake providers", () => {
 
     const afterUnsubscribe = emails().length
 
-    completeMeeting(env.E2E_M8_HEBREW_MEETING_ID)
-    await new Promise((resolve) => setTimeout(resolve, 5_000))
+    // A NEW meeting completion (a new rule key; re-completing the first meeting
+    // would be a no-op whatever the unsubscribe did). Wait until its email
+    // delivery settles, then check nothing went to the unsubscribed address.
+    completeMeeting(env.E2E_M8_RECAP_MEETING_ID)
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(
+            `/api/integrations/deliveries?provider=email&meetingId=${encodeURIComponent(env.E2E_M8_RECAP_MEETING_ID)}&limit=10`
+          )
+          const body = (await response.json()) as { deliveries?: { status: string }[] }
+
+          return (body.deliveries ?? []).filter((delivery) => ["sent", "partial", "skipped", "failed", "cancelled"].includes(delivery.status)).length
+        },
+        { timeout: 60_000, intervals: [2_000] }
+      )
+      .toBeGreaterThan(0)
     const later = emails().slice(afterUnsubscribe)
 
     expect(later.some((item) => String(Array.isArray(item.to) ? item.to[0] : item.to) === recipient)).toBe(false)
@@ -411,6 +521,7 @@ test.describe.serial("M8 integrations with fake providers", () => {
   })
 
   test("10. a private meeting is skipped until its owner opts in", async ({ page, context, baseURL }) => {
+    test.setTimeout(180_000)
     const posts = (await fakeRequests("slack", "chat.postMessage")).length
 
     completeMeeting(env.E2E_M8_PRIVATE_MEETING_ID)
@@ -428,6 +539,10 @@ test.describe.serial("M8 integrations with fake providers", () => {
     // The private title never appears in the admin's log.
     await expect(page.getByText(he.integrationsLogPrivateMeeting).first()).toBeVisible()
     expect((await fakeRequests("slack", "chat.postMessage")).length).toBe(posts)
+
+    // "Send to…" needs a default channel (otherwise the item is disabled).
+    await openIntegrations(page, "he")
+    await setDefaultDestination(page, "slack")
 
     await signIn(context, baseURL, "w1Member")
     await openMeeting(page, env.E2E_M8_PRIVATE_MEETING_ID)

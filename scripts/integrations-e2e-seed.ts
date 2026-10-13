@@ -49,6 +49,7 @@ const MEETINGS = {
   private: `${PREFIX}meeting_private`,
   w2: `${PREFIX}meeting_w2`,
   calendar: `${PREFIX}meeting_calendar`,
+  recap: `${PREFIX}meeting_recap`,
 } as const
 /** The fake Outlook calendar returns an event with this iCalUID (Acceptance 14, step 6). */
 export const E2E_M8_ICAL_UID = "e2e-m8-shared-event@meetsum.test"
@@ -148,7 +149,18 @@ function seededMeetings(): SeedMeeting[] {
     calendarEventId: `${PREFIX}cal_google_1`,
   })
 
-  return [hebrew, privateMeeting, w2, calendar]
+  // A second recap meeting: test 7 completes it after unsubscribing, so the
+  // check runs on a new rule key (re-completing the first one is a no-op anyway).
+  const recap = meeting(MEETINGS.recap, W1, USERS.w1Owner.id, "workspace", {
+    title: "סיכום שבועי של הצוות",
+    participants: ["דנה כהן"],
+    participantDetails: [participant(MEETINGS.recap, 0, "דנה כהן", USERS.w1Owner.email)],
+    overview: "סקירה שבועית של המשימות הפתוחות בצוות.",
+    decisions: ["להמשיך במעקב שבועי"],
+    actions: [],
+  })
+
+  return [hebrew, privateMeeting, w2, calendar, recap]
 }
 
 async function seed() {
@@ -251,6 +263,7 @@ async function seed() {
     `E2E_M8_PRIVATE_MEETING_ID=${MEETINGS.private}`,
     `E2E_M8_W2_MEETING_ID=${MEETINGS.w2}`,
     `E2E_M8_CALENDAR_MEETING_ID=${MEETINGS.calendar}`,
+    `E2E_M8_RECAP_MEETING_ID=${MEETINGS.recap}`,
     `E2E_M8_ICAL_UID=${E2E_M8_ICAL_UID}`,
     `E2E_M8_MEMBER_EMAIL=${USERS.w1Member.email}`,
   ]
