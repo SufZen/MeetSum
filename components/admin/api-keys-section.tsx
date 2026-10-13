@@ -13,8 +13,9 @@ import {
   type ApiKeyView,
 } from "@/components/admin/api"
 import { ConfirmDialog } from "@/components/admin/confirm-dialog"
-import { formatDateTime, scopeLabel } from "@/components/admin/labels"
+import { adminErrorMessage, formatDateTime, scopeLabel } from "@/components/admin/labels"
 import { SectionState } from "@/components/admin/section-state"
+import { useI18n } from "@/components/i18n-provider"
 import { useAsyncResource } from "@/components/admin/use-async-resource"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,7 +42,10 @@ export function ApiKeysSection({
   dictionary: Dictionary
   locale: SupportedLocale
 }) {
-  const keys = useAsyncResource(listApiKeys, [] as ApiKeyView[])
+  const { timeZone } = useI18n()
+  const keys = useAsyncResource(listApiKeys, [] as ApiKeyView[], (error) =>
+    adminErrorMessage(error, t, t.loadFailed)
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [label, setLabel] = useState("")
   const [scope, setScope] = useState<ApiKeyScopeName>("read")
@@ -74,7 +78,7 @@ export function ApiKeysSection({
       setExpiresAt("")
       setRawKey(created.rawKey)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
     } finally {
       setCreating(false)
     }
@@ -103,7 +107,7 @@ export function ApiKeysSection({
       )
       toast.success(t.apiKeysRevoked)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
       throw error
     }
   }
@@ -127,7 +131,7 @@ export function ApiKeysSection({
         onRetry={() => void keys.reload()}
       >
         <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-160 text-sm">
             <thead className="bg-surface-2 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
@@ -171,13 +175,11 @@ export function ApiKeysSection({
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {key.lastUsedAt
-                      ? formatDateTime(locale, key.lastUsedAt)
+                      ? formatDateTime({ locale, timeZone }, key.lastUsedAt)
                       : t.apiKeysNever}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
-                    {formatDateTime(locale, key.createdAt, {
-                      dateStyle: "medium",
-                    })}
+                    {formatDateTime({ locale, timeZone }, key.createdAt, "date")}
                   </td>
                   <td className="px-3 py-2 text-end">
                     {key.revokedAt ? (

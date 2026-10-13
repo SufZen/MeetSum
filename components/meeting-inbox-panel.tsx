@@ -5,6 +5,8 @@ import {
 } from "lucide-react"
 
 import { BotStatusPill } from "@/components/bot/bot-status-pill"
+import { useI18n } from "@/components/i18n-provider"
+import { OnboardingChecklistCard } from "@/components/onboarding/onboarding-checklist-card"
 import { botPillFor, pickInboxPill, type BotPill } from "@/components/bot/bot-ui-state"
 import type { BotSessionsMap } from "@/components/bot/use-bot-sessions"
 import { Badge } from "@/components/ui/badge"
@@ -18,42 +20,46 @@ import type {
   MeetingListSortMode,
 } from "@/lib/meetings/repository"
 import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
+import { formatIsoDate } from "@/lib/i18n/format"
 
+type Translate = (key: string, values?: Record<string, string | number>) => string
+
+/** Quick filter -> dictionary key (`all` uses the base dictionary's `all`). */
 const quickFilters = [
-  ["all", "All Meetings"],
-  ["usable", "Ready"],
-  ["favorites", "Favorites"],
-  ["processing", "Processing"],
-  ["failed", "Failed"],
-  ["upcoming", "Upcoming"],
+  ["all", "all"],
+  ["usable", "shellInboxFilterReady"],
+  ["favorites", "shellInboxFilterFavorites"],
+  ["processing", "shellInboxFilterProcessing"],
+  ["failed", "shellInboxFilterFailed"],
+  ["upcoming", "shellInboxFilterUpcoming"],
 ] as const
 
 export type MeetingSortMode = MeetingListSortMode
 
-const sortLabels: Record<MeetingSortMode, string> = {
-  smart: "Smart",
-  recent: "Recent",
-  oldest: "Oldest",
-  title: "Title",
-  status: "Status",
+const sortLabelKeys: Record<MeetingSortMode, string> = {
+  smart: "shellInboxSortSmart",
+  recent: "shellInboxSortRecent",
+  oldest: "shellInboxSortOldest",
+  title: "shellInboxSortTitle",
+  status: "shellInboxSortStatus",
 }
 
 function isDriveImport(meeting: MeetingListItem) {
   return Boolean(meeting.mediaAssets?.some((asset) => asset.source === "google_drive"))
 }
 
-function sourceMeta(meeting: MeetingListItem) {
+function sourceMeta(meeting: MeetingListItem, t: Translate) {
   const source = meeting.source
 
   if (source === "upload" && isDriveImport(meeting)) {
-    return { label: "Drive import", dot: "bg-info", icon: "D" }
+    return { label: t("shellInboxSourceDrive"), dot: "bg-info", icon: "D" }
   }
   if (source === "google_meet") return { label: "Google Meet", dot: "bg-ok", icon: "G" }
-  if (source === "upload") return { label: "Upload", dot: "bg-info", icon: "U" }
-  if (source === "pwa_recorder") return { label: "Recorder", dot: "bg-brand", icon: "R" }
-  if (source === "desktop_recorder") return { label: "Desktop", dot: "bg-fg-3", icon: "D" }
-  if (source === "meeting_bot") return { label: "MeetSum bot", dot: "bg-brand", icon: "B" }
-  return { label: source.replaceAll("_", " "), dot: "bg-warn", icon: "A" }
+  if (source === "upload") return { label: t("shellInboxSourceUpload"), dot: "bg-info", icon: "U" }
+  if (source === "pwa_recorder") return { label: t("shellInboxSourceRecorder"), dot: "bg-brand", icon: "R" }
+  if (source === "desktop_recorder") return { label: t("shellInboxSourceDesktop"), dot: "bg-fg-3", icon: "D" }
+  if (source === "meeting_bot") return { label: t("shellInboxSourceBot"), dot: "bg-brand", icon: "B" }
+  return { label: t("shellInboxSourceOther"), dot: "bg-warn", icon: "A" }
 }
 
 function participantCount(meeting: MeetingListItem) {
@@ -80,33 +86,30 @@ function tagClass(tag: string) {
  * invented percentage.
  */
 function statusPill(
-  status: MeetingListItem["status"]
+  status: MeetingListItem["status"],
+  t: Translate
 ): { status: "failed" | "processing"; label: string } | null {
-  if (status === "failed") return { status: "failed", label: "Failed" }
+  if (status === "failed") return { status: "failed", label: t("shellInboxStatusFailed") }
   if (status === "completed" || status === "scheduled" || status === "created") return null
 
-  return { status: "processing", label: "Processing" }
+  return { status: "processing", label: t("shellInboxStatusProcessing") }
 }
 
-function dateGroupLabel(date: Date) {
-  const today = new Date()
-  const yesterday = new Date()
+type GroupI18n = {
+  t: Translate
+  timeZone: string
+  fmt: { date: (value: Date, style: "weekdayDate") => string }
+}
 
-  yesterday.setDate(today.getDate() - 1)
+/** Day groups in the user's zone: today, yesterday, else the localized weekday date. */
+function dateGroupLabel(date: Date, i18n: GroupI18n) {
+  const now = Date.now()
+  const day = formatIsoDate(date, i18n.timeZone)
 
-  const sameDay = (left: Date, right: Date) =>
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
+  if (day === formatIsoDate(now, i18n.timeZone)) return i18n.t("shellInboxToday")
+  if (day === formatIsoDate(now - 86_400_000, i18n.timeZone)) return i18n.t("shellInboxYesterday")
 
-  if (sameDay(date, today)) return "Today"
-  if (sameDay(date, yesterday)) return "Yesterday"
-
-  return new Intl.DateTimeFormat("en", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(date)
+  return i18n.fmt.date(date, "weekdayDate")
 }
 
 export function MeetingInboxPanel({
@@ -154,16 +157,14 @@ export function MeetingInboxPanel({
   /** M7: newest bot session per meeting (empty when the bot is disabled). */
   botSessions?: BotSessionsMap
 }) {
-  const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
-    hour: "numeric",
-    minute: "2-digit",
-  })
+  const i18n = useI18n()
+  const t = i18n.t
   const showingStart = page.total === 0 ? 0 : page.offset + 1
   const showingEnd = Math.min(page.offset + meetings.length, page.total)
   const meetingRows = meetings.map((meeting, index) => {
-    const group = dateGroupLabel(new Date(meeting.startedAt))
+    const group = dateGroupLabel(new Date(meeting.startedAt), i18n)
     const previousGroup =
-      index > 0 ? dateGroupLabel(new Date(meetings[index - 1].startedAt)) : ""
+      index > 0 ? dateGroupLabel(new Date(meetings[index - 1].startedAt), i18n) : ""
 
     return {
       meeting,
@@ -187,16 +188,16 @@ export function MeetingInboxPanel({
         <div className="mb-2.5 flex items-center gap-2">
           <label className="ms-auto flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground">
               <SlidersHorizontalIcon data-icon="inline-start" className="size-4 text-muted-foreground" />
-              <span className="sr-only">Sort meetings</span>
+              <span className="sr-only">{t("shellInboxSort")}</span>
               <select
                 value={sortMode}
                 onChange={(event) => onSortChange(event.target.value as MeetingSortMode)}
                 className="h-8 rounded-sm border border-transparent bg-transparent px-1 text-sm font-medium text-foreground outline-none hover:border-line focus:border-ring focus:ring-2 focus:ring-ring/20"
-                aria-label="Sort meetings"
+                aria-label={t("shellInboxSort")}
               >
-              {(Object.keys(sortLabels) as MeetingSortMode[]).map((mode) => (
+              {(Object.keys(sortLabelKeys) as MeetingSortMode[]).map((mode) => (
                 <option key={mode} value={mode}>
-                  {sortLabels[mode]}
+                  {t(sortLabelKeys[mode])}
                 </option>
               ))}
               </select>
@@ -208,6 +209,7 @@ export function MeetingInboxPanel({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder={dictionary.commandPlaceholder}
+            aria-label={dictionary.commandPlaceholder}
             className="h-7 min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
           />
         </div>
@@ -227,7 +229,7 @@ export function MeetingInboxPanel({
                     : "h-7 w-full justify-center rounded-md border-line px-1.5 text-muted-foreground"
                 }
               >
-                {filter === "all" ? dictionary.all : label === "Processing" ? "Process" : label}
+                {t(label)}
               </Badge>
             </button>
           ))}
@@ -237,15 +239,18 @@ export function MeetingInboxPanel({
       <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-surface-2 p-2.5 lg:max-h-none">
         <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
           {!loading && meetings.length === 0 && (
-            <div className="rounded-md border border-dashed border-line bg-surface p-5 text-center text-sm text-muted-foreground">
-              No meetings match this view.
-            </div>
+            <>
+              <OnboardingChecklistCard locale={locale} />
+              <div className="rounded-md border border-dashed border-line bg-surface p-5 text-center text-sm text-muted-foreground">
+                {t("shellInboxEmpty")}
+              </div>
+            </>
           )}
           {meetingRows.map(({ meeting, group, showGroup }) => {
-            const source = sourceMeta(meeting)
+            const source = sourceMeta(meeting, t)
             const selected = selectedMeetingId === meeting.id
             const started = new Date(meeting.startedAt)
-            const meetingPill = statusPill(meeting.status)
+            const meetingPill = statusPill(meeting.status, t)
             const botSession = botSessions?.[meeting.id]
             const botPill = botSession ? botPillFor(botSession.status, botSession.statusReason) : null
             // One pill per row: live > review > failed > processing.
@@ -280,7 +285,7 @@ export function MeetingInboxPanel({
                           {meeting.title}
                         </h3>
                         <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                          {formatter.format(started)}
+                          {i18n.fmt.date(started, "time")}
                         </span>
                       </div>
                       <div className="mt-1 flex min-w-0 items-center gap-x-1.5 overflow-hidden text-xs text-muted-foreground">
@@ -326,12 +331,12 @@ export function MeetingInboxPanel({
       <div className="ms-no-x grid gap-2 border-t border-line bg-surface px-3 py-2.5 text-xs text-muted-foreground">
         <div className="flex min-w-0 items-center justify-between gap-2">
         <label className="flex items-center gap-2">
-          <span>Show</span>
+          <span>{t("shellInboxPageSizeLabel")}</span>
           <select
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value))}
             className="h-8 rounded-sm border border-line bg-surface-2 px-2 text-sm font-medium text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            aria-label="Meetings per page"
+            aria-label={t("shellInboxPageSize")}
           >
             {[5, 10, 20].map((value) => (
               <option key={value} value={value}>
@@ -341,7 +346,7 @@ export function MeetingInboxPanel({
           </select>
         </label>
         <span className="min-w-0 truncate font-mono">
-          Showing {showingStart}-{showingEnd} of {page.total}
+          {t("shellInboxRange", { start: showingStart, end: showingEnd, total: page.total })}
         </span>
         </div>
         <div className="flex items-center gap-1">
@@ -352,7 +357,7 @@ export function MeetingInboxPanel({
             disabled={page.offset === 0 || loading}
             onClick={onPreviousPage}
           >
-            Previous
+            {t("shellInboxPrevious")}
           </Button>
           <Button
             variant="outline"
@@ -361,7 +366,7 @@ export function MeetingInboxPanel({
             disabled={!page.hasMore || loading}
             onClick={onNextPage}
           >
-            Next
+            {t("shellInboxNext")}
           </Button>
         </div>
       </div>

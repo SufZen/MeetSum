@@ -11,6 +11,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { useI18n } from "@/components/i18n-provider"
+import { JOB_STATUS_KEYS } from "@/components/pipeline-timeline"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -21,9 +23,25 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { apiErrorMessage } from "@/lib/i18n/api-errors"
-import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
+import { apiErrorText } from "@/lib/i18n/api-errors"
 import type { JobRecord } from "@/lib/meetings/repository"
+
+const MAX_SELECTION = 5
+
+const RECORDING_STATUS_KEYS: Record<DriveRecording["status"], string> = {
+  available: "opsDriveRecAvailable",
+  imported: "opsDriveFileImported",
+  processing: "opsMeetingStatusProcessing",
+  failed: "opsDriveFileFailed",
+}
+
+const FILE_STATUS_KEYS: Record<DriveImportFileResult["status"], string> = {
+  imported: "opsDriveFileImported",
+  already_imported: "opsDriveFileAlreadyImported",
+  queued: "opsDriveFileQueued",
+  skipped: "opsDriveFileSkipped",
+  failed: "opsDriveFileFailed",
+}
 
 type DriveRecording = {
   fileId: string
@@ -62,24 +80,26 @@ export type DriveImportResult = {
   files: DriveImportFileResult[]
 }
 
-function formatBytes(value?: number) {
-  if (!value) return "Unknown size"
-  if (value > 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
-  if (value > 1024 * 1024) return `${Math.round(value / 1024 / 1024)} MB`
-  return `${Math.round(value / 1024)} KB`
-}
-
 export function DriveRecordingPickerDrawer({
-  dictionary = dictionaries.en,
   open,
   onOpenChange,
   onImported,
 }: {
-  dictionary?: Dictionary
   open: boolean
   onOpenChange: (open: boolean) => void
   onImported: (result: DriveImportResult) => void
 }) {
+  const { t, plural, fmt, locale } = useI18n()
+  const formatBytes = (value?: number) => {
+    if (!value) return t("opsDriveUnknownSize")
+
+    const unit = (amount: number, name: string, digits: number) =>
+      fmt.number(amount, { style: "unit", unit: name, unitDisplay: "short", maximumFractionDigits: digits })
+
+    if (value > 1024 * 1024 * 1024) return unit(value / 1024 / 1024 / 1024, "gigabyte", 1)
+    if (value > 1024 * 1024) return unit(Math.round(value / 1024 / 1024), "megabyte", 0)
+    return unit(Math.round(value / 1024), "kilobyte", 0)
+  }
   const [recordings, setRecordings] = useState<DriveRecording[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState("")
@@ -90,7 +110,7 @@ export function DriveRecordingPickerDrawer({
   const [loading, startTransition] = useTransition()
   const selectedCount = selected.size
 
-  const selectedIds = useMemo(() => [...selected].slice(0, 5), [selected])
+  const selectedIds = useMemo(() => [...selected].slice(0, MAX_SELECTION), [selected])
   const activeImportJobs = useMemo(
     () =>
       (lastImport?.jobs ?? []).filter((job) => {
@@ -116,16 +136,12 @@ export function DriveRecordingPickerDrawer({
         const body = await response.json()
 
         if (!response.ok) {
-          setError(
-            apiErrorMessage(body, dictionary, "Unable to find Drive recordings")
-          )
+          setError(apiErrorText(body, t, t("opsDriveLoadFailed"), locale))
           return
         }
 
         setRecordings(body.recordings ?? [])
-      })().catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Unable to find Drive recordings")
-      )
+      })().catch(() => setError(t("opsDriveLoadFailed")))
     })
   }
 
@@ -175,8 +191,8 @@ export function DriveRecordingPickerDrawer({
     if (recording && !["available", "failed"].includes(recording.status)) {
       toast.info(
         recording.status === "processing"
-          ? "This recording is already processing"
-          : "This recording is already imported"
+          ? t("opsDriveAlreadyProcessing")
+          : t("opsDriveAlreadyImported")
       )
       return
     }
@@ -185,8 +201,8 @@ export function DriveRecordingPickerDrawer({
       const next = new Set(current)
 
       if (next.has(fileId)) next.delete(fileId)
-      else if (next.size < 5) next.add(fileId)
-      else toast.warning("Import up to 5 recordings at a time")
+      else if (next.size < MAX_SELECTION) next.add(fileId)
+      else toast.warning(t("opsDriveMaxSelection", { max: MAX_SELECTION }))
 
       return next
     })
@@ -194,7 +210,7 @@ export function DriveRecordingPickerDrawer({
 
   function importSelected() {
     if (!selectedIds.length) {
-      toast.info("Select at least one Drive recording")
+      toast.info(t("opsDriveSelectOne"))
       return
     }
 
@@ -209,9 +225,7 @@ export function DriveRecordingPickerDrawer({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(
-            apiErrorMessage(body, dictionary, "Unable to import selected recordings")
-          )
+          toast.error(apiErrorText(body, t, t("opsDriveImportFailed"), locale))
           return
         }
 
@@ -233,16 +247,16 @@ export function DriveRecordingPickerDrawer({
 
         const failed = importResult.files.filter((file) => file.status === "failed")
         if (importResult.imported > 0) {
-          toast.success(`Queued ${importResult.imported} Drive recording(s)`)
+          toast.success(plural("opsDriveQueued", importResult.imported))
         } else if (failed.length) {
-          toast.error(failed[0]?.error ?? "Drive import failed")
+          toast.error(t("opsDriveImportError"))
         } else {
-          toast.info("No new recordings were imported")
+          toast.info(t("opsDriveNothingImported"))
         }
 
         loadRecordings()
-      } catch (caught) {
-        toast.error(caught instanceof Error ? caught.message : "Drive import failed")
+      } catch {
+        toast.error(t("opsDriveImportError"))
       } finally {
         setImporting(false)
       }
@@ -253,10 +267,8 @@ export function DriveRecordingPickerDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
-          <SheetTitle>Find Drive recordings</SheetTitle>
-          <SheetDescription>
-            Select recordings to import. MeetSum lists candidates first and only downloads files you choose.
-          </SheetDescription>
+          <SheetTitle>{t("findDriveRecordings")}</SheetTitle>
+          <SheetDescription>{t("opsDriveDescription")}</SheetDescription>
         </SheetHeader>
 
         <div className="grid gap-4 p-4">
@@ -266,17 +278,18 @@ export function DriveRecordingPickerDrawer({
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search Drive recordings"
+                placeholder={t("opsDriveSearchPlaceholder")}
+                aria-label={t("opsDriveSearchPlaceholder")}
                 className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
               />
             </div>
             <Button variant="outline" className="h-10" disabled={loading} onClick={() => loadRecordings()}>
-              Search
+              {t("opsDriveSearch")}
             </Button>
           </div>
 
           {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <div role="alert" className="rounded-md border border-danger/30 bg-danger-soft p-3 text-sm text-danger-text">
               {error}
             </div>
           )}
@@ -284,50 +297,50 @@ export function DriveRecordingPickerDrawer({
           {lastImport && (
             <div className="grid gap-2 rounded-md border border-ring bg-brand-soft p-3 text-sm text-foreground">
               <div className="font-semibold">
-                Import result: {lastImport.imported} queued, {lastImport.skipped} skipped
+                {t("opsDriveImportResult", { queued: lastImport.imported, skipped: lastImport.skipped })}
               </div>
               <div className="grid gap-2 rounded-md border border-line bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">Drive download and audio extraction</span>
+                  <span className="font-medium">{t("opsDriveStepDownload")}</span>
                   <span className="flex items-center gap-1 text-ok-text">
-                    <CheckCircle2Icon className="size-3.5" />
-                    Done
+                    <CheckCircle2Icon aria-hidden="true" className="size-3.5" />
+                    {t("opsDriveStepDone")}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">Worker processing</span>
+                  <span className="font-medium">{t("opsDriveStepWorker")}</span>
                   {activeImportJobs.length ? (
                     <span className="flex items-center gap-1 text-brand-text">
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                      {activeImportJobs.length} active
+                      <Loader2Icon aria-hidden="true" className="size-3.5 animate-spin" />
+                      {plural("opsDriveActiveJobs", activeImportJobs.length)}
                     </span>
                   ) : lastImport.jobs.some((job) => (trackedJobs[job.id] ?? job).status === "failed") ? (
                     <span className="flex items-center gap-1 text-destructive">
-                      <XCircleIcon className="size-3.5" />
-                      Needs retry
+                      <XCircleIcon aria-hidden="true" className="size-3.5" />
+                      {t("opsDriveNeedsRetry")}
                     </span>
                   ) : lastImport.jobs.length ? (
                     <span className="flex items-center gap-1 text-ok-text">
-                      <CheckCircle2Icon className="size-3.5" />
-                      Complete
+                      <CheckCircle2Icon aria-hidden="true" className="size-3.5" />
+                      {t("opsDriveStepDone")}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground">No worker job</span>
+                    <span className="text-muted-foreground">{t("opsDriveNoWorkerJob")}</span>
                   )}
                 </div>
               </div>
               <div className="grid gap-1 text-xs">
                 {lastImport.files.map((file) => (
                   <div key={`${file.fileId}-${file.jobId ?? file.status}`} className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="min-w-0 truncate">{file.name ?? file.fileId}</span>
+                    <bdi className="min-w-0 truncate">{file.name ?? file.fileId}</bdi>
                     <span className="rounded-sm bg-surface/85 px-2 py-0.5 font-medium text-brand-text">
-                      {file.status}
+                      {t(FILE_STATUS_KEYS[file.status] ?? file.status)}
                       {file.jobId
-                        ? ` · ${(trackedJobs[file.jobId]?.status ?? "queued")}`
+                        ? ` · ${t(JOB_STATUS_KEYS[trackedJobs[file.jobId]?.status ?? "queued"])}`
                         : ""}
                     </span>
                     {file.jobId && trackedJobs[file.jobId]?.error ? (
-                      <span className="basis-full text-destructive">
+                      <span dir="auto" className="basis-full text-destructive">
                         {trackedJobs[file.jobId].error}
                       </span>
                     ) : null}
@@ -339,9 +352,7 @@ export function DriveRecordingPickerDrawer({
 
           {(loading || importing) && (
             <div className="rounded-md border border-ring bg-brand-soft p-3 text-sm text-foreground">
-              {importing
-                ? "Importing selected recording(s): downloading from Drive, storing in MinIO, and queueing processing..."
-                : "Searching Drive recordings..."}
+              {importing ? t("opsDriveImporting") : t("opsDriveSearching")}
             </div>
           )}
 
@@ -349,7 +360,7 @@ export function DriveRecordingPickerDrawer({
             <div className="grid min-h-40 place-items-center rounded-md border border-dashed border-line bg-surface-2 p-6 text-center text-sm text-muted-foreground">
               <div>
                 <FileAudioIcon aria-hidden="true" className="mx-auto mb-2 size-7 text-brand-text" />
-                No unimported Drive recordings found.
+                {t("opsDriveEmpty")}
               </div>
             </div>
           )}
@@ -385,25 +396,27 @@ export function DriveRecordingPickerDrawer({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="break-words text-sm font-semibold text-foreground">
-                        {recording.name}
+                        <bdi>{recording.name}</bdi>
                       </div>
                       <span className="rounded-sm bg-surface-2 px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                        {recording.status}
+                        {t(RECORDING_STATUS_KEYS[recording.status] ?? recording.status)}
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span>{recording.mimeType ?? "media"}</span>
+                      {recording.mimeType ? <bdi dir="ltr">{recording.mimeType}</bdi> : <span>{t("opsDriveMedia")}</span>}
                       <span>{formatBytes(recording.sizeBytes)}</span>
                       {recording.modifiedTime && (
-                        <span>{new Date(recording.modifiedTime).toLocaleString()}</span>
+                        <span>{fmt.date(recording.modifiedTime, "dateTime")}</span>
                       )}
                     </div>
                     {recording.bestCalendarMatch && (
                       <div className="mt-2 flex items-center gap-2 text-xs text-brand-text">
                         <CalendarIcon aria-hidden="true" className="size-3.5" />
                         <span className="truncate">
-                          Matches {recording.bestCalendarMatch.title} ·{" "}
-                          {Math.round(recording.bestCalendarMatch.confidence * 100)}%
+                          {t("opsDriveMatches", {
+                            title: `\u2068${recording.bestCalendarMatch.title}\u2069`,
+                            percent: fmt.percent(recording.bestCalendarMatch.confidence),
+                          })}
                         </span>
                       </div>
                     )}
@@ -421,7 +434,7 @@ export function DriveRecordingPickerDrawer({
                     ) : null}
                   </div>
                   {recording.imported && (
-                    <CheckCircle2Icon aria-hidden="true" className="size-4 text-emerald-600" />
+                    <CheckCircle2Icon aria-hidden="true" className="size-4 text-ok" />
                   )}
                 </div>
               </div>
@@ -431,10 +444,12 @@ export function DriveRecordingPickerDrawer({
 
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-line bg-surface p-4">
           <div className="text-sm text-muted-foreground">
-            {importing ? "Import in progress..." : `${selectedCount}/5 selected`}
+            {importing
+              ? t("opsDriveImportInProgress")
+              : t("opsDriveSelectedCount", { count: selectedCount, max: MAX_SELECTION })}
           </div>
           <Button className="h-10" disabled={loading || importing || !selectedCount} onClick={importSelected}>
-            {importing ? "Importing and queueing..." : "Import selected to processing"}
+            {importing ? t("opsDriveImportingButton") : t("opsDriveImportButton")}
           </Button>
         </div>
       </SheetContent>

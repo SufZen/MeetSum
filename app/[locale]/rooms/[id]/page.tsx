@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation"
 
 import { RoomDetailView } from "@/components/room-detail-view"
 import { getServerAuthState } from "@/lib/auth/authz"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { buildRoomDetail } from "@/lib/rooms"
 
 export default async function RoomDetailPage({
@@ -13,7 +13,7 @@ export default async function RoomDetailPage({
   const { locale, id } = await params
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
-    : "en"
+    : DEFAULT_LOCALE
   const auth = await getServerAuthState()
 
   if (auth.status === "unauthenticated") redirect(`/${supportedLocale}/login`)

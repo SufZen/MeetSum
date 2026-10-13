@@ -70,7 +70,9 @@ describe("meeting capture readiness", () => {
 
     expect(readiness.status).toBe("capture_armed")
     expect(readiness.primaryAction).toBe("sync_artifacts")
-    expect(readiness.title).toBe("Capture armed")
+    // M9: codes only; components translate them.
+    expect(readiness).not.toHaveProperty("title")
+    expect(readiness).not.toHaveProperty("description")
   })
 
   it("asks past empty Google meetings to sync artifacts", () => {
@@ -101,7 +103,7 @@ describe("meeting capture readiness", () => {
     )
 
     expect(readiness.status).toBe("ready_to_process")
-    expect(readiness.checks).toContainEqual({ key: "transcript", label: "Transcript", state: "ready" })
+    expect(readiness.checks).toContainEqual({ key: "transcript", state: "ready" })
     expect(
       getMeetingCaptureReadiness(meeting({ source: "upload", transcriptSegmentCount: 0 })).status
     ).toBe("manual_capture")
@@ -146,7 +148,7 @@ describe("job recovery grouping", () => {
 
     expect(transcribeGroup).toBeDefined()
     expect(transcribeGroup!.jobs.length).toBe(2)
-    expect(transcribeGroup!.errorPattern).toBe("Timeout")
+    expect(transcribeGroup!.errorPattern).toBe("timeout")
 
     const summaryGroup = groups.find(
       (group) => group.stage === "summary.generate"
@@ -154,7 +156,7 @@ describe("job recovery grouping", () => {
 
     expect(summaryGroup).toBeDefined()
     expect(summaryGroup!.jobs.length).toBe(1)
-    expect(summaryGroup!.errorPattern).toBe("Rate limited")
+    expect(summaryGroup!.errorPattern).toBe("rateLimit")
   })
 
   it("excludes non-failed jobs from recovery groups", () => {
@@ -183,7 +185,7 @@ describe("job recovery grouping", () => {
     const groups = groupFailedJobsByStageAndError(jobs, meetings)
 
     expect(groups[0].jobs[0].meetingTitle).toBe("Board Review Q3")
-    expect(groups[0].errorPattern).toBe("Authentication error")
+    expect(groups[0].errorPattern).toBe("auth")
   })
 
   it("normalizes error patterns case-insensitively", () => {
@@ -206,8 +208,8 @@ describe("job recovery grouping", () => {
 
     const groups = groupFailedJobsByStageAndError(jobs, [])
 
-    expect(groups.find((g) => g.stage === "audio.transcribe")?.errorPattern).toBe("Timeout")
-    expect(groups.find((g) => g.stage === "summary.generate")?.errorPattern).toBe("Connection refused")
+    expect(groups.find((g) => g.stage === "audio.transcribe")?.errorPattern).toBe("timeout")
+    expect(groups.find((g) => g.stage === "summary.generate")?.errorPattern).toBe("connection")
   })
 
   it("does not falsely match 'rate' inside unrelated words", () => {
@@ -223,7 +225,7 @@ describe("job recovery grouping", () => {
 
     const groups = groupFailedJobsByStageAndError(jobs, [])
 
-    expect(groups[0].errorPattern).not.toBe("Rate limited")
+    expect(groups[0].errorPattern).not.toBe("rateLimit")
     expect(groups[0].errorPattern).toBe("Failed to generate summary")
   })
 })

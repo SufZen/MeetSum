@@ -68,6 +68,9 @@ export function RenameMeetingDialog({
             />
           </label>
           <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+              {dictionary.cancel}
+            </Button>
             <Button type="submit" disabled={busy || !value.trim()}>
               {dictionary.meetingRenameSave}
             </Button>

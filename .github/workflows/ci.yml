@@ -38,6 +38,11 @@ jobs:
       - name: Lint
         run: npm run lint -- --max-warnings=0
 
+      # M9 ratchet: no design-system rule may rise above design-system/baseline.json
+      # (the Integration step switches this to --strict).
+      - name: Design-system guardrails
+        run: npm run ds:check
+
       - name: Run tests
         run: npm test
 
@@ -50,3 +55,7 @@ jobs:
           # Matches the Dockerfile: next build's TypeScript pass exceeds V8's
           # default old-space cap.
           NODE_OPTIONS: --max-old-space-size=4096
+
+      # M9 ratchet: first-load JS per route against bundle-budget.json.
+      - name: Bundle budget
+        run: npm run bundle:check

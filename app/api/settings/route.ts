@@ -3,7 +3,6 @@ import { NextResponse } from "next/server"
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
-import { LOCALE_COOKIE } from "@/lib/i18n/locales"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { getAppSettings, updateAppSettings } from "@/lib/settings/app-settings"
 
@@ -41,17 +40,10 @@ export const PATCH = withAuthz("settings:write", async (request, ctx) => {
       metadata: { keys: Object.keys(patch) },
     })
 
-    const response = NextResponse.json({ settings }, { headers: rateLimit.headers })
-
-    response.cookies.set(LOCALE_COOKIE, settings.defaultLocale, {
-      httpOnly: false,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-    })
-
-    return response
+    // The workspace default never overrides a user's locale choice: the
+    // `meetsum_locale` cookie belongs to the user (language switcher,
+    // `users.locale`), so a settings PATCH leaves it alone (M9 Integration).
+    return NextResponse.json({ settings }, { headers: rateLimit.headers })
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to update settings",

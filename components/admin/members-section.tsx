@@ -12,7 +12,8 @@ import {
   type WorkspaceMember,
 } from "@/components/admin/api"
 import { ConfirmDialog } from "@/components/admin/confirm-dialog"
-import { formatDateTime, roleLabel } from "@/components/admin/labels"
+import { adminErrorMessage, formatDateTime, roleLabel } from "@/components/admin/labels"
+import { useI18n } from "@/components/i18n-provider"
 import { SectionState } from "@/components/admin/section-state"
 import { useAsyncResource } from "@/components/admin/use-async-resource"
 import { Button } from "@/components/ui/button"
@@ -36,7 +37,10 @@ export function MembersSection({
 }) {
   const router = useRouter()
   const { me, can, refresh: refreshMe } = useWorkspace()
-  const members = useAsyncResource(listMembers, [] as WorkspaceMember[])
+  const { timeZone } = useI18n()
+  const members = useAsyncResource(listMembers, [] as WorkspaceMember[], (error) =>
+    adminErrorMessage(error, t, t.loadFailed)
+  )
   const [pendingUserId, setPendingUserId] = useState<string>()
   const [removing, setRemoving] = useState<WorkspaceMember>()
   const canManage = can("members:manage")
@@ -61,7 +65,7 @@ export function MembersSection({
 
       if (member.userId === me?.user.id) await refreshMe()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
     } finally {
       setPendingUserId(undefined)
     }
@@ -83,7 +87,7 @@ export function MembersSection({
       )
       toast.success(t.membersRemoved)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.actionFailed)
+      toast.error(adminErrorMessage(error, t, t.actionFailed))
       throw error
     }
   }
@@ -101,7 +105,7 @@ export function MembersSection({
       onRetry={() => void members.reload()}
     >
       <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[560px] text-sm">
+        <table className="w-full min-w-140 text-sm">
           <thead className="bg-surface-2 text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-start font-medium">
@@ -196,9 +200,7 @@ export function MembersSection({
                     )}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
-                    {formatDateTime(locale, member.createdAt, {
-                      dateStyle: "medium",
-                    })}
+                    {formatDateTime({ locale, timeZone }, member.createdAt, "date")}
                   </td>
                   <td className="px-3 py-2 text-end">
                     {removable ? (

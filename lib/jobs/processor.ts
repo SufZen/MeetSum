@@ -74,6 +74,7 @@ import {
 } from "@/lib/webhooks/delivery"
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
 import { PRIVATE_PAYLOAD_KEYS } from "@/lib/platform/event-schemas"
+import { notifyMeetingFailed, notifyMeetingProcessed } from "@/lib/notifications/notify"
 
 export type MeetSumJob = Job<MeetSumJobPayload, unknown, MeetSumJobName>
 
@@ -246,8 +247,9 @@ export function platformEventData(
   }
 }
 
-async function meetingVisibility(
-  scope: JobScope,
+/** Exported for tests: the visibility a platform event is filtered by. */
+export async function meetingVisibility(
+  scope: Pick<JobScope, "repo">,
   meetingId: unknown
 ): Promise<MeetingVisibility | undefined> {
   if (typeof meetingId !== "string" || !meetingId) return undefined
@@ -255,7 +257,8 @@ async function meetingVisibility(
   try {
     const meeting = await scope.repo.getMeeting(meetingId)
 
-    return meeting ? (meeting.visibility ?? "workspace") : undefined
+    // Fail closed: a missing visibility stays undefined → minimal payload.
+    return meeting ? meeting.visibility : undefined
   } catch {
     return undefined
   }
@@ -1008,6 +1011,11 @@ async function processMediaJob(
     meetingId: meeting.id,
     title: meeting.title,
   })
+  await notifyMeetingProcessed({
+    workspaceId: scope.workspaceId,
+    meetingId: meeting.id,
+    transcriptVersion: meeting.transcriptVersion ?? 0,
+  }).catch(() => {})
 
   return {
     meetingId: meeting.id,
@@ -1117,6 +1125,11 @@ async function processIntelligenceOnlyJob(
     title: meeting.title,
     mode: payload.mode,
   })
+  await notifyMeetingProcessed({
+    workspaceId: scope.workspaceId,
+    meetingId: meeting.id,
+    transcriptVersion: meeting.transcriptVersion ?? 0,
+  }).catch(() => {})
 
   return {
     meetingId: meeting.id,
@@ -1459,6 +1472,11 @@ export async function processJob(job: MeetSumJob) {
         attempts,
         permanent,
       })
+      await notifyMeetingFailed({
+        workspaceId: scope.workspaceId,
+        meetingId: job.data.meetingId,
+        jobId: jobRecordId,
+      }).catch(() => {})
     }
     throw error
   }

@@ -1,0 +1,50 @@
+/**
+ * M9 export messages: Hebrew PDF headings and page chrome, plus the M4
+ * carry-over transcript toasts (owner: Package B). Distinct from M8's
+ * `lib/i18n/m8/exports.ts` (the export menu).
+ */
+export const m9ExportsMessages = {
+  en: {
+    pdfOverview: "Overview",
+    pdfActionItems: "Action items",
+    pdfDecisions: "Decisions",
+    pdfOpenQuestions: "Open questions",
+    pdfChapters: "Chapters",
+    pdfTranscript: "Transcript",
+    pdfParticipants: "Participants",
+    pdfDate: "Date",
+    pdfDuration: "Duration",
+    pdfSource: "Source",
+    pdfOwner: "Owner",
+    pdfDue: "Due {date}",
+    pdfDone: "Done",
+    pdfPageOf: "Page {page} of {total}",
+    pdfTranscriptTruncated: "The transcript was shortened to {count} segments.",
+    pdfUnsupportedGlyphs: "Some characters could not be displayed ({count}).",
+    pdfSubject: "Meeting summary and transcript",
+    transcriptSpeakerUndone_one: "Speaker change undone for {count} segment",
+    transcriptSpeakerUndone_other: "Speaker change undone for {count} segments",
+  },
+  he: {
+    pdfOverview: "סקירה",
+    pdfActionItems: "משימות",
+    pdfDecisions: "החלטות",
+    pdfOpenQuestions: "שאלות פתוחות",
+    pdfChapters: "פרקים",
+    pdfTranscript: "תמליל",
+    pdfParticipants: "משתתפים",
+    pdfDate: "תאריך",
+    pdfDuration: "משך",
+    pdfSource: "מקור",
+    pdfOwner: "אחראי",
+    pdfDue: "יעד: {date}",
+    pdfDone: "בוצע",
+    pdfPageOf: "עמוד {page} מתוך {total}",
+    pdfTranscriptTruncated: "התמליל קוצר ל־{count} קטעים.",
+    pdfUnsupportedGlyphs: "חלק מהתווים לא הוצגו ({count}).",
+    pdfSubject: "סיכום ותמליל של הפגישה",
+    transcriptSpeakerUndone_one: "בוטל שיוך הדובר לקטע אחד",
+    transcriptSpeakerUndone_two: "בוטל שיוך הדובר לשני קטעים",
+    transcriptSpeakerUndone_other: "בוטל שיוך הדובר ל־{count} קטעים",
+  },
+}

@@ -24,7 +24,7 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
 
   if (!access) return jsonError("Clip not found", 404)
   if (!canManageMeeting(ctx, access.meeting)) return meetingManageForbidden()
-  if ((access.meeting.visibility ?? "workspace") === "private") {
+  if ((access.meeting.visibility ?? "private") === "private") {
     return NextResponse.json({ error: "meeting_private" }, { status: 409 })
   }
 

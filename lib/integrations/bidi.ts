@@ -1,80 +1,14 @@
 /**
  * Bidi helpers for text pushed to providers without RTL support (Slack,
  * Notion, plain-text email, HubSpot fallbacks) and the shared chunker
- * (docs/parity/m8.md, "Shared contracts"). Real in Step 0; owned by
- * Package A afterwards, consumed read-only by B and C. Pure.
+ * (docs/parity/m8.md, "Shared contracts"). Since M9 the primitives live in
+ * `lib/i18n/hebrew-text.ts` (canonical) and are re-exported here with the
+ * same names and behaviour; this module keeps only the M8-specific helpers
+ * (`isolateLtr(token, mode)` as an adapter, `chunkText`). Pure.
  */
+import { LRM, isolateLtr as isolateRun } from "@/lib/i18n/hebrew-text"
 
-/** RIGHT-TO-LEFT MARK. */
-export const RLM = "‏"
-/** LEFT-TO-RIGHT MARK. */
-export const LRM = "‎"
-/** LEFT-TO-RIGHT ISOLATE. */
-export const LRI = "⁦"
-/** POP DIRECTIONAL ISOLATE. */
-export const PDI = "⁩"
-
-const RTL_LANGUAGES = new Set(["he", "ar", "fa", "ur", "yi"])
-
-/** `he`, `he-IL`, `ar_EG`… → true; null/unknown → false. */
-export function isRtlLanguage(lang: string | null | undefined): boolean {
-  if (!lang) return false
-
-  return RTL_LANGUAGES.has(lang.trim().toLowerCase().split(/[-_]/)[0] ?? "")
-}
-
-/** Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan… and their presentation forms. */
-const STRONG_RTL = /[֐-ࣿיִ-﷿ﹰ-ﻼ]|[\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u
-const LETTER = /\p{L}/u
-/** LRI, RLI, FSI open an isolate (skipped, UBA rule P2); PDI closes it. */
-const ISOLATE_OPEN = new Set(["⁦", "⁧", "⁨"])
-
-/**
- * Direction of the first strong character (UBA P2: isolated runs are
- * skipped), or `neutral` when there is none (digits, punctuation, emoji).
- */
-export function firstStrongDirection(text: string): "ltr" | "rtl" | "neutral" {
-  let depth = 0
-
-  for (const char of text) {
-    if (ISOLATE_OPEN.has(char)) {
-      depth += 1
-      continue
-    }
-    if (char === PDI) {
-      if (depth > 0) depth -= 1
-      continue
-    }
-    if (depth > 0) continue
-    if (char === RLM) return "rtl"
-    if (char === LRM) return "ltr"
-    if (STRONG_RTL.test(char)) return "rtl"
-    if (LETTER.test(char)) return "ltr"
-  }
-
-  return "neutral"
-}
-
-function rtlSingleLine(line: string): string {
-  if (!line) return line
-
-  const first = String.fromCodePoint(line.codePointAt(0) as number)
-
-  if (first === RLM || STRONG_RTL.test(first)) return line
-
-  return `${RLM}${line}`
-}
-
-/**
- * Makes a line lay out right-to-left in a renderer that picks direction
- * from the first strong character (Slack, Notion, plain text): prefixes RLM
- * unless the line already starts with an RTL character or RLM. Applied per
- * line when the text has line breaks. Marks are only ever added at a line
- * start, never inside URLs or tokens.
- */
-export function rtlLine(line: string): string {
-  return line.split("\n").map(rtlSingleLine).join("\n")
-}
+export { LRI, LRM, PDI, RLM, firstStrongDirection, isRtlLanguage, rtlLine } from "@/lib/i18n/hebrew-text"
 
 /**
  * Keeps an LTR token (time, email, URL label, number) intact inside RTL
@@ -84,7 +18,7 @@ export function rtlLine(line: string): string {
 export function isolateLtr(token: string, mode: "marks" | "isolates"): string {
   if (!token) return token
 
-  return mode === "marks" ? `${LRM}${token}${LRM}` : `${LRI}${token}${PDI}`
+  return mode === "marks" ? `${LRM}${token}${LRM}` : isolateRun(token)
 }
 
 // ---------------------------------------------------------------------------

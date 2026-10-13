@@ -15,8 +15,11 @@ import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 /**
  * POST /api/meetings/:id/transcript/segments/:segmentId/undo
- * Body: { revision } — restores the latest non-reverted revision. 409
- * `{error:"nothing_to_undo"}` or `{error:"conflict", segment}`.
+ * Body: { revision } — undoes the segment's latest non-reverted edit as a
+ * whole (M9 B5): every segment of its edit group (a whole-turn speaker
+ * change) is restored in one transaction, and `segments` lists them all.
+ * 409 `{error:"nothing_to_undo"}`, or `{error:"conflict", segment}` when any
+ * segment of the group changed since (nothing is reverted).
  */
 export const POST = withAuthz<{ id: string; segmentId: string }>(
   "meeting:write",
@@ -42,7 +45,11 @@ export const POST = withAuthz<{ id: string; segmentId: string }>(
         action: "meeting.transcript.reverted",
         targetType: "meeting",
         targetId: id,
-        metadata: { segmentId, revision: result.segment.revision ?? 0 },
+        metadata: {
+          segmentId,
+          revision: result.segment.revision ?? 0,
+          segmentCount: result.segments?.length ?? 1,
+        },
       })
 
       await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "transcript.edited" })

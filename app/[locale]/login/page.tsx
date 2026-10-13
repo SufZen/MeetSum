@@ -6,10 +6,10 @@ import { Card, CardContent } from "@/components/ui/card"
 import { SigmaMark } from "@/components/ui/sigma-mark"
 import { getCurrentSession } from "@/lib/auth/server"
 import { getDictionary } from "@/lib/i18n/dictionaries"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 
-/** Only same-app invitation pages may be used as a post-login target. */
-const SAFE_RETURN_TO = /^\/[a-z]{2}\/invite\/[A-Za-z0-9_-]+$/
+/** Only same-app invitation pages (by token, or in-app by id) may be used as a post-login target. */
+const SAFE_RETURN_TO = /^\/[a-z]{2}\/invite\/(?:[A-Za-z0-9_-]+|accept\?id=[A-Za-z0-9_-]{1,80})$/
 
 export default async function LoginPage({
   params,
@@ -22,7 +22,7 @@ export default async function LoginPage({
   const query = await searchParams
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
-    : "en"
+    : DEFAULT_LOCALE
   const requestedReturnTo =
     typeof query.returnTo === "string" ? query.returnTo : ""
   const returnTo = SAFE_RETURN_TO.test(requestedReturnTo)

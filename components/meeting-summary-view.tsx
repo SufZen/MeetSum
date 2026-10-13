@@ -19,6 +19,12 @@ import {
   UploadIcon,
 } from "lucide-react"
 
+import {
+  readinessCheckLabel,
+  readinessCheckState,
+  readinessText,
+} from "@/components/google-context-card"
+import { useI18n } from "@/components/i18n-provider"
 import { ChapterList } from "@/components/intelligence/chapter-list"
 import {
   SummaryLine,
@@ -42,10 +48,62 @@ import { normalizeIntelligence } from "@/lib/intelligence/normalize"
 import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
 import { formatTimestamp } from "@/lib/meetings/duration"
 import type { ActionItem, JobRecord, MeetingRecord } from "@/lib/meetings/repository"
-import { getMeetingWorkStatus } from "@/lib/meetings/work-status"
+import { getMeetingWorkStatus, type MeetingWorkStatus } from "@/lib/meetings/work-status"
 
-function priorityLabel(priority: NonNullable<ActionItem["priority"]>) {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+type Translate = ReturnType<typeof useI18n>["t"]
+
+const PRIORITY_KEYS: Record<NonNullable<ActionItem["priority"]>, keyof Dictionary> = {
+  low: "tasksPriorityLow",
+  normal: "tasksPriorityNormal",
+  high: "tasksPriorityHigh",
+  urgent: "tasksPriorityUrgent",
+}
+
+const STAGE_KEYS: Record<string, string> = {
+  "artifact.import": "mtgStageArtifactImport",
+  "drive.import": "mtgStageDriveImport",
+  "audio.extract": "mtgStageAudioExtract",
+  "audio.transcribe": "mtgStageTranscribe",
+  transcribing: "mtgStageTranscribe",
+  "transcript.clean": "mtgStageTranscriptClean",
+  "summary.generate": "mtgStageSummary",
+  summarizing: "mtgStageSummary",
+  "summary.persist": "mtgStageSummaryPersist",
+  "tasks.extract": "mtgStageTasks",
+  "meeting.index": "mtgStageIndex",
+  indexing: "mtgStageIndex",
+  "quality.review": "mtgStageQuality",
+  completed: "mtgStageCompleted",
+}
+
+/**
+ * Localized title and description of a work status (lib/meetings/work-status
+ * returns codes only: kind, stage, job status and action).
+ */
+function workStatusText(
+  status: MeetingWorkStatus,
+  meeting: MeetingRecord,
+  job: JobRecord | undefined,
+  t: Translate,
+  locale: string
+): { title: string; description: string } {
+  if (status.kind === "processing") {
+    const title = status.stage && STAGE_KEYS[status.stage] ? t(STAGE_KEYS[status.stage]!) : t("mtgWorkProcessingTitle")
+
+    return {
+      title,
+      description: t(job?.status === "active" ? "mtgWorkProcessingActive" : "mtgWorkProcessingQueued", { stage: title }),
+    }
+  }
+  if (status.kind === "failed") {
+    return {
+      title: t("mtgWorkFailedTitle"),
+      // The job error is server text: shown in English only.
+      description: locale === "en" && job?.error ? job.error : t("mtgWorkFailedDescription"),
+    }
+  }
+
+  return readinessText(getMeetingCaptureReadiness(meeting), meeting.source, t)
 }
 
 /** `YYYY-MM-DD` / ISO → `DD.MM.YYYY` (Hebrew business format). */
@@ -149,6 +207,7 @@ export function MeetingSummaryView({
   onTemplateChanged?: (templateKey: string | null) => void
 }) {
   const t = dictionary
+  const { t: tr, plural, fmt, text, locale: uiLocale } = useI18n()
   const intelligence = useMemo(
     () => (meeting.intelligence ? normalizeIntelligence(meeting.intelligence) : undefined),
     [meeting.intelligence]
@@ -184,13 +243,14 @@ export function MeetingSummaryView({
   const readiness = getMeetingCaptureReadiness(meeting)
   const workStatus = getMeetingWorkStatus(meeting, jobs)
   const latestJob = workStatus.jobId ? jobs.find((job) => job.id === workStatus.jobId) : undefined
+  const workCopy = workStatusText(workStatus, meeting, latestJob, tr, uiLocale)
   const showWorkStatus = workStatus.kind === "processing" || workStatus.kind === "failed"
   const languageMismatch = generation?.languageCheck === "failed"
   // Iris AI mark only for AI content (not heuristic / fallback summaries).
   const provenance = summaryProvenance(generation)
-  const generatedAt = generation?.generatedAt
-    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(generation.generatedAt))
-    : undefined
+  const generatedAt = generation?.generatedAt ? fmt.date(generation.generatedAt, "dateTime") || undefined : undefined
+  const languageName = (code: string) =>
+    code === "he" ? t.intelLanguageHe : code === "en" ? t.intelLanguageEn : code
 
   async function regenerate() {
     setRegenerateState("busy")
@@ -250,10 +310,10 @@ export function MeetingSummaryView({
           >
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="font-semibold">{workStatus.title}</div>
-                <p className="mt-1 opacity-90">{workStatus.description}</p>
+                <div className="font-semibold">{workCopy.title}</div>
+                <p className="mt-1 opacity-90">{workCopy.description}</p>
                 {workStatus.stage ? (
-                  <div className="mt-2 font-mono text-xs opacity-80">
+                  <div dir="ltr" className="mt-2 font-mono text-xs opacity-80 [unicode-bidi:isolate]">
                     {workStatus.stage}
                     {workStatus.jobId ? ` · ${workStatus.jobId}` : ""}
                   </div>
@@ -262,7 +322,7 @@ export function MeetingSummaryView({
               {workStatus.primaryAction === "retry" && latestJob ? (
                 <Button size="sm" variant="outline" onClick={() => onRetryJob(latestJob)}>
                   <RefreshCwIcon data-icon="inline-start" className="size-4" />
-                  Retry job
+                  {tr("mtgSummaryRetryJob")}
                 </Button>
               ) : null}
             </div>
@@ -324,7 +384,7 @@ export function MeetingSummaryView({
                   onClick={() => onReprocessMeeting("full")}
                 >
                   <RefreshCwIcon data-icon="inline-start" className="size-4" />
-                  {hasMeetImportableArtifact && !hasMedia ? "Process from Google artifacts" : "Reprocess"}
+                  {hasMeetImportableArtifact && !hasMedia ? tr("mtgSummaryProcessFromGoogle") : tr("mtgSummaryReprocess")}
                 </Button>
                 {overview ? <CopyButton label={t.intelCopy} text={overview} onCopy={onCopyText} /> : null}
               </div>
@@ -339,16 +399,14 @@ export function MeetingSummaryView({
             <div className="rounded-lg border border-line bg-surface-2 p-4 text-sm leading-6 text-muted-foreground">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="font-medium text-foreground">
-                  {isUpcoming ? workStatus.title : "No meeting intelligence has been generated yet."}
+                  {isUpcoming ? workCopy.title : tr("mtgSummaryNoIntelligence")}
                 </div>
                 <Badge variant="outline" className={`rounded-md ${readinessBadgeClass(readiness.status)}`}>
-                  {workStatus.title}
+                  {workCopy.title}
                 </Badge>
               </div>
               <p className="mt-1">
-                {isUpcoming
-                  ? workStatus.description
-                  : "Attach a recording, import a Google Meet artifact, or process an existing transcript to generate summary, decisions, tasks, and quotes."}
+                {isUpcoming ? workCopy.description : tr("mtgSummaryNoIntelligenceHint")}
               </p>
               <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {readiness.checks.slice(0, 6).map((check) => (
@@ -357,8 +415,8 @@ export function MeetingSummaryView({
                     className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-xs text-foreground"
                   >
                     <span className={`size-2 rounded-full ${checkDotClass(check.state)}`} />
-                    <span className="min-w-0 truncate">{check.label}</span>
-                    <span className="ms-auto text-2xs text-muted-foreground">{check.state}</span>
+                    <span className="min-w-0 truncate">{readinessCheckLabel(check, tr)}</span>
+                    <span className="ms-auto text-2xs text-muted-foreground">{readinessCheckState(check, tr)}</span>
                   </div>
                 ))}
               </div>
@@ -366,27 +424,27 @@ export function MeetingSummaryView({
                 {workStatus.primaryAction === "process" ? (
                   <Button size="sm" disabled={!canProcess} onClick={onProcessMeeting}>
                     <PlayCircleIcon data-icon="inline-start" className="size-4" />
-                    {hasMeetImportableArtifact ? "Process from Google artifacts" : "Process now"}
+                    {hasMeetImportableArtifact ? tr("mtgSummaryProcessFromGoogle") : tr("mtgSummaryProcessNow")}
                   </Button>
                 ) : null}
                 {workStatus.primaryAction === "sync_artifacts" ? (
                   <Button size="sm" onClick={onSyncMeetArtifacts}>
                     <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                    Sync Meet artifacts
+                    {tr("mtgSummarySyncMeet")}
                   </Button>
                 ) : null}
                 <Button size="sm" variant={workStatus.primaryAction === "upload" ? "default" : "outline"} onClick={onOpenUpload}>
                   <UploadIcon data-icon="inline-start" className="size-4" />
-                  Upload recording
+                  {tr("mtgSummaryUploadRecording")}
                 </Button>
                 <Button size="sm" variant="outline" onClick={onFindDriveRecordings}>
                   <FileAudioIcon data-icon="inline-start" className="size-4" />
-                  Find Drive recordings
+                  {t.findDriveRecordings}
                 </Button>
                 {workStatus.primaryAction !== "sync_artifacts" ? (
                   <Button size="sm" variant="ghost" onClick={onSyncMeetArtifacts}>
                     <RadioTowerIcon data-icon="inline-start" className="size-4" />
-                    Sync Meet artifacts
+                    {tr("mtgSummarySyncMeet")}
                   </Button>
                 ) : null}
               </div>
@@ -405,11 +463,11 @@ export function MeetingSummaryView({
                       : t.intelAiLabel
                 }
               >
-                <p className="leading-7">{overview}</p>
+                <p lang={summaryLanguage ?? undefined} className="leading-7">{text(overview, summaryLanguage)}</p>
               </AiProvenance>
               {moments.length ? (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
-                  <span>{formatMessage(t.intelFromMoments, { n: moments.length })}</span>
+                  <span>{plural("mtgFromMoments", moments.length)}</span>
                   {moments.slice(0, 6).map((moment) => (
                     <PlayerCitation
                       key={moment.segmentId}
@@ -425,7 +483,7 @@ export function MeetingSummaryView({
                 <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
                   {intelligence.topics.map((topic) => (
                     <span key={topic} dir={dir} className="rounded-sm bg-surface-3 px-2 py-0.5 text-xs text-fg-2">
-                      {topic}
+                      {text(topic, summaryLanguage)}
                     </span>
                   ))}
                 </div>
@@ -481,7 +539,7 @@ export function MeetingSummaryView({
                         ) : null}
                         {item.priority && item.priority !== "normal" ? (
                           <span className={`rounded-full px-2 text-xs ${priorityClass(item.priority)}`}>
-                            {priorityLabel(item.priority)}
+                            {t[PRIORITY_KEYS[item.priority]] ?? item.priority}
                           </span>
                         ) : null}
                       </>
@@ -520,10 +578,10 @@ export function MeetingSummaryView({
 
           return (
             <section key={section.key} className="mt-8">
-              <SectionHeader title={section.title ?? section.key} />
+              <SectionHeader title={section.title ? text(section.title, summaryLanguage) : section.key} />
               {section.text ? (
-                <p dir={dir} className="mb-2 text-md leading-7 text-fg">
-                  {section.text}
+                <p dir={dir} lang={summaryLanguage ?? undefined} className="mb-2 text-md leading-7 text-fg">
+                  {text(section.text, summaryLanguage)}
                 </p>
               ) : null}
               {sectionItems.length ? itemList(sectionItems) : section.text ? null : (
@@ -597,7 +655,7 @@ export function MeetingSummaryView({
             <span className="font-mono [direction:ltr] [unicode-bidi:isolate]">
               {formatMessage(t.intelGeneratedBy, { provider: generation.provider, model: generation.model ?? "—" })}
             </span>
-            {generation.language ? <span>{generation.language}</span> : null}
+            {generation.language ? <span>{languageName(generation.language)}</span> : null}
             {generation.templateKey ? <span>{`${t.intelTemplate}: ${generation.templateKey}`}</span> : null}
             <span className="font-mono [direction:ltr] [unicode-bidi:isolate]">
               {typeof generation.costUsd === "number" ? `$${generation.costUsd.toFixed(4)}` : t.intelCostUnknown}

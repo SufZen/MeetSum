@@ -9,6 +9,7 @@ import {
 import { getAsrChainConfig, type AsrChainConfig } from "@/lib/ai/asr/router"
 import { getLlmStatus, type LlmStatus } from "@/lib/ai/llm"
 import { getGeminiModels } from "@/lib/ai/llm/config"
+import { statusMessage, type StatusMessage, type StatusMessageCode } from "@/lib/ops/status-messages"
 
 
 export type ProviderHealthStatus = {
@@ -23,7 +24,10 @@ export type ProviderHealthStatus = {
   asr: AsrChainConfig
   /** M5 LLM layer: configured providers, routes, Gemini tier. */
   llm: LlmStatus
+  /** English, for logs and API compatibility. */
   configWarnings: string[]
+  /** `configWarnings` as codes, same order (the UI translates them). */
+  configWarningMessages: StatusMessage[]
 }
 
 /**
@@ -36,34 +40,47 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
   const transcriptionMode = getTranscriptionProviderMode()
   const localWhisperConfigured = isLocalWhisperConfigured()
   const warnings: string[] = []
+  const messages: StatusMessage[] = []
+  const warn = (text: string, code: StatusMessageCode, params?: Record<string, string>) => {
+    warnings.push(text)
+    messages.push(statusMessage(code, params))
+  }
 
   // Validate Vertex AI env vars
   if (mode === "vertex-ai") {
     if (!process.env.GOOGLE_CLOUD_PROJECT) {
-      warnings.push("Vertex AI: GOOGLE_CLOUD_PROJECT is required")
+      warn("Vertex AI: GOOGLE_CLOUD_PROJECT is required", "config_vertex_project_missing", { env: "GOOGLE_CLOUD_PROJECT" })
     }
 
     if (!process.env.GOOGLE_CLOUD_LOCATION) {
-      warnings.push("Vertex AI: GOOGLE_CLOUD_LOCATION is required (defaulting to 'global')")
+      warn("Vertex AI: GOOGLE_CLOUD_LOCATION is required (defaulting to 'global')", "config_vertex_location_missing", {
+        env: "GOOGLE_CLOUD_LOCATION",
+      })
     }
 
     if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      warnings.push("Vertex AI: GOOGLE_APPLICATION_CREDENTIALS is required for service account auth")
+      warn("Vertex AI: GOOGLE_APPLICATION_CREDENTIALS is required for service account auth", "config_vertex_credentials_missing", {
+        env: "GOOGLE_APPLICATION_CREDENTIALS",
+      })
     }
   } else if (!process.env.GOOGLE_GEMINI_API_KEY) {
-    warnings.push("Gemini Developer API: GOOGLE_GEMINI_API_KEY is not set")
+    warn("Gemini Developer API: GOOGLE_GEMINI_API_KEY is not set", "config_gemini_key_missing", { env: "GOOGLE_GEMINI_API_KEY" })
   }
 
   // Validate transcription provider
   if (transcriptionMode === "local-whisper" && !localWhisperConfigured) {
-    warnings.push("Local Whisper selected but LOCAL_TRANSCRIPTION_URL is not configured")
+    warn("Local Whisper selected but LOCAL_TRANSCRIPTION_URL is not configured", "config_local_whisper_url_missing", {
+      env: "LOCAL_TRANSCRIPTION_URL",
+    })
   }
 
   const asr = getAsrChainConfig()
 
   if (!asr.chain.length) {
-    warnings.push(
-      "ASR: no transcription provider configured (RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, MODAL_ASR_URL + MODAL_ASR_TOKEN, SONIOX_API_KEY or LOCAL_TRANSCRIPTION_URL)"
+    warn(
+      "ASR: no transcription provider configured (RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, MODAL_ASR_URL + MODAL_ASR_TOKEN, SONIOX_API_KEY or LOCAL_TRANSCRIPTION_URL)",
+      "config_asr_none",
+      { env: "RUNPOD_API_KEY + RUNPOD_ASR_ENDPOINT_ID, MODAL_ASR_URL + MODAL_ASR_TOKEN, SONIOX_API_KEY, LOCAL_TRANSCRIPTION_URL" }
     )
   }
   if (
@@ -73,8 +90,10 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
     !process.env.S3_PUBLIC_ENDPOINT?.trim() &&
     process.env.MEETSUM_ASR_MEDIA_HANDOFF?.trim() !== "blob"
   ) {
-    warnings.push(
-      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod/Modal receive inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)"
+    warn(
+      "ASR: S3_PUBLIC_ENDPOINT is not set; RunPod/Modal receive inline audio (≤ RUNPOD_MAX_BLOB_BYTES, ~38 min at 24 kbit/s)",
+      "config_asr_inline_audio",
+      { env: "S3_PUBLIC_ENDPOINT" }
     )
   }
 
@@ -85,6 +104,7 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
 
   // Includes the GEMINI_TIER=free privacy warning: never silent.
   warnings.push(...(llm.warnings ?? []))
+  messages.push(...(llm.warningCodes ?? []).map((code) => statusMessage(code)))
 
   return {
     ai: {
@@ -97,6 +117,7 @@ export function getProviderHealthStatus(): ProviderHealthStatus {
     asr,
     llm,
     configWarnings: warnings,
+    configWarningMessages: messages,
   }
 }
 

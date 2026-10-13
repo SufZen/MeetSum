@@ -14,20 +14,14 @@ import {
 import Link from "next/link"
 
 import { LazyAskPanel } from "@/components/ask/lazy"
-import { formatMessage, getDictionary } from "@/lib/i18n/dictionaries"
+import { useDictionary, useI18n } from "@/components/i18n-provider"
+import { formatMessage } from "@/lib/i18n/dictionaries"
 import { formatDurationLabel } from "@/lib/meetings/duration"
 import type { RoomDetail, RoomMeetingSummary, RoomTask, RoomParticipant, RoomArtifact } from "@/lib/rooms"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
+/** Wraps a name or title in Unicode isolates for use inside a message string. */
+const isolate = (value: string) => `\u2068${value}\u2069`
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: React.ComponentType<{ className?: string }> }) {
   return (
@@ -44,11 +38,19 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: number; 
 }
 
 function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale: string }) {
-  const statusColors: Record<string, string> = {
-    completed: "bg-emerald-500/15 text-emerald-600",
-    error: "bg-red-500/15 text-red-600",
-  }
-  const statusClass = statusColors[meeting.status] ?? "bg-amber-500/15 text-amber-600"
+  const { t, plural, fmt, text } = useI18n()
+  const statusClass =
+    meeting.status === "completed"
+      ? "bg-ok-soft text-ok-text"
+      : meeting.status === "failed"
+        ? "bg-danger-soft text-danger-text"
+        : "bg-warn-soft text-warn-text"
+  const statusLabel =
+    meeting.status === "completed"
+      ? t("opsMeetingStatusCompleted")
+      : meeting.status === "failed"
+        ? t("opsMeetingStatusFailed")
+        : t("opsMeetingStatusProcessing")
 
   return (
     <Link
@@ -56,18 +58,20 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
       className="block rounded-lg border border-line bg-surface p-4 transition-colors hover:border-brand/30 hover:bg-surface-3"
     >
       <div className="mb-2 flex items-start justify-between gap-2">
-        <h3 className="font-medium text-fg">{meeting.title}</h3>
+        <h3 className="font-medium text-fg">
+          <bdi>{text(meeting.title)}</bdi>
+        </h3>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}`}>
-          {meeting.status}
+          {statusLabel}
         </span>
       </div>
-      <p className="mb-3 line-clamp-2 text-sm text-fg-3">
-        {meeting.overview || "No summary available yet."}
+      <p dir="auto" className="mb-3 line-clamp-2 text-sm text-fg-3">
+        {meeting.overview ? text(meeting.overview) : t("opsRoomNoSummary")}
       </p>
       <div className="flex items-center gap-4 text-xs text-fg-3">
         <span className="flex items-center gap-1">
           <CalendarDaysIcon className="size-3" />
-          {formatDate(meeting.startedAt)}
+          {fmt.date(meeting.startedAt, "dateTime")}
         </span>
         <span className="flex items-center gap-1 [unicode-bidi:isolate]">
           <ClockIcon className="size-3" />
@@ -78,9 +82,9 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
           {meeting.participants}
         </span>
         {meeting.openTasks > 0 && (
-          <span className="flex items-center gap-1 text-amber-600">
+          <span className="flex items-center gap-1 text-warn-text">
             <ClipboardListIcon className="size-3" />
-            {meeting.openTasks} open
+            {plural("opsRoomOpenTasks", meeting.openTasks)}
           </span>
         )}
       </div>
@@ -89,15 +93,23 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
 }
 
 function TaskItem({ task }: { task: RoomTask }) {
+  const { t, fmt, text } = useI18n()
+
   return (
     <div className="flex items-start gap-3 rounded-md border border-line bg-surface px-4 py-3">
-      <CircleDotIcon className="mt-0.5 size-4 shrink-0 text-amber-500" />
+      <CircleDotIcon className="mt-0.5 size-4 shrink-0 text-warn" />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-fg">{task.title}</div>
+        <div className="font-medium text-fg">
+          <bdi>{text(task.title)}</bdi>
+        </div>
         <div className="mt-1 flex gap-3 text-xs text-fg-3">
-          {task.owner && <span>→ {task.owner}</span>}
-          <span>from {task.meetingTitle}</span>
-          {task.dueDate && <span className="text-amber-600">due {task.dueDate}</span>}
+          {task.owner && <span>{t("opsRoomTaskOwner", { name: isolate(task.owner) })}</span>}
+          <span>{t("opsRoomTaskFrom", { meeting: isolate(task.meetingTitle) })}</span>
+          {task.dueDate && (
+            <span className="text-warn-text">
+              {t("opsRoomTaskDue", { date: isolate(fmt.date(task.dueDate, "date") || task.dueDate) })}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -105,6 +117,7 @@ function TaskItem({ task }: { task: RoomTask }) {
 }
 
 function ParticipantRow({ participant }: { participant: RoomParticipant }) {
+  const { plural } = useI18n()
   const initials = participant.name
     .split(" ")
     .map((w) => w[0])
@@ -118,19 +131,24 @@ function ParticipantRow({ participant }: { participant: RoomParticipant }) {
         {initials}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-fg">{participant.name}</div>
+        <div className="text-sm font-medium text-fg">
+          <bdi>{participant.name}</bdi>
+        </div>
         {participant.email && (
-          <div className="truncate text-xs text-fg-3">{participant.email}</div>
+          <div className="truncate text-xs text-fg-3">
+            <bdi>{participant.email}</bdi>
+          </div>
         )}
       </div>
       <div className="text-xs text-fg-3">
-        {participant.meetingCount} meeting{participant.meetingCount !== 1 ? "s" : ""}
+        {plural("coreMeetingsCount", participant.meetingCount)}
       </div>
     </div>
   )
 }
 
 function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
+  const { text } = useI18n()
   const icons: Record<string, React.ComponentType<{ className?: string }>> = {
     recording: FileAudioIcon,
     transcript: ClipboardListIcon,
@@ -142,8 +160,12 @@ function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
     <div className="flex items-center gap-3 py-2">
       <Icon className="size-4 text-fg-3" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm text-fg">{artifact.artifactName}</div>
-        <div className="text-xs text-fg-3">{artifact.meetingTitle}</div>
+        <div className="text-sm text-fg">
+          <bdi>{artifact.artifactName}</bdi>
+        </div>
+        <div className="text-xs text-fg-3">
+          <bdi>{text(artifact.meetingTitle)}</bdi>
+        </div>
       </div>
     </div>
   )
@@ -151,7 +173,7 @@ function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
 
 /** M6: room-scope AskMeetSum (streamed, cited answers), code split. */
 function AskRoom({ roomId, roomName, locale }: { roomId: string; roomName: string; locale: SupportedLocale }) {
-  const dictionary = getDictionary(locale)
+  const dictionary = useDictionary()
 
   return (
     <LazyAskPanel
@@ -176,6 +198,7 @@ export function RoomDetailView({
   detail: RoomDetail
   locale: SupportedLocale
 }) {
+  const { t } = useI18n()
   const { room, stats, meetings, openTasks, participants, artifacts } = detail
 
   return (
@@ -187,8 +210,8 @@ export function RoomDetailView({
             href={`/${locale}`}
             className="mb-4 inline-flex items-center gap-1.5 text-sm text-fg-3 hover:text-brand-text"
           >
-            <ArrowLeftIcon className="size-3.5" />
-            Back to MeetSum
+            <ArrowLeftIcon aria-hidden="true" className="size-3.5" data-directional="" />
+            {t("opsRoomBack")}
           </Link>
 
           <div className="flex items-start gap-4">
@@ -197,9 +220,13 @@ export function RoomDetailView({
               style={{ backgroundColor: room.color ?? "var(--brand)" }}
             />
             <div>
-              <h1 className="text-2xl font-bold">{room.name}</h1>
+              <h1 className="text-2xl font-bold">
+                <bdi dir="auto">{room.name}</bdi>
+              </h1>
               {room.description && (
-                <p className="mt-1 text-sm text-fg-3">{room.description}</p>
+                <p dir="auto" className="mt-1 text-sm text-fg-3">
+                  {room.description}
+                </p>
               )}
             </div>
           </div>
@@ -209,11 +236,11 @@ export function RoomDetailView({
       {/* Stats */}
       <div className="mx-auto max-w-6xl px-6 py-6">
         <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <StatCard label="Meetings" value={stats.meetings} icon={CalendarDaysIcon} />
-          <StatCard label="Completed" value={stats.completedMeetings} icon={CheckCircle2Icon} />
-          <StatCard label="Open Tasks" value={stats.openTasks} icon={ClipboardListIcon} />
-          <StatCard label="Participants" value={stats.participants} icon={UsersIcon} />
-          <StatCard label="Artifacts" value={stats.artifacts} icon={FileAudioIcon} />
+          <StatCard label={t("navMeetings")} value={stats.meetings} icon={CalendarDaysIcon} />
+          <StatCard label={t("opsRoomStatCompleted")} value={stats.completedMeetings} icon={CheckCircle2Icon} />
+          <StatCard label={t("opsRoomStatOpenTasks")} value={stats.openTasks} icon={ClipboardListIcon} />
+          <StatCard label={t("opsRoomStatParticipants")} value={stats.participants} icon={UsersIcon} />
+          <StatCard label={t("opsRoomStatArtifacts")} value={stats.artifacts} icon={FileAudioIcon} />
         </div>
 
         {/* Ask */}
@@ -225,7 +252,7 @@ export function RoomDetailView({
         <div className="grid gap-8 lg:grid-cols-3">
           {/* Meetings — 2 cols */}
           <div className="lg:col-span-2">
-            <h2 className="mb-4 text-lg font-semibold">Meetings</h2>
+            <h2 className="mb-4 text-lg font-semibold">{t("navMeetings")}</h2>
             {meetings.length > 0 ? (
               <div className="grid gap-3">
                 {meetings
@@ -235,14 +262,14 @@ export function RoomDetailView({
                   ))}
               </div>
             ) : (
-              <EmptyState message="No meetings in this room yet." />
+              <EmptyState message={t("opsRoomNoMeetings")} />
             )}
 
             {/* Open Tasks */}
             {openTasks.length > 0 && (
               <div className="mt-8">
                 <h2 className="mb-4 text-lg font-semibold">
-                  Open Tasks
+                  {t("opsRoomStatOpenTasks")}
                   <span className="ms-2 text-sm font-normal text-fg-3">
                     ({openTasks.length})
                   </span>
@@ -262,7 +289,7 @@ export function RoomDetailView({
             <div className="rounded-lg border border-line bg-surface p-4">
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
                 <UsersIcon className="size-4 text-brand-text" />
-                Participants
+                {t("opsRoomStatParticipants")}
               </h2>
               {participants.length > 0 ? (
                 <div className="divide-y divide-line">
@@ -271,7 +298,7 @@ export function RoomDetailView({
                   ))}
                 </div>
               ) : (
-                <EmptyState message="No participants recorded." />
+                <EmptyState message={t("opsRoomNoParticipants")} />
               )}
             </div>
 
@@ -280,7 +307,7 @@ export function RoomDetailView({
               <div className="rounded-lg border border-line bg-surface p-4">
                 <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
                   <FileAudioIcon className="size-4 text-brand-text" />
-                  Artifacts
+                  {t("opsRoomStatArtifacts")}
                 </h2>
                 <div className="divide-y divide-line">
                   {artifacts.map((a) => (

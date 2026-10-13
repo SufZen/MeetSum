@@ -5,22 +5,13 @@
  * are honoured in one place. Pure: no I/O, no share-link creation.
  */
 import type { RuleContent } from "@/lib/integrations/core/types"
+import { formatDateOnly, formatIsoDate, zoneOffsetMs } from "@/lib/i18n/format"
+import { fixHebrewTypography } from "@/lib/i18n/hebrew-text"
 import { isRtlLanguage } from "@/lib/integrations/bidi"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
 import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
-
-/** `YYYY-MM-DD` of an instant in `timeZone`. */
-function localDate(instant: Date, timeZone: string): string {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
-      .formatToParts(instant)
-      .map((part) => [part.type, part.value])
-  )
-
-  return `${parts.year}-${parts.month}-${parts.day}`
-}
 
 /**
  * The date-only due date of an action item (M8 e2e fix #8): `dueOn` when
@@ -35,40 +26,21 @@ export function recapDueOn(item: { dueOn?: string | null; dueDate?: string | nul
 
   const instant = new Date(item.dueDate)
 
-  return Number.isNaN(instant.getTime()) ? undefined : localDate(instant, timeZone)
+  return Number.isNaN(instant.getTime()) ? undefined : formatIsoDate(instant, timeZone)
 }
 
-/** A date-only due date for display: `20.10.2026` (he), `Oct 20, 2026` (en). */
+/**
+ * A date-only due date for display: `20.10.2026` (he; numeric reads the
+ * same in every provider's bidi), `Oct 20, 2026` (en).
+ */
 export function formatRecapDueDate(dueOn: string, locale: "he" | "en"): string {
   if (!DATE_ONLY.test(dueOn)) return dueOn
 
+  if (locale === "en") return formatDateOnly(dueOn, "en", "date")
+
   const [year, month, day] = dueOn.split("-").map(Number)
-  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12))
 
-  return locale === "he"
-    ? new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric", year: "numeric", timeZone: "UTC" }).format(noonUtc)
-    : new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(noonUtc)
-}
-
-/** Milliseconds `timeZone` is ahead of UTC at `instant`. */
-function zoneOffsetMs(instant: Date, timeZone: string): number {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    })
-      .formatToParts(instant)
-      .map((part) => [part.type, part.value])
-  )
-  const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second))
-
-  return asUtc - Math.floor(instant.getTime() / 1000) * 1000
+  return `${day}.${month}.${year}`
 }
 
 /** 23:59:59 local time on `dueOn` in `timeZone`, as a UTC ISO instant. */
@@ -193,16 +165,19 @@ function linksFor(content: RuleContent, links: BuildMeetingRecapOptions["links"]
 
 export function buildMeetingRecap(meeting: MeetingRecord, options: BuildMeetingRecapOptions): MeetingRecap {
   const { content } = options
-  const overview = (meeting.summary?.overview || meeting.intelligence?.overview || "").trim()
+  const dir = isRtlLanguage(meeting.language) ? "rtl" : "ltr"
+  // Display-time Hebrew typesetting (never persisted): every provider renders from the recap.
+  const typeset = (text: string) => fixHebrewTypography(text, { base: dir })
+  const overview = typeset((meeting.summary?.overview || meeting.intelligence?.overview || "").trim())
   const chapters = (meeting.intelligence?.chapters ?? [])
     .filter((chapter) => chapter.title?.trim())
-    .map((chapter) => ({ title: chapter.title.trim(), startMs: chapter.startMs }))
+    .map((chapter) => ({ title: typeset(chapter.title.trim()), startMs: chapter.startMs }))
 
   const recap: MeetingRecap = {
     meetingId: meeting.id,
-    title: meeting.title,
+    title: typeset(meeting.title),
     language: meeting.language,
-    dir: isRtlLanguage(meeting.language) ? "rtl" : "ltr",
+    dir,
     startedAt: meeting.startedAt,
     participants: participantsOf(meeting),
     actionItems: content.actionItems
@@ -212,7 +187,7 @@ export function buildMeetingRecap(meeting: MeetingRecord, options: BuildMeetingR
 
           return {
             id: item.id,
-            title: item.title,
+            title: typeset(item.title),
             ...(owner ? { owner } : {}),
             ...(dueDate ? { dueDate } : {}),
             ...(item.priority ? { priority: item.priority } : {}),

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   discardMeeting: vi.fn(),
   createMediaAsset: vi.fn(),
   findMediaAssetBySourceFile: vi.fn(),
+  deleteMediaAsset: vi.fn(),
   replaceTranscriptSegments: vi.fn(),
   listJobs: vi.fn(),
   enqueueMeetSumJob: vi.fn(),
@@ -38,6 +39,7 @@ const scopedRepository = {
   discardMeeting: mocks.discardMeeting,
   createMediaAsset: mocks.createMediaAsset,
   findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
+  deleteMediaAsset: mocks.deleteMediaAsset,
   replaceTranscriptSegments: mocks.replaceTranscriptSegments,
   listJobs: mocks.listJobs,
 }
@@ -197,6 +199,40 @@ describe("desktop capture upload routes", () => {
     )
     formDataSpy.mockRestore()
     arrayBufferSpy.mockRestore()
+  })
+
+  it("deletes the stored media and its asset row when a plain upload can't be queued (no duplicate pile-up on retry)", async () => {
+    mocks.enqueueMeetSumJob.mockRejectedValue(new Error("redis down"))
+    mocks.deleteMediaAsset.mockResolvedValue(true)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const { POST } = await import("@/app/api/meetings/[id]/upload/route")
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await POST(await uploadRequest(formWith({ file: wavFile() })), {
+        params: Promise.resolve({ id: "meet_known" }),
+      })
+
+      expect(response.status).toBe(500)
+    }
+
+    expect(mocks.createMediaAsset).toHaveBeenCalledTimes(3)
+    expect(mocks.deleteMediaAsset).toHaveBeenCalledTimes(3)
+    expect(mocks.deleteMediaAsset).toHaveBeenCalledWith("asset_1", { meetingId: "meet_known" })
+    expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps a desktop capture's stored media on a queue failure, so the retry reuses it", async () => {
+    mocks.enqueueMeetSumJob.mockRejectedValue(new Error("redis down"))
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const { POST } = await import("@/app/api/meetings/[id]/upload/route")
+    const response = await POST(
+      await uploadRequest(formWith({ captureMetadata: { captureId: "cap_keep" }, file: wavFile() })),
+      { params: Promise.resolve({ id: "meet_known" }) }
+    )
+
+    expect(response.status).toBe(500)
+    expect(mocks.deleteMediaAsset).not.toHaveBeenCalled()
+    expect(mocks.deleteMeetingObject).not.toHaveBeenCalled()
   })
 
   it("requires meeting:create (viewers get 403 before any byte is read)", async () => {
@@ -666,5 +702,96 @@ describe("desktop capture upload routes", () => {
     expect(response.status).toBe(400)
     expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(1)
     expect(mocks.createMeeting).not.toHaveBeenCalled()
+  })
+  it("rejects a PWA queued upload recorded in another workspace before reading it (M9 D5)", async () => {
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const request = new Request("http://localhost/api/desktop-capture/ingest", {
+      method: "POST",
+      headers: { "x-meetsum-workspace-id": "ws_other" },
+      body: formWith({ meeting: { title: "x", startedAt: "2026-07-05T09:00:00.000Z" } }),
+    })
+    const response = await ingestRoute.POST(request, { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "workspace_mismatch" })
+    expect(mocks.createMeeting).not.toHaveBeenCalled()
+    expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
+  })
+  describe("offline-queued recording for an existing meeting (M9 Integration)", () => {
+    function targetForm(targetMeetingId: string, captureId = "cap_q1") {
+      const form = formWith({
+        meeting: { title: "Browser recording", startedAt: "2026-07-05T09:00:00.000Z" },
+        captureMetadata: { captureId },
+      })
+
+      // Same order as the queue's ingestFormData: text fields, then the file.
+      form.append("targetMeetingId", targetMeetingId)
+      form.append("file", wavFile())
+
+      return form
+    }
+
+    const ingest = async (form: FormData) => {
+      const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+
+      return ingestRoute.POST(await ingestRequest(form), { params: Promise.resolve({}) })
+    }
+
+    it("attaches the media to the target meeting and never creates a meeting", async () => {
+      const response = await ingest(targetForm("meet_known"))
+
+      expect(response.status).toBe(202)
+      expect((await response.json()).meeting.id).toBe("meet_known")
+      expect(mocks.storeMeetingObjectStream).toHaveBeenCalledWith(
+        expect.objectContaining({ keyPrefix: "meetings/meet_known" })
+      )
+      expect(mocks.createMediaAsset).toHaveBeenCalledWith(
+        expect.objectContaining({ meetingId: "meet_known", source: "desktop_capture", sourceFileId: "cap_q1" })
+      )
+      expect(mocks.createMeeting).not.toHaveBeenCalled()
+      expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    })
+
+    it("dedupes a repeated captureId on the target meeting without storing again", async () => {
+      mocks.findMediaAssetBySourceFile.mockResolvedValue({
+        id: "asset_original",
+        meetingId: "meet_known",
+        storageKey: "meetings/meet_known/a.wav",
+        contentType: "audio/wav",
+        sizeBytes: 64,
+        retention: "audio",
+        createdAt: "2026-07-05T09:00:00.000Z",
+      })
+      mocks.listJobs.mockResolvedValue([
+        { id: "job_original", status: "completed", payload: { assetId: "asset_original" } },
+      ])
+
+      const response = await ingest(targetForm("meet_known"))
+
+      expect(response.status).toBe(200)
+      expect(mocks.findMediaAssetBySourceFile).toHaveBeenCalledWith("desktop_capture", "cap_q1", {
+        meetingId: "meet_known",
+      })
+      expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
+      expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    })
+
+    it("404s for a meeting the caller cannot see (or of another workspace) before storing anything", async () => {
+      const response = await ingest(targetForm("meet_other_workspace"))
+
+      expect(response.status).toBe(404)
+      expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
+      expect(mocks.createMeeting).not.toHaveBeenCalled()
+      expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    })
+
+    it("rejects a malformed target id", async () => {
+      const response = await ingest(targetForm("../meet_known"))
+
+      expect(response.status).toBe(404)
+      expect(mocks.getMeeting).not.toHaveBeenCalled()
+      expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    })
   })
 })

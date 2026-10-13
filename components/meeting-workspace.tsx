@@ -41,6 +41,8 @@ import type { MeetingTranscriptHandle } from "@/components/transcript/use-meetin
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useShellUrl } from "@/hooks/use-shell-url"
+import { MEETING_TABS, type MeetingTab } from "@/lib/client/shell-url"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { describeMeetingMedia } from "@/lib/media/playback-select"
@@ -104,7 +106,11 @@ const COMPACT_AT_PX = 24
 const EXPAND_BELOW_PX = 4
 
 type ReprocessMode = "full" | "summary" | "tasks" | "transcript-cleanup"
-type TabValue = "summary" | "transcript" | "ask" | "tasks" | "clips" | "prep" | "followup"
+/** `summary | transcript | ask` live in the shell URL (`?tab=`); the rest are local. */
+type LocalTab = "tasks" | "clips" | "prep" | "followup"
+type TabValue = MeetingTab | LocalTab
+
+const isUrlTab = (value: string): value is MeetingTab => (MEETING_TABS as readonly string[]).includes(value)
 
 type MembersResponse = { members: Array<{ userId: string; email: string; name: string | null }> }
 
@@ -231,7 +237,24 @@ export function MeetingWorkspace({
   onRename?: (title: string) => Promise<boolean>
   onDelete?: () => Promise<boolean>
 }) {
-  const [tab, setTab] = useState<TabValue>("summary")
+  // M9 D1: the URL owns summary/transcript/ask (`replace`, no history entry);
+  // tabs outside the shell contract stay local until a URL tab is chosen.
+  const shell = useShellUrl(locale)
+  const { navigate } = shell
+  const [localTab, setLocalTab] = useState<LocalTab | null>(null)
+  const tab: TabValue = localTab ?? shell.state.tab
+  const meetingId = meeting?.id
+  const setTab = useCallback(
+    (value: TabValue) => {
+      if (!isUrlTab(value)) {
+        setLocalTab(value)
+        return
+      }
+      setLocalTab(null)
+      if (meetingId) navigate({ meeting: meetingId, tab: value }, { replace: true })
+    },
+    [meetingId, navigate]
+  )
   // M6: the Ask panel loads on first open and then stays mounted, so a
   // conversation survives tab switches (citations seek from the Ask tab).
   const [askOpened, setAskOpened] = useState(false)
@@ -263,7 +286,7 @@ export function MeetingWorkspace({
     (segment: { speaker: string; speakerId?: string }) => directory.forSegment(segment).name,
     [directory]
   )
-  const openTranscript = useCallback(() => setTab("transcript"), [])
+  const openTranscript = useCallback(() => setTab("transcript"), [setTab])
   const summaryRun = meeting?.aiRuns?.find((run) => run.task === "summary.generate")
   const editedAfterSummary = Boolean(
     meeting?.transcriptEditedAt &&
@@ -309,15 +332,15 @@ export function MeetingWorkspace({
         <div className="mt-3 flex flex-wrap justify-center gap-2">
           <Button onClick={onSyncGoogle}>
             <CalendarSyncIcon data-icon="inline-start" />
-            Sync Google Workspace
+            {dictionary.mtgEmptySyncGoogle}
           </Button>
           <Button variant="outline" onClick={onOpenUpload}>
             <UploadIcon data-icon="inline-start" />
-            Upload or import recording
+            {dictionary.mtgEmptyUpload}
           </Button>
           <Button variant="ghost" onClick={onCheckSetup}>
             <SettingsIcon data-icon="inline-start" />
-            Check setup
+            {dictionary.mtgEmptyCheckSetup}
           </Button>
         </div>
       </div>

@@ -9,10 +9,13 @@
  */
 import Link from "next/link"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { HighlightedText } from "@/components/search/highlighted-text"
 import { formatTimecode } from "@/components/ui/meeting-atoms"
 import { dirForLanguage, hitDir } from "@/lib/client/highlight"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import { formatDate } from "@/lib/i18n/format"
+import { FALLBACK_TIME_ZONE } from "@/lib/i18n/time-zone"
 import { buildSegmentLink } from "@/lib/player/deep-link"
 import { meetingTypeLabel } from "@/lib/search/meeting-type-labels"
 import type { ChunkKind, SearchHit, SearchMeetingGroup } from "@/lib/search/types"
@@ -26,16 +29,9 @@ export const KIND_KEYS: Record<ChunkKind, keyof Dictionary> = {
   meta: "searchKindMeta",
 }
 
-export function formatMeetingDate(iso: string, locale: string): string {
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(date)
+/** Meeting date ("13 Oct 2026") in the viewer's time zone (`lib/i18n/format`). */
+export function formatMeetingDate(iso: string, locale: string, timeZone: string = FALLBACK_TIME_ZONE): string {
+  return formatDate(iso, { locale: locale === "he" ? "he" : "en", timeZone }, "date")
 }
 
 export function hitHref(locale: string, meetingId: string, hit: Pick<SearchHit, "startMs">): string {
@@ -102,6 +98,7 @@ export function MeetingResultCard({
   dictionary: Dictionary
 }) {
   const { meeting } = group
+  const timeZone = useOptionalI18n()?.timeZone
   const titleDir = dirForLanguage(meeting.language)
   const meta = [
     ...meeting.rooms.map((room) => ({ key: `room-${room.id}`, label: room.name })),
@@ -121,7 +118,7 @@ export function MeetingResultCard({
           </Link>
         </h3>
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
-          <time dateTime={meeting.startedAt}>{formatMeetingDate(meeting.startedAt, locale)}</time>
+          <time dateTime={meeting.startedAt}>{formatMeetingDate(meeting.startedAt, locale, timeZone)}</time>
           {meta.map((item) => (
             <span key={item.key} className="rounded-sm bg-surface-2 px-1.5 py-0.5 text-fg-2">
               <bdi>{item.label}</bdi>

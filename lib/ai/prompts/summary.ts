@@ -6,6 +6,7 @@
 import { neutralizeData } from "@/lib/ai/prompts/data-block"
 import { modelSections } from "@/lib/ai/templates/schema"
 import type { SectionSpec, SummaryTemplateDef } from "@/lib/ai/templates/types"
+import { formatIsoDate, formatNumericDate, zonedParts } from "@/lib/i18n/format"
 
 export const DEFAULT_TIME_ZONE = "Asia/Jerusalem"
 
@@ -14,27 +15,14 @@ const EN_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Fr
 
 /** `{date: "DD.MM.YYYY", weekday}` of an ISO datetime in a time zone. */
 export function meetingDateParts(iso: string, timeZone = DEFAULT_TIME_ZONE) {
-  const date = new Date(iso)
+  const parts = zonedParts(iso, timeZone)
 
-  if (Number.isNaN(date.getTime())) return undefined
-
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      weekday: "short",
-    })
-      .formatToParts(date)
-      .map((part) => [part.type, part.value])
-  ) as Record<string, string>
-  const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday)
+  if (!parts) return undefined
 
   return {
-    date: `${parts.day}.${parts.month}.${parts.year}`,
-    isoDate: `${parts.year}-${parts.month}-${parts.day}`,
-    weekdayIndex,
+    date: formatNumericDate(iso, timeZone),
+    isoDate: formatIsoDate(iso, timeZone),
+    weekdayIndex: parts.weekday,
   }
 }
 

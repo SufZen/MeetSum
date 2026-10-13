@@ -1,10 +1,44 @@
 import { getEmailSender, type EmailSender } from "@/lib/email"
+import { notifyInvited } from "@/lib/notifications/notify"
 import {
   buildInvitationEmail,
   type InvitationEmailLocale,
 } from "@/lib/email/templates/invitation"
-import type { WorkspaceStore } from "@/lib/workspaces/store"
-import type { Invitation, Workspace } from "@/lib/workspaces/types"
+import { WorkspaceStoreError, type WorkspaceStore } from "@/lib/workspaces/store"
+import type { Invitation, Membership, Workspace, WorkspaceUser } from "@/lib/workspaces/types"
+
+/**
+ * M9 (Package C): accepts a pending invitation by id for the signed-in user,
+ * from the bell or `POST /api/me/invitations/[id]/accept`. The session email
+ * must equal the invitation email (checked before anything changes); the
+ * store then accepts by id in one transaction that locks the row and
+ * re-checks pending, so the invitation is single-use. The emailed token is
+ * never rotated: if the accept fails, the link in the email still works.
+ * Accepted, revoked and expired invitations throw.
+ */
+export async function acceptInvitationById(
+  store: WorkspaceStore,
+  input: { workspaceId: string; invitationId: string; user: Pick<WorkspaceUser, "id" | "email"> },
+  now: number = Date.now()
+): Promise<{ membership: Membership; workspace: Workspace; invitation: Invitation }> {
+  const invitation = await store.getInvitation(input.workspaceId, input.invitationId)
+  const workspace = invitation ? await store.getWorkspace(invitation.workspaceId) : undefined
+
+  if (!invitation || !workspace) throw new WorkspaceStoreError("not_found", "Invitation not found")
+
+  if (invitation.status !== "pending" || Date.parse(invitation.expiresAt) <= now) {
+    throw new WorkspaceStoreError("invitation_invalid", "Invitation is no longer valid")
+  }
+  if (input.user.email.trim().toLowerCase() !== invitation.email.trim().toLowerCase()) {
+    throw new WorkspaceStoreError("email_mismatch", "Invitation is for a different email")
+  }
+
+  return store.acceptInvitationById({
+    workspaceId: invitation.workspaceId,
+    invitationId: invitation.id,
+    user: input.user,
+  })
+}
 
 /** Public origin used in invitation links. */
 export function resolveAppOrigin(
@@ -54,6 +88,8 @@ export async function deliverInvitation(input: {
   origin: string
   sender?: EmailSender
 }): Promise<InvitationDelivery> {
+  // M9: in-app `invited` notification for an existing user (dedupe inv:<id>).
+  await notifyInvited({ invitationId: input.invitation.id }).catch(() => {})
   const inviteUrl = buildInviteUrl(input.origin, input.locale, input.token)
   const sender = input.sender ?? getEmailSender()
 

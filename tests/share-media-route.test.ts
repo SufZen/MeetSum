@@ -34,6 +34,12 @@ vi.mock("@/lib/meetings/store", () => ({
         : undefined
     },
   }),
+  // These shares live only in the lookup mock: the verify throttle allows all.
+  getShareVerifyThrottle: () => ({
+    begin: async () => ({ allowed: true }),
+    fail: async () => ({ failures: 1, notifyOwner: false }),
+    succeed: async () => undefined,
+  }),
 }))
 vi.mock("@/lib/settings/app-settings", () => ({ getAppSettings: mocks.getAppSettings }))
 vi.mock("@/lib/storage/object-storage", () => ({

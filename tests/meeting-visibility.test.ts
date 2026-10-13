@@ -34,8 +34,11 @@ describe("canViewMeeting", () => {
     }
   })
 
-  it("defaults missing workspace/visibility to the legacy default workspace", () => {
-    expect(canViewMeeting({ ...member, workspaceId: "ws_default" }, {})).toBe(true)
+  it("defaults a missing workspace to the legacy default and a missing visibility to private (M9)", () => {
+    // Fail closed: no visibility → private, so a non-owner member is denied.
+    expect(canViewMeeting({ ...member, workspaceId: "ws_default" }, {})).toBe(false)
+    expect(canViewMeeting({ ...member, workspaceId: "ws_default" }, { ownerUserId: member.userId })).toBe(true)
+    expect(canViewMeeting({ ...system, workspaceId: "ws_default" }, {})).toBe(true)
     expect(canViewMeeting(member, {})).toBe(false)
   })
 

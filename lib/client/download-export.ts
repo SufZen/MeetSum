@@ -19,6 +19,9 @@ export type DownloadExportFormat = "pdf" | "markdown" | "docx"
 
 const EXTENSIONS: Record<DownloadExportFormat, string> = { pdf: "pdf", markdown: "md", docx: "docx" }
 
+/** How long a download's blob URL stays alive after the click. */
+export const DOWNLOAD_URL_TTL_MS = 30_000
+
 type ExportOptions = {
   locale?: string
   messages?: ExportsMessages
@@ -60,7 +63,9 @@ export async function downloadExport(
   anchor.href = url
   anchor.download = downloadFilename(response.headers.get("content-disposition"), meeting.title, format)
   anchor.click()
-  URL.revokeObjectURL(url)
+  // Revoking right after click() can cancel the download in some browsers
+  // (Safari, Firefox): keep the blob URL alive while the download starts.
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_TTL_MS)
   toast.success(formatMessage(t.exportDownloadStarted, { format: label }))
 
   return true

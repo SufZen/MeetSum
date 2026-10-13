@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#008073">
+<title>MeetSum · אין חיבור</title>
+<link rel="icon" href="/icons/icon-192.png">
+<style>
+  :root { color-scheme: light dark; --canvas: #f6fafb; --surface: #ffffff; --fg: #1b2328; --fg-2: #4b5961; --line: #dbe3e6; --brand: #008073; --on-brand: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --canvas: #0f161c; --surface: #172028; --fg: #e6edf0; --fg-2: #a3b1b8; --line: #2a3640; --brand: #4fc4b4; --on-brand: #0b1f1c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 1.5rem; background: var(--canvas); color: var(--fg);
+    font-family: "IBM Plex Sans Hebrew", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 28rem; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 0.75rem; padding: 2rem; text-align: center; }
+  img { width: 3.5rem; height: 3.5rem; }
+  h1 { font-size: 1.25rem; margin: 1rem 0 0.5rem; }
+  p { color: var(--fg-2); line-height: 1.6; margin: 0 0 1.5rem; }
+  button { font: inherit; font-weight: 600; color: var(--on-brand); background: var(--brand); border: 0; border-radius: 0.5rem; padding: 0.625rem 1.25rem; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <img src="/icons/icon-192.png" alt="" width="56" height="56">
+  <h1 id="title">אין חיבור לאינטרנט</h1>
+  <p id="body">הקלטות שכבר התחילו נשמרות במכשיר ויועלו כשהחיבור יחזור.</p>
+  <button id="retry" type="button">נסו שוב</button>
+</main>
+<script>
+  (function () {
+    var en = { lang: "en", dir: "ltr", title: "You’re offline", doc: "MeetSum · Offline",
+      body: "Recordings already in progress are saved on this device and upload when the connection is back.", retry: "Try again" };
+    var language = (navigator.language || "he").toLowerCase();
+    if (language.indexOf("he") !== 0 && language.indexOf("iw") !== 0) {
+      document.documentElement.lang = en.lang;
+      document.documentElement.dir = en.dir;
+      document.title = en.doc;
+      document.getElementById("title").textContent = en.title;
+      document.getElementById("body").textContent = en.body;
+      document.getElementById("retry").textContent = en.retry;
+    }
+    document.getElementById("retry").addEventListener("click", function () { location.reload(); });
+    window.addEventListener("online", function () { location.reload(); });
+  })();
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 "use client"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
@@ -47,6 +48,8 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  const i18n = useOptionalI18n()
+  const closeText = i18n?.t("shellClose") ?? ""
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -74,7 +77,7 @@ function DialogContent({
           >
             <XIcon
             />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{closeText}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -100,6 +103,8 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const i18n = useOptionalI18n()
+
   return (
     <div
       data-slot="dialog-footer"
@@ -112,7 +117,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="secondary" />}>
-          Close
+          {i18n?.t("shellClose")}
         </DialogPrimitive.Close>
       )}
     </div>

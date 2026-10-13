@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { getMeetingWorkStatus, meetingStageTitle } from "@/lib/meetings/work-status"
+import { getDictionary } from "@/lib/i18n/dictionaries"
+import { getMeetingWorkStatus, meetingStageMessageKey } from "@/lib/meetings/work-status"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
 function meeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
@@ -49,8 +50,8 @@ describe("meeting work status", () => {
 
     expect(status).toMatchObject({
       kind: "processing",
-      title: "Generating summary",
       primaryAction: "none",
+      jobStatus: "active",
       stage: "summary.generate",
       jobId: "job_1",
       progress: 0.65,
@@ -71,9 +72,7 @@ describe("meeting work status", () => {
 
     expect(status).toMatchObject({
       kind: "failed",
-      title: "Processing failed",
       primaryAction: "retry",
-      description: "Gemini audio request failed",
       jobId: "job_1",
       retryable: true,
     })
@@ -103,7 +102,7 @@ describe("meeting work status", () => {
 
     expect(status).toMatchObject({
       kind: "ready",
-      title: "Ready to process",
+      readiness: "ready_to_process",
       primaryAction: "process",
     })
   })
@@ -142,7 +141,7 @@ describe("meeting work status", () => {
 
     expect(status).toMatchObject({
       kind: "completed",
-      title: "Processed",
+      readiness: "processed",
       primaryAction: "none",
       progress: 1,
     })
@@ -211,15 +210,26 @@ describe("meeting work status", () => {
       kind: "processing",
       jobId: "job_summary",
       stage: "summary.persist",
-      title: "Saving summary",
       progress: 0.7,
     })
   })
 
-  it("labels the summary.persist stage in Hebrew and English", () => {
-    expect(meetingStageTitle("summary.persist", "en")).toBe("Saving summary")
-    expect(meetingStageTitle("summary.persist", "he")).toBe("שומר את הסיכום")
-    expect(meetingStageTitle("unknown.stage")).toBeUndefined()
+  it("maps the summary.persist stage to a dictionary key (gender-neutral Hebrew)", () => {
+    const key = meetingStageMessageKey("summary.persist")!
+    const he = getDictionary("he") as Record<string, string>
+    const en = getDictionary("en") as Record<string, string>
+
+    expect(en[key]).toBe("Saving summary")
+    expect(he[key]).toBe("שמירת הסיכום")
+    expect(meetingStageMessageKey("unknown.stage")).toBeUndefined()
+  })
+
+  it("returns codes, never English or Hebrew copy (M9)", () => {
+    const status = getMeetingWorkStatus(meeting(), [])
+
+    expect(status).not.toHaveProperty("title")
+    expect(status).not.toHaveProperty("description")
+    for (const check of status.checks) expect(check).not.toHaveProperty("label")
   })
 
   it("marks future Google meetings as capture armed", () => {
@@ -227,7 +237,7 @@ describe("meeting work status", () => {
 
     expect(status).toMatchObject({
       kind: "upcoming",
-      title: "Capture armed",
+      readiness: "capture_armed",
       primaryAction: "sync_artifacts",
     })
   })

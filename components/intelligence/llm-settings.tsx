@@ -9,11 +9,13 @@ import { useState } from "react"
 import { TriangleAlertIcon } from "lucide-react"
 
 import { requestJson, useJson } from "@/components/intelligence/use-json"
+import { StatusMessageText } from "@/components/status-message-text"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { TemplateListItem } from "@/lib/ai/templates/catalog"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import type { StatusMessage } from "@/lib/ops/status-messages"
 
 export type LlmSettingsProps = {
   /** Disables editing without `settings:write`. */
@@ -87,16 +89,32 @@ export function configuredProviders(payload: unknown): Record<string, boolean> {
 
 /**
  * Warnings from the provider status payload: whether the Gemini free-tier
- * privacy warning is on (shown localized), plus any other warning text.
+ * privacy warning is on (shown localized), other warnings as codes
+ * (`warningMessages`, translated), and the English text of any warning a
+ * server sent without codes.
  */
-export function providerWarnings(payload: unknown): { geminiFreeTier: boolean; other: string[] } {
+export function providerWarnings(payload: unknown): {
+  geminiFreeTier: boolean
+  messages: StatusMessage[]
+  other: string[]
+} {
   const FREE = /GEMINI_TIER=free:[\s\S]*?(?:confidential meetings\.|$)/g
   let geminiFreeTier = false
+  const messages = new Map<string, StatusMessage>()
   const other = new Set<string>()
 
   for (const entry of Array.isArray(payload) ? payload : []) {
-    const warning = entry && typeof entry === "object" ? (entry as { warning?: unknown }).warning : undefined
+    if (!entry || typeof entry !== "object") continue
 
+    const { warning, warningMessages } = entry as { warning?: unknown; warningMessages?: unknown }
+
+    if (Array.isArray(warningMessages) && warningMessages.length) {
+      for (const message of warningMessages as StatusMessage[]) {
+        if (message?.code === "llm_warning_gemini_free_tier") geminiFreeTier = true
+        else if (message?.code) messages.set(message.code, message)
+      }
+      continue
+    }
     if (typeof warning !== "string" || !warning.trim()) continue
     if (warning.includes("GEMINI_TIER=free")) geminiFreeTier = true
 
@@ -105,7 +123,7 @@ export function providerWarnings(payload: unknown): { geminiFreeTier: boolean; o
     if (rest) other.add(rest)
   }
 
-  return { geminiFreeTier, other: [...other] }
+  return { geminiFreeTier, messages: [...messages.values()], other: [...other] }
 }
 
 export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSettingsProps) {
@@ -156,7 +174,7 @@ export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSett
     <section className="ms-card grid gap-4 p-4">
       <h3 className="text-sm font-semibold">{t.intelLlmSettings}</h3>
       {readOnly ? <p className="text-xs text-fg-3">{t.intelReadOnly}</p> : null}
-      {warnings.geminiFreeTier || warnings.other.length ? (
+      {warnings.geminiFreeTier || warnings.messages.length || warnings.other.length ? (
         <div
           role="status"
           aria-label={t.intelProviderWarnings}
@@ -168,6 +186,14 @@ export function LlmSettings({ readOnly = false, dictionary: t, locale }: LlmSett
               <span>{t.intelGeminiFreeTierWarning}</span>
             </p>
           ) : null}
+          {warnings.messages.map((message) => (
+            <p key={message.code} className="flex items-start gap-1.5">
+              <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <span className="break-words">
+                <StatusMessageText message={message} />
+              </span>
+            </p>
+          ))}
           {warnings.other.map((warning) => (
             <p key={warning} dir="ltr" className="flex items-start gap-1.5">
               <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />

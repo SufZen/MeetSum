@@ -8,6 +8,7 @@
 import { useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { ApiError, requestJson, useJson } from "@/components/intelligence/use-json"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
@@ -35,7 +36,8 @@ function errorMessage(error: unknown, t: Dictionary): string {
   return t.intelLoadFailed
 }
 
-export function PrepPanel({ meetingId, dictionary: t, locale, canWrite = false }: PrepPanelProps) {
+export function PrepPanel({ meetingId, dictionary: t, canWrite = false }: PrepPanelProps) {
+  const { fmt } = useI18n()
   const [language, setLanguage] = useState<"" | "he" | "en">("")
   const base = `/api/meetings/${encodeURIComponent(meetingId)}/prep`
   const { data, setData, error, loading } = useJson<PrepBriefResult>(language ? `${base}?language=${language}` : base)
@@ -43,7 +45,6 @@ export function PrepPanel({ meetingId, dictionary: t, locale, canWrite = false }
   const [generateError, setGenerateError] = useState<string | undefined>()
   const dir = (data?.language ?? language) === "en" ? "ltr" : "rtl"
   const titles = new Map((data?.related ?? []).map((meeting) => [meeting.meetingId, meeting.title]))
-  const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: "medium" })
 
   async function generate() {
     setGenerating(true)
@@ -117,7 +118,7 @@ export function PrepPanel({ meetingId, dictionary: t, locale, canWrite = false }
                     <a href={meetingHref(meeting.meetingId)} className="min-w-0 truncate text-fg hover:underline">
                       <bdi>{meeting.title}</bdi>
                     </a>
-                    <span className="shrink-0 text-xs text-fg-3">{dateFormat.format(new Date(meeting.startedAt))}</span>
+                    <span className="shrink-0 text-xs text-fg-3">{fmt.date(meeting.startedAt, "date")}</span>
                   </li>
                 ))}
               </ul>

@@ -2,13 +2,17 @@ import { isValidTemplateKey } from "@/lib/ai/templates/registry"
 import { getDatabasePool } from "@/lib/db/client"
 import {
   DEFAULT_LOCALE,
-  isSupportedLocale,
+  coerceLocale,
+  isLegacyLocale,
   type SupportedLocale,
 } from "@/lib/i18n/locales"
+import { isValidTimeZone } from "@/lib/i18n/time-zone"
+import { CONTENT_LANGUAGES, type ContentLanguage } from "@/lib/intelligence/types"
 
 export type AppSettings = {
   defaultLocale: SupportedLocale
-  meetingLanguageMode: "auto" | SupportedLocale
+  /** Meeting content language, independent of the UI locale (M9). */
+  meetingLanguageMode: "auto" | ContentLanguage
   /**
    * Summary template (M5): a built-in key (legacy keys stay valid),
    * `custom:<key>` or `auto`.
@@ -32,6 +36,8 @@ export type AppSettings = {
   autoTitleMode: "generic_only" | "always" | "off"
   /** Optional AI features (M5). */
   aiFeatures: { sentiment: boolean; prepBriefs: boolean }
+  /** Workspace time zone (M9); null = MEETSUM_DEFAULT_TIMEZONE. Users may override it. */
+  timeZone: string | null
 }
 
 type AppSettingsRow = {
@@ -56,6 +62,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   summaryLanguageMode: "meeting",
   autoTitleMode: "generic_only",
   aiFeatures: { sentiment: true, prepBriefs: true },
+  timeZone: null,
 }
 
 /** In-memory (non-postgres) settings, keyed by workspace id. */
@@ -114,16 +121,16 @@ function normalizeAudioRetentionDays(value: unknown) {
 }
 
 function normalizeSettings(raw: Record<string, unknown>): AppSettings {
+  // Stored pt/es/it UI locales (removed in M9) read as he; 030 rewrites them.
   const defaultLocale =
-    typeof raw.defaultLocale === "string" && isSupportedLocale(raw.defaultLocale)
-      ? raw.defaultLocale
-      : DEFAULT_APP_SETTINGS.defaultLocale
+    typeof raw.defaultLocale === "string" && isLegacyLocale(raw.defaultLocale)
+      ? "he"
+      : coerceLocale(raw.defaultLocale, DEFAULT_APP_SETTINGS.defaultLocale)
   const meetingLanguageMode =
     raw.meetingLanguageMode === "auto"
       ? "auto"
-      : typeof raw.meetingLanguageMode === "string" &&
-          isSupportedLocale(raw.meetingLanguageMode)
-        ? raw.meetingLanguageMode
+      : CONTENT_LANGUAGES.includes(raw.meetingLanguageMode as ContentLanguage)
+        ? (raw.meetingLanguageMode as ContentLanguage)
         : DEFAULT_APP_SETTINGS.meetingLanguageMode
 
   return {
@@ -179,6 +186,7 @@ function normalizeSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_APP_SETTINGS.autoTitleMode
     ),
     aiFeatures: normalizeAiFeatures(raw.aiFeatures),
+    timeZone: isValidTimeZone(raw.timeZone) ? raw.timeZone : null,
   }
 }
 

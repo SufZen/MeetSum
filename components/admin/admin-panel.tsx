@@ -1,12 +1,13 @@
 "use client"
 
 import { ShieldAlertIcon } from "lucide-react"
-import { useState } from "react"
 import dynamic from "next/dynamic"
 
 import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/permissions"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useWorkspace } from "@/components/workspace-context"
+import { useShellUrl } from "@/hooks/use-shell-url"
+import type { AdminTabKey } from "@/lib/client/shell-url"
 import type { Permission } from "@/lib/auth/authz"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -30,7 +31,8 @@ const AuditLogSection = dynamic(
   { loading: sectionLoading }
 )
 
-type AdminTab = "members" | "invitations" | "api-keys" | "audit"
+/** The tab ids are the shell URL's `adminTab` values (M9 D1). */
+type AdminTab = AdminTabKey
 
 const TAB_PERMISSIONS: Record<AdminTab, Permission> = {
   members: "workspace:read",
@@ -52,7 +54,9 @@ export function AdminPanel({
   const tabs = (Object.keys(TAB_PERMISSIONS) as AdminTab[]).filter((tab) =>
     can(TAB_PERMISSIONS[tab])
   )
-  const [selected, setSelected] = useState<AdminTab>("members")
+  // M9 D1: the tab lives in the URL (`?panel=admin&adminTab=`); Back walks it.
+  const shell = useShellUrl(locale)
+  const selected = shell.state.adminTab
   const active = tabs.includes(selected) ? selected : tabs[0]
   const tabLabels: Record<AdminTab, string> = {
     members: t.adminTabMembers,
@@ -91,7 +95,7 @@ export function AdminPanel({
         ) : (
           <Tabs
             value={active}
-            onValueChange={(value) => setSelected(value as AdminTab)}
+            onValueChange={(value) => shell.navigate({ panel: "admin", adminTab: value as AdminTab })}
             className="ms-card gap-4 p-3 lg:p-4"
           >
             <TabsList className="max-w-full overflow-x-auto">

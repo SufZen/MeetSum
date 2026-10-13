@@ -29,6 +29,7 @@ import { TranscriptToolbar, type SpeakerChip } from "@/components/transcript/tra
 import type { MeetingTranscriptHandle, TranscriptStatus } from "@/components/transcript/use-meeting-transcript"
 import { Button } from "@/components/ui/button"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { pluralMessage } from "@/lib/i18n/messages"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 import type { TranscriptSegmentWire } from "@/lib/meetings/transcript-wire"
 import type { PlayerMarker } from "@/lib/player/citations"
@@ -439,10 +440,20 @@ export function TranscriptView({
       historyRef.current = forgetSegment(historyRef.current, entry.segmentId)
 
       if (outcome.ok) {
+        // A turn undo restores every segment of the turn at once (M9 B5).
+        transcript.applyMutation(outcome.response)
         if (entry.kind === "speaker") transcript.refetch()
-        else transcript.applyMutation(outcome.response)
         onTranscriptChanged?.()
-        toast.success(t.transcriptUndone)
+        toast.success(
+          entry.kind === "speaker"
+            ? pluralMessage(
+                t,
+                locale === "he" ? "he" : "en",
+                "transcriptSpeakerUndone",
+                outcome.response.segments?.length ?? 1
+              )
+            : t.transcriptUndone
+        )
         return
       }
       if (outcome.conflict) {
@@ -453,7 +464,7 @@ export function TranscriptView({
 
       toast.error(outcome.error === "nothing_to_undo" ? t.transcriptNothingToUndo : t.transcriptUndoFailed)
     },
-    [onTranscriptChanged, t, transcript]
+    [locale, onTranscriptChanged, t, transcript]
   )
 
   const remember = useCallback(

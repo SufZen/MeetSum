@@ -14,6 +14,7 @@
  * with RLM (never inside a URL); digits (dates, counts, durations) are
  * isolated with LRI…PDI.
  */
+import { formatDate as formatDateValue } from "@/lib/i18n/format"
 import { chunkText, isolateLtr, RLM } from "@/lib/integrations/bidi"
 import { formatRecapDueDate, type MeetingRecap, type MeetingRecapActionItem } from "@/lib/integrations/recap"
 
@@ -86,15 +87,7 @@ function isAbsoluteUrl(value: string | undefined): value is string {
 }
 
 function formatDate(iso: string, locale: Locale, timeZone: string): string {
-  const date = new Date(iso)
-
-  if (Number.isNaN(date.getTime())) return ""
-
-  return new Intl.DateTimeFormat(locale === "he" ? "he-IL" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone,
-  }).format(date)
+  return formatDateValue(iso, { locale, timeZone }, "dateTime")
 }
 
 function itemLine(item: MeetingRecapActionItem, locale: Locale): string {

@@ -1,0 +1,41 @@
+{
+  "description": "M9 first-load JS budgets, KB gzipped (level 9), polyfills included; see scripts/bundle-size.mjs. budgetKb is the M9 target (enforced with --strict); baselineKb is the ratchet (fails above baselineKb + maxGrowthKb).",
+  "maxGrowthKb": 5,
+  "routes": {
+    "/[locale]": {
+      "budgetKb": 300,
+      "baselineKb": 393.9
+    },
+    "/[locale]/analytics": {
+      "budgetKb": 330,
+      "baselineKb": 228.7
+    },
+    "/[locale]/onboarding": {
+      "budgetKb": 260,
+      "baselineKb": 236.6
+    },
+    "/share/[token]": {
+      "budgetKb": 220,
+      "baselineKb": 236.9
+    },
+    "/[locale]/login": {
+      "baselineKb": 223
+    },
+    "/[locale]/tasks": {
+      "baselineKb": 312.7
+    },
+    "/[locale]/search": {
+      "baselineKb": 306.3
+    },
+    "/[locale]/rooms/[id]": {
+      "baselineKb": 228.6
+    },
+    "/[locale]/invite/[token]": {
+      "baselineKb": 230.3
+    },
+    "/[locale]/unsubscribe": {
+      "baselineKb": 218.6
+    }
+  },
+  "newRoutes": "Baselines re-measured at the M9 Integration step (merged A-D tree): analytics and onboarding landed; login/tasks/search/invite/unsubscribe were raised to the measured values (shared [locale] chrome grew in A-D)."
+}

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
+import { getDictionary } from "@/lib/i18n/dictionaries"
 import type { JobRecord, JobStatus } from "@/lib/meetings/repository"
-import { meetingStageTitle } from "@/lib/meetings/work-status"
+import { meetingStageMessageKey } from "@/lib/meetings/work-status"
 
 const STAGE_PROGRESS: Record<string, number> = {
   "audio.transcribe": 0.35,
@@ -10,6 +11,13 @@ const STAGE_PROGRESS: Record<string, number> = {
   // M6: the summarize path's persist step (was the inline "meeting.index").
   "summary.persist": 0.7,
   "meeting.index": 0.85,
+}
+
+/** API compatibility: stage titles from the dictionaries (gender-neutral Hebrew). */
+function stageTitle(stage: string, locale: "he" | "en"): string | undefined {
+  const key = meetingStageMessageKey(stage)
+
+  return key ? (getDictionary(locale) as Record<string, string>)[key] : undefined
 }
 
 function serializeJob(job: JobRecord) {
@@ -23,8 +31,8 @@ function serializeJob(job: JobRecord) {
   return {
     ...job,
     stage,
-    stageTitle: meetingStageTitle(stage, "en"),
-    stageTitleHe: meetingStageTitle(stage, "he"),
+    stageTitle: stageTitle(stage, "en"),
+    stageTitleHe: stageTitle(stage, "he"),
     progress:
       job.status === "completed"
         ? 1

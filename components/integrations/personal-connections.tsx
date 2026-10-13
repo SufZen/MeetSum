@@ -4,6 +4,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { BdiMessage } from "@/components/bot/bdi-message"
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { integrationsApi } from "@/components/integrations/api"
 import { im } from "@/components/integrations/messages"
 import { ExceptionPill, IntegrationsSection, SwitchRow, When } from "@/components/integrations/pieces"
@@ -50,6 +51,7 @@ export function PersonalConnections({
   returnTo: string
   onChanged: () => void
 }) {
+  const timeZone = useOptionalI18n()?.timeZone
   const [busy, setBusy] = useState(false)
   const mine = (provider: (typeof PERSONAL_PROVIDER_IDS)[number]) =>
     userId ? activeConnectionsFor(connections, provider, userId)[0] : undefined
@@ -109,7 +111,7 @@ export function PersonalConnections({
               />
               <p className="text-xs text-fg-3">
                 {stats?.at ? (
-                  <BdiMessage template={t.integrationsOutlookLastSync} values={{ when: <When value={formatWhen(locale, stats.at)} /> }} />
+                  <BdiMessage template={t.integrationsOutlookLastSync} values={{ when: <When value={formatWhen(locale, stats.at, timeZone)} /> }} />
                 ) : (
                   t.integrationsOutlookNeverSynced
                 )}

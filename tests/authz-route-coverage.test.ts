@@ -231,6 +231,16 @@ describe("API route authz coverage", () => {
       "meetings/[id]/export/google-docs POST": "meeting:read",
       "meetings/[id]/export/docx POST": "meeting:read",
       "webhooks/catalog GET": "webhooks:manage",
+      // M9 (docs/parity/m9.md, "Route → permission map"); user principal checked in the handler.
+      "notifications GET": "workspace:read",
+      "notifications/unread-count GET": "workspace:read",
+      "notifications/read POST": "workspace:read",
+      "analytics/overview GET": "meeting:read",
+      "onboarding GET": "workspace:read",
+      "onboarding POST": "workspace:read",
+      // M9 B4: the share PATCH also sets the link password (+ canManageMeeting in the handler,
+      // `exports` rate limit). Flipped from M4's meeting:read (orchestrator-approved exception).
+      "meetings/[id]/share PATCH": "meeting:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -379,6 +389,37 @@ describe("API route authz coverage", () => {
       for (const route of routes.filter((candidate) => /^(search|ask)(\/|$)/.test(candidate.route))) {
         expect(route.source, route.route).not.toMatch(/@\/lib\/db\/client|\bgetSystemMeetingRepository\b/)
         expect(SYSTEM_REPOSITORY_ROUTES.has(route.route), route.route).toBe(false)
+      }
+    })
+  })
+
+  describe("M9 routes", () => {
+    const source = (route: string) => routes.find((candidate) => candidate.route === route)?.source ?? ""
+
+    it("guards the per-user routes with withSession (API keys rejected)", () => {
+      for (const route of ["me/preferences", "me/invitations", "me/invitations/[id]/accept"]) {
+        const found = routes.find((candidate) => candidate.route === route)
+
+        expect(found, route).toBeDefined()
+        for (const handler of handlersOf(found!)) expect(handler.wrapper, `${route} ${handler.method}`).toBe("withSession")
+      }
+    })
+
+    it("refuses API keys on notifications, analytics and onboarding (user principal)", () => {
+      for (const route of ["notifications", "notifications/unread-count", "notifications/read", "analytics/overview", "onboarding"]) {
+        const found = routes.find((candidate) => candidate.route === route)
+        const text = source(route)
+
+        expect(found, route).toBeDefined()
+        expect(text.match(/if \(!isUserPrincipal\(ctx\)\) return userRequiredResponse\(\)/g)?.length ?? 0, route).toBe(
+          handlersOf(found!).length
+        )
+      }
+    })
+
+    it("keeps the public allowlist unchanged", () => {
+      for (const route of ["me/preferences", "me/invitations", "notifications", "analytics/overview", "onboarding"]) {
+        expect(source(route), route).not.toMatch(/withPublicRoute/)
       }
     })
   })

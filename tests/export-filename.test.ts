@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   contentDispositionAttachment,
+  exportAsciiFilename,
   exportFileBaseName,
   filenameFromContentDisposition,
 } from "@/lib/http/content-disposition"
@@ -18,6 +19,7 @@ describe("contentDispositionAttachment", () => {
     expect(header).toMatch(/^attachment; filename="[\x20-\x7e]+"; filename\*=UTF-8''/)
     expect(header).toContain(`filename*=UTF-8''${encodeURIComponent("פגישת צוות שבועית.docx")}`)
     expect(header).toContain('filename="meetsum-export.docx"')
+    expect(contentDispositionAttachment("פגישת צוות שבועית", "docx", { id: "abc" })).toContain('filename="meetsum-abc.docx"')
   })
 
   it("keeps the ASCII part of a mixed title in the fallback", () => {
@@ -33,7 +35,7 @@ describe("contentDispositionAttachment", () => {
     expect(header).not.toMatch(/[\r\n\u0000]/)
     expect(header.match(/"/g)).toHaveLength(2)
     expect(header).not.toContain("\\")
-    expect(filenameFromContentDisposition(header)).toBe("abc Set-Cookie: x=1.md")
+    expect(filenameFromContentDisposition(header)).toBe("a-b-c Set-Cookie- x=1.md")
   })
 
   it("percent-encodes the RFC 5987 attr-char exceptions", () => {
@@ -41,7 +43,7 @@ describe("contentDispositionAttachment", () => {
     const star = /filename\*=UTF-8''(\S+)/.exec(header)?.[1] ?? ""
 
     expect(star).not.toMatch(/[()*' ]/)
-    expect(decodeURIComponent(star)).toBe("Plan (v2) * final's.md")
+    expect(decodeURIComponent(star)).toBe("Plan (v2) - final's.md")
   })
 
   it("falls back to meetsum-export for an empty title", () => {
@@ -71,6 +73,73 @@ describe("filenameFromContentDisposition", () => {
   })
 
   it("never returns a path", () => {
-    expect(filenameFromContentDisposition(`attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd`)).toBe("....etcpasswd")
+    expect(filenameFromContentDisposition(`attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd`)).toBe("..-..-etc-passwd")
+  })
+})
+
+describe("M9 filename hardening", () => {
+  const meta = { date: "2026-10-13T09:00:00.000Z", id: "m_8f3c2a91-77b0" }
+
+  it("gives a Hebrew title the dated ASCII fallback with the id prefix", () => {
+    const header = contentDispositionAttachment("פגישת צוות שבועית", "pdf", meta)
+
+    expect(header).toContain('filename="meetsum-2026-10-13-m8f3c2a9.pdf"')
+    expect(filenameFromContentDisposition(header)).toBe("פגישת צוות שבועית.pdf")
+  })
+
+  it("uses the dated fallback when the title has fewer than 3 ASCII letters", () => {
+    expect(exportAsciiFilename("סיכום Q4", "md", meta)).toBe("meetsum-2026-10-13-m8f3c2a9.md")
+    expect(exportAsciiFilename("סיכום Q4 roadmap", "md", meta)).toBe("Q4-roadmap.md")
+    expect(exportAsciiFilename("שלום", "docx", { date: new Date("2026-01-02T23:00:00Z") })).toBe("meetsum-2026-01-02.docx")
+    expect(exportAsciiFilename("שלום", "docx")).toBe("meetsum-export.docx")
+  })
+
+
+  it("strips bidi controls (RLO spoofing) from both names", () => {
+    const spoof = "invoice‮fdp.exe"
+    const header = contentDispositionAttachment(spoof, "pdf", meta)
+    const decoded = filenameFromContentDisposition(header) ?? ""
+
+    expect(decoded).toBe("invoicefdp.exe.pdf")
+    expect(decoded).not.toMatch(/[؜‎‏‪-‮⁦-⁩]/)
+    expect(contentDispositionAttachment("⁧שלום⁩ ‏עולם‎", "md")).toContain(
+      encodeURIComponent("שלום עולם.md")
+    )
+    expect(filenameFromContentDisposition(`attachment; filename*=UTF-8''a%E2%80%AEb.pdf`)).toBe("ab.pdf")
+  })
+
+  it("replaces Windows-forbidden characters and strips C1 controls", () => {
+    expect(exportFileBaseName('a<b>c:d"e/f\\g|h?i*j\u0085k')).toBe("a-b-c-d-e-f-g-h-i-jk")
+  })
+
+  it("prefixes Windows reserved device names", () => {
+    expect(exportFileBaseName("CON")).toBe("_CON")
+    expect(exportFileBaseName("nul")).toBe("_nul")
+    expect(exportFileBaseName("com1")).toBe("_com1")
+    expect(exportFileBaseName("LPT9.backup")).toBe("_LPT9.backup")
+    expect(exportFileBaseName("Console")).toBe("Console")
+    expect(filenameFromContentDisposition("attachment; filename*=UTF-8''aux.pdf")).toBe("_aux.pdf")
+  })
+
+  it("trims trailing dots and spaces and applies NFC", () => {
+    expect(exportFileBaseName("notes. . .")).toBe("notes")
+    expect(exportFileBaseName("été")).toBe("été")
+  })
+
+  it("caps a 300-character title at 120 code points with the extension after the cap", () => {
+    const title = "פ".repeat(150) + "a".repeat(150)
+    const header = contentDispositionAttachment(title, "pdf", meta)
+    const decoded = filenameFromContentDisposition(header) ?? ""
+
+    expect([...decoded.replace(/\.pdf$/, "")]).toHaveLength(120)
+    expect(decoded.endsWith(".pdf")).toBe(true)
+  })
+
+  it("keeps an emoji title intact in filename* and falls back to the dated name", () => {
+    const header = contentDispositionAttachment("🎉🎉 launch", "pdf", meta)
+
+    expect(filenameFromContentDisposition(header)).toBe("🎉🎉 launch.pdf")
+    expect(header).toContain('filename="launch.pdf"')
+    expect(exportAsciiFilename("🎉 יום", "pdf", meta)).toBe("meetsum-2026-10-13-m8f3c2a9.pdf")
   })
 })

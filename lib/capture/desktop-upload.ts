@@ -130,6 +130,8 @@ export async function ingestDesktopCapture(options: {
   })
   let asset: MediaAsset | undefined
   let assetPersisted = false
+  /** A row created by this request for a non-idempotent (no captureId) upload. */
+  let disposableAsset: MediaAsset | undefined
 
   try {
     if (hasFile && captureId) {
@@ -180,6 +182,7 @@ export async function ingestDesktopCapture(options: {
           isDesktopCapture && Object.keys(metadata).length ? metadata : undefined,
       })
       assetPersisted = true
+      if (!captureId) disposableAsset = asset
     }
 
     if (hasFile && !asset && transcriptSegments.length === 0) {
@@ -227,10 +230,19 @@ export async function ingestDesktopCapture(options: {
       deduplicated: false,
     }
   } catch (error) {
-    // Once an asset row references the object, keep the object so a retry
-    // can reuse it; otherwise the stored upload is orphaned — delete it.
+    // A capture (captureId) keeps its asset row and object so a retry reuses
+    // them. A plain upload has no retry key: every retry would store another
+    // copy, so its row and object are deleted. An unreferenced object is
+    // always orphaned — delete it.
+    if (disposableAsset && meetingRepository.deleteMediaAsset) {
+      const removed = await meetingRepository
+        .deleteMediaAsset(disposableAsset.id, { meetingId: options.meetingId })
+        .catch(() => false)
+
+      if (removed) assetPersisted = false
+    }
     if (!assetPersisted) {
-      await upload.cleanup()
+      await upload.cleanup().catch(() => undefined)
     }
     throw error
   }

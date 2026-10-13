@@ -12,7 +12,7 @@ import { useState, type FormEvent } from "react"
 import { toast } from "sonner"
 
 import { createWorkspace } from "@/components/admin/api"
-import { roleLabel } from "@/components/admin/labels"
+import { adminErrorMessage, roleLabel } from "@/components/admin/labels"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -42,7 +42,7 @@ export function WorkspaceSwitcher({
   dictionary: Dictionary
 }) {
   const router = useRouter()
-  const { status, me, activeWorkspace, error, refresh, switchWorkspace } =
+  const { status, me, activeWorkspace, refresh, switchWorkspace } =
     useWorkspace()
   const [switchingId, setSwitchingId] = useState<string>()
   const [createOpen, setCreateOpen] = useState(false)
@@ -58,7 +58,7 @@ export function WorkspaceSwitcher({
           size="icon-sm"
           onClick={() => void refresh()}
           aria-label={t.retry}
-          title={error}
+          title={t.retry}
         >
           <RefreshCwIcon aria-hidden="true" />
         </Button>
@@ -87,11 +87,7 @@ export function WorkspaceSwitcher({
       toast.success(formatMessage(t.workspaceSwitched, { name }))
       router.refresh()
     } catch (switchError) {
-      toast.error(
-        switchError instanceof Error
-          ? switchError.message
-          : t.workspaceSwitchFailed
-      )
+      toast.error(adminErrorMessage(switchError, t, t.workspaceSwitchFailed))
     } finally {
       setSwitchingId(undefined)
     }
@@ -119,11 +115,7 @@ export function WorkspaceSwitcher({
         await refresh()
       }
     } catch (createError) {
-      toast.error(
-        createError instanceof Error
-          ? createError.message
-          : t.workspaceCreateFailed
-      )
+      toast.error(adminErrorMessage(createError, t, t.workspaceCreateFailed))
     } finally {
       setCreating(false)
     }

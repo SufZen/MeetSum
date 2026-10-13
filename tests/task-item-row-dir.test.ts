@@ -1,9 +1,25 @@
-import { createElement } from "react"
+import { createElement, type ComponentProps, type ReactElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
+import { I18nProvider } from "@/components/i18n-provider"
 import { TaskItemRow } from "@/components/tasks/task-item-row"
+import { getDictionary } from "@/lib/i18n/dictionaries"
 import { getTasksMessages } from "@/lib/i18n/m5/tasks"
+
+/** The row's comment anchor reads `useI18n()`; every app layout mounts the provider. */
+function render(element: ReactElement, locale: "he" | "en" = "en") {
+  // `children` is passed as the third argument below.
+  const props: ComponentProps<typeof I18nProvider> = {
+    locale,
+    dir: locale === "he" ? "rtl" : "ltr",
+    timeZone: "Asia/Jerusalem",
+    messages: getDictionary(locale),
+    children: null,
+  }
+
+  return renderToStaticMarkup(createElement(I18nProvider, props, element))
+}
 
 /**
  * A task title or quote can be in another language than its meeting (an
@@ -12,7 +28,7 @@ import { getTasksMessages } from "@/lib/i18n/m5/tasks"
  */
 describe("TaskItemRow direction", () => {
   it("renders the title and the source quote with dir=auto", () => {
-    const html = renderToStaticMarkup(
+    const html = render(
       createElement(TaskItemRow, {
         item: {
           id: "act_1",
@@ -26,7 +42,8 @@ describe("TaskItemRow direction", () => {
         members: [],
         today: "2026-10-15",
         onPatch: async () => {},
-      })
+      }),
+      "he"
     )
     const title = /<button[^>]*>(?:(?!<\/button>)[\s\S])*Send the Supabase migration plan/.exec(html)?.[0] ?? ""
     const quote = /<blockquote[^>]*>/.exec(html)?.[0] ?? ""
@@ -38,7 +55,7 @@ describe("TaskItemRow direction", () => {
 
   it("renders read-only values for viewers: no check-off, title edit or editor", () => {
     const strings = getTasksMessages("en")
-    const html = renderToStaticMarkup(
+    const html = render(
       createElement(TaskItemRow, {
         item: { id: "act_1", title: "Send the plan", status: "open", owner: "Dana", dueOn: "2026-10-20" },
         meetingId: "m_1",

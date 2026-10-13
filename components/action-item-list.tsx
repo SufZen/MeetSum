@@ -2,12 +2,20 @@
 
 import { CalendarIcon, PencilIcon } from "lucide-react"
 
+import { useI18n } from "@/components/i18n-provider"
 import { PlayerCitation } from "@/components/player/player-citation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { ActionItem } from "@/lib/meetings/repository"
+
+const PRIORITY_KEYS: Record<NonNullable<ActionItem["priority"]>, string> = {
+  low: "tasksPriorityLow",
+  normal: "tasksPriorityNormal",
+  high: "tasksPriorityHigh",
+  urgent: "tasksPriorityUrgent",
+}
 
 export function ActionItemList({
   items = [],
@@ -21,6 +29,9 @@ export function ActionItemList({
   /** Enables the "▶ 12:34" source chip (rendered only when it resolves). */
   dictionary?: Dictionary
 }) {
+  const { t, fmt } = useI18n()
+  const priorityLabel = (priority: NonNullable<ActionItem["priority"]>) => t(PRIORITY_KEYS[priority] ?? priority)
+
   return (
     <div className="flex flex-col gap-2">
       {items.length ? items.map((item) => (
@@ -36,9 +47,9 @@ export function ActionItemList({
               disabled={!onToggle}
             />
             <div className="min-w-0">
-              <div className="leading-6 text-foreground">{item.title}</div>
+              <div dir="auto" className="leading-6 text-foreground">{item.title}</div>
               {item.sourceQuote && (
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                <p dir="auto" className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
                   {item.sourceQuote}
                 </p>
               )}
@@ -59,29 +70,29 @@ export function ActionItemList({
                 variant="ghost"
                 className="size-7 rounded-md"
                 disabled
-                title="Inline editing is planned for the next task editor pass"
+                title={t("mtgTaskEditPlanned")}
               >
                 <PencilIcon aria-hidden="true" className="size-3.5" />
-                <span className="sr-only">Edit task</span>
+                <span className="sr-only">{t("mtgTaskEdit")}</span>
               </Button>
             </div>
           </div>
           {(item.priority || item.confidence) && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              {item.priority && <span className="capitalize">{item.priority}</span>}
+              {item.priority && <span>{priorityLabel(item.priority)}</span>}
               {item.dueDate && (
                 <span className="inline-flex items-center gap-1">
                   <CalendarIcon aria-hidden="true" className="size-3.5" />
-                  {item.dueDate}
+                  <span className="[direction:ltr] [unicode-bidi:isolate]">{item.dueDate}</span>
                 </span>
               )}
-              {item.confidence && <span>{Math.round(item.confidence * 100)}% confidence</span>}
+              {item.confidence && <span>{t("mtgTaskConfidence", { percent: fmt.percent(item.confidence) })}</span>}
             </div>
           )}
         </div>
       )) : (
         <div className="rounded-lg border border-dashed border-line bg-surface-2 p-4 text-sm text-muted-foreground">
-          No smart tasks extracted yet.
+          {t("mtgTasksEmpty")}
         </div>
       )}
     </div>

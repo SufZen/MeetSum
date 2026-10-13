@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 
 import { BotStatusStrip } from "@/components/bot/bot-status-strip"
+import { useI18n } from "@/components/i18n-provider"
 import { MeetingIntegrationControls } from "@/components/integrations/meeting-integration-controls"
 import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
 import { directionForLanguage } from "@/components/speaker-display"
@@ -29,16 +30,22 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
-import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
+import type { MeetingParticipant, MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
+import { getMeetingDurationMs } from "@/lib/meetings/duration"
+import { meetingSourceLabel } from "@/lib/meetings/source-label"
 
-function sourceLabel(source: MeetingRecord["source"]) {
-  if (source === "google_meet") return "Google Meet"
-  if (source === "pwa_recorder") return "Recorder"
-  if (source === "desktop_recorder") return "Desktop recorder"
-  if (source === "upload") return "Upload"
-  if (source === "meeting_bot") return "MeetSum bot"
-  return source.replaceAll("_", " ")
+type Translate = ReturnType<typeof useI18n>["t"]
+
+function sourceLabel(source: MeetingRecord["source"], t: Translate) {
+  return meetingSourceLabel(source, t)
+}
+
+const ATTENDANCE_KEYS: Record<MeetingParticipant["attendanceStatus"], string> = {
+  accepted: "mtgAttendanceAccepted",
+  declined: "mtgAttendanceDeclined",
+  tentative: "mtgAttendanceTentative",
+  needs_action: "mtgAttendanceNeedsAction",
+  unknown: "mtgAttendanceUnknown",
 }
 
 const TITLE_MAX = 200
@@ -89,11 +96,8 @@ export function MeetingHeader({
   const [dialogsReady, setDialogsReady] = useState(false)
   const { me } = useWorkspace()
   const isOwner = Boolean(me?.user.id && meeting.ownerUserId === me.user.id)
-  const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
-  const room = meeting.contexts?.[0]?.name ?? "No room"
+  const { t, plural, fmt, text } = useI18n()
+  const roomName = meeting.contexts?.[0]?.name
   const participantCount =
     meeting.participantDetails?.length || meeting.participants.length || 0
   const durationMs = getMeetingDurationMs(meeting)
@@ -129,7 +133,7 @@ export function MeetingHeader({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-md bg-brand-soft text-brand-text">
-              {sourceLabel(meeting.source)}
+              {sourceLabel(meeting.source, t)}
             </Badge>
             {dictionary && onVisibilityChanged ? (
               <MeetingVisibilityControl
@@ -143,13 +147,13 @@ export function MeetingHeader({
               dir={titleDir}
               className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl"
             >
-              {meeting.title}
+              <bdi>{text(meeting.title, meeting.language)}</bdi>
             </h1>
             <button
               className="rounded p-0.5 text-warn hover:bg-surface-2"
               onClick={onToggleFavorite}
-              title={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
-              aria-label={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
+              title={meeting.isFavorite ? t("mtgFavoriteRemove") : t("mtgFavoriteAdd")}
+              aria-label={meeting.isFavorite ? t("mtgFavoriteRemove") : t("mtgFavoriteAdd")}
               aria-pressed={Boolean(meeting.isFavorite)}
               type="button"
             >
@@ -162,11 +166,11 @@ export function MeetingHeader({
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
               <CalendarIcon aria-hidden="true" className="size-4" />
-              {formatter.format(new Date(meeting.startedAt))}
+              {fmt.date(meeting.startedAt, "dateTime")}
             </span>
             <span className="flex items-center gap-2">
               <ClockIcon aria-hidden="true" className="size-4" />
-              <span className="[unicode-bidi:isolate]">{formatDurationLabel(durationMs, locale)}</span>
+              <span className="[unicode-bidi:isolate]">{durationMs ? fmt.duration(durationMs) : "—"}</span>
             </span>
             <div className="group relative">
               <button
@@ -175,12 +179,12 @@ export function MeetingHeader({
                 type="button"
               >
                 <UsersIcon aria-hidden="true" className="size-4" />
-                {participantCount || 0} participants
+                {plural("mtgParticipantCount", participantCount)}
               </button>
               {meeting.participantDetails?.length ? (
                 <div className="pointer-events-none absolute start-0 top-full z-50 mt-2 hidden min-w-60 max-w-sm rounded-lg border border-line bg-surface p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
                   <div className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">
-                    Participants
+                    {t("mtgParticipantsTitle")}
                   </div>
                   <div className="grid gap-1.5">
                     {meeting.participantDetails.slice(0, 12).map((p) => (
@@ -200,13 +204,17 @@ export function MeetingHeader({
                                 ? "bg-destructive/10 text-destructive"
                                 : "bg-surface-2/50 text-muted-foreground"
                         }`}>
-                          {p.role === "organizer" ? "organizer" : p.attendanceStatus}
+                          {p.role === "organizer"
+                            ? t("mtgParticipantOrganizer")
+                            : ATTENDANCE_KEYS[p.attendanceStatus]
+                              ? t(ATTENDANCE_KEYS[p.attendanceStatus])
+                              : p.attendanceStatus}
                         </span>
                       </div>
                     ))}
                     {meeting.participantDetails.length > 12 ? (
                       <div className="text-xs text-muted-foreground">
-                        +{meeting.participantDetails.length - 12} more
+                        {t("mtgParticipantsMore", { count: fmt.number(meeting.participantDetails.length - 12) })}
                       </div>
                     ) : null}
                   </div>
@@ -217,7 +225,7 @@ export function MeetingHeader({
           <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
               <span className="size-2 rounded-full bg-ok" />
-              <bdi>{room}</bdi>
+              {roomName ? <bdi>{roomName}</bdi> : t("mtgNoRoom")}
             </span>
             <Button
               variant="outline"
@@ -225,7 +233,7 @@ export function MeetingHeader({
               className="h-7 rounded-md border-line bg-brand-soft text-brand-text"
               onClick={onAddToRoom}
             >
-              {dictionary?.addToRoom ?? "Add to room"}
+              {t("addToRoom")}
             </Button>
           </div>
           {dictionary ? (
@@ -242,7 +250,7 @@ export function MeetingHeader({
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" className="h-8" onClick={onShare}>
             <Share2Icon data-icon="inline-start" />
-            {dictionary?.meetingShare ?? "Share"}
+            {t("meetingShare")}
           </Button>
           {showMenu && dictionary ? (
             <DropdownMenu onOpenChange={(open) => open && setDialogsReady(true)}>

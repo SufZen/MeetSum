@@ -1,19 +1,15 @@
-import { DEFAULT_DUE_DATE_TIME_ZONE } from "@/lib/tasks/due-date"
+import { resolveTimeZone } from "@/lib/i18n/time-zone"
 
 /**
- * Time zone that anchors due phrases and "overdue" (M5). There is no
- * per-workspace zone yet, so `MEETSUM_DEFAULT_TIMEZONE` (default
- * Asia/Jerusalem) applies to every workspace.
+ * Time zone that anchors due phrases and "overdue" (M5). Since M9 a thin
+ * wrapper over the shared resolver (`lib/i18n/time-zone.ts`): pass the
+ * user's and workspace's zones when known; otherwise
+ * `MEETSUM_DEFAULT_TIMEZONE`, then Asia/Jerusalem. Every candidate is
+ * validated against `Intl.supportedValuesOf("timeZone")`.
  */
-export function getTaskTimeZone(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.MEETSUM_DEFAULT_TIMEZONE?.trim()
-
-  if (!configured) return DEFAULT_DUE_DATE_TIME_ZONE
-
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: configured })
-    return configured
-  } catch {
-    return DEFAULT_DUE_DATE_TIME_ZONE
-  }
+export function getTaskTimeZone(
+  env: NodeJS.ProcessEnv = process.env,
+  scope: { user?: string | null; workspace?: string | null } = {}
+): string {
+  return resolveTimeZone({ ...scope, env: env.MEETSUM_DEFAULT_TIMEZONE })
 }

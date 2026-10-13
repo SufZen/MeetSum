@@ -138,6 +138,7 @@ export function getLlmStatus(
   }
   const geminiTier = getGeminiTier(env)
   const warnings: string[] = []
+  const warningCodes: NonNullable<LlmStatus["warningCodes"]> = []
   const routes: LlmStatus["routes"] = {}
 
   for (const task of LLM_TASKS) {
@@ -150,10 +151,15 @@ export function getLlmStatus(
     warnings.push(
       "No LLM provider configured: summaries use the heuristic fallback (set GOOGLE_GEMINI_API_KEY, optionally ANTHROPIC_API_KEY)"
     )
+    warningCodes.push("llm_warning_no_provider")
   }
-  if (configured.gemini && geminiTier === "free") warnings.push(GEMINI_FREE_TIER_WARNING)
+  if (configured.gemini && geminiTier === "free") {
+    warnings.push(GEMINI_FREE_TIER_WARNING)
+    warningCodes.push("llm_warning_gemini_free_tier")
+  }
   if (preference === "anthropic" && !configured.anthropic) {
     warnings.push("LLM preference is anthropic but ANTHROPIC_API_KEY is not set; using Gemini")
+    warningCodes.push("llm_warning_anthropic_missing")
   }
 
   return {
@@ -166,6 +172,7 @@ export function getLlmStatus(
     preference,
     geminiTier,
     warnings,
+    warningCodes,
     heuristicOnly: !configured.gemini && !configured.anthropic,
   }
 }

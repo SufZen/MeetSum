@@ -1,4 +1,5 @@
 import { getDatabasePool } from "@/lib/db/client"
+import { cleanupReadNotifications } from "@/lib/notifications/cleanup"
 import { deleteMeetingObject } from "@/lib/storage/object-storage"
 import {
   applyMediaRetention,
@@ -116,6 +117,14 @@ async function main() {
         (result.errors.length ? `, ${result.errors.length} error(s)` : "")
     )
   }
+
+  // M9: read notifications past MEETSUM_NOTIFICATIONS_RETENTION_DAYS (90).
+  const notifications = await cleanupReadNotifications(getDatabasePool(), { execute })
+
+  console.log(
+    `notifications retention ${notifications.days}d: ${notifications.matched} read row(s)` +
+      (execute ? `, deleted ${notifications.deleted}` : " (dry run)")
+  )
 
   await getDatabasePool().end()
 }

@@ -13,6 +13,11 @@ import {
   createPostgresMeetingRepository,
   createPostgresShareLookup,
 } from "@/lib/meetings/postgres-repository"
+import {
+  createInMemoryShareVerifyThrottle,
+  createPostgresShareVerifyThrottle,
+  type ShareVerifyThrottle,
+} from "@/lib/sharing/share-verify-throttle"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 
 /** Where meetings live; scoped repositories are cheap views over it. */
@@ -104,6 +109,15 @@ export function getShareLookup(): ShareLookup {
   return backend.kind === "postgres"
     ? createPostgresShareLookup(backend.client)
     : createInMemoryShareLookup(backend.db)
+}
+
+/** Share-link password throttle on the share rows of the active backend. */
+export function getShareVerifyThrottle(): ShareVerifyThrottle {
+  const backend = getMeetingBackend()
+
+  return backend.kind === "postgres"
+    ? createPostgresShareVerifyThrottle(backend.client)
+    : createInMemoryShareVerifyThrottle(backend.db)
 }
 
 /**

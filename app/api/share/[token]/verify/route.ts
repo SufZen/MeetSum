@@ -1,19 +1,33 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { verifyApiKey } from "@/lib/auth/api-keys"
+import { ShareVerifyBusyError, verifySharePassword } from "@/lib/sharing/share-password"
 import { withPublicRoute } from "@/lib/auth/authz"
 import { getSessionSecret } from "@/lib/auth/session"
 import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
 import { lookupPublicShare } from "@/lib/sharing/public-share"
 import {
+  SHARE_ACCESS_COOKIE,
   createShareAccessCookie,
   getShareAccessCookiePath,
+  verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
 import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
+import { getShareVerifyThrottle } from "@/lib/meetings/store"
+import { notifyShareAttempts } from "@/lib/notifications/notify"
 
 /** Password attempts per IP per share token. */
 const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
+
+function cookieValue(request: Request, name: string): string | undefined {
+  for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+    const [key, ...rest] = part.trim().split("=")
+
+    if (key === name) return rest.join("=")
+  }
+
+  return undefined
+}
 
 function isFormSubmission(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
@@ -85,9 +99,64 @@ export const POST = withPublicRoute<{ token: string }>(
         : NextResponse.json({ valid: true, passwordRequired: false })
     }
 
+    // Already verified (a valid access cookie): no password check at all.
+    if (
+      verifyShareAccessCookie(cookieValue(request, SHARE_ACCESS_COOKIE), {
+        token,
+        passwordHash: share.passwordHash,
+        secret: getSessionSecret(),
+      })
+    ) {
+      return form ? redirectToShare(token) : NextResponse.json({ valid: true, passwordRequired: true })
+    }
+
     const password = await readPassword(request, form)
-    const isValid =
-      Boolean(password) && verifyApiKey(password, [share.passwordHash])
+    const throttle = getShareVerifyThrottle()
+    let isValid = false
+
+    if (password) {
+      // Per-token failure spacing across every IP (never a lock): after 10
+      // failures attempts are spaced 2 s → 30 s; an early attempt gets 429.
+      const decision = await throttle.begin(token)
+
+      // The share vanished between the lookup and here: the same 404.
+      if (!decision) return jsonError("Share link not found or expired", 404)
+      if (!decision.allowed) {
+        const retryAfter = String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000)))
+
+        return form
+          ? redirectToShare(token, "rate_limited")
+          : NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": retryAfter } })
+      }
+
+      try {
+        isValid = await verifySharePassword(password, share.passwordHash, { key: token })
+      } catch (error) {
+        if (!(error instanceof ShareVerifyBusyError)) throw error
+
+        // The verifier stayed saturated past the short queue timeout.
+        return form
+          ? redirectToShare(token, "rate_limited")
+          : NextResponse.json({ error: "Service busy" }, { status: 503, headers: { "Retry-After": "5" } })
+      }
+
+      if (isValid) {
+        await throttle.succeed(token)
+      } else {
+        const failed = await throttle.fail(token)
+
+        if (failed?.notifyOwner && result.meeting.workspaceId) {
+          // Once per streak: the owner learns the link is being guessed (no password data).
+          await notifyShareAttempts({
+            workspaceId: result.meeting.workspaceId,
+            meetingId: result.meeting.id,
+            ownerUserId: result.meeting.ownerUserId,
+            shareId: share.id,
+            failures: failed.failures,
+          }).catch(() => undefined)
+        }
+      }
+    }
 
     if (!isValid) {
       if (form) return redirectToShare(token, "invalid")

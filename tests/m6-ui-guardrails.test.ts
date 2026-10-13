@@ -17,7 +17,16 @@ describe("M6 UI guardrails", () => {
   it("has no Cadence violations (physical direction, raw palette, arbitrary colours or sizes)", () => {
     const output = execFileSync(
       process.execPath,
-      ["design-system/check.mjs", "--json", ...M6_DIRS, "app/[locale]/search", "components/command-palette.tsx"],
+      [
+        "design-system/check.mjs",
+        "--json",
+        // The Cadence rules this guardrail covers (M9 added i18n/dialog rules, ratcheted separately).
+        "--rules",
+        "physical-direction,raw-palette,arbitrary-colour,arbitrary-size,hex-literal",
+        ...M6_DIRS,
+        "app/[locale]/search",
+        "components/command-palette.tsx",
+      ],
       { encoding: "utf8" }
     )
 

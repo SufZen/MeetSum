@@ -1,0 +1,4 @@
+{
+  "description": "Serious/critical axe violations tolerated by tests/e2e/m9-screenshots.spec.ts. Each entry: { surface, rule, reason }. Keep empty unless a reason is recorded.",
+  "entries": []
+}

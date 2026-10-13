@@ -3,6 +3,7 @@
 import {
   type CSSProperties,
   type ChangeEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -11,7 +12,6 @@ import {
   useTransition,
 } from "react"
 import dynamic from "next/dynamic"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { botApi } from "@/components/bot/bot-api"
@@ -19,17 +19,14 @@ import {
   BotSessionsProvider,
   type BotSessionsContextValue,
 } from "@/components/bot/bot-sessions-context"
-import { RecorderDock } from "@/components/bot/recorder-dock"
 import { dockEntriesFrom, type DockStopAction } from "@/components/bot/recorder-dock-state"
-import { StopBotDialog } from "@/components/bot/stop-bot-dialog"
 import { useBotSessions } from "@/components/bot/use-bot-sessions"
-import { useBrowserRecorder } from "@/components/bot/use-browser-recorder"
+import { useBrowserRecorder, type RecordingMeta } from "@/components/bot/use-browser-recorder"
+import { preloadRecorderChunks } from "@/components/bot/recorder-preload"
+import { LocalizedError, planBrowserRecording, uploadErrorText } from "@/components/bot/recording-target"
 import { CommandPaletteHost } from "@/components/command-palette"
 import { useWorkspace } from "@/components/workspace-context"
-import {
-  DriveRecordingPickerDrawer,
-  type DriveImportResult,
-} from "@/components/drive-recording-picker-drawer"
+import type { DriveImportResult } from "@/components/drive-recording-picker-drawer"
 import {
   MainSidebar,
   type MainPanelKey,
@@ -40,14 +37,15 @@ import {
   MeetingInboxPanel,
   type MeetingSortMode,
 } from "@/components/meeting-inbox-panel"
-import { MeetingRightRail } from "@/components/meeting-right-rail"
 import { MeetingWorkspace, type MeetingPermissions } from "@/components/meeting-workspace"
-import { localizeSpeakerLabel } from "@/components/speaker-display"
-import { TalkTimePanel } from "@/components/talk-time-panel"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { providerLabelString, statusMessageString } from "@/components/status-message-text"
+import { OfflineBanner } from "@/components/pwa/offline-banner"
+import { UploadQueueProvider } from "@/components/pwa/upload-queue-provider"
+import { usePromptDialog } from "@/components/ui/prompt-dialog"
+import { useShellUrl } from "@/hooks/use-shell-url"
+import { ShareMeetingDialog } from "@/components/share/share-meeting-dialog"
 import {
   TopCommandBar,
   type AiProviderStatus,
@@ -58,8 +56,9 @@ import {
   SLOW_STATUS_POLL_MS,
   nextPollDelay,
 } from "@/lib/client/polling"
-import { apiErrorMessage } from "@/lib/i18n/api-errors"
+import { withoutParams } from "@/lib/client/shell-navigation"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { fillMessage, pluralMessage, translate } from "@/lib/i18n/messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { selectRecentRooms } from "@/lib/rooms"
 import type {
@@ -72,7 +71,6 @@ import type {
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
 import type { MeetingDetailResponse } from "@/lib/meetings/transcript-wire"
-import { parseTimeParam } from "@/lib/player/deep-link"
 
 // M5 analytics card: its own chunk (right rail only).
 const AnalyticsCard = dynamic(
@@ -98,6 +96,55 @@ const OperationalPage = dynamic(
   { loading: panelLoading }
 )
 
+// M9 D6 bundle diet: everything below loads on first use, or after the
+// meetings view, with a skeleton that keeps the final layout.
+const railLoading = () => (
+  <aside aria-busy="true" className="hidden min-h-0 animate-pulse border-s border-line bg-surface-2 2xl:block" />
+)
+const MeetingRightRail = dynamic(
+  () => import("@/components/meeting-right-rail").then((mod) => mod.MeetingRightRail),
+  { loading: railLoading }
+)
+const TalkTimePanel = dynamic(
+  () => import("@/components/talk-time-panel").then((mod) => mod.TalkTimePanel),
+  { loading: () => <div aria-busy="true" className="h-32 animate-pulse rounded-md bg-surface-2" /> }
+)
+const DriveRecordingPickerDrawer = dynamic(
+  () => import("@/components/drive-recording-picker-drawer").then((mod) => mod.DriveRecordingPickerDrawer),
+  { ssr: false }
+)
+// Preloaded when the recorder sheet opens (recorder-preload.ts). If the chunk
+// still can't load (opened offline), the dock is skipped instead of crashing
+// the shell; the sheet keeps its own Stop control.
+const RecorderDock = dynamic(
+  () =>
+    import("@/components/bot/recorder-dock")
+      .then((mod) => mod.RecorderDock)
+      .catch(() => function RecorderDockUnavailable() {
+        return null
+      }),
+  { ssr: false }
+)
+const StopBotDialog = dynamic(
+  () => import("@/components/bot/stop-bot-dialog").then((mod) => mod.StopBotDialog),
+  { ssr: false }
+)
+const PayloadPreviewDialog = dynamic(
+  () => import("@/components/meeting-shell-dialogs").then((mod) => mod.PayloadPreviewDialog),
+  { ssr: false }
+)
+const ParticipantsDialog = dynamic(
+  () => import("@/components/meeting-shell-dialogs").then((mod) => mod.ParticipantsDialog),
+  { ssr: false }
+)
+const TagsDialog = dynamic(
+  () => import("@/components/meeting-shell-dialogs").then((mod) => mod.TagsDialog),
+  { ssr: false }
+)
+
+/** Room names are short labels (M9 D2). */
+const ROOM_NAME_MAX = 80
+
 type MeetingPageState = {
   limit: number
   offset: number
@@ -106,6 +153,9 @@ type MeetingPageState = {
 }
 
 type DetailEntry = { meeting: MeetingRecord; permissions: MeetingPermissions }
+
+/** A meeting detail read server-side (deep link outside the first page). */
+export type ShellDetailEntry = DetailEntry
 
 const DETAIL_CACHE_SIZE = 10
 const NO_PERMISSIONS: MeetingPermissions = { canWrite: false, canManage: false }
@@ -136,6 +186,16 @@ function listItemFromRecord(record: MeetingRecord, previous?: MeetingListItem): 
   }
 }
 
+/**
+ * A localized toast for a failed request. Server error text is English and
+ * never shown; only known error codes map to their own message.
+ */
+function shellError(body: unknown, fallback: string, dictionary?: Pick<Dictionary, "googleNotConfigured">): string {
+  const code = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined
+
+  return code === "google_not_configured" && dictionary ? dictionary.googleNotConfigured : fallback
+}
+
 function isActiveJob(job: JobRecord) {
   return job.status === "queued" || job.status === "active"
 }
@@ -156,18 +216,32 @@ export function CommandCenterShell({
   meetings,
   rooms,
   user,
+  workspaceId,
+  initialDetail,
+  unavailableMeetingId,
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
   meetings: MeetingListItem[]
   rooms: SidebarRoom[]
   user?: SidebarUser
+  /** The session's workspace (partitions the offline recording queue). */
+  workspaceId?: string
+  /** A `?meeting=` deep link outside the first page, read server-side. */
+  initialDetail?: ShellDetailEntry
+  /** A `?meeting=` deep link the user cannot see: inbox plus a notice. */
+  unavailableMeetingId?: string
 }) {
-  const router = useRouter()
+  // M9 D1: panel, meeting and `t` live in the URL; nothing mirrors them.
+  const shell = useShellUrl(locale)
+  const { navigate } = shell
+  const activePanel: MainPanelKey = shell.state.panel
   const [sidebarRooms, setSidebarRooms] = useState(rooms)
-  const initialMeetings = useMemo(() => meetings, [meetings])
-  const [meetingRecords, setMeetingRecords] = useState(initialMeetings)
-  const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeetings[0]?.id ?? "")
+  const [meetingRecords, setMeetingRecords] = useState(() =>
+    initialDetail ? [listItemFromRecord(initialDetail.meeting), ...meetings] : meetings
+  )
+  const [unavailableId, setUnavailableId] = useState<string | null>(unavailableMeetingId ?? null)
+  const { prompt, dialog: promptDialog } = usePromptDialog()
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [sortMode, setSortMode] = useState<MeetingSortMode>("smart")
@@ -176,16 +250,15 @@ export function CommandCenterShell({
   const [meetingPage, setMeetingPage] = useState<MeetingPageState>({
     limit: 5,
     offset: 0,
-    total: initialMeetings.length,
+    total: meetings.length,
     hasMore: false,
   })
   const [meetingsLoading, setMeetingsLoading] = useState(false)
-  const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
-  const [detail, setDetail] = useState<DetailEntry | null>(null)
-  const detailCacheRef = useRef(new Map<string, DetailEntry>())
+  const [detail, setDetail] = useState<DetailEntry | null>(initialDetail ?? null)
+  const detailCacheRef = useRef(
+    new Map<string, DetailEntry>(initialDetail ? [[initialDetail.meeting.id, initialDetail]] : [])
+  )
   const detailAbortRef = useRef<AbortController | null>(null)
-  const [deepLinkTime, setDeepLinkTime] = useState<{ meetingId: string; ms: number } | null>(null)
-  const [shareSections, setShareSections] = useState<string[] | null>(null)
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [providers, setProviders] = useState<ProviderStatusView[]>([])
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatusView>()
@@ -205,27 +278,26 @@ export function CommandCenterShell({
   const [stopBusy, setStopBusy] = useState(false)
   const [dockHeight, setDockHeight] = useState(0)
   const browserRecorder = useBrowserRecorder({
-    onRecordingReady: (file, meta) => handleBrowserRecording(file, meta.meetingId),
+    onRecordingReady: (file, meta) => handleBrowserRecording(file, meta),
+    userId: user?.id,
+    workspaceId,
+    recordingTitle: dictionary.shellBrowserRecordingTitle,
   })
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
+  const [drivePickerReady, setDrivePickerReady] = useState(false)
+  const [stopDialogReady, setStopDialogReady] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  const [shareLink, setShareLink] = useState("")
-  const [sharePrivateConfirm, setSharePrivateConfirm] = useState(false)
   const [participantsOpen, setParticipantsOpen] = useState(false)
   const [participants, setParticipants] = useState<MeetingParticipant[]>([])
   const [tagsOpen, setTagsOpen] = useState(false)
   const [tagDraft, setTagDraft] = useState("")
   const [payloadPreviewOpen, setPayloadPreviewOpen] = useState(false)
   const [payloadPreview, setPayloadPreview] = useState<string>("")
+  const [payloadLoading, setPayloadLoading] = useState(false)
+  // Lazy dialogs mount on first open and stay mounted (close animation).
+  const [dialogsReady, setDialogsReady] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
   const [isPending, startTransition] = useTransition()
-
-  // A ?meeting= deep link (e.g. from a room page) may point outside the
-  // current page of meetings; fetch it once and keep it pinned in the list
-  // until the user selects a different meeting.
-  const deepLinkedMeetingRef = useRef<MeetingListItem | null>(null)
-  const deepLinkAttemptRef = useRef<string | null>(null)
-  const deepLinkTimeReadRef = useRef(false)
 
   /** LRU of meeting details (most recent last). */
   const rememberDetail = useCallback((entry: DetailEntry) => {
@@ -239,53 +311,54 @@ export function CommandCenterShell({
     )
   }, [])
 
-  // M8: `?panel=settings&section=integrations` deep link (OAuth return).
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("panel") === "settings") {
-      queueMicrotask(() => setActivePanel("settings"))
-    }
-  }, [])
+  const setActivePanel = useCallback((panel: MainPanelKey) => navigate({ panel }), [navigate])
+
+  // A panel change moves focus to the panel's heading (not on first paint).
+  const panelRegionRef = useRef<HTMLDivElement>(null)
+  const previousPanelRef = useRef(activePanel)
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const meetingId = params.get("meeting")
+    if (previousPanelRef.current === activePanel) return
+    previousPanelRef.current = activePanel
 
-    if (!deepLinkTimeReadRef.current) {
-      deepLinkTimeReadRef.current = true
+    // Lazy panels mount a frame later; try for a short while.
+    let attempts = 0
+    const focusHeading = () => {
+      const heading = panelRegionRef.current?.querySelector<HTMLElement>("h1, h2")
 
-      const ms = parseTimeParam(params.get("t"))
-
-      if (meetingId && ms !== undefined) queueMicrotask(() => setDeepLinkTime({ meetingId, ms }))
+      if (heading) {
+        if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1")
+        heading.focus({ preventScroll: false })
+      } else if (attempts++ < 20) {
+        window.setTimeout(focusHeading, 50)
+      }
     }
 
-    if (!meetingId) return
-    if (meetingRecords.some((meeting) => meeting.id === meetingId)) {
-      queueMicrotask(() => setSelectedMeetingId(meetingId))
-      return
-    }
-    if (deepLinkAttemptRef.current === meetingId) return
+    focusHeading()
+  }, [activePanel])
 
-    deepLinkAttemptRef.current = meetingId
-    void fetch(`/api/meetings/${encodeURIComponent(meetingId)}`)
-      .then((response) => (response.ok ? response.json() : undefined))
-      .then((body: Partial<MeetingDetailResponse> | undefined) => {
-        const record = body?.meeting
+  // `?record=1` (the PWA "New recording" shortcut) only OPENS the recorder
+  // sheet. URL state is navigation: capture always needs the user's own click
+  // on Record inside the sheet (no microphone request from a link). The
+  // parameter is dropped at once so it never round-trips or replays.
+  const recordRequested = shell.searchParams.get("record") === "1"
+  const [recordSheetOpen, setRecordSheetOpen] = useState(false)
 
-        if (!record) return
+  useEffect(() => {
+    if (!recordRequested) return
+    window.history.replaceState(null, "", `${window.location.pathname}${withoutParams(window.location.search, ["record"])}`)
+    queueMicrotask(() => setRecordSheetOpen(true))
+  }, [recordRequested])
 
-        const linked = listItemFromRecord(record)
-
-        rememberDetail({ meeting: record, permissions: body?.permissions ?? NO_PERMISSIONS })
-        deepLinkedMeetingRef.current = linked
-        setMeetingRecords((current) =>
-          current.some((meeting) => meeting.id === linked.id)
-            ? current
-            : [linked, ...current]
-        )
-        setSelectedMeetingId(linked.id)
-      })
-      .catch(() => undefined)
-  }, [meetingRecords, rememberDetail])
+  // Load the recorder's lazy chunks while still online, so Record works if
+  // the connection drops after the sheet opened.
+  useEffect(() => {
+    if (recordSheetOpen) void preloadRecorderChunks()
+  }, [recordSheetOpen])
+  function openDrivePicker() {
+    setDrivePickerReady(true)
+    setDrivePickerOpen(true)
+  }
 
   // Jobs drive the adaptive poll; completions refresh the list and detail.
   const jobsSeenRef = useRef(new Map<string, JobRecord["status"]>())
@@ -413,15 +486,23 @@ export function CommandCenterShell({
   const aiStatus: AiProviderStatus | undefined = geminiProvider
     ? {
         configured: geminiProvider.configured,
-        label: geminiProvider.label,
-        detail: geminiProvider.detail,
+        label: providerLabelString((key, values) => translate(dictionary, key, values), geminiProvider),
+        detail: statusMessageString(
+          (key, values) => translate(dictionary, key, values),
+          geminiProvider.detailMessage,
+          geminiProvider.detail
+        ),
       }
     : undefined
 
-  const selectedListItem =
+  // The URL's meeting, else the first row. A deep-linked meeting outside the
+  // current page renders from its detail (read server-side or fetched).
+  const urlMeetingId = shell.state.meeting
+  const selectedMeetingId = urlMeetingId ?? meetingRecords[0]?.id ?? ""
+  const selectedListItem: MeetingListItem | null =
     meetingRecords.find((meeting) => meeting.id === selectedMeetingId) ??
-    meetingRecords[0] ??
-    null
+    (detail && detail.meeting.id === selectedMeetingId ? listItemFromRecord(detail.meeting) : null) ??
+    (urlMeetingId ? null : (meetingRecords[0] ?? null))
   // The full record comes from `/api/meetings/[id]`; until it arrives the
   // list row (a subset of the record) renders the header.
   const selectedDetail =
@@ -449,7 +530,11 @@ export function CommandCenterShell({
           error?: string
         }
 
-        if (!response.ok || !body.meeting) throw new Error(body.error ?? "Unable to refresh meeting")
+        if (response.status === 404 || response.status === 403) {
+          setUnavailableId(meetingId)
+          return undefined
+        }
+        if (!response.ok || !body.meeting) throw new Error(dictionary.shellErrorRefreshMeeting)
 
         const entry: DetailEntry = { meeting: body.meeting, permissions: body.permissions ?? NO_PERMISSIONS }
 
@@ -466,7 +551,7 @@ export function CommandCenterShell({
         throw error
       }
     },
-    [rememberDetail]
+    [dictionary.shellErrorRefreshMeeting, rememberDetail]
   )
 
   // Selecting a meeting shows its cached detail at once and revalidates.
@@ -494,18 +579,13 @@ export function CommandCenterShell({
     if (!wasBusy && (activeJobCount > 0 || selectedProcessing)) kickPollRef.current()
   }, [activeJobCount, selectedProcessing])
 
-  const selectMeeting = useCallback((meetingId: string) => {
-    if (deepLinkedMeetingRef.current?.id !== meetingId) {
-      deepLinkedMeetingRef.current = null
-    }
-    setSelectedMeetingId(meetingId)
-    setActivePanel("meetings")
-    const params = new URLSearchParams(window.location.search)
-
-    params.set("meeting", meetingId)
-    params.delete("t")
-    router.replace(`?${params.toString()}`, { scroll: false })
-  }, [router])
+  const selectMeeting = useCallback(
+    (meetingId: string) => {
+      setUnavailableId(null)
+      navigate({ panel: "meetings", meeting: meetingId, t: null })
+    },
+    [navigate]
+  )
 
   async function refreshMeeting(meetingId = selectedMeeting?.id) {
     if (!meetingId) return
@@ -520,7 +600,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(body.error ?? "Unable to refresh meeting")
+      throw new Error(dictionary.shellErrorRefreshMeeting)
     }
 
     setMeetingRecords((current) =>
@@ -563,16 +643,8 @@ export function CommandCenterShell({
     const meetingsBody = await meetingsResponse.json()
     const listItems: MeetingListItem[] = meetingsBody.meetings ?? []
     const nextMeetings = listItems
-    const pinned = deepLinkedMeetingRef.current
-    const keepPinned = Boolean(
-      pinned && !nextMeetings.some((meeting) => meeting.id === pinned.id)
-    )
 
-    setMeetingRecords((current) =>
-      keepPinned && pinned
-        ? [current.find((meeting) => meeting.id === pinned.id) ?? pinned, ...nextMeetings]
-        : nextMeetings
-    )
+    setMeetingRecords(nextMeetings)
     setMeetingPage(
       meetingsBody.page ?? {
         limit: pageSize,
@@ -582,21 +654,12 @@ export function CommandCenterShell({
       }
     )
     setMeetingsLoading(false)
-    if (nextSelectedMeetingId) {
-      selectMeeting(nextSelectedMeetingId)
-    } else if (
-      nextMeetings.length &&
-      !(keepPinned && pinned?.id === selectedMeetingId) &&
-      !nextMeetings.some((meeting) => meeting.id === selectedMeetingId)
-    ) {
-      setSelectedMeetingId(nextMeetings[0].id)
-    }
+    if (nextSelectedMeetingId) selectMeeting(nextSelectedMeetingId)
   }, [
     pageOffset,
     pageSize,
     query,
     selectMeeting,
-    selectedMeetingId,
     sortMode,
     statusFilter,
   ])
@@ -628,7 +691,7 @@ export function CommandCenterShell({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        title: file.name.replace(/\.[^.]+$/, "") || "Uploaded meeting",
+        title: file.name.replace(/\.[^.]+$/, "") || dictionary.shellUploadedMeetingTitle,
         source: "upload",
         language: "mixed",
         startedAt: new Date().toISOString(),
@@ -638,18 +701,22 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(body.error ?? "Unable to create meeting")
+      throw new LocalizedError(dictionary.shellErrorCreateMeeting)
     }
 
     setMeetingRecords((current) =>
       [listItemFromRecord(body.meeting as MeetingRecord), ...current].slice(0, pageSize)
     )
-    setSelectedMeetingId(body.meeting.id)
-    setActivePanel("meetings")
+    selectMeeting(body.meeting.id)
     return body.meeting as MeetingRecord
   }
 
-  async function uploadFile(file: File, meeting = selectedMeeting) {
+  /**
+   * Uploads to `meeting`; `null` (a new recording) always creates a new
+   * meeting. Only an omitted argument falls back to the selected meeting
+   * (the Upload drawer).
+   */
+  async function uploadFile(file: File, meeting: Pick<MeetingRecord, "id"> | null = selectedMeeting) {
     const targetMeeting = meeting ?? (await createMeetingForFile(file))
     const formData = new FormData()
 
@@ -662,11 +729,11 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(body.error ?? "Unable to upload media")
+      throw new LocalizedError(dictionary.shellErrorUploadMedia)
     }
 
     setJobs((current) => [body.job, ...current])
-    toast.success("Upload queued for meeting intelligence")
+    toast.success(dictionary.shellToastUploadQueued)
     await refreshMeeting(targetMeeting.id)
     await refreshOperationalState()
   }
@@ -679,7 +746,7 @@ export function CommandCenterShell({
     formData.append(
       "meeting",
       JSON.stringify({
-        title: file.name.replace(/\.[^.]+$/, "") || "Desktop recording",
+        title: file.name.replace(/\.[^.]+$/, "") || dictionary.shellDesktopRecordingTitle,
         startedAt: new Date().toISOString(),
         language: "mixed",
         participants: [],
@@ -702,18 +769,17 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      throw new Error(body.error ?? "Unable to import desktop recording")
+      throw new LocalizedError(dictionary.shellErrorImportDesktop)
     }
 
     if (body.meeting) {
       setMeetingRecords((current) =>
         [listItemFromRecord(body.meeting as MeetingRecord), ...current].slice(0, pageSize)
       )
-      setSelectedMeetingId(body.meeting.id)
-      setActivePanel("meetings")
+      selectMeeting(body.meeting.id)
     }
     setJobs((current) => (body.job ? [body.job, ...current] : current))
-    toast.success("Desktop recording queued for meeting intelligence")
+    toast.success(dictionary.shellToastDesktopQueued)
     await refreshOperationalState()
   }
 
@@ -721,11 +787,9 @@ export function CommandCenterShell({
     const file = event.target.files?.[0]
 
     if (!file) return
-    toast.info(`Uploading ${file.name}`)
+    toast.info(fillMessage(dictionary.shellToastUploading, { name: file.name }))
     startTransition(() =>
-      void uploadFile(file).catch((error) => {
-        toast.error(error.message)
-      })
+      void uploadFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorUploadMedia))
     )
     event.target.value = ""
   }
@@ -734,35 +798,62 @@ export function CommandCenterShell({
     const file = event.target.files?.[0]
 
     if (!file) return
-    toast.info(`Importing desktop recording ${file.name}`)
+    toast.info(fillMessage(dictionary.shellToastImportingDesktop, { name: file.name }))
     startTransition(() =>
-      void importDesktopFile(file).catch((error) => {
-        toast.error(error.message)
-      })
+      void importDesktopFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorImportDesktop))
     )
     event.target.value = ""
   }
 
-  function handleBrowserRecording(file: File, meetingId: string | null) {
-    const target =
-      (meetingId ? meetingRecords.find((meeting) => meeting.id === meetingId) : undefined) ??
-      selectedMeeting ??
-      undefined
+  function uploadToastError(error: unknown, fallback: string) {
+    toast.error(uploadErrorText(error, { offline: dictionary.pwaOffline, fallback }))
+  }
 
-    toast.info("Recording saved. Uploading audio...")
+  /**
+   * M9 D5: a recording started for a meeting (the explicit "record into this
+   * meeting" action) keeps the M7 path (upload to that meeting); its
+   * offline-queue copy is dropped after success and, if the direct upload
+   * fails, uploads through the idempotent ingest route with
+   * `targetMeetingId`, so it attaches to the same meeting (never a second
+   * one). A new recording (the recorder sheet, `?record=1`) never targets
+   * the selected meeting: it goes through the queue, which creates its own
+   * meeting, or without a queue uploads to a new meeting.
+   */
+  function handleBrowserRecording(file: File, meta: RecordingMeta) {
+    const plan = planBrowserRecording(meta)
+    const { captureId } = meta
+    const queue = () =>
+      user?.id && workspaceId
+        ? import("@/lib/client/upload-queue/browser")
+            .then((browser) => browser.getUploadQueue(user.id as string, workspaceId))
+            .catch(() => null)
+        : Promise.resolve(null)
+
+    toast.info(dictionary.shellToastRecordingSaved)
+    if (plan.kind === "queue") {
+      void queue().then((uploadQueue) => uploadQueue?.flush({ force: true }))
+      return
+    }
     startTransition(() =>
-      void uploadFile(file, target).catch((error) => {
-        toast.error(error.message)
-      })
+      void uploadFile(file, plan.kind === "meeting" ? { id: plan.meetingId } : null)
+        .then(() => (captureId ? queue().then((uploadQueue) => uploadQueue?.remove(captureId)) : undefined))
+        .catch((error) => {
+          if (captureId) {
+            // The queued copy uploads once the connection is back.
+            if (!navigator.onLine) toast.info(dictionary.pwaOffline)
+            else uploadToastError(error, dictionary.shellErrorUploadMedia)
+            void queue().then((uploadQueue) => uploadQueue?.flush({ force: true }))
+            return
+          }
+          uploadToastError(error, dictionary.shellErrorUploadMedia)
+        })
     )
   }
 
   function handleRecordingReady(file: File) {
-    toast.info("Recording saved. Uploading audio...")
+    toast.info(dictionary.shellToastRecordingSaved)
     startTransition(() =>
-      void uploadFile(file, selectedMeeting ?? undefined).catch((error) => {
-        toast.error(error.message)
-      })
+      void uploadFile(file).catch((error) => uploadToastError(error, dictionary.shellErrorUploadMedia))
     )
   }
 
@@ -775,10 +866,9 @@ export function CommandCenterShell({
         status: item.status === "done" ? "open" : "done",
       }),
     })
-    const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to update action item")
+      toast.error(dictionary.shellErrorUpdateActionItem)
       return
     }
 
@@ -788,20 +878,24 @@ export function CommandCenterShell({
   async function previewRealizeOSPayload() {
     if (!selectedMeeting) return
 
-    setPayloadPreview("Loading…")
+    setPayloadPreview("")
+    setPayloadLoading(true)
+    setDialogsReady(true)
     setPayloadPreviewOpen(true)
     try {
       const response = await fetch(`/api/integrations/realizeos/preview/${selectedMeeting.id}`)
       const body = await response.json()
 
       if (!response.ok) {
-        setPayloadPreview(JSON.stringify({ error: body.error ?? "Unable to build preview" }, null, 2))
+        setPayloadPreview(JSON.stringify({ error: dictionary.shellErrorBuildPreview }, null, 2))
         return
       }
 
       setPayloadPreview(JSON.stringify(body, null, 2))
     } catch {
-      setPayloadPreview(JSON.stringify({ error: "Failed to fetch preview" }, null, 2))
+      setPayloadPreview(JSON.stringify({ error: dictionary.shellErrorFetchPreview }, null, 2))
+    } finally {
+      setPayloadLoading(false)
     }
   }
 
@@ -819,12 +913,12 @@ export function CommandCenterShell({
       const body = await response.json()
 
       if (!response.ok) {
-        toast.error(body.error ?? "Unable to export to RealizeOS")
+        toast.error(dictionary.shellErrorExportRealizeOS)
         return
       }
 
       setJobs((current) => [body.job, ...current])
-      toast.success("RealizeOS export queued")
+      toast.success(dictionary.shellRealizeOSQueued)
       await refreshMeeting(selectedMeeting.id)
       await refreshOperationalState()
     } finally {
@@ -844,7 +938,7 @@ export function CommandCenterShell({
       const body = await response.json()
 
       if (!response.ok) {
-        toast.error(body.error ?? "Unable to suggest agents")
+        toast.error(dictionary.shellErrorSuggestAgents)
         return
       }
 
@@ -852,9 +946,7 @@ export function CommandCenterShell({
       const count = body.suggestions?.length ?? 0
 
       toast.success(
-        count
-          ? `${count} agent suggestion${count === 1 ? "" : "s"} prepared`
-          : "No new agent suggestions needed"
+        count ? pluralMessage(dictionary, locale, "shellAgentSuggestions", count) : dictionary.shellNoAgentSuggestions
       )
     } finally {
       setSuggestingAgents(false)
@@ -870,7 +962,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to approve agent")
+      toast.error(dictionary.shellErrorApproveAgent)
       return
     }
 
@@ -879,21 +971,17 @@ export function CommandCenterShell({
     }
     await refreshMeeting(run.meetingId)
     await refreshOperationalState()
-    toast.success(
-      body.job
-        ? "Agent approved and queued"
-        : "Agent approved. Execution connector is prepared."
-    )
+    toast.success(body.job ? dictionary.shellAgentApprovedQueued : dictionary.shellAgentApprovedPrepared)
   }
 
   async function copyText(text: string, label: string) {
     if (!text.trim()) {
-      toast.info(`${label} is empty`)
+      toast.info(fillMessage(dictionary.shellCopyEmpty, { label }))
       return
     }
 
     await navigator.clipboard.writeText(text)
-    toast.success(`${label} copied`)
+    toast.success(fillMessage(dictionary.shellCopied, { label }))
   }
 
   function setMeetingVisibility(meetingId: string, visibility: MeetingVisibility) {
@@ -904,106 +992,10 @@ export function CommandCenterShell({
     )
   }
 
-  async function createShareLink() {
+  function openShareDialog() {
     if (!selectedMeeting) return
 
-    setSharePrivateConfirm(false)
-    const meetingId = selectedMeeting.id
-    const response = await fetch(`/api/meetings/${meetingId}/share`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(
-        body.reason === "meeting_manage_required"
-          ? dictionary.visibilityReadOnly
-          : (body.error ?? "Unable to create share link")
-      )
-      return
-    }
-
-    setShareLink(body.url)
-    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : null)
-    setMeetingVisibility(meetingId, "link")
-  }
-
-  /** "Include recording" adds or removes the opt-in `media` share section. */
-  async function setShareIncludesRecording(include: boolean) {
-    if (!selectedMeeting || !shareSections) return
-
-    const next = include
-      ? [...shareSections.filter((section) => section !== "media"), "media"]
-      : shareSections.filter((section) => section !== "media")
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ includedSections: next }),
-    })
-    const body = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to update share link")
-      return
-    }
-
-    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : next)
-  }
-
-  async function openShareDialog() {
-    if (!selectedMeeting) return
-
-    setShareLink("")
-    setShareSections(null)
     setShareOpen(true)
-
-    // A public link widens a private meeting to the workspace: confirm first.
-    if (selectedMeeting.visibility === "private") {
-      setSharePrivateConfirm(true)
-      return
-    }
-
-    await createShareLink()
-  }
-
-  async function regenerateShareLink() {
-    if (!selectedMeeting) return
-
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ regenerate: true }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to regenerate share link")
-      return
-    }
-
-    setShareLink(body.url)
-    toast.success("Share link regenerated")
-  }
-
-  async function revokeShareLink() {
-    if (!selectedMeeting) return
-
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ revoked: true }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to revoke share link")
-      return
-    }
-
-    setShareLink("")
-    toast.success("Share link revoked")
   }
 
   async function toggleFavorite() {
@@ -1017,7 +1009,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to update favorite")
+      toast.error(dictionary.shellErrorFavorite)
       return
     }
 
@@ -1027,6 +1019,7 @@ export function CommandCenterShell({
   async function openParticipantsDialog() {
     if (!selectedMeeting) return
 
+    setDialogsReady(true)
     setParticipantsOpen(true)
     const response = await fetch(
       `/api/meetings/${selectedMeeting.id}/participants`
@@ -1034,7 +1027,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to load participants")
+      toast.error(dictionary.shellErrorLoadParticipants)
       return
     }
 
@@ -1053,7 +1046,7 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to save participant")
+      toast.error(dictionary.shellErrorSaveParticipant)
       return
     }
 
@@ -1061,7 +1054,7 @@ export function CommandCenterShell({
       current.map((item) => (item.id === participant.id ? body.participant : item))
     )
     await refreshMeeting(participant.meetingId)
-    toast.success("Participant updated")
+    toast.success(dictionary.shellParticipantUpdated)
   }
 
   async function handleSpeakersChanged() {
@@ -1110,11 +1103,10 @@ export function CommandCenterShell({
     const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
 
     detailCacheRef.current.delete(meetingId)
-    if (deepLinkedMeetingRef.current?.id === meetingId) deepLinkedMeetingRef.current = null
     setMeetingRecords(remaining)
     setMeetingPage((page) => ({ ...page, total: Math.max(0, page.total - 1) }))
-    if (next) selectMeeting(next.id)
-    else setSelectedMeetingId("")
+    // The deleted meeting's URL entry is replaced, so Back never returns to it.
+    navigate({ meeting: next?.id ?? null, t: null }, { replace: true })
     toast.success(dictionary.meetingDeleted)
     void refreshMeetings(next?.id)
     return true
@@ -1124,6 +1116,7 @@ export function CommandCenterShell({
     if (!selectedMeeting) return
 
     setTagDraft((selectedMeeting.tags ?? []).join(", "))
+    setDialogsReady(true)
     setTagsOpen(true)
   }
 
@@ -1143,19 +1136,32 @@ export function CommandCenterShell({
     const body = await response.json()
 
     if (!response.ok) {
-      toast.error(body.error ?? "Unable to save tags")
+      toast.error(dictionary.shellErrorSaveTags)
       return
     }
 
     upsertMeetingRecord(body.meeting)
     setTagsOpen(false)
-    toast.success("Tags updated")
+    toast.success(dictionary.shellTagsUpdated)
   }
 
   async function addToDefaultRoom() {
     if (!selectedMeeting) return
 
-    const roomName = window.prompt("Room name:", selectedMeeting.contexts?.[0]?.name ?? "")
+    const roomName = await prompt({
+      title: dictionary.shellRoomPromptTitle,
+      description: dictionary.shellRoomPromptDescription,
+      label: dictionary.shellRoomNamePrompt,
+      defaultValue: selectedMeeting.contexts?.[0]?.name ?? "",
+      confirmLabel: dictionary.shellRoomPromptSubmit,
+      maxLength: ROOM_NAME_MAX,
+      validate: (value) =>
+        !value
+          ? dictionary.shellRoomNameRequired
+          : Array.from(value).length > ROOM_NAME_MAX
+            ? fillMessage(dictionary.shellRoomNameTooLong, { max: ROOM_NAME_MAX })
+            : null,
+    })
     if (!roomName?.trim()) return
 
     const contextsResponse = await fetch("/api/contexts")
@@ -1173,7 +1179,7 @@ export function CommandCenterShell({
       const body = await response.json()
 
       if (!response.ok || !body.context?.id) {
-        toast.error(body.error ?? "Unable to create room")
+        toast.error(dictionary.shellErrorCreateRoom)
         return
       }
       contextId = body.context.id
@@ -1187,16 +1193,14 @@ export function CommandCenterShell({
         body: JSON.stringify({ contextId }),
       }
     )
-    const linkBody = await linkResponse.json()
-
     if (!linkResponse.ok) {
-      toast.error(linkBody.error ?? "Unable to add meeting to room")
+      toast.error(dictionary.shellErrorAddToRoom)
       return
     }
 
     await refreshMeeting(selectedMeeting.id)
     void refreshSidebarRooms()
-    toast.success(`Meeting added to "${roomName.trim()}"`)
+    toast.success(fillMessage(dictionary.shellAddedToRoom, { room: roomName.trim() }))
   }
 
   async function refreshSidebarRooms() {
@@ -1221,16 +1225,14 @@ export function CommandCenterShell({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(body.error ?? "Unable to reprocess meeting")
+          toast.error(dictionary.shellErrorReprocess)
           return
         }
 
         setJobs((current) => [body.job, ...current])
-        toast.success("Reprocess queued")
+        toast.success(dictionary.shellReprocessQueued)
         await refreshOperationalState()
-      })().catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Unable to reprocess meeting")
-      )
+      })().catch(() => toast.error(dictionary.shellErrorReprocess))
     })
   }
 
@@ -1251,22 +1253,15 @@ export function CommandCenterShell({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(apiErrorMessage(body, dictionary, "Unable to process meeting"))
+          toast.error(shellError(body, dictionary.shellErrorProcess, dictionary))
           return
         }
 
         setJobs((current) => [body.job, ...current])
-        toast.success(
-          body.message ??
-            (useArtifacts
-              ? "Google Meet artifact processing queued"
-              : "Processing queued")
-        )
+        toast.success(useArtifacts ? dictionary.shellMeetArtifactsQueued : dictionary.shellProcessingQueued)
         await refreshMeeting(meetingToProcess.id)
         await refreshOperationalState()
-      })().catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Unable to process meeting")
-      )
+      })().catch(() => toast.error(dictionary.shellErrorProcess))
     })
   }
 
@@ -1283,18 +1278,18 @@ export function CommandCenterShell({
           const body = await response.json()
 
           if (!response.ok) {
-            toast.error(apiErrorMessage(body, dictionary, "Unable to sync Meet artifacts"))
+            toast.error(shellError(body, dictionary.shellErrorSyncMeet, dictionary))
             return
           }
 
-          toast.success(body.message ?? "Meet artifact sync checked")
+          toast.success(dictionary.shellMeetSyncChecked)
           await refreshOperationalState()
         } finally {
           setSyncing(false)
         }
-      })().catch((error) => {
+      })().catch(() => {
         setSyncing(false)
-        toast.error(error instanceof Error ? error.message : "Unable to sync Meet artifacts")
+        toast.error(dictionary.shellErrorSyncMeet)
       })
     })
   }
@@ -1313,26 +1308,20 @@ export function CommandCenterShell({
           const body = await response.json()
 
           if (!response.ok) {
-            const message = apiErrorMessage(
-              body,
-              dictionary,
-              "Unable to sync Google Workspace"
-            )
-
-            toast.error(message)
+            toast.error(shellError(body, dictionary.shellErrorSyncGoogle, dictionary))
             return
           }
 
           setJobs((current) => (body.job ? [body.job, ...current] : current))
-          toast.success(target === "gmail" ? "Gmail context sync queued" : "Calendar sync queued")
+          toast.success(target === "gmail" ? dictionary.shellGmailSyncQueued : dictionary.shellCalendarSyncQueued)
           await refreshOperationalState()
           await refreshMeetings()
         } finally {
           setSyncing(false)
         }
-      })().catch((error) => {
+      })().catch(() => {
         setSyncing(false)
-        toast.error(error instanceof Error ? error.message : "Unable to sync Google Workspace")
+        toast.error(dictionary.shellErrorSyncGoogle)
       })
     })
   }
@@ -1359,7 +1348,6 @@ export function CommandCenterShell({
             ])
           }
           selectMeeting(targetMeetingId)
-          setActivePanel("meetings")
         } catch {
           selectMeeting(targetMeetingId)
         }
@@ -1377,7 +1365,7 @@ export function CommandCenterShell({
         const body = await response.json()
 
         if (!response.ok) {
-          toast.error(body.error ?? "Unable to retry job")
+          toast.error(dictionary.shellErrorRetryJob)
           return
         }
 
@@ -1416,8 +1404,11 @@ export function CommandCenterShell({
     refresh: botSessions.refresh,
     onRecordFromBrowser: (meetingId) => void browserRecorder.start({ meetingId }),
     onImportDesktop: () => setDesktopOpen(true),
-    onRequestStop: (session, title) =>
-      session.meetingId && setStopTarget({ meetingId: session.meetingId, title }),
+    onRequestStop: (session, title) => {
+      if (!session.meetingId) return
+      setStopDialogReady(true)
+      setStopTarget({ meetingId: session.meetingId, title })
+    },
   }
 
   function handleDockStop(action: DockStopAction) {
@@ -1425,6 +1416,7 @@ export function CommandCenterShell({
       browserRecorder.stop()
       return
     }
+    setStopDialogReady(true)
     setStopTarget({ meetingId: action.meetingId, title: action.title })
   }
 
@@ -1441,6 +1433,25 @@ export function CommandCenterShell({
     }
     await botSessions.refresh()
   }
+
+  // A deep-linked meeting that is gone or hidden: an inline notice at the top
+  // of the reading column; the meeting list stays (it used to be a grid row
+  // that took the whole content area).
+  const unavailableNotice =
+    unavailableId && unavailableId === urlMeetingId ? (
+      <p role="status" className="border-b border-line bg-warn-soft px-4 py-2 text-sm text-warn-text">
+        {dictionary.shellMeetingUnavailable}
+      </p>
+    ) : null
+  const withUnavailableNotice = (column: ReactNode) =>
+    unavailableNotice ? (
+      <div className="flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-y-auto">
+        {unavailableNotice}
+        {column}
+      </div>
+    ) : (
+      column
+    )
 
   const defaultMeetingsView = (
     <div className={defaultMeetingsViewClass}>
@@ -1478,6 +1489,7 @@ export function CommandCenterShell({
         onSelectMeeting={selectMeeting}
         botSessions={botEnabled ? botSessions.byMeetingId : undefined}
       />
+      {withUnavailableNotice(
       <MeetingWorkspace
         dictionary={dictionary}
         locale={locale}
@@ -1486,7 +1498,7 @@ export function CommandCenterShell({
         transcript={transcript}
         permissions={selectedPermissions}
         initialMs={
-          deepLinkTime && deepLinkTime.meetingId === selectedMeeting?.id ? deepLinkTime.ms : undefined
+          shell.state.t !== null && shell.state.meeting === selectedMeeting?.id ? shell.state.t * 1000 : undefined
         }
         onRename={renameMeeting}
         onDelete={deleteMeeting}
@@ -1495,7 +1507,7 @@ export function CommandCenterShell({
         onProcessMeeting={processMeeting}
         onRetryJob={retryJob}
         onOpenUpload={() => setUploadOpen(true)}
-        onFindDriveRecordings={() => setDrivePickerOpen(true)}
+        onFindDriveRecordings={openDrivePicker}
         onSyncMeetArtifacts={syncMeetArtifacts}
         onSyncGoogle={() => syncGoogle("calendar")}
         onCheckSetup={() => setActivePanel("workspace")}
@@ -1509,6 +1521,7 @@ export function CommandCenterShell({
         onAddToRoom={addToDefaultRoom}
         onCopyText={copyText}
       />
+      )}
       <MeetingRightRail
         meeting={selectedMeeting}
         jobs={jobs}
@@ -1549,11 +1562,14 @@ export function CommandCenterShell({
     </div>
   )
 
+  const effectiveDockHeight = dockEntries.length ? dockHeight : 0
+
   return (
+    <UploadQueueProvider userId={user?.id} workspaceId={workspaceId} onUploaded={() => void refreshMeetings()}>
     <BotSessionsProvider value={botContext}>
-    <main
+    <div
       className="ms-page min-h-svh pb-(--ms-dock-h) lg:fixed lg:inset-0 lg:h-svh lg:overflow-hidden lg:pb-0"
-      style={{ "--ms-dock-h": `${dockHeight}px` } as CSSProperties}
+      style={{ "--ms-dock-h": `${effectiveDockHeight}px` } as CSSProperties}
     >
       <div className="grid min-h-svh grid-cols-1 lg:h-svh lg:min-h-0 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden">
         <MainSidebar
@@ -1564,7 +1580,8 @@ export function CommandCenterShell({
           rooms={sidebarRooms}
           user={user}
         />
-        <section className="min-w-0 lg:h-svh lg:overflow-hidden">
+        <main id="main-content" tabIndex={-1} className="min-w-0 outline-none lg:h-svh lg:overflow-hidden">
+          <OfflineBanner />
           <TopCommandBar
             dictionary={dictionary}
             locale={locale}
@@ -1581,13 +1598,15 @@ export function CommandCenterShell({
             onDesktopFileChange={handleDesktopFileChange}
             onRecordingReady={handleRecordingReady}
             onSync={syncGoogle}
-            onFindDriveRecordings={() => setDrivePickerOpen(true)}
+            onFindDriveRecordings={openDrivePicker}
             darkMode={darkMode}
             onToggleDarkMode={toggleDarkMode}
             aiStatus={aiStatus}
-            onInvite={() => setActivePanel("admin")}
+            onInvite={() => navigate({ panel: "admin", adminTab: "invitations" })}
             recorder={browserRecorder}
-            recordingMeetingId={selectedMeeting?.id ?? null}
+            recordingMeetingId={null}
+            recordOpen={recordSheetOpen}
+            onRecordOpenChange={setRecordSheetOpen}
             desktopOpen={desktopOpen}
             onDesktopOpenChange={setDesktopOpen}
             onSendBot={
@@ -1611,276 +1630,73 @@ export function CommandCenterShell({
               }}
             />
           ) : null}
-          <StopBotDialog
-            dictionary={dictionary}
-            open={Boolean(stopTarget)}
-            onOpenChange={(open) => {
-              if (!open) setStopTarget(null)
-            }}
-            title={stopTarget?.title ?? null}
-            busy={stopBusy}
-            onConfirm={() => void confirmStopBot()}
-          />
-          <DriveRecordingPickerDrawer
-            dictionary={dictionary}
-            open={drivePickerOpen}
-            onOpenChange={setDrivePickerOpen}
-            onImported={handleDriveImported}
-          />
-          {shareOpen ? (
-            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">Share meeting</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Public link includes summary, decisions, action items,
-                      participants, and transcript. The recording is included
-                      only when you tick it below.
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => setShareOpen(false)}>
-                    Close
-                  </Button>
-                </div>
-                {sharePrivateConfirm ? (
-                  <div className="mt-4 grid gap-3 rounded-md border border-warn/40 bg-warn-soft p-3 text-sm leading-5 text-warn-text">
-                    <p>{dictionary.sharePrivateWarning}</p>
-                    <div>
-                      <Button onClick={() => void createShareLink()}>
-                        {dictionary.visibilityConfirm}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-md border border-line bg-surface-2 p-3">
-                    <input
-                      className="w-full bg-transparent text-sm outline-none"
-                      dir="ltr"
-                      readOnly
-                      value={shareLink || "Creating link..."}
-                    />
-                  </div>
-                )}
-                {!sharePrivateConfirm && selectedMeeting?.mediaAssets?.length ? (
-                  <label className="mt-3 flex items-start gap-2.5 text-sm">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={Boolean(shareSections?.includes("media"))}
-                      disabled={!shareSections}
-                      onCheckedChange={(checked) => void setShareIncludesRecording(Boolean(checked))}
-                    />
-                    <span className="grid">
-                      <span className="font-medium">{dictionary.shareIncludeRecording}</span>
-                      <span className="text-xs text-fg-3">{dictionary.shareIncludeRecordingHint}</span>
-                    </span>
-                  </label>
-                ) : null}
-                {selectedDetail && !selectedDetail.meeting.summary?.overview ? (
-                  <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
-                    This meeting has no generated summary yet. The public page
-                    will still open, but it may only show metadata, participants,
-                    and any transcript that exists.
-                  </div>
-                ) : null}
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    disabled={!shareLink}
-                    onClick={() => copyText(shareLink, "Share link")}
-                  >
-                    Copy link
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="outline"
-                    onClick={() => window.open(shareLink, "_blank")}
-                  >
-                    Open
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="outline"
-                    onClick={regenerateShareLink}
-                    title={
-                      shareLink
-                        ? "Regenerate the public share token"
-                        : "Create the first share link before regenerating"
-                    }
-                  >
-                    Regenerate
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="destructive"
-                    onClick={revokeShareLink}
-                    title={
-                      shareLink
-                        ? "Revoke this public share link"
-                        : "No active public link to revoke"
-                    }
-                  >
-                    Revoke
-                  </Button>
-                </div>
-              </section>
-            </div>
+          {stopDialogReady ? (
+            <StopBotDialog
+              dictionary={dictionary}
+              open={Boolean(stopTarget)}
+              onOpenChange={(open) => {
+                if (!open) setStopTarget(null)
+              }}
+              title={stopTarget?.title ?? null}
+              busy={stopBusy}
+              onConfirm={() => void confirmStopBot()}
+            />
           ) : null}
-          {payloadPreviewOpen ? (
-            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="flex w-full max-w-3xl flex-col rounded-lg border border-line bg-surface p-5 shadow-xl" style={{ maxHeight: "80vh" }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">RealizeOS payload preview</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Review the payload before sending to RealizeOS.
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => setPayloadPreviewOpen(false)}>
-                    Close
-                  </Button>
-                </div>
-                <div className="ms-scrollbar mt-4 min-h-0 flex-1 overflow-auto rounded-md border border-line bg-surface-2 p-3">
-                  <pre className="whitespace-pre-wrap text-xs leading-5 text-fg-2">
-                    {payloadPreview}
-                  </pre>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => copyText(payloadPreview, "Payload JSON")}
-                    variant="outline"
-                  >
-                    Copy JSON
-                  </Button>
-                  <Button
-                    onClick={exportRealizeOS}
-                    disabled={exporting || payloadPreview === "Loading\u2026"}
-                  >
-                    Send export
-                  </Button>
-                </div>
-              </section>
-            </div>
+          {drivePickerReady ? (
+            <DriveRecordingPickerDrawer
+              open={drivePickerOpen}
+              onOpenChange={setDrivePickerOpen}
+              onImported={handleDriveImported}
+            />
           ) : null}
-          {participantsOpen ? (
-            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-2xl rounded-lg border border-line bg-surface p-5 shadow-xl">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">Participants</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Edit attendee names and map speakers when transcript
-                      labels need cleanup.
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setParticipantsOpen(false)}
-                  >
-                    Close
-                  </Button>
-                </div>
-                <div className="mt-4 max-h-[55vh] space-y-3 overflow-y-auto">
-                  {participants.length ? participants.map((participant) => (
-                    <div
-                      className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_1fr_110px_auto]"
-                      key={participant.id}
-                    >
-                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                        Name
-                        <input
-                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
-                          value={participant.name}
-                          onChange={(event) =>
-                            setParticipants((current) =>
-                              current.map((item) =>
-                                item.id === participant.id
-                                  ? { ...item, name: event.target.value }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-                        Email
-                        <input
-                          className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-foreground"
-                          placeholder="email"
-                          value={participant.email ?? ""}
-                          onChange={(event) =>
-                            setParticipants((current) =>
-                              current.map((item) =>
-                                item.id === participant.id
-                                  ? { ...item, email: event.target.value }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </label>
-                      <div className="grid gap-1 text-xs font-medium text-muted-foreground">
-                        {dictionary.speakersTitle}
-                        <span className="flex min-h-9 items-center rounded-md border border-dashed border-line px-3 text-sm text-foreground">
-                          {(() => {
-                            const mapped = (selectedMeeting?.speakers ?? []).filter(
-                              (speaker) =>
-                                speaker.participantId === participant.id &&
-                                speaker.mappingStatus === "confirmed"
-                            )
-
-                            return mapped.length ? (
-                              <bdi>
-                                {mapped
-                                  .map((speaker) =>
-                                    localizeSpeakerLabel(speaker.label, dictionary.speakersGenericLabel)
-                                  )
-                                  .join(", ")}
-                              </bdi>
-                            ) : (
-                              "—"
-                            )
-                          })()}
-                        </span>
-                      </div>
-                      <Button
-                        variant="outline"
-                        className="self-end"
-                        onClick={() => saveParticipant(participant)}
-                      >
-                        Save
-                      </Button>
-                    </div>
-                  )) : (
-                    <div className="rounded-md border border-dashed border-line p-4 text-sm text-muted-foreground">
-                      No participants were found for this meeting yet.
-                    </div>
-                  )}
-                </div>
-              </section>
-            </div>
+          {shareOpen && selectedMeeting ? (
+            <ShareMeetingDialog
+              key={selectedMeeting.id}
+              meeting={selectedMeeting}
+              open={shareOpen}
+              onOpenChange={setShareOpen}
+              dictionary={dictionary}
+              hasSummary={!selectedDetail || Boolean(selectedDetail.meeting.summary?.overview)}
+              onVisibilityChange={setMeetingVisibility}
+            />
           ) : null}
-          {tagsOpen ? (
-            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-xl">
-                <h2 className="text-lg font-semibold">Edit tags</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Separate tags with commas.
-                </p>
-                <textarea
-                  className="mt-4 min-h-28 w-full rounded-md border border-line bg-surface p-3 text-sm"
-                  value={tagDraft}
-                  onChange={(event) => setTagDraft(event.target.value)}
-                />
-                <div className="mt-4 flex justify-end gap-2">
-                  <Button variant="ghost" onClick={() => setTagsOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={saveTags}>Save tags</Button>
-                </div>
-              </section>
-            </div>
+          {dialogsReady ? (
+            <>
+              <PayloadPreviewDialog
+                dictionary={dictionary}
+                open={payloadPreviewOpen}
+                onOpenChange={setPayloadPreviewOpen}
+                payload={payloadPreview}
+                loading={payloadLoading}
+                exporting={exporting}
+                onCopy={() => void copyText(payloadPreview, dictionary.shellPayloadLabel)}
+                onSend={() => void exportRealizeOS()}
+              />
+              <ParticipantsDialog
+                dictionary={dictionary}
+                open={participantsOpen}
+                onOpenChange={setParticipantsOpen}
+                meeting={selectedMeeting}
+                participants={participants}
+                onChange={(participant) =>
+                  setParticipants((current) =>
+                    current.map((item) => (item.id === participant.id ? participant : item))
+                  )
+                }
+                onSave={(participant) => void saveParticipant(participant)}
+              />
+              <TagsDialog
+                dictionary={dictionary}
+                open={tagsOpen}
+                onOpenChange={setTagsOpen}
+                value={tagDraft}
+                onValueChange={setTagDraft}
+                onSave={() => void saveTags()}
+              />
+            </>
           ) : null}
+          {promptDialog}
+          <div ref={panelRegionRef} className="contents">
           {activePanel === "meetings"
             ? defaultMeetingsView
             : activePanel === "admin"
@@ -1897,7 +1713,7 @@ export function CommandCenterShell({
                   query={query}
                   onQueryChange={setQuery}
                   onSyncCalendar={() => syncGoogle("calendar")}
-                  onFindDriveRecordings={() => setDrivePickerOpen(true)}
+                  onFindDriveRecordings={openDrivePicker}
                   onRetryJob={retryJob}
                   onOpenMeeting={selectMeeting}
                   onSyncMeetArtifacts={syncMeetArtifacts}
@@ -1910,21 +1726,22 @@ export function CommandCenterShell({
                   }}
                 />
               )}
-        </section>
+          </div>
+        </main>
       </div>
-      <RecorderDock
-        entries={dockEntries}
-        dictionary={dictionary}
-        onOpenMeeting={(meetingId) => {
-          setActivePanel("meetings")
-          selectMeeting(meetingId)
-        }}
-        onStop={handleDockStop}
-        onHeightChange={setDockHeight}
-      />
+      {dockEntries.length ? (
+        <RecorderDock
+          entries={dockEntries}
+          dictionary={dictionary}
+          onOpenMeeting={selectMeeting}
+          onStop={handleDockStop}
+          onHeightChange={setDockHeight}
+        />
+      ) : null}
       {/* M6: Ctrl/Cmd+K command palette, available on every shell view. */}
       <CommandPaletteHost locale={locale} dictionary={dictionary} />
-    </main>
+    </div>
     </BotSessionsProvider>
+    </UploadQueueProvider>
   )
 }

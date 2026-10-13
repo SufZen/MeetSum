@@ -6,7 +6,7 @@ import { redirect } from "next/navigation"
 import { SearchView } from "@/components/search/search-view"
 import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
-import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 
 /** Global Search & Ask page (docs/parity/m6.md, D1). */
 export default async function SearchPage({
@@ -15,7 +15,7 @@ export default async function SearchPage({
   params: Promise<{ locale: string }>
 }) {
   const { locale } = await params
-  const supportedLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en"
+  const supportedLocale: SupportedLocale = isSupportedLocale(locale) ? locale : DEFAULT_LOCALE
   const auth = await getServerAuthState()
 
   if (auth.status === "unauthenticated") redirect(`/${supportedLocale}/login`)

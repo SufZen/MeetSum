@@ -141,6 +141,8 @@ export type LlmStatus = {
   geminiTier?: "free" | "paid"
   /** Configuration warnings to show in health/ops/settings. */
   warnings?: string[]
+  /** One code per `warnings` entry, same order (the UI translates codes). */
+  warningCodes?: Array<"llm_warning_no_provider" | "llm_warning_gemini_free_tier" | "llm_warning_anthropic_missing">
   /** True when no provider is configured (heuristic summaries only). */
   heuristicOnly?: boolean
 }

@@ -65,10 +65,12 @@ describe("meeting agent suggestions", () => {
       "extract_crm_notes",
     ])
     expect(suggestions.every((suggestion) => suggestion.payload.requiresApproval)).toBe(true)
+    // M9: the intent code is the copy key; no English title or description is stored.
+    expect(suggestions.some((suggestion) => "title" in suggestion.payload || "description" in suggestion.payload)).toBe(false)
     expect(suggestions[0]).toMatchObject({
       target: "realizeos",
       payload: {
-        title: "Export to RealizeOS",
+        intent: "export_to_realizeos",
         meetingId: "meeting_1",
         meetingTitle: "Lisbon acquisition review",
         actionItemCount: 1,

@@ -8,6 +8,10 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
+import { useI18n } from "@/components/i18n-provider"
+import { StatusMessageText } from "@/components/status-message-text"
+import type { StatusMessage } from "@/lib/ops/status-messages"
+import { JOB_STATUS_KEYS } from "@/components/pipeline-timeline"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
@@ -17,6 +21,7 @@ export type WorkspaceStatusView = {
     strategy: "user-oauth" | "keyless-iam-signjwt" | "json-key" | "key-file" | "missing"
     configured: boolean
     detail: string
+    detailMessage?: StatusMessage
     serviceAccountEmail?: string
     serviceAccountEmailConfigured: boolean
     serviceAccountKeyConfigured: boolean
@@ -39,6 +44,25 @@ export type WorkspaceStatusView = {
   }
 }
 
+const STRATEGY_KEYS: Record<WorkspaceStatusView["google"]["strategy"], string> = {
+  "user-oauth": "opsSyncStrategyUserOauth",
+  "keyless-iam-signjwt": "opsSyncStrategyKeyless",
+  "json-key": "opsSyncStrategyJsonKey",
+  "key-file": "opsSyncStrategyKeyFile",
+  missing: "opsSyncStrategyMissing",
+}
+
+const SOURCE_KEYS: Record<string, string> = {
+  calendar: "opsSyncSourceCalendar",
+}
+
+const SYNC_STATUS_KEYS: Record<string, string> = {
+  idle: "opsSyncStatusIdle",
+  running: "opsSyncStatusRunning",
+  completed: JOB_STATUS_KEYS.completed,
+  failed: JOB_STATUS_KEYS.failed,
+}
+
 export function WorkspaceSyncPanel({
   status,
   syncing,
@@ -50,6 +74,9 @@ export function WorkspaceSyncPanel({
   onSyncAll: () => void
   onSyncMeetArtifacts: () => void
 }) {
+  const { t, plural, fmt, locale } = useI18n()
+  const label = (keys: Record<string, string>, value: string) => (keys[value] ? t(keys[value]) : value)
+
   return (
     <section className="ms-card grid gap-4 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -61,39 +88,47 @@ export function WorkspaceSyncPanel({
           variant={status?.google.strategy === "missing" ? "outline" : "secondary"}
           className="rounded-sm"
         >
-          {status?.google.strategy ?? "checking"}
+          {status ? label(STRATEGY_KEYS, status.google.strategy) : t("opsSyncChecking")}
         </Badge>
       </div>
       <div className="text-xs leading-5 text-muted-foreground">
-        Subject:{" "}
-        <span className="font-mono text-foreground">
-          {status ? (status.google.subject ?? "Not configured") : "Checking…"}
-        </span>
+        {t("opsSyncSubject")}{" "}
+        {status?.google.subject ? (
+          <bdi dir="ltr" className="font-mono text-foreground">
+            {status.google.subject}
+          </bdi>
+        ) : (
+          <span className="text-foreground">
+            {status ? t("asrStatusNotConfigured") : t("opsSyncChecking")}
+          </span>
+        )}
       </div>
       <div className="rounded-lg border border-line bg-surface-2 p-3 text-xs leading-5 text-muted-foreground">
         <div>
-          Auth:{" "}
+          {t("opsSyncAuth")}{" "}
           <span className="font-medium text-foreground">
-            {status?.google.detail ?? "Checking Workspace credentials"}
+            {status ? (
+              <StatusMessageText message={status.google.detailMessage} fallback={status.google.detail} />
+            ) : (
+              t("opsSyncCheckingCredentials")
+            )}
           </span>
         </div>
         {status?.google.serviceAccountEmail && (
-          <div className="break-all font-mono">
+          <bdi dir="ltr" className="block break-all font-mono">
             {status.google.serviceAccountEmail}
-          </div>
+          </bdi>
         )}
         {(!status?.google.configured || status.google.strategy === "missing") && (
-          <p className="mt-1 text-amber-700">
-            Google sync needs a connected Workspace account.
-          </p>
+          <p className="mt-1 text-warn-text">{t("opsSyncNeedsAccount")}</p>
         )}
       </div>
       {status && !status.google.configured && (
         <Link
-          href="/api/auth/google/start?returnTo=/en"
+          href={`/api/auth/google/start?returnTo=${encodeURIComponent(`/${locale}`)}`}
           className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-brand px-3 text-sm font-medium text-on-brand hover:bg-brand/90"
         >
-          Reconnect Google
+          {t("opsSyncReconnect")}
         </Link>
       )}
       <div className="grid grid-cols-2 gap-2">
@@ -104,7 +139,7 @@ export function WorkspaceSyncPanel({
           onClick={onSyncAll}
         >
           <CalendarSyncIcon data-icon="inline-start" />
-          {syncing ? "Queued..." : "Sync Calendar"}
+          {syncing ? t("opsSyncQueued") : t("calendarSync")}
         </Button>
         <Button
           variant="outline"
@@ -113,7 +148,7 @@ export function WorkspaceSyncPanel({
           onClick={onSyncMeetArtifacts}
         >
           <RadioTowerIcon data-icon="inline-start" />
-          {syncing ? "Queued..." : "Sync Meet"}
+          {syncing ? t("opsSyncQueued") : t("opsSyncMeet")}
         </Button>
       </div>
 
@@ -123,19 +158,19 @@ export function WorkspaceSyncPanel({
           {status.jobs.active > 0 && (
             <span className="flex items-center gap-1 text-brand-text">
               <Loader2Icon aria-hidden="true" className="size-3 animate-spin" />
-              {status.jobs.active} active
+              {plural("opsDriveActiveJobs", status.jobs.active)}
             </span>
           )}
           {status.jobs.queued > 0 && (
             <span className="flex items-center gap-1 text-muted-foreground">
               <CheckCircle2Icon aria-hidden="true" className="size-3" />
-              {status.jobs.queued} queued
+              {plural("opsSyncJobsQueued", status.jobs.queued)}
             </span>
           )}
           {status.jobs.failed > 0 && (
             <span className="flex items-center gap-1 text-destructive">
               <AlertTriangleIcon aria-hidden="true" className="size-3" />
-              {status.jobs.failed} failed
+              {plural("opsSyncJobsFailed", status.jobs.failed)}
             </span>
           )}
         </div>
@@ -144,11 +179,11 @@ export function WorkspaceSyncPanel({
         {(status?.sync.length ? status.sync : []).map((item) => (
             <div key={item.source} className="rounded-lg border border-line bg-surface-2 p-3">
             <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="font-medium capitalize">{item.source}</span>
-              <span className="text-muted-foreground">{item.status}</span>
+              <span className="font-medium">{label(SOURCE_KEYS, item.source)}</span>
+              <span className="text-muted-foreground">{label(SYNC_STATUS_KEYS, item.status)}</span>
             </div>
             {item.stats && Object.keys(item.stats).length > 0 && (
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              <p dir="ltr" className="mt-1 text-start text-xs leading-5 text-muted-foreground">
                 {Object.entries(item.stats)
                   .filter(([, value]) => typeof value !== "object")
                   .map(([key, value]) => `${key}: ${String(value)}`)
@@ -157,11 +192,11 @@ export function WorkspaceSyncPanel({
             )}
             {item.nextPollAt && (
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Next poll: {new Date(item.nextPollAt).toLocaleString()}
+                {t("opsSyncNextPoll", { time: fmt.date(item.nextPollAt, "dateTime") })}
               </p>
             )}
             {item.lastError && (
-              <p className="mt-1 break-words text-xs leading-5 text-destructive">
+              <p dir="auto" className="mt-1 break-words text-xs leading-5 text-destructive">
                 {item.lastError}
               </p>
             )}
@@ -169,7 +204,7 @@ export function WorkspaceSyncPanel({
         ))}
         {!status?.sync.length && (
           <div className="rounded-md border border-dashed p-3 text-xs leading-5 text-muted-foreground">
-            No sync runs recorded yet.
+            {t("opsSyncEmpty")}
           </div>
         )}
       </div>

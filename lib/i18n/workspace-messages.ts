@@ -309,14 +309,14 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   apiKeysNever: "אף פעם",
   apiKeysRevokedBadge: "בוטל",
   apiKeysRevoke: "ביטול",
-  apiKeysRevokeTitle: "לבטל את מפתח ה-API {label}?",
+  apiKeysRevokeTitle: "לבטל את מפתח ה-\u2060API {label}?",
   apiKeysRevokeDescription: "כל מערכת שמשתמשת במפתח הזה תפסיק לעבוד מיד.",
-  apiKeysRevoked: "מפתח ה-API בוטל",
-  apiKeysCreatedTitle: "העתיקו את מפתח ה-API החדש",
+  apiKeysRevoked: "מפתח ה-\u2060API בוטל",
+  apiKeysCreatedTitle: "העתיקו את מפתח ה-\u2060API החדש",
   apiKeysCreatedDescription:
     "זו הפעם היחידה שהמפתח מוצג. שמרו אותו במנהל סודות לפני הסגירה.",
   apiKeysCopy: "העתקת המפתח",
-  apiKeysCopied: "מפתח ה-API הועתק",
+  apiKeysCopied: "מפתח ה-\u2060API הועתק",
 
   auditFilterAction: "פעולה",
   auditFilterActor: "מבצע",
@@ -349,9 +349,9 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
     "הפגישה פרטית. קישור ציבורי יהפוך אותה לגלויה לכל סביבת העבודה ולכל מי שמחזיק בקישור.",
 
   settingsReadOnly: "רק מנהלי סביבת העבודה יכולים לשנות הגדרות אלה.",
-  settingsKeepVideoTitle: "שמירת הווידאו המקורי בייבוא מ-Drive",
+  settingsKeepVideoTitle: "שמירת הווידאו המקורי בייבוא מ-\u2060Drive",
   settingsKeepVideoDescription:
-    "מומלץ כבוי. הקלטות מ-Drive נשמרות כאודיו אלא אם האפשרות פעילה.",
+    "מומלץ כבוי. הקלטות מ-\u2060Drive נשמרות כאודיו אלא אם האפשרות פעילה.",
   settingsDefaultVisibilityTitle: "נראות ברירת מחדל לפגישות",
   settingsDefaultVisibilityDescription: "חל על פגישות שייווצרו מעכשיו.",
 
@@ -359,7 +359,7 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   inviteJoin: "הצטרפות אל {workspace} בתפקיד {role}.",
   inviteForEmail: "ההזמנה מיועדת ל-{email}.",
   inviteAccept: "קבלת ההזמנה",
-  inviteAccepting: "מצטרף…",
+  inviteAccepting: "ההצטרפות מתבצעת…",
   inviteSignIn: "התחברו עם Google כדי לקבל את ההזמנה",
   inviteSignedInAs: "מחוברים בתור {email}",
   inviteSwitchAccount: "שימוש בחשבון Google אחר",
@@ -372,7 +372,7 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   inviteAccepted: "הצטרפתם אל {workspace}",
 
   loginErrorNoAccess:
-    "לחשבון Google הזה אין גישה ל-MeetSum. בקשו הזמנה ממנהל סביבת עבודה.",
+    "לחשבון Google הזה אין גישה ל-\u2060MeetSum. בקשו הזמנה ממנהל סביבת עבודה.",
   loginErrorGeneric: "ההתחברות נכשלה. נסו שוב.",
 }
 
