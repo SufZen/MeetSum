@@ -221,7 +221,13 @@ export function buildPendingCountQuery(input: ScopedInput & { filters: SearchFil
   return {
     text:
       `select count(*)::int as pending from meetings m\n` +
-      `  where ${where(prefix, [...clauses, "m.search_index_state not in ('ready', 'skipped')"])}`,
+      `  where ${where(prefix, [
+        ...clauses,
+        "m.search_index_state not in ('ready', 'skipped')",
+        // Only meetings the indexer can index (a transcript or a summary, as
+        // the sweeper's USABLE predicate): an empty meeting is never pending.
+        "(exists (select 1 from transcript_segments ts where ts.meeting_id = m.id) or exists (select 1 from summaries s where s.meeting_id = m.id))",
+      ])}`,
     values,
   }
 }

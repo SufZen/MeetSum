@@ -159,6 +159,25 @@ describe("search on PGlite", () => {
     if (db.hebrewTrigrams) expect(ranked.candidates.map((candidate) => candidate.chunk.meetingId)).toContain("m_budget")
   })
 
+  it("does not count meetings without a transcript or summary as pending (no permanent banner)", async () => {
+    if (!db) return
+
+    await db.client.query(
+      "insert into meetings (id, title, source, status, started_at, workspace_id, search_index_state) values ('m_empty', 'Empty', 'upload', 'completed', now(), 'ws_a', 'pending')"
+    )
+
+    try {
+      expect(await engine.countPending(ctx(member), {})).toBe(0)
+
+      await db.client.query(
+        "insert into transcript_segments (id, meeting_id, start_ms, end_ms, text) values ('m_empty_s1', 'm_empty', 0, 1000, 'שלום')"
+      )
+      expect(await engine.countPending(ctx(member), {})).toBe(1)
+    } finally {
+      await db.client.query("delete from meetings where id = 'm_empty'")
+    }
+  })
+
   it("serves searchWorkspace, facets, pending counts and retrieve end to end", async () => {
     if (!db) return
 
