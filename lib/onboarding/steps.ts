@@ -62,6 +62,28 @@ export function computeOnboardingState(
   return { steps, dismissed: Boolean(progress?.dismissedAt), completed: Boolean(progress?.completedAt) }
 }
 
+/** Dictionary key of a step's status label. */
+export function statusLabelKey(step: Pick<OnboardingStep, "status">): string {
+  switch (step.status) {
+    case "done":
+      return "onboardingDone"
+    case "skipped":
+      return "onboardingStatusSkipped"
+    case "unavailable":
+      return "onboardingUnavailable"
+    default:
+      return "onboardingStatusTodo"
+  }
+}
+
+/** Dictionary keys of each step's title. */
+export const ONBOARDING_STEP_TITLE: Record<OnboardingStepId, string> = {
+  google: "onboardingStepGoogle",
+  invite: "onboardingStepInvite",
+  glossary: "onboardingStepGlossary",
+  upload: "onboardingStepUpload",
+}
+
 /** Steps still open (neither done, skipped nor unavailable). */
 export function openOnboardingSteps(state: OnboardingState): OnboardingStepId[] {
   return state.steps.filter((step) => step.status === "todo").map((step) => step.id)

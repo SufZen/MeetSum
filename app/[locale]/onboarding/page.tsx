@@ -1,42 +1,36 @@
-import { ArrowLeftIcon } from "lucide-react"
-import Link from "next/link"
 import { redirect } from "next/navigation"
 
+import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard"
+import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
 import { getServerAuthState } from "@/lib/auth/authz"
-import { getDictionary } from "@/lib/i18n/dictionaries"
 import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
+import { getOnboardingState, isOnboardingEnabled } from "@/lib/onboarding/service"
+
+export const dynamic = "force-dynamic"
+
+/** Built-in Hebrew business terms offered as quick-add suggestions. */
+const GLOSSARY_SUGGESTIONS = 8
 
 /**
- * Onboarding wizard (docs/parity/m9.md C3).
- * M9 Step 0 stub behind its final guard (signed in, with a workspace);
- * owner: Package C.
+ * Onboarding wizard (docs/parity/m9.md C3). Signed in, with a workspace;
+ * steps are computed live on the server. Off with MEETSUM_ONBOARDING_ENABLED=false.
  */
-export default async function OnboardingPage({
-  params,
-}: {
-  params: Promise<{ locale: string }>
-}) {
+export default async function OnboardingPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params
   const supportedLocale: SupportedLocale = isSupportedLocale(locale) ? locale : DEFAULT_LOCALE
   const auth = await getServerAuthState()
 
   if (auth.status === "unauthenticated") redirect(`/${supportedLocale}/login`)
   if (auth.status === "no_workspace") redirect(`/${supportedLocale}`)
+  if (!isOnboardingEnabled() || auth.ctx.principal !== "user") redirect(`/${supportedLocale}`)
 
-  const dictionary = getDictionary(supportedLocale)
+  const state = await getOnboardingState(auth.ctx)
 
   return (
-    <main className="min-h-svh bg-canvas">
-      <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 pt-4">
-        <Link
-          href={`/${supportedLocale}`}
-          className="inline-flex items-center gap-1.5 text-sm text-fg-3 hover:text-brand-text"
-        >
-          <ArrowLeftIcon aria-hidden data-icon="directional" className="size-3.5 rtl:-scale-x-100" />
-          {dictionary.navMeetings}
-        </Link>
-        <h1 className="text-xl font-semibold">{dictionary.onboardingTitle}</h1>
-      </div>
-    </main>
+    <OnboardingWizard
+      locale={supportedLocale}
+      initial={{ ...state, enabled: true }}
+      glossarySuggestions={DEFAULT_ASR_GLOSSARY.terms.slice(0, GLOSSARY_SUGGESTIONS).map((term) => term.term)}
+    />
   )
 }

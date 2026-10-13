@@ -120,9 +120,10 @@ export function NotificationBell({ locale }: { locale: string }) {
     [locale]
   )
 
-  useEffect(() => {
-    if (open) void load(null)
-  }, [open, load])
+  const onOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) void load(null)
+  }
 
   const markRead = useCallback(
     async (body: { ids: string[] } | { all: true }) => {
@@ -182,7 +183,7 @@ export function NotificationBell({ locale }: { locale: string }) {
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger
           render={
             <Button variant="ghost" size="icon" className="relative rounded-full" aria-label={label} title={label} />

@@ -4,14 +4,13 @@
  * the role, names are in <bdi>, filters live in the URL.
  */
 import { createElement } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import { AnalyticsDashboard, analyticsHref } from "@/components/analytics/analytics-dashboard"
-import { I18nProvider } from "@/components/i18n-provider"
 import { emptyAnalyticsOverview } from "@/lib/analytics/dashboard/compute"
 import type { AnalyticsOverview } from "@/lib/analytics/dashboard/types"
-import { getDictionary } from "@/lib/i18n/dictionaries"
+
+import { renderWithI18n } from "./helpers/render-i18n"
 
 const QUERY = {
   from: "2026-09-30T21:00:00.000Z",
@@ -35,19 +34,14 @@ const FILLED: AnalyticsOverview = {
 }
 
 function render(overview: AnalyticsOverview, canSeeMembers = true, locale: "he" | "en" = "he") {
-  return renderToStaticMarkup(
-    createElement(I18nProvider, {
+  return renderWithI18n(
+    createElement(AnalyticsDashboard, {
       locale,
-      dir: locale === "he" ? "rtl" : "ltr",
-      timeZone: "Asia/Jerusalem",
-      messages: getDictionary(locale) as unknown as Record<string, string>,
-      children: createElement(AnalyticsDashboard, {
-        locale,
-        overview,
-        filters: { range: 90, interval: "week", scope: "workspace" },
-        canSeeMembers,
-      }),
-    })
+      overview,
+      filters: { range: 90, interval: "week", scope: "workspace" },
+      canSeeMembers,
+    }),
+    locale
   )
 }
 

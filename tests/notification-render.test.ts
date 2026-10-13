@@ -4,16 +4,16 @@
  * actor verbs in Hebrew, and a hidden meeting never shows a title.
  */
 import { createElement } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { I18nProvider } from "@/components/i18n-provider"
 import { NotificationItem } from "@/components/notifications/notification-item"
 import { mutedFromPreferences } from "@/components/notifications/notification-preferences"
 import { m9NotificationsMessages } from "@/lib/i18n/m9/notifications"
 import { translate } from "@/lib/i18n/messages"
 import { notificationTemplateKey, notificationText } from "@/lib/notifications/render"
 import { NOTIFICATION_KINDS, type NotificationDTO, type NotificationKind } from "@/lib/notifications/types"
+
+import { renderWithI18n } from "./helpers/render-i18n"
 
 function dto(kind: NotificationKind, extra: Partial<NotificationDTO> = {}): NotificationDTO {
   return {
@@ -70,19 +70,10 @@ describe("notification sentences", () => {
 
 describe("NotificationItem", () => {
   const render = (notification: NotificationDTO, locale: "he" | "en" = "he") =>
-    renderToStaticMarkup(
-      createElement(I18nProvider, {
-        locale,
-        dir: locale === "he" ? "rtl" : "ltr",
-        timeZone: "Asia/Jerusalem",
-        messages: m9NotificationsMessages[locale],
-        children: createElement(NotificationItem, {
-          notification,
-          onOpen: () => {},
-          onAcceptInvitation: () => {},
-          accepting: false,
-        }),
-      })
+    renderWithI18n(
+      createElement(NotificationItem, { notification, onOpen: () => {}, onAcceptInvitation: () => {}, accepting: false }),
+      locale,
+      m9NotificationsMessages[locale]
     )
 
   it("wraps names and titles in bdi, labels unread for screen readers and links the target", () => {
