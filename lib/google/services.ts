@@ -10,6 +10,11 @@ import { promisify } from "node:util"
 import { google } from "googleapis"
 
 import { FFMPEG_INPUT_PROTOCOLS } from "@/lib/ai/asr/audio"
+import { hasConferenceLink } from "@/lib/bot/calendar-links"
+import { cancelCalendarBotSession, syncCalendarBotSession } from "@/lib/bot/calendar-sync"
+import { getBotConfig, isBotEnabled } from "@/lib/bot/config"
+import { redactBotError } from "@/lib/bot/redact"
+import type { CalendarEventLike } from "@/lib/bot/types"
 import { getDatabasePool } from "@/lib/db/client"
 import { createDelegatedGoogleClient } from "@/lib/google/auth"
 import {
@@ -251,6 +256,8 @@ function calendarParticipants(event: {
   >()
 
   const organizerEmail = event.organizer?.email ?? undefined
+  // M7: the bot's own Google account is never a meeting participant.
+  const botAccountEmail = getBotConfig().accountEmail
   const organizerName =
     event.organizer?.displayName ?? organizerEmail?.split("@")[0] ?? undefined
 
@@ -268,6 +275,7 @@ function calendarParticipants(event: {
     const name = attendee.displayName ?? email?.split("@")[0] ?? undefined
 
     if (!name && !email) continue
+    if (botAccountEmail && email?.toLowerCase() === botAccountEmail) continue
 
     byEmailOrName.set((email ?? name ?? "").toLowerCase(), {
       name: name ?? email ?? "Attendee",
@@ -351,8 +359,12 @@ function shouldImportCalendarEvent(
 ) {
   if (importAll || event.status === "cancelled") return true
 
+  // M7: Zoom/Teams-only events count as meetings once the bot is enabled
+  // (gated so calendar import is unchanged while MEETSUM_BOT_ENABLED is off).
   const hasMeetingSignal =
-    Boolean(extractMeetLink(event)) || Boolean(event.attendees?.length)
+    Boolean(extractMeetLink(event)) ||
+    (isBotEnabled() && hasConferenceLink(event as CalendarEventLike)) ||
+    Boolean(event.attendees?.length)
 
   if (!hasMeetingSignal) return false
   if (isAllDayEvent(event)) return false
@@ -1366,6 +1378,15 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                where calendar_event_id = $1 and workspace_id = $2 and status <> 'completed'`,
               [calendarEventId, workspaceId]
             )
+            if (isBotEnabled()) {
+              await cancelCalendarBotSession({
+                workspaceId,
+                calendarEventId,
+                reason: "event_cancelled",
+              }).catch((error: unknown) => {
+                stats.errors?.push(`bot: ${redactBotError(error)}`)
+              })
+            }
             continue
           }
 
@@ -1434,6 +1455,18 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
                 attendees: event.attendees as CalendarAttendee[] | null | undefined,
               },
             })
+
+            if (isBotEnabled()) {
+              await syncCalendarBotSession({
+                workspaceId,
+                subject,
+                calendarEventId,
+                meetingId,
+                event,
+              }).catch((error: unknown) => {
+                stats.errors?.push(`bot: ${redactBotError(error)}`)
+              })
+            }
           }
         }
       } catch (error) {

@@ -3,6 +3,7 @@
 import type { ChangeEvent } from "react"
 import { LaptopIcon, MicIcon, UploadIcon } from "lucide-react"
 
+import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
 import { MeetingRecorder } from "@/components/meeting-recorder"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +24,8 @@ export function MediaIngestionDrawer({
   onOpenChange,
   onFileChange,
   onRecordingReady,
+  recorder,
+  meetingId,
 }: {
   dictionary: Dictionary
   pending?: boolean
@@ -31,6 +34,10 @@ export function MediaIngestionDrawer({
   onOpenChange?: (open: boolean) => void
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
   onRecordingReady: (file: File) => void
+  /** The shell's browser recorder (M7): keeps recording, and the dock, when the sheet closes. */
+  recorder?: BrowserRecorder
+  /** Meeting the browser recording belongs to, for the dock's "Open meeting". */
+  meetingId?: string | null
 }) {
   const triggerLabel =
     mode === "record"
@@ -104,6 +111,8 @@ export function MediaIngestionDrawer({
           {mode === "record" ? (
             <MeetingRecorder
               onRecordingReady={onRecordingReady}
+              recorder={recorder}
+              meetingId={meetingId}
               labels={{
                 ready: dictionary.recorderReady,
                 record: dictionary.record,

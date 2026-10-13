@@ -1,4 +1,5 @@
 import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
+import { botMessagesEn, botMessagesHe } from "@/lib/i18n/m7/bot"
 import { playerMessagesEn, playerMessagesHe } from "@/lib/i18n/player-messages"
 import { clipsMessagesEn, clipsMessagesHe } from "@/lib/i18n/m5/clips"
 import { commentsMessagesEn, commentsMessagesHe } from "@/lib/i18n/m5/comments"
@@ -79,6 +80,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
     ...intelligenceMessagesEn,
     ...tasksMessagesEn,
     ...clipsMessagesEn,
@@ -147,6 +149,7 @@ export const dictionaries = {
     ...workspaceMessagesHe,
     ...asrMessagesHe,
     ...playerMessagesHe,
+    ...botMessagesHe,
     ...intelligenceMessagesHe,
     ...tasksMessagesHe,
     ...clipsMessagesHe,
@@ -215,6 +218,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
     ...intelligenceMessagesEn,
     ...tasksMessagesEn,
     ...clipsMessagesEn,
@@ -283,6 +287,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
     ...intelligenceMessagesEn,
     ...tasksMessagesEn,
     ...clipsMessagesEn,
@@ -351,6 +356,7 @@ export const dictionaries = {
     ...workspaceMessagesEn,
     ...asrMessagesEn,
     ...playerMessagesEn,
+    ...botMessagesEn,
     ...intelligenceMessagesEn,
     ...tasksMessagesEn,
     ...clipsMessagesEn,

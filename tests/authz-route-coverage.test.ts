@@ -147,6 +147,16 @@ describe("API route authz coverage", () => {
       "meetings/[id]/transcript/segments/[segmentId] PATCH": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/undo POST": "meeting:write",
       "meetings/[id]/transcript/segments/[segmentId]/revisions GET": "meeting:read",
+      // M7 meeting bot.
+      "meetings/bot POST": "meeting:create",
+      "meetings/[id]/bot GET": "meeting:read",
+      "meetings/[id]/bot POST": "meeting:write",
+      "meetings/[id]/bot DELETE": "meeting:write",
+      "meetings/[id]/bot/live GET": "meeting:read",
+      "bot/sessions GET": "meeting:read",
+      "bot/status GET": "ops:read",
+      "settings/bot GET": "workspace:read",
+      "settings/bot PUT": "settings:write",
       // M5 C clips (rename/delete/share also check author / canManageMeeting).
       "meetings/[id]/clips GET": "meeting:read",
       "meetings/[id]/clips POST": "meeting:write",
@@ -223,6 +233,24 @@ describe("API route authz coverage", () => {
       expect(source).not.toMatch(/Presigned|S3_PUBLIC_ENDPOINT|getSignedUrl/)
       expect(source).toMatch(/export const runtime = "nodejs"/)
       expect(source).toMatch(/export const dynamic = "force-dynamic"/)
+    }
+  })
+
+  it("keeps the Vexa webhook public only behind its signature (M7)", () => {
+    const webhook = routes.find((route) => route.route === "integrations/vexa/webhook")?.source
+
+    expect(webhook).toMatch(
+      /withPublicRoute\(\s*"Vexa webhook: HMAC-SHA256 signed with VEXA_WEBHOOK_SECRET"/
+    )
+    expect(webhook).toMatch(/export const runtime = "nodejs"/)
+    expect(webhook).toMatch(/processVexaWebhook\(/)
+    // The workspace never comes from the request.
+    expect(webhook).not.toMatch(/workspaceId|getSystemMeetingRepository|getCaptureWorkspaceId/)
+
+    for (const route of routes.filter(
+      (candidate) => /(^|\/)bot(\/|$)/.test(candidate.route) || candidate.route === "settings/bot"
+    )) {
+      expect(route.source, route.route).not.toMatch(/withPublicRoute/)
     }
   })
 

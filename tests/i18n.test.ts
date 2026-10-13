@@ -11,6 +11,11 @@ import {
 import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
 import { dictionaries, formatMessage } from "@/lib/i18n/dictionaries"
 import {
+  BOT_LATIN_ONLY_KEYS,
+  botMessagesEn,
+  botMessagesHe,
+} from "@/lib/i18n/m7/bot"
+import {
   workspaceMessagesEn,
   workspaceMessagesHe,
 } from "@/lib/i18n/workspace-messages"
@@ -84,6 +89,26 @@ describe("internationalization", () => {
 
     for (const key of Object.keys(asrMessagesEn) as Array<keyof typeof asrMessagesEn>) {
       expect(placeholders(asrMessagesHe[key]), key).toEqual(placeholders(asrMessagesEn[key]))
+    }
+  })
+
+  it("keeps M7 bot strings in he/en parity with matching placeholders", () => {
+    const hebrew = /[֐-׿]/
+    const placeholders = (value: string) => (value.match(/\{\w+\}/g) ?? []).sort()
+    const keys = Object.keys(botMessagesEn) as Array<keyof typeof botMessagesEn>
+
+    expect(Object.keys(botMessagesHe).sort()).toEqual([...keys].sort())
+    expect(keys.filter((key) => key.startsWith("botReason")).length).toBe(20)
+
+    for (const key of keys) {
+      expect(botMessagesHe[key].trim(), key).not.toBe("")
+      expect(placeholders(botMessagesHe[key]), key).toEqual(placeholders(botMessagesEn[key]))
+      expect(dictionaries.en[key], key).toBe(botMessagesEn[key])
+      expect(dictionaries.he[key], key).toBe(botMessagesHe[key])
+      expect(dictionaries.pt[key], key).toBe(botMessagesEn[key])
+      if (!BOT_LATIN_ONLY_KEYS.includes(key)) {
+        expect(botMessagesHe[key], key).toMatch(hebrew)
+      }
     }
   })
 

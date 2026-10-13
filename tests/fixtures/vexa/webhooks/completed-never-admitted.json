@@ -1,0 +1,18 @@
+{
+  "_synthetic": true,
+  "event_type": "meeting.completed",
+  "event_id": "evt_completed_never_admitted",
+  "data": {
+    "meeting": {
+      "id": 4242,
+      "platform": "google_meet",
+      "native_meeting_id": "abc-defg-hij",
+      "status": "completed",
+      "data": {
+        "service_provenance": {
+          "bot_outcome": "never_admitted"
+        }
+      }
+    }
+  }
+}
