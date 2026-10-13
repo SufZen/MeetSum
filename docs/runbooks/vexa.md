@@ -84,10 +84,10 @@ Hosts should still announce the recording at the start of the call. Recordings f
 
 ## Docker socket
 
-The runtime mounts `/var/run/docker.sock` to spawn bot containers, which is **root-equivalent on the host**. Mitigations, in order of preference:
+The runtime mounts `/var/run/docker.sock` to spawn bot containers, which is **root-equivalent on the host**. See [meeting-bot.md](meeting-bot.md#docker-socket-and-host-isolation) for the full threat model. In order of preference:
 
-1. Run Vexa on a dedicated, isolated host.
-2. Set `VEXA_SOCKET_PROXY=1` to put `tecnativa/docker-socket-proxy` (pinned) in front of the runtime, with only the containers, images and networks APIs enabled (`deploy/vexa/compose.socket-proxy.yml`). This is not verified against the 0.12.28 runtime. If bots stop spawning, turn it off and use option 1.
+1. Run Vexa on a dedicated, isolated host or VM (or rootless Docker), with **no MeetSum secrets on that host**. This is the only real boundary.
+2. Optionally set `VEXA_SOCKET_PROXY=1` to put `tecnativa/docker-socket-proxy` (pinned) in front of the runtime (`deploy/vexa/compose.socket-proxy.yml`, behind the `socket-proxy` profile). It allows only the containers API plus POST; images and networks are off. **It is not a security boundary**: containers + POST still lets the runtime create a privileged container and escape to the host. It is not verified against the 0.12.28 runtime; if bots stop spawning, see the file header.
 3. If neither is possible, accept the risk explicitly. Keep the host patched, keep Vexa off Traefik, and restrict who can reach the Docker daemon.
 
 ## Troubleshooting by status reason

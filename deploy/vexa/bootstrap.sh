@@ -56,7 +56,9 @@ docker network inspect meetsum-vexa >/dev/null 2>&1 || docker network create --i
 
 compose=(docker compose -p vexa --env-file "$ENV_FILE" -f "$VEXA_HOME/$VEXA_COMPOSE_FILE" -f "$OVERRIDE")
 if [ "${VEXA_SOCKET_PROXY:-0}" = "1" ]; then
-  compose+=(-f "$HERE/compose.socket-proxy.yml")
+  # Opt-in only. NOT a security boundary (see the file header): it narrows the
+  # Docker API surface but CONTAINERS+POST still allow privileged containers.
+  compose+=(-f "$HERE/compose.socket-proxy.yml" --profile socket-proxy)
 fi
 
 # 4. Pull the pinned images (the bot image is spawned by the runtime, so pull it too).

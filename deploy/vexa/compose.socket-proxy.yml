@@ -1,24 +1,55 @@
-# OPTIONAL hardening for the Vexa runtime (docs/runbooks/vexa.md "Docker socket").
+# OPTIONAL, OPT-IN partial hardening for the Vexa runtime
+# (docs/runbooks/meeting-bot.md "Docker socket", docs/runbooks/vexa.md).
+#
+# !!! THIS PROXY IS NOT A SECURITY BOUNDARY. !!!
 #
 # The runtime spawns one bot container per meeting through the Docker API, and
-# a raw /var/run/docker.sock mount is root-equivalent on the host. This file
-# puts tecnativa/docker-socket-proxy in front of it with only the containers,
-# images and networks APIs enabled, and points the runtime at it.
+# a raw /var/run/docker.sock mount is root-equivalent on the host. The proxy
+# below only narrows WHICH API sections are reachable. Vexa must create and
+# start containers, so CONTAINERS=1 + POST=1 stay on, and that combination
+# alone lets anyone who controls the runtime create a privileged container or
+# bind-mount the host filesystem: a full host escape. tecnativa's proxy cannot
+# filter request bodies (privileged, binds, cap_add, devices, pid/network mode).
 #
-# NOT verified against the v0.12.28 runtime (deploy/vexa/VERIFIED.md): the
-# runtime must honour DOCKER_HOST. Enable with VEXA_SOCKET_PROXY=1 in vexa.env
-# (bootstrap.sh then adds `-f deploy/vexa/compose.socket-proxy.yml`); if bots
-# fail to spawn, remove it and run Vexa on a dedicated or isolated host.
+# Treat the Vexa host as fully trusted-by-Vexa only:
+#   - run Vexa on an isolated host or VM (preferred) or rootless Docker;
+#   - keep NO MeetSum secrets on that host (no MEETSUM_* / DATABASE_URL /
+#     session secret / MinIO root keys / OAuth secrets) beyond the Vexa API
+#     token and the bucket-scoped MinIO key;
+#   - expose only the gateway to MeetSum over a private network.
+#
+# Opt-in twice: VEXA_SOCKET_PROXY=1 in vexa.env makes bootstrap.sh add this
+# file AND `--profile socket-proxy`; without both nothing here runs.
+#
+# Restricted as far as the runtime allows: IMAGES=0 (bootstrap.sh pre-pulls
+# the bot image, so no pull/build/delete through the API) and NETWORKS=0 (bot
+# containers join the network via HostConfig at create time). NOT verified
+# against the v0.12.28 runtime (deploy/vexa/VERIFIED.md): it must honour
+# DOCKER_HOST and must not need the images/networks APIs. If bots fail to
+# spawn, first try IMAGES=1 (note: with POST=1 that also allows image pulls and
+# deletes), then NETWORKS=1; otherwise drop the proxy and rely on host isolation.
 
 services:
   docker-socket-proxy:
+    profiles: ["socket-proxy"]
     image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     restart: unless-stopped
     environment:
+      # Needed to create/start/stop/inspect bot containers. Together this is
+      # host-root-equivalent (privileged containers): see the header.
       CONTAINERS: 1
-      IMAGES: 1
-      NETWORKS: 1
       POST: 1
+      # Everything else off (most are already off by default; explicit here).
+      IMAGES: 0
+      NETWORKS: 0
+      SERVICES: 0
+      TASKS: 0
+      NODES: 0
+      PLUGINS: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      BUILD: 0
+      COMMIT: 0
       INFO: 1
       PING: 1
       VERSION: 1
