@@ -14,7 +14,7 @@ import { SegmentError, SegmentNotFound, mayShowErrorDetail } from "@/components/
 const root = path.resolve(__dirname, "..")
 
 describe("segment state files", () => {
-  const segments = ["app/[locale]", "app/[locale]/rooms/[id]", "app/[locale]/tasks", "app/[locale]/search", "app/[locale]/invite/[token]"]
+  const segments = ["app/[locale]", "app/[locale]/rooms/[id]", "app/[locale]/tasks", "app/[locale]/search", "app/[locale]/invite/[token]", "app/[locale]/invite/accept"]
 
   it.each(segments.flatMap((segment) => ["loading.tsx", "error.tsx", "not-found.tsx"].map((file) => `${segment}/${file}`)))(
     "%s exists",

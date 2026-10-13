@@ -359,7 +359,7 @@ export const workspaceMessagesHe: Record<WorkspaceMessageKey, string> = {
   inviteJoin: "הצטרפות אל {workspace} בתפקיד {role}.",
   inviteForEmail: "ההזמנה מיועדת ל-{email}.",
   inviteAccept: "קבלת ההזמנה",
-  inviteAccepting: "מצטרף…",
+  inviteAccepting: "ההצטרפות מתבצעת…",
   inviteSignIn: "התחברו עם Google כדי לקבל את ההזמנה",
   inviteSignedInAs: "מחוברים בתור {email}",
   inviteSwitchAccount: "שימוש בחשבון Google אחר",
