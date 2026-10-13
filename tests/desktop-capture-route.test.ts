@@ -667,4 +667,19 @@ describe("desktop capture upload routes", () => {
     expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(1)
     expect(mocks.createMeeting).not.toHaveBeenCalled()
   })
+  it("rejects a PWA queued upload recorded in another workspace before reading it (M9 D5)", async () => {
+    const ingestRoute = await import("@/app/api/desktop-capture/ingest/route")
+    const request = new Request("http://localhost/api/desktop-capture/ingest", {
+      method: "POST",
+      headers: { "x-meetsum-workspace-id": "ws_other" },
+      body: formWith({ meeting: { title: "x", startedAt: "2026-07-05T09:00:00.000Z" } }),
+    })
+    const response = await ingestRoute.POST(request, { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "workspace_mismatch" })
+    expect(mocks.createMeeting).not.toHaveBeenCalled()
+    expect(mocks.createMeetingIfAbsent).not.toHaveBeenCalled()
+    expect(mocks.storeMeetingObjectStream).not.toHaveBeenCalled()
+  })
 })

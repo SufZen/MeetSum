@@ -17,12 +17,14 @@ import {
   ShieldCheckIcon,
 } from "lucide-react"
 
-import { SigmaMark } from "@/components/ui/sigma-mark"
 import Link from "next/link"
-import { useRef } from "react"
+import { useRef, useState, type MouseEvent } from "react"
 
 import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/permissions"
-import { Button } from "@/components/ui/button"
+import { useUploadQueue } from "@/components/pwa/upload-queue-provider"
+import { clearServiceWorkerCaches } from "@/components/pwa/service-worker-registrar"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { SigmaMark } from "@/components/ui/sigma-mark"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +35,8 @@ import { useWorkspace } from "@/components/workspace-context"
 import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+import { isPlainLeftClick } from "@/lib/client/shell-navigation"
+import { buildShellUrl } from "@/lib/client/shell-url"
 
 export type SidebarRoom = {
   id: string
@@ -41,6 +45,8 @@ export type SidebarRoom = {
 }
 
 export type SidebarUser = {
+  /** Partitions the offline recording queue (never shown). */
+  id?: string
   email: string
   name?: string
   picture?: string
@@ -86,10 +92,34 @@ export function MainSidebar({
   user?: SidebarUser
 }) {
   const logoutFormRef = useRef<HTMLFormElement>(null)
+  const uploads = useUploadQueue()
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const { can } = useWorkspace()
   const showAdmin = ADMIN_PANEL_PERMISSIONS.some((permission) => can(permission))
   const displayName = user?.name?.trim() || user?.email.split("@")[0] || ""
   const initial = (displayName || "?").slice(0, 1).toUpperCase()
+  // Logout: queued recordings belong to this user on this device; deleting
+  // them needs a confirmation, then the queue and the SW caches are cleared.
+  async function logOut(discardPending: boolean) {
+    if (!discardPending && (uploads?.snapshot?.pending ?? 0) > 0) {
+      setLogoutConfirmOpen(true)
+      return
+    }
+    await uploads?.clearAll().catch(() => undefined)
+    await clearServiceWorkerCaches()
+    logoutFormRef.current?.requestSubmit()
+  }
+
+  function onNavClick(event: MouseEvent<HTMLAnchorElement>, panel: MainPanelKey) {
+    if (!isPlainLeftClick(event)) return
+    event.preventDefault()
+    onPanelChange(panel)
+  }
+
+  const linkClass =
+    "inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+  const activeLinkClass =
+    "inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md bg-brand-soft px-3 text-base font-semibold text-brand-text transition-colors duration-(--dur-1) focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
   const navItems = [
     dictionary.navMeetings,
     dictionary.navMemory,
@@ -109,7 +139,10 @@ export function MainSidebar({
       </div>
       {user ? <WorkspaceSwitcher dictionary={dictionary} /> : null}
 
-      <nav className="mt-2 flex gap-2 overflow-x-auto border-y border-line py-3 lg:grid lg:gap-1.5 lg:overflow-visible">
+      <nav
+        aria-label={dictionary.shellMainNavLabel}
+        className="mt-2 flex gap-2 overflow-x-auto border-y border-line py-3 lg:grid lg:gap-1.5 lg:overflow-visible"
+      >
         {navItems.map((label, index) => {
           const Icon = navIcons[index]
           const panel = panelKeys[index]
@@ -117,26 +150,24 @@ export function MainSidebar({
 
           if (panel === "admin" && !showAdmin) return null
 
+          // Real links: modifier-click opens a tab; a plain click stays in-app.
           return (
-            <Button
+            <Link
               key={panel}
-              variant="ghost"
-              className={
-                active
-                  ? "h-9 min-w-fit justify-start rounded-md bg-brand-soft px-3 font-semibold text-brand-text hover:bg-brand-soft hover:text-brand-text lg:min-w-0"
-                  : "h-9 min-w-fit justify-start rounded-md px-3 text-sidebar-foreground hover:bg-surface-3 hover:text-sidebar-accent-foreground lg:min-w-0"
-              }
-              onClick={() => onPanelChange(panel)}
+              href={buildShellUrl(locale, { panel })}
+              aria-current={active ? "page" : undefined}
+              className={active ? activeLinkClass : linkClass}
+              onClick={(event) => onNavClick(event, panel)}
             >
-              <Icon data-icon="inline-start" className="size-4" />
+              <Icon aria-hidden="true" className="size-4" />
               {label}
-            </Button>
+            </Link>
           )
         })}
         {/* M6: global Search & Ask is its own page. */}
         <Link
           href={`/${locale}/search`}
-          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+          className={linkClass}
         >
           <SearchIcon aria-hidden className="size-4" />
           {dictionary.navSearchAsk}
@@ -144,7 +175,7 @@ export function MainSidebar({
         {/* M5: the cross-meeting Tasks view is its own page. */}
         <Link
           href={`/${locale}/tasks`}
-          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+          className={linkClass}
         >
           <ListChecksIcon aria-hidden className="size-4" />
           {dictionary.navTasks}
@@ -152,7 +183,7 @@ export function MainSidebar({
         {/* M9: the workspace analytics dashboard is its own page (Package C). */}
         <Link
           href={`/${locale}/analytics`}
-          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+          className={linkClass}
         >
           <BarChart3Icon aria-hidden className="size-4" />
           {dictionary.analyticsNav}
@@ -163,7 +194,7 @@ export function MainSidebar({
         {rooms.length ? (
           <div className="hidden lg:block">
             <div className="mb-4 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <span>Recent rooms</span>
+              <span>{dictionary.shellRecentRooms}</span>
               <FolderPlusIcon aria-hidden="true" className="size-4 text-brand-text" />
             </div>
             <div className="grid gap-1 text-sm text-sidebar-foreground">
@@ -226,13 +257,21 @@ export function MainSidebar({
               <DropdownMenuContent align="end" side="top">
                 <DropdownMenuItem
                   variant="destructive"
-                  onClick={() => logoutFormRef.current?.requestSubmit()}
+                  onClick={() => void logOut(false)}
                 >
                   <LogOutIcon aria-hidden="true" className="size-4" />
                   {dictionary.logOut}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <ConfirmDialog
+              open={logoutConfirmOpen}
+              onOpenChange={setLogoutConfirmOpen}
+              title={dictionary.pwaLogoutPendingTitle}
+              description={dictionary.pwaLogoutPendingDescription}
+              confirmLabel={dictionary.pwaLogoutDiscard}
+              onConfirm={() => logOut(true)}
+            />
           </>
         ) : null}
       </div>

@@ -46,6 +46,13 @@ export default async function LocaleLayout({
       className={cn("antialiased", fontVariables)}
     >
       <body>
+        {/* M9 D7: first focusable element; the shell's <main> has this id. */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:start-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:shadow-3"
+        >
+          {i18n.dictionary.shellSkipToContent}
+        </a>
         <DirectionProvider direction={dir}>
           <I18nProvider locale={i18n.locale} dir={i18n.dir} timeZone={i18n.timeZone} messages={i18n.dictionary}>
             <ThemeProvider>

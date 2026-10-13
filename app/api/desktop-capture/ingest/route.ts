@@ -38,6 +38,14 @@ export const runtime = "nodejs"
  * duplicate meetings or jobs.
  */
 export const POST = withAuthz("meeting:create", async (request, ctx) => {
+  // M9 D5: the PWA offline queue names the workspace a recording was made
+  // in; never ingest it into another one (checked before reading the body).
+  const recordedIn = request.headers.get("x-meetsum-workspace-id")
+
+  if (recordedIn !== null && recordedIn !== ctx.workspace.id) {
+    return NextResponse.json({ error: "workspace_mismatch" }, { status: 409 })
+  }
+
   const limits = getUploadLimits()
   let upload: ParsedMediaUpload
 

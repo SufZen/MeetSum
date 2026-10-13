@@ -67,6 +67,13 @@ export const DEFAULT_SHELL_STATE: ShellState = {
 /** The parameters the shell owns; everything else is kept as-is. */
 export const SHELL_PARAMS = ["panel", "meeting", "tab", "t", "adminTab", "section"] as const
 
+/**
+ * One-shot parameters that are never round-tripped (M9 security review):
+ * URL state is navigation only. `record=1` may open the recorder sheet once,
+ * but never starts capture, and is dropped from every built URL.
+ */
+const ONE_SHOT_PARAMS: readonly string[] = ["record"]
+
 /** `useSearchParams()` (a URLSearchParams), a page's `searchParams` object, or a query string. */
 export type SearchParamsInput = URLSearchParams | Record<string, string | string[] | undefined> | string
 
@@ -111,7 +118,7 @@ export function parseShellUrl(input: SearchParamsInput | null | undefined): Shel
 /**
  * Builds `/<locale>?…` for a shell state. Values equal to the defaults are
  * omitted; `keep` (the current search params) contributes every parameter
- * the shell does not own.
+ * the shell does not own, except one-shot ones (`record`).
  */
 export function buildShellUrl(
   locale: string,
@@ -129,7 +136,7 @@ export function buildShellUrl(
   if (next.panel === "settings" && next.section) params.set("section", next.section)
 
   toSearchParams(keep).forEach((value, key) => {
-    if (!(SHELL_PARAMS as readonly string[]).includes(key)) params.append(key, value)
+    if (!(SHELL_PARAMS as readonly string[]).includes(key) && !ONE_SHOT_PARAMS.includes(key)) params.append(key, value)
   })
 
   const query = params.toString()
