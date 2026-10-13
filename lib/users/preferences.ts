@@ -95,37 +95,53 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 /**
  * Applies a patch (`undefined` keeps a field; `null` clears locale or zone).
  * Invalid values are rejected by the caller (the route validates first) and
- * normalized here as a second line of defence.
+ * normalized here as a second line of defence. On Postgres only the supplied
+ * columns are written, in one statement (no read-modify-write), so
+ * concurrent locale, zone and notification PATCHes never clobber each other.
  */
 export async function updateUserPreferences(
   userId: string,
   patch: UserPreferencesPatch
 ): Promise<UserPreferences> {
-  const current = await getUserPreferences(userId)
-  const next: UserPreferences = {
-    locale: patch.locale === undefined ? current.locale : normalizeLocalePreference(patch.locale),
-    timeZone: patch.timeZone === undefined ? current.timeZone : normalizeTimeZonePreference(patch.timeZone),
-    notifications:
-      patch.notifications === undefined ? current.notifications : normalizeNotificationPrefs(patch.notifications),
-  }
-
   if (!usesPostgres()) {
+    const current = await getUserPreferences(userId)
+    const next: UserPreferences = {
+      locale: patch.locale === undefined ? current.locale : normalizeLocalePreference(patch.locale),
+      timeZone: patch.timeZone === undefined ? current.timeZone : normalizeTimeZonePreference(patch.timeZone),
+      notifications:
+        patch.notifications === undefined ? current.notifications : normalizeNotificationPrefs(patch.notifications),
+    }
+
     memoryPreferences.set(userId, next)
     return { ...next, notifications: { muted: [...next.notifications.muted] } }
   }
 
-  await getDatabasePool().query(
-    `
-      update users
-         set locale = $2,
-             time_zone = $3,
-             preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('notifications', $4::jsonb)
-       where id = $1
-    `,
-    [userId, next.locale, next.timeZone, JSON.stringify(next.notifications)]
+  const values: unknown[] = [userId]
+  const sets: string[] = []
+
+  if (patch.locale !== undefined) {
+    values.push(normalizeLocalePreference(patch.locale))
+    sets.push(`locale = $${values.length}`)
+  }
+  if (patch.timeZone !== undefined) {
+    values.push(normalizeTimeZonePreference(patch.timeZone))
+    sets.push(`time_zone = $${values.length}`)
+  }
+  if (patch.notifications !== undefined) {
+    values.push(JSON.stringify(normalizeNotificationPrefs(patch.notifications)))
+    sets.push(
+      `preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('notifications', $${values.length}::jsonb)`
+    )
+  }
+
+  if (!sets.length) return getUserPreferences(userId)
+
+  const result = await getDatabasePool().query(
+    `update users set ${sets.join(", ")} where id = $1 returning locale, time_zone, preferences`,
+    values
   )
 
-  return next
+  return fromRow(result.rows[0] as PreferencesRow | undefined)
 }
 
 /** Validates a PATCH body; unknown fields are ignored, invalid ones name the field. */

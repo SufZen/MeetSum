@@ -66,6 +66,22 @@ describe("notification mutes on Postgres (A preferences -> C enqueue)", () => {
     expect(allowed.skipped).toBe(false)
   })
 
+  it("concurrent locale and notification PATCHes don't clobber each other", async () => {
+    await holder.db!.exec("update users set locale = null, time_zone = null where id = 'usr_admin'")
+
+    await Promise.all([
+      updateUserPreferences("usr_admin", { locale: "en" }),
+      updateUserPreferences("usr_admin", { notifications: { muted: ["reply"] } }),
+      updateUserPreferences("usr_admin", { timeZone: "Europe/Lisbon" }),
+    ])
+
+    expect(await getUserPreferences("usr_admin")).toEqual({
+      locale: "en",
+      timeZone: "Europe/Lisbon",
+      notifications: { muted: ["reply"] },
+    })
+  })
+
   it("unmuting through the same shape lets the kind through again", async () => {
     await updateUserPreferences("usr_admin", { notifications: { muted: ["meeting_failed"] } })
     await updateUserPreferences("usr_admin", { notifications: { muted: [] } })
