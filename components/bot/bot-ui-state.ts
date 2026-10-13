@@ -62,8 +62,9 @@ export function botPillFor(
   switch (status) {
     case "requested":
     case "joining":
-    case "stopping":
       return { status: "processing", labelKey: "botPillJoining" }
+    case "stopping":
+      return { status: "processing", labelKey: "botPillStopping" }
     case "awaiting_admission":
     case "needs_help":
       return { status: "review", labelKey: "botPillWaiting" }

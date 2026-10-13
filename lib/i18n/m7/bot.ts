@@ -15,6 +15,7 @@ export const botMessagesEn = {
   botPillJoining: "Joining…",
   botPillWaiting: "Waiting to be admitted",
   botPillRecording: "Recording",
+  botPillStopping: "Stopping…",
   botScheduledAt: "Bot joins at {time}",
 
   // Status strip steps (showcase: Scheduled → Joining → Waiting → Recording → Processing)
@@ -196,6 +197,7 @@ export const botMessagesHe: Record<BotMessageKey, string> = {
   botPillJoining: "מצטרף…",
   botPillWaiting: "ממתין לאישור",
   botPillRecording: "מקליט",
+  botPillStopping: "עוצר…",
   botScheduledAt: "הבוט יצטרף ב־{time}",
 
   botStepsLabel: "התקדמות בוט הפגישות",

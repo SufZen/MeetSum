@@ -31,7 +31,7 @@ import {
   type BotSessionSummary,
   type BotStatus,
 } from "@/lib/bot/types"
-import { botMessagesEn } from "@/lib/i18n/m7/bot"
+import { botMessagesEn, botMessagesHe } from "@/lib/i18n/m7/bot"
 
 function session(overrides: Partial<BotSessionSummary> = {}): BotSessionSummary {
   return {
@@ -55,7 +55,7 @@ describe("botPillFor", () => {
     scheduled: null,
     requested: { status: "processing", labelKey: "botPillJoining" },
     joining: { status: "processing", labelKey: "botPillJoining" },
-    stopping: { status: "processing", labelKey: "botPillJoining" },
+    stopping: { status: "processing", labelKey: "botPillStopping" },
     awaiting_admission: { status: "review", labelKey: "botPillWaiting" },
     needs_help: { status: "review", labelKey: "botPillWaiting" },
     active: { status: "live", labelKey: "botPillRecording" },
@@ -294,5 +294,12 @@ describe("live transcript draft", () => {
     expect(liveSegmentDir("en-US", "he")).toBe("ltr")
     expect(liveSegmentDir(null, "he")).toBe("rtl")
     expect(liveSegmentDir(null, "mixed")).toBe("auto")
+  })
+})
+
+describe("stopping pill label", () => {
+  it("is localized as Stopping… / עוצר…", () => {
+    expect(botMessagesEn.botPillStopping).toBe("Stopping…")
+    expect(botMessagesHe.botPillStopping).toBe("עוצר…")
   })
 })
