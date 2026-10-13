@@ -380,7 +380,7 @@ test.describe.serial("M8 integrations with fake providers", () => {
     const section = page.locator("section", { has: page.locator("#integrations-webhooks-title") })
 
     await section.getByLabel(he.integrationsSectionWebhooks).fill(`${FAKE}/__fake/webhook`)
-    await section.getByRole("button", { name: he.botInternalDomainsAdd }).click()
+    await section.getByRole("button", { name: he.integrationsWebhookAdd }).click()
     const secret = await section.locator("code").first().textContent()
 
     expect(secret).toBeTruthy()

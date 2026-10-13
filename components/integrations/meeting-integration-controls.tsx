@@ -148,7 +148,7 @@ export function MeetingIntegrationControls({
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <SendIcon aria-hidden="true" data-icon="directional" />
-              {t.exportSendTo || t.integrationsRuleDestination}
+              {t.exportSendTo}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               {targets.map((connection) => (

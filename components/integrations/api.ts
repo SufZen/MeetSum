@@ -202,8 +202,11 @@ export const integrationsApi = {
   webhookSubscriptions: () =>
     mapped(call<unknown>("/api/webhooks/subscriptions"), (body) => list<WebhookSubscriptionView>(body, "subscriptions")),
 
-  createWebhook: (url: string, events: string[]) =>
-    call<{ subscription: WebhookSubscriptionView; secret?: string }>("/api/webhooks/subscriptions", json("POST", { url, events })),
+  createWebhook: (url: string, events: string[], payloadVersion: WebhookPayloadVersion = 2) =>
+    call<{ subscription: WebhookSubscriptionView; secret?: string }>(
+      "/api/webhooks/subscriptions",
+      json("POST", { url, events, payloadVersion })
+    ),
 
   updateWebhook: (id: string, patch: { enabled?: boolean; payloadVersion?: WebhookPayloadVersion; events?: string[]; rotateSecret?: boolean }) =>
     call<{ subscription?: WebhookSubscriptionView; secret?: string }>(`/api/webhooks/subscriptions/${enc(id)}`, json("PATCH", patch)),

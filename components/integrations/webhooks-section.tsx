@@ -23,29 +23,21 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 
-/** Used until `GET /api/webhooks/catalog` (C4) answers: today's v1 events. */
-const FALLBACK_EVENTS: CatalogEvent[] = [
-  "meeting.completed",
-  "summary.created",
-  "action_item.created",
-  "meeting.process_failed",
-  "realizeos.export.sent",
-  "realizeos.export.failed",
-].map((name) => ({ name, versions: [1, 2] }))
-
 const DOCS_URL = "https://github.com/SufZen/MeetSum/blob/main/docs/api-reference.md#event-catalog"
 
 type Revealed = { subscriptionId: string; url: string; secret: string }
 
 /**
  * Webhooks (Zapier, n8n): the subscription CRUD moved here from the
- * automations panel (D1), with the C4 event catalog, the payload-version
+ * automations panel (D1), with the C4 event catalog (`GET
+ * /api/webhooks/catalog`; new subscriptions are created with
+ * `payloadVersion: 2`), the payload-version
  * badge and one-way "Upgrade to v2", the signing secret shown once, and a
  * test-fire with an event picker. The delivery history is in the delivery log.
  */
 export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: () => void }) {
   const [subscriptions, setSubscriptions] = useState<WebhookSubscriptionView[]>([])
-  const [catalog, setCatalog] = useState<CatalogEvent[]>(FALLBACK_EVENTS)
+  const [catalog, setCatalog] = useState<CatalogEvent[]>([])
   const [url, setUrl] = useState("")
   const [selected, setSelected] = useState<string[]>(["meeting.completed", "summary.created"])
   const [testEvent, setTestEvent] = useState<Record<string, string>>({})
@@ -97,7 +89,7 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
       return
     }
     setBusy(true)
-    const result = await integrationsApi.createWebhook(url.trim(), selected)
+    const result = await integrationsApi.createWebhook(url.trim(), selected, 2)
 
     setBusy(false)
     if (!result.ok) {
@@ -165,7 +157,7 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
             onChange={(event) => setUrl(event.target.value)}
           />
           <Button variant="secondary" disabled={busy || !url.trim()} onClick={() => void create()}>
-            {t.botInternalDomainsAdd}
+            {t.integrationsWebhookAdd}
           </Button>
         </div>
         <fieldset className="flex flex-wrap gap-1.5">
@@ -250,8 +242,8 @@ export function WebhooksSection({ t, onChanged }: { t: Dictionary; onChanged?: (
                       variant="ghost"
                       size="icon-sm"
                       disabled={busy}
-                      title={t.intelRegenerate}
-                      aria-label={`${t.intelRegenerate}: ${subscription.url}`}
+                      title={t.integrationsWebhookRotateSecret}
+                      aria-label={`${t.integrationsWebhookRotateSecret}: ${subscription.url}`}
                       onClick={() => void rotate(subscription)}
                     >
                       <KeyRoundIcon aria-hidden="true" />
