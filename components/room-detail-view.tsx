@@ -5,6 +5,7 @@ import {
   CalendarDaysIcon,
   CheckCircle2Icon,
   CircleDotIcon,
+  ClockIcon,
   ClipboardListIcon,
   MessageSquareIcon,
   SendIcon,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
+import { formatDurationLabel } from "@/lib/meetings/duration"
 import type { RoomDetail, RoomMeetingSummary, RoomTask, RoomParticipant, RoomArtifact } from "@/lib/rooms"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 
@@ -67,6 +69,10 @@ function MeetingCard({ meeting, locale }: { meeting: RoomMeetingSummary; locale:
         <span className="flex items-center gap-1">
           <CalendarDaysIcon className="size-3" />
           {formatDate(meeting.startedAt)}
+        </span>
+        <span className="flex items-center gap-1 [unicode-bidi:isolate]">
+          <ClockIcon className="size-3" />
+          {formatDurationLabel(meeting.durationMs, locale)}
         </span>
         <span className="flex items-center gap-1">
           <UsersIcon className="size-3" />
