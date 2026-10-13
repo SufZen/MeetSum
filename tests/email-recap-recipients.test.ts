@@ -19,6 +19,7 @@ function participant(email: string | undefined, index: number) {
     source: "calendar" as const,
     attendanceStatus: "accepted" as const,
     createdAt: "",
+    updatedAt: "",
   }
 }
 

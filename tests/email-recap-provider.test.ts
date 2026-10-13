@@ -28,6 +28,7 @@ function participants(emails: string[]): MeetingRecord["participantDetails"] {
     source: "calendar",
     attendanceStatus: "accepted",
     createdAt: "",
+    updatedAt: "",
   }))
 }
 
@@ -42,7 +43,7 @@ describe("email recap provider", () => {
     MEETSUM_EMAIL_RECAP_MAX_PER_HOUR: "200",
   } as NodeJS.ProcessEnv
 
-  function install(overrides: NodeJS.ProcessEnv = {}) {
+  function install(overrides: Record<string, string> = {}) {
     const sender: EmailSender = {
       provider: "log",
       isConfigured: () => true,
@@ -61,7 +62,7 @@ describe("email recap provider", () => {
         listMembers: async (workspaceId) => (rt.members.get(workspaceId) ?? []).map(({ userId, email }) => ({ userId, email })),
         workspaceName: async () => "Acme",
         sleep: async () => undefined,
-        env: { ...env, ...overrides },
+        env: { ...env, ...overrides } as NodeJS.ProcessEnv,
       })
     )
   }
