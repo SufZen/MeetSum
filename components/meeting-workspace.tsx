@@ -25,16 +25,11 @@ import {
 } from "lucide-react"
 
 import { AskMeetingPanel, type AskCitation } from "@/components/ask-meeting-panel"
-import { ClipList } from "@/components/clips/clip-list"
-import { CommentsDrawer } from "@/components/comments/comments-drawer"
-import { FollowUpPanel } from "@/components/intelligence/follow-up-panel"
-import { PrepPanel } from "@/components/intelligence/prep-panel"
 import { useJson } from "@/components/intelligence/use-json"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
 import { LazyMeetingPlayer } from "@/components/player/lazy"
 import { TranscriptSkeleton } from "@/components/transcript/transcript-skeleton"
-import { ActionItemEditor } from "@/components/tasks/action-item-editor"
 import {
   MeetingPlayerProvider,
   useMeetingPlayer,
@@ -74,6 +69,30 @@ const SpeakerMappingPanel = dynamic(
 const LazyTranscriptTimeline = dynamic(
   () => import("@/components/transcript-timeline").then((mod) => mod.TranscriptTimeline),
   { ssr: false, loading: () => <TranscriptSkeleton /> }
+)
+/**
+ * M5 panels (clips, comments, prep, follow-up, tasks) render only on their
+ * tab or when the drawer opens: code split to keep the meeting route small.
+ */
+const ClipList = dynamic(() => import("@/components/clips/clip-list").then((mod) => mod.ClipList), {
+  ssr: false,
+  loading: () => <Skeleton className="h-24 w-full rounded-lg" />,
+})
+const CommentsDrawer = dynamic(
+  () => import("@/components/comments/comments-drawer").then((mod) => mod.CommentsDrawer),
+  { ssr: false }
+)
+const PrepPanel = dynamic(() => import("@/components/intelligence/prep-panel").then((mod) => mod.PrepPanel), {
+  ssr: false,
+  loading: () => <Skeleton className="h-32 w-full rounded-lg" />,
+})
+const FollowUpPanel = dynamic(
+  () => import("@/components/intelligence/follow-up-panel").then((mod) => mod.FollowUpPanel),
+  { ssr: false, loading: () => <Skeleton className="h-32 w-full rounded-lg" /> }
+)
+const ActionItemEditor = dynamic(
+  () => import("@/components/tasks/action-item-editor").then((mod) => mod.ActionItemEditor),
+  { ssr: false, loading: () => <Skeleton className="h-24 w-full rounded-lg" /> }
 )
 const ReprocessConfirmDialog = dynamic(
   () => import("@/components/meeting-dialogs").then((mod) => mod.ReprocessConfirmDialog),
