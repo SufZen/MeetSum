@@ -130,7 +130,8 @@ export function buildWebhookPayloadV2(
   if (!isMeetingScoped(name)) return compact(data)
 
   const meeting = context.meeting
-  const visibility = meeting && meeting.id === data.meetingId ? (meeting.visibility ?? "workspace") : "private"
+  // Unknown visibility is private (fail closed), as in the integrations privacy gate.
+  const visibility = meeting && meeting.id === data.meetingId ? (meeting.visibility ?? "private") : "private"
 
   if (data.visibility === "private" || !meeting || visibility === "private") {
     return minimalPrivatePayload(context.workspaceId, data)

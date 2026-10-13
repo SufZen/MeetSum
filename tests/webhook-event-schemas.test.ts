@@ -115,6 +115,16 @@ describe("v2 payload builders", () => {
     expect(data).toEqual({ meetingId: "meet_1", mode: "full", workspace_id: WS, visibility: "private" })
   })
 
+  it("fails closed when the meeting record has no visibility (undefined → private)", () => {
+    const data = buildWebhookPayloadV2("meeting.completed", RAW["meeting.completed"], {
+      workspaceId: WS,
+      meeting: meeting({ visibility: undefined }),
+      env: ENV,
+    })
+
+    expect(data).toEqual({ meetingId: "meet_1", mode: "full", workspace_id: WS, visibility: "private" })
+  })
+
   it("keeps an already-minimized v1 private payload minimal", () => {
     const v1Private = minimalPrivatePayload(WS, RAW["summary.created"])
     const data = buildWebhookPayloadV2("summary.created", v1Private, { workspaceId: WS, meeting: meeting() })
