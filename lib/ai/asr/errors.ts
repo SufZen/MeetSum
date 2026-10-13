@@ -12,6 +12,29 @@ export class TranscriptionUnavailableError extends Error {
   }
 }
 
+const MAX_ERROR_LENGTH = 300
+
+/**
+ * Strips secrets from provider error text before it is logged or persisted
+ * (ai_runs metadata is shown to every workspace member): URL query strings
+ * (presigned handoff signatures), bearer tokens, key/token/signature params,
+ * and long base64 blobs. Output is capped at 300 characters.
+ */
+export function redactAsrErrorMessage(message: string): string {
+  const redacted = message
+    .replace(/(https?:\/\/[^\s?#"'<>]+)\?[^\s"'<>]*/gi, "$1?[redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?token|token|secret|signature|password|x-amz-[a-z-]+)(["']?\s*[:=]\s*["']?)[^\s&"',}]+/gi,
+      "$1$2[redacted]"
+    )
+    .replace(/[A-Za-z0-9+/]{200,}={0,2}/g, "[blob]")
+
+  return redacted.length > MAX_ERROR_LENGTH
+    ? `${redacted.slice(0, MAX_ERROR_LENGTH - 1)}…`
+    : redacted
+}
+
 /** Kind + retryability for an HTTP status returned by an ASR provider. */
 export function classifyHttpStatus(status: number): {
   kind: AsrErrorKind
@@ -38,7 +61,7 @@ function errorName(error: unknown) {
 export function toAsrError(error: unknown, provider: string): AsrError {
   if (error instanceof AsrError) return error
 
-  const message = error instanceof Error ? error.message : String(error)
+  const message = redactAsrErrorMessage(error instanceof Error ? error.message : String(error))
   const lower = message.toLowerCase()
   const name = errorName(error)
 
@@ -74,7 +97,7 @@ export async function throwForResponse(
   const { kind, retryable } = classifyHttpStatus(response.status)
 
   throw new AsrError(
-    `${context} failed with HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`,
+    redactAsrErrorMessage(`${context} failed with HTTP ${response.status}${body ? `: ${body}` : ""}`),
     kind,
     provider,
     retryable,

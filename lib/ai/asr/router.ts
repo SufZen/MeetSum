@@ -8,7 +8,7 @@ import {
   type CircuitBreaker,
 } from "./breaker"
 import { DEFAULT_ASR_CHAIN, DEFAULT_ASR_CHAIN_NON_HE, envText, resolveAsrChain, type AsrEnv } from "./config"
-import { toAsrError, TranscriptionUnavailableError } from "./errors"
+import { redactAsrErrorMessage, toAsrError, TranscriptionUnavailableError } from "./errors"
 import type { FetchFn } from "./http"
 import { createGeminiLegacyProvider } from "./providers/gemini-legacy"
 import { createLocalWhisperChunkedProvider } from "./providers/local-whisper-chunked"
@@ -221,14 +221,15 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
         }
       }
 
-      attempts.push({ provider: provider.id, ok: false, kind: asrError.kind, error: asrError.message, elapsedMs })
+      const safeMessage = redactAsrErrorMessage(asrError.message)
+      attempts.push({ provider: provider.id, ok: false, kind: asrError.kind, error: safeMessage, elapsedMs })
       await breaker.recordFailure(provider.id, asrError)
       console.error(
-        `[asr] ${provider.id} failed after ${elapsedMs}ms (${asrError.kind}, retryable=${asrError.retryable}): ${asrError.message}`
+        `[asr] ${provider.id} failed after ${elapsedMs}ms (${asrError.kind}, retryable=${asrError.retryable}): ${safeMessage}`
       )
 
       if (asrError.kind === "bad_input") {
-        throw new AsrChainError(`ASR input rejected by ${provider.id}: ${asrError.message}`, attempts, false)
+        throw new AsrChainError(`ASR input rejected by ${provider.id}: ${safeMessage}`, attempts, false)
       }
       if (req.signal?.aborted) {
         throw new AsrChainError("ASR transcription aborted", attempts, false)
@@ -277,7 +278,7 @@ export async function getAsrRouterStatus(opts: AsrRouterOptions = {}): Promise<A
               provider: provider.id,
               configured,
               healthy: false,
-              lastError: error instanceof Error ? error.message : String(error),
+              lastError: redactAsrErrorMessage(error instanceof Error ? error.message : String(error)),
             }
           }
         }
