@@ -88,11 +88,35 @@ describe("buildSlackRecapMessage", () => {
       }),
       { ...OPTIONS, locale: "en" }
     )
-    const all = JSON.stringify(message)
+    // Every mrkdwn/text field is escaped; the plain_text header is not parsed by Slack.
+    const all = JSON.stringify({ text: message.text, blocks: message.blocks.slice(1) })
 
     expect(all).not.toMatch(/<!channel>|<!here>|<@U123>|<https:\/\/evil|<!everyone>|<@U9>|<script>/)
     expect(all).toContain("&lt;!channel&gt;")
     expect(escapeSlack("a & b < c > d")).toBe("a &amp; b &lt; c &gt; d")
+  })
+
+  it("does not entity-escape the plain_text header but escapes the mrkdwn fallback (Q&A <x>)", () => {
+    const message = buildSlackRecapMessage(recap({ title: "Q&A <x>" }), { ...OPTIONS, locale: "en" })
+    const header = message.blocks[0] as { type: string; text: { type: string; text: string } }
+
+    expect(header).toMatchObject({ type: "header", text: { type: "plain_text" } })
+    expect(header.text.text).toContain("Recap: Q&A <x>")
+    expect(message.text.split(/\n/)[0]).toContain("Recap: Q&amp;A &lt;x&gt;")
+  })
+
+  it("truncates before escaping, so an entity is never cut", () => {
+    const title = `${"x".repeat(140)}&&&&&&&&&&&&&&&&&&&&`
+    const message = buildSlackRecapMessage(recap({ title, overview: "&".repeat(4000) }), { ...OPTIONS, locale: "en" })
+    const header = (message.blocks[0] as { text: { text: string } }).text.text
+    const sections = message.blocks.filter((block) => block.type === "section").map((block) => (block as { text: { text: string } }).text.text)
+
+    expect(header.length).toBeLessThanOrEqual(150)
+    expect(header).not.toContain("&amp;")
+    for (const text of [message.text, ...sections]) {
+      // Every "&" starts a complete entity.
+      expect(text.replace(/&(amp|lt|gt);/g, "")).not.toContain("&")
+    }
   })
 
   it("keeps every limit: header 150, sections 3000, ≤ 50 blocks with +N more, text 3000", () => {

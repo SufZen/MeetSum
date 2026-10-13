@@ -3,8 +3,13 @@
  *
  * Limits: header plain_text ≤ 150, section mrkdwn ≤ 3000 (overview chunked),
  * ≤ 50 blocks with a "+N more" line, `text` fallback ≤ 3000.
- * Every user or AI string is escaped (`& < >`), which neutralizes
- * `<!channel>`, `<@U…>` and `<url|label>` link injection from content.
+ * Every user or AI string in a mrkdwn or `text` field is escaped (`& < >`),
+ * which neutralizes `<!channel>`, `<@U…>` and `<url|label>` link injection
+ * from content. The header is `plain_text`, which Slack neither parses for
+ * mentions/links nor entity-decodes, so it is NOT escaped (an escaped
+ * "Q&A" would show as "Q&amp;A"; VERIFY against Slack's Block Kit text
+ * object docs). Text is truncated before escaping, and a truncation of
+ * already-escaped text never cuts an entity in half.
  * Hebrew: Slack has no RTL, so every line, bullet and the header start
  * with RLM (never inside a URL); digits (dates, counts, durations) are
  * isolated with LRI…PDI.
@@ -68,7 +73,8 @@ function truncate(text: string, max: number): string {
     if (result.length + char.length > max - 1) break
     result += char
   }
-  return `${result}…`
+  // Never leave half an entity (`&am`, `&l`…) at the cut.
+  return `${result.replace(/&(?:a|am|amp|l|lt|g|gt)?$/, "")}…`
 }
 
 function line(text: string, rtl: boolean): string {
@@ -100,6 +106,21 @@ function itemLine(item: MeetingRecapActionItem, locale: Locale): string {
   return `• ${parts.join(" ")}`
 }
 
+/** `chunkText` over escaped text that never splits an `&amp;`/`&lt;`/`&gt;` entity. */
+function chunkEscaped(text: string, max: number): string[] {
+  const chunks = chunkText(text, max - 4)
+
+  for (let index = 0; index < chunks.length - 1; index += 1) {
+    const partial = /&(?:a|am|amp|l|lt|g|gt)?$/.exec(chunks[index])
+
+    if (partial) {
+      chunks[index] = chunks[index].slice(0, partial.index)
+      chunks[index + 1] = `${partial[0]}${chunks[index + 1]}`
+    }
+  }
+  return chunks.filter(Boolean)
+}
+
 /** Sections of `lines` under a bold label, each ≤ 3000 characters. */
 function listSections(label: string, lines: string[], rtl: boolean): string[] {
   const heading = line(`*${label}*`, rtl)
@@ -107,7 +128,7 @@ function listSections(label: string, lines: string[], rtl: boolean): string[] {
   let current = heading
 
   for (const raw of lines.flatMap((entry) => entry.split(/\r?\n/)).filter((entry) => entry.trim())) {
-    for (const piece of chunkText(raw, SLACK_SECTION_MAX - 2)) {
+    for (const piece of chunkEscaped(raw, SLACK_SECTION_MAX - 2)) {
       const next = line(piece, rtl)
 
       if (current.length + 1 + next.length > SLACK_SECTION_MAX) {
@@ -158,7 +179,10 @@ export function buildSlackRecapMessage(recap: MeetingRecap, options: SlackMessag
   const labels = LABELS[locale]
   const rtl = recap.dir === "rtl"
   const title = recap.title.trim() || labels.recap
-  const headerText = truncate(line(`${labels.recap}: ${escapeSlack(title)}`, rtl), SLACK_HEADER_MAX)
+  // plain_text: not escaped (Slack shows it literally).
+  const headerText = truncate(line(`${labels.recap}: ${title}`, rtl), SLACK_HEADER_MAX)
+  // The mrkdwn `text` fallback: truncated first, then escaped.
+  const fallbackHeader = escapeSlack(headerText)
   const contextParts = [
     isolateLtr(formatDate(recap.startedAt, locale, timeZone), "isolates"),
     ...(recap.durationMs ? [`${isolateLtr(String(Math.max(1, Math.round(recap.durationMs / 60_000))), "isolates")} ${labels.minutes}`] : []),
@@ -211,7 +235,7 @@ export function buildSlackRecapMessage(recap: MeetingRecap, options: SlackMessag
   if (tail) blocks.push(tail)
 
   const fallback = [
-    headerText,
+    fallbackHeader,
     ...(recap.overview ? escapeSlack(recap.overview).split(/\r?\n/).filter((entry) => entry.trim()).map((entry) => line(entry, rtl)) : []),
   ]
 
