@@ -4,6 +4,9 @@ import type { MeetingRecord, RepoScope } from "@/lib/meetings/repository"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { deliverWebhookEvent } from "@/lib/webhooks/delivery"
+import { evaluatePrivacyGate } from "@/lib/integrations/core/privacy"
+import { getIntegrationStore } from "@/lib/integrations/core/store"
+import type { MeetingIntegrationPrefs } from "@/lib/integrations/core/types"
 import { englishQualityWarningText, englishSuggestionText } from "@/lib/integrations/realizeos-text"
 
 /**
@@ -148,6 +151,43 @@ export class RealizeOSExportNotFoundError extends Error {
   }
 }
 
+/** Raised when a private meeting has no owner opt-in for external pushes (R11). */
+export class RealizeOSPrivateMeetingError extends Error {
+  readonly code = "private_meeting_not_opted_in"
+  readonly status = 403
+
+  constructor() {
+    super("Private meeting: the owner has not allowed external exports")
+    this.name = "RealizeOSPrivateMeetingError"
+  }
+}
+
+type PrivacyPrefs = Pick<MeetingIntegrationPrefs, "allowPrivatePush" | "allowPrivateSetByUserId">
+
+/**
+ * M10 R11: RealizeOS goes through the same M8 privacy gate as every other
+ * push (`evaluatePrivacyGate`, origin `manual`): a private meeting (or one
+ * with an unknown visibility) leaves only when its current owner opted in
+ * per meeting (`meeting_integration_prefs.allow_private_push`). Evaluated at
+ * send time, so a meeting made private after the export was queued is caught.
+ */
+export async function assertRealizeOSPrivacy(
+  meeting: Pick<MeetingRecord, "id" | "visibility" | "ownerUserId">,
+  workspaceId: string,
+  getPrefs: (workspaceId: string, meetingId: string) => Promise<PrivacyPrefs | undefined> = async (ws, id) =>
+    (await getIntegrationStore()).getPrefs(ws, id)
+): Promise<void> {
+  const facts = { visibility: meeting.visibility, ...(meeting.ownerUserId ? { ownerUserId: meeting.ownerUserId } : {}) }
+
+  // Shared meetings never need the prefs lookup.
+  if (evaluatePrivacyGate({ facts, origin: "manual" }).allowed) return
+
+  const prefs = await getPrefs(workspaceId, meeting.id)
+  const decision = evaluatePrivacyGate({ facts, origin: "manual", ...(prefs ? { prefs } : {}) })
+
+  if (!decision.allowed) throw new RealizeOSPrivateMeetingError()
+}
+
 export async function exportMeetingToRealizeOS(options: {
   meetingId?: string
   workspaceId: string
@@ -170,6 +210,15 @@ export async function exportMeetingToRealizeOS(options: {
 
   if (!meeting) {
     throw new RealizeOSExportNotFoundError(`Meeting not found: ${options.meetingId}`)
+  }
+
+  try {
+    await assertRealizeOSPrivacy(meeting, options.workspaceId)
+  } catch (error) {
+    if (error instanceof RealizeOSPrivateMeetingError && options.suggestionId) {
+      await updateSuggestedRun(options.suggestionId, { status: "failed", lastError: error.code })
+    }
+    throw error
   }
 
   if (options.suggestionId) {
