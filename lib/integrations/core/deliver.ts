@@ -209,7 +209,11 @@ export async function runIntegrationDelivery(
 
     if (isUnrecoverableKind(error.kind) || input.finalAttempt || delivery.attempts >= delivery.maxAttempts) {
       const status = hasPartialProgress(progress) ? "partial" : "failed"
-      const outcome = await finish(status, { lastError, progress })
+      const outcome = await finish(status, {
+        lastError,
+        progress,
+        ...(status === "partial" && error.providerCode === "hourly_cap" ? { skipReason: "hourly_cap" as const } : {}),
+      })
 
       if (status === "failed") await reportFailure(rt, delivery, error.kind)
       return outcome
