@@ -32,6 +32,8 @@ import {
 } from "@/lib/i18n/hebrew-text"
 import { isValidTimeZone, resolveTimeZone } from "@/lib/i18n/time-zone"
 
+import { HEBREW_MIXED_CORPUS } from "./fixtures/hebrew-mixed"
+
 const he = { locale: "he" as const, timeZone: "Asia/Jerusalem" }
 const en = { locale: "en" as const, timeZone: "Asia/Jerusalem" }
 
@@ -102,6 +104,16 @@ describe("hebrew-text.ts (minimal)", () => {
     expect(hebrewList(["Slack", "Notion", "HubSpot"], "he")).toBe(`Slack, Notion ו-${WJ}HubSpot`)
     expect(hebrewList(["א", "ב", "ג"], "he")).toBe("א, ב וג")
     expect(hebrewList(["a", "b", "c"], "en")).toBe("a, b, and c")
+  })
+})
+
+describe("hebrew-mixed corpus", () => {
+  it.each(HEBREW_MIXED_CORPUS.map((entry) => [entry.id, entry] as const))("%s typesets as recorded and idempotently", (_id, entry) => {
+    const once = fixHebrewTypography(entry.text)
+
+    expect(once).toBe(entry.expectTypeset ?? entry.text)
+    expect(fixHebrewTypography(once)).toBe(once)
+    expect(directionFor(null, entry.text)).toBe(entry.base)
   })
 })
 
