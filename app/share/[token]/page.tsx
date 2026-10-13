@@ -1,27 +1,22 @@
 import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 
+import { SharedMeetingPlayer } from "@/components/share/shared-meeting-player"
 import { getSessionSecret } from "@/lib/auth/session"
+import { describeMeetingMedia } from "@/lib/media/playback-select"
+import { formatDurationShort, meetingDurationMs } from "@/lib/player/time-format"
+import { toWireSegments } from "@/lib/player/wire"
 import {
   SHARE_ACCESS_COOKIE,
   verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
+import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 
 import { loadShare } from "./load-share"
 
 const SHARE_ERROR_MESSAGES: Record<string, string> = {
   invalid: "Incorrect password. Please try again.",
   rate_limited: "Too many attempts. Please wait a minute and try again.",
-}
-
-function formatMs(ms: number) {
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0")
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0")
-
-  return `${minutes}:${seconds}`
 }
 
 export default async function PublicMeetingSharePage({
@@ -105,6 +100,11 @@ export default async function PublicMeetingSharePage({
     meeting.participantDetails?.map((participant) => participant.name) ??
     meeting.participants
   const transcribeRun = meeting.aiRuns?.find((r) => r.task === "audio.transcribe")
+  const { lang } = getShareDocumentLocale(meeting)
+  // The recording is opt-in per share (`media` section); the routes enforce it too.
+  const media = includes.has("media") ? describeMeetingMedia(meeting.mediaAssets ?? []) : undefined
+  const segments = includes.has("transcript") ? toWireSegments(meeting.transcript ?? []) : []
+  const durationMs = meetingDurationMs(meeting)
 
   return (
     <main className="min-h-screen bg-canvas px-5 py-8 text-fg">
@@ -118,6 +118,7 @@ export default async function PublicMeetingSharePage({
             <span>{new Date(meeting.startedAt).toLocaleString()}</span>
             <span>{meeting.source.replaceAll("_", " ")}</span>
             <span>{meeting.language}</span>
+            <span className="[unicode-bidi:isolate]">{formatDurationShort(durationMs, lang)}</span>
             <span>{participants.length} participants</span>
           </div>
           {includes.has("participants") && participants.length > 0 ? (
@@ -190,50 +191,38 @@ export default async function PublicMeetingSharePage({
           </section>
         ) : null}
 
-        {includes.has("transcript") ? (
-          <section>
-            <h2 className="mb-3 text-xl font-semibold">Transcript</h2>
-            {transcribeRun ? (
-              <div className="mb-4 rounded-md border border-line bg-surface-2 p-3 text-sm">
-                <div className="font-medium">
-                  Transcription provided by {transcribeRun.provider}
-                  {transcribeRun.model ? ` (${transcribeRun.model})` : ""}
-                </div>
-                {transcribeRun.latencyMs ? (
-                  <div className="mt-1 text-xs text-fg-3">
-                    Completed in {(transcribeRun.latencyMs / 1000).toFixed(1)}s
-                  </div>
-                ) : null}
-                {transcribeRun.metadata?.fallbackUsed ? (
-                  <div className="mt-1 text-xs text-warn-text">
-                    Fallback used after {transcribeRun.metadata.attemptedProvider as string}. Reason: {(transcribeRun.metadata.fallbackReason as string) || "Unknown error"}
-                  </div>
-                ) : null}
+        {includes.has("transcript") && transcribeRun ? (
+          <div className="mb-4 rounded-md border border-line bg-surface-2 p-3 text-sm">
+            <div className="font-medium">
+              Transcription provided by {transcribeRun.provider}
+              {transcribeRun.model ? ` (${transcribeRun.model})` : ""}
+            </div>
+            {transcribeRun.latencyMs ? (
+              <div className="mt-1 text-xs text-fg-3">
+                Completed in {(transcribeRun.latencyMs / 1000).toFixed(1)}s
               </div>
             ) : null}
-            <div className="space-y-3">
-              {(meeting.transcript?.length ? meeting.transcript : []).map(
-                (segment) => (
-                  <div
-                    className="rounded-md bg-surface-2 p-3"
-                    key={segment.id}
-                  >
-                    <div className="mb-1 text-xs font-medium text-fg-3">
-                      {formatMs(segment.startMs)} · <bdi>{segment.speaker}</bdi>
-                    </div>
-                    <p dir="auto" className="text-sm leading-6">
-                      {segment.text}
-                    </p>
-                  </div>
-                )
-              )}
-              {!meeting.transcript?.length ? (
-                <p className="text-fg-3">
-                  No transcript is available yet.
-                </p>
-              ) : null}
-            </div>
-          </section>
+            {transcribeRun.metadata?.fallbackUsed ? (
+              <div className="mt-1 text-xs text-warn-text">
+                Fallback used after {transcribeRun.metadata.attemptedProvider as string}. Reason: {(transcribeRun.metadata.fallbackReason as string) || "Unknown error"}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {media?.available || includes.has("transcript") ? (
+          <SharedMeetingPlayer
+            token={token}
+            meetingId={meeting.id}
+            locale={lang === "he" ? "he" : "en"}
+            language={meeting.language}
+            media={media}
+            segments={segments}
+            speakers={meeting.speakers ?? []}
+            participants={meeting.participantDetails ?? []}
+            durationMs={durationMs}
+            showTranscript={includes.has("transcript")}
+          />
         ) : null}
 
         {/* Processing metadata footer */}

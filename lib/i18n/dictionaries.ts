@@ -1,4 +1,5 @@
 import { asrMessagesEn, asrMessagesHe } from "@/lib/i18n/asr-messages"
+import { playerMessagesEn, playerMessagesHe } from "@/lib/i18n/player-messages"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import {
   workspaceMessagesEn,
@@ -70,6 +71,7 @@ export const dictionaries = {
     signInRestricted: "Access is by invitation to a workspace.",
     ...workspaceMessagesEn,
     ...asrMessagesEn,
+    ...playerMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -133,6 +135,7 @@ export const dictionaries = {
     signInRestricted: "הגישה מתאפשרת בהזמנה לסביבת עבודה.",
     ...workspaceMessagesHe,
     ...asrMessagesHe,
+    ...playerMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -196,6 +199,7 @@ export const dictionaries = {
     signInRestricted: "O acesso e feito por convite para um workspace.",
     ...workspaceMessagesEn,
     ...asrMessagesEn,
+    ...playerMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -259,6 +263,7 @@ export const dictionaries = {
     signInRestricted: "El acceso es por invitacion a un workspace.",
     ...workspaceMessagesEn,
     ...asrMessagesEn,
+    ...playerMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -322,6 +327,7 @@ export const dictionaries = {
     signInRestricted: "L'accesso avviene su invito a un workspace.",
     ...workspaceMessagesEn,
     ...asrMessagesEn,
+    ...playerMessagesEn,
   },
 } as const
 
