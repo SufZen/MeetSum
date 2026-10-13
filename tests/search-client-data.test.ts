@@ -72,5 +72,6 @@ describe("search client data", () => {
     expect(threadsQuery({ kind: "meeting", meetingId: "m 1" })).toBe("scope=meeting&meetingId=m+1&limit=50")
     expect(threadsQuery({ kind: "room", roomId: "r1" })).toBe("scope=room&roomId=r1&limit=50")
     expect(threadsQuery({ kind: "workspace" })).toBe("scope=workspace&limit=50")
+    expect(threadsQuery({ kind: "workspace" }, true)).toBe("scope=workspace&limit=50&archived=1")
   })
 })

@@ -73,7 +73,8 @@ function AskPanelInner({
   const composer = useRef<HTMLTextAreaElement>(null)
   const hintId = useId()
   const listEnd = useRef<HTMLDivElement>(null)
-  const threads = useThreads(scope)
+  const [showArchived, setShowArchived] = useState(false)
+  const threads = useThreads(scope, true, showArchived)
   const reloadThreads = threads.reload
   const stream = useAskStream({ scope, onTurnFinished: reloadThreads })
   const { session, streaming } = stream
@@ -166,6 +167,9 @@ function AskPanelInner({
             dictionary={t}
             onOpen={openThread}
             onRename={threads.rename}
+            showArchived={showArchived}
+            onToggleArchived={() => setShowArchived((value) => !value)}
+            onUnarchive={threads.unarchive}
             onArchive={async (id) => {
               const ok = await threads.archive(id)
 

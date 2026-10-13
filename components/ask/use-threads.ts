@@ -13,12 +13,13 @@ export type ThreadsState = {
   threads: ThreadSummary[]
 }
 
-export function threadsQuery(scope: AskScope): string {
+export function threadsQuery(scope: AskScope, archived = false): string {
   const params = new URLSearchParams({ scope: scope.kind })
 
   if (scope.kind === "meeting") params.set("meetingId", scope.meetingId)
   if (scope.kind === "room") params.set("roomId", scope.roomId)
   params.set("limit", "50")
+  if (archived) params.set("archived", "1")
 
   return params.toString()
 }
@@ -34,10 +35,11 @@ function readThreads(body: unknown): ThreadSummary[] {
   )
 }
 
-export function useThreads(scope: AskScope, enabled = true) {
+/** The active threads, or the archived ones (`archived`), of one scope. */
+export function useThreads(scope: AskScope, enabled = true, archived = false) {
   const [state, setState] = useState<ThreadsState>({ status: "loading", threads: [] })
   const [reloadKey, setReloadKey] = useState(0)
-  const query = threadsQuery(scope)
+  const query = threadsQuery(scope, archived)
 
   useEffect(() => {
     if (!enabled) return
@@ -52,7 +54,7 @@ export function useThreads(scope: AskScope, enabled = true) {
         }
         if (!response.ok) throw new Error(String(response.status))
 
-        const threads = readThreads(await response.json()).filter((thread) => !thread.archived)
+        const threads = readThreads(await response.json()).filter((thread) => Boolean(thread.archived) === archived)
 
         setState({ status: "ready", threads })
       })
@@ -61,7 +63,7 @@ export function useThreads(scope: AskScope, enabled = true) {
       })
 
     return () => controller.abort()
-  }, [enabled, query, reloadKey])
+  }, [archived, enabled, query, reloadKey])
 
   const reload = useCallback(() => setReloadKey((key) => key + 1), [])
 
@@ -79,12 +81,12 @@ export function useThreads(scope: AskScope, enabled = true) {
         ...current,
         threads: current.threads
           .map((thread) => (thread.id === id ? { ...thread, ...body } : thread))
-          .filter((thread) => !thread.archived),
+          .filter((thread) => Boolean(thread.archived) === archived),
       }))
 
       return true
     },
-    []
+    [archived]
   )
 
   const remove = useCallback(async (id: string) => {
@@ -97,7 +99,14 @@ export function useThreads(scope: AskScope, enabled = true) {
     return true
   }, [])
 
-  return { state, reload, rename: (id: string, title: string) => patch(id, { title }), archive: (id: string) => patch(id, { archived: true }), remove }
+  return {
+    state,
+    reload,
+    rename: (id: string, title: string) => patch(id, { title }),
+    archive: (id: string) => patch(id, { archived: true }),
+    unarchive: (id: string) => patch(id, { archived: false }),
+    remove,
+  }
 }
 
 /** Loads one thread's messages (`GET /api/ask/threads/:id`). */

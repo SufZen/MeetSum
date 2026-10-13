@@ -2,10 +2,11 @@
 
 /**
  * The caller's private Ask conversations for the current scope: open,
- * rename, archive, delete (AlertDialog).
+ * rename, archive, delete (AlertDialog); a toggle shows the archived ones,
+ * which can be unarchived.
  */
 import { useState } from "react"
-import { ArchiveIcon, MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react"
+import { ArchiveIcon, ArchiveRestoreIcon, MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react"
 
 import type { ThreadsState } from "@/components/ask/use-threads"
 import {
@@ -38,7 +39,10 @@ export function ThreadList({
   onOpen,
   onRename,
   onArchive,
+  onUnarchive,
   onDelete,
+  showArchived = false,
+  onToggleArchived,
 }: {
   state: ThreadsState
   activeThreadId: string | null
@@ -46,7 +50,10 @@ export function ThreadList({
   onOpen: (thread: ThreadSummary) => void
   onRename: (id: string, title: string) => Promise<boolean>
   onArchive: (id: string) => Promise<boolean>
+  onUnarchive?: (id: string) => Promise<boolean>
   onDelete: (id: string) => Promise<boolean>
+  showArchived?: boolean
+  onToggleArchived?: () => void
 }) {
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const [deleting, setDeleting] = useState<ThreadSummary | null>(null)
@@ -56,10 +63,18 @@ export function ThreadList({
 
   return (
     <nav aria-label={t.askThreads} className="grid gap-1.5">
-      <p className="text-xs text-fg-3">{t.askThreadsPrivate}</p>
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <p className="text-xs text-fg-3">{t.askThreadsPrivate}</p>
+        {onToggleArchived ? (
+          <Button size="xs" variant="ghost" aria-pressed={showArchived} onClick={onToggleArchived}>
+            <ArchiveIcon data-icon="inline-start" />
+            {showArchived ? t.askThreadsHideArchived : t.askThreadsShowArchived}
+          </Button>
+        ) : null}
+      </div>
       {state.status === "error" ? <p className="text-sm text-danger-text">{t.askThreadsLoadError}</p> : null}
       {state.status === "ready" && !state.threads.length ? (
-        <p className="text-sm text-fg-3">{t.askThreadsEmpty}</p>
+        <p className="text-sm text-fg-3">{showArchived ? t.askThreadsArchivedEmpty : t.askThreadsEmpty}</p>
       ) : null}
       {state.status === "loading" ? (
         <div aria-busy="true" className="grid gap-1.5">
@@ -132,10 +147,19 @@ export function ThreadList({
                     <PencilIcon aria-hidden />
                     {t.askThreadRename}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => void onArchive(thread.id)}>
-                    <ArchiveIcon aria-hidden />
-                    {t.askThreadArchive}
-                  </DropdownMenuItem>
+                  {showArchived ? (
+                    onUnarchive ? (
+                      <DropdownMenuItem onClick={() => void onUnarchive(thread.id)}>
+                        <ArchiveRestoreIcon aria-hidden />
+                        {t.askThreadUnarchive}
+                      </DropdownMenuItem>
+                    ) : null
+                  ) : (
+                    <DropdownMenuItem onClick={() => void onArchive(thread.id)}>
+                      <ArchiveIcon aria-hidden />
+                      {t.askThreadArchive}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onClick={() => setDeleting(thread)}>
                     <Trash2Icon aria-hidden />
