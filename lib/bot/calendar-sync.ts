@@ -127,22 +127,40 @@ async function defaultInviteBot(input: {
   })
 }
 
-async function defaultUpcomingEvents(
+/**
+ * Upcoming canonical calendar rows of a workspace for resync. Google rows go
+ * through the workspace's DWD identities; M8 adds Outlook rows of active
+ * personal Microsoft connections (subject = the connection user's email).
+ * Only rows that own a meeting (`meetings.calendar_event_id = ce.id`) are
+ * returned, so iCalUID duplicates (non-canonical rows) never resync a bot.
+ */
+export async function listUpcomingCalendarEvents(
+  db: { query(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }> },
   workspaceId: string,
   window: { from: Date; to: Date }
 ): Promise<Array<Omit<SyncCalendarBotSessionInput, "workspaceId">>> {
-  if (process.env.MEETSUM_STORAGE !== "postgres") return []
-
-  const { getDatabasePool } = await import("@/lib/db/client")
-  const result = await getDatabasePool().query(
-    `select ce.id as calendar_event_id, ce.raw, gi.subject_email, m.id as meeting_id
-       from calendar_events ce
-       join google_identities gi on gi.id = ce.google_identity_id
-       join meetings m on m.calendar_event_id = ce.id and m.workspace_id = gi.workspace_id
-      where gi.workspace_id = $1
-        and ce.starts_at between $2 and $3
-      order by ce.starts_at asc
-      limit 500`,
+  const result = await db.query(
+    `select * from (
+       select ce.id as calendar_event_id, ce.raw, gi.subject_email, m.id as meeting_id, ce.starts_at
+         from calendar_events ce
+         join google_identities gi on gi.id = ce.google_identity_id
+         join meetings m on m.calendar_event_id = ce.id and m.workspace_id = gi.workspace_id
+        where gi.workspace_id = $1
+          and ce.starts_at between $2 and $3
+       union all
+       select ce.id as calendar_event_id, ce.raw, lower(u.email) as subject_email, m.id as meeting_id, ce.starts_at
+         from calendar_events ce
+         join integration_connections c
+           on c.id = ce.integration_connection_id and c.workspace_id = ce.workspace_id
+          and c.provider = 'microsoft' and c.status = 'active'
+         join users u on u.id = c.user_id
+         join meetings m on m.calendar_event_id = ce.id and m.workspace_id = ce.workspace_id
+        where ce.provider = 'microsoft'
+          and ce.workspace_id = $1
+          and ce.starts_at between $2 and $3
+     ) upcoming
+     order by starts_at asc
+     limit 500`,
     [workspaceId, window.from.toISOString(), window.to.toISOString()]
   )
 
@@ -154,6 +172,17 @@ async function defaultUpcomingEvents(
       event: (row.raw ?? {}) as CalendarEventLike,
     })
   )
+}
+
+async function defaultUpcomingEvents(
+  workspaceId: string,
+  window: { from: Date; to: Date }
+): Promise<Array<Omit<SyncCalendarBotSessionInput, "workspaceId">>> {
+  if (process.env.MEETSUM_STORAGE !== "postgres") return []
+
+  const { getDatabasePool } = await import("@/lib/db/client")
+
+  return listUpcomingCalendarEvents(getDatabasePool(), workspaceId, window)
 }
 
 export function resolveCalendarSyncDeps(deps: Partial<CalendarSyncDeps> = {}): CalendarSyncDeps {
