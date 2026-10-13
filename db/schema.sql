@@ -574,17 +574,7 @@ create table if not exists suggested_agent_runs (
   created_at timestamptz not null default now()
 );
 
-create table if not exists integration_endpoints (
-  id text primary key,
-  name text not null,
-  kind text not null,
-  base_url text,
-  auth_type text not null default 'none',
-  config jsonb not null default '{}'::jsonb,
-  enabled boolean not null default false,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+-- integration_endpoints (002, legacy) was dropped by 032 (M10).
 
 create table if not exists meeting_shares (
   id text primary key,
