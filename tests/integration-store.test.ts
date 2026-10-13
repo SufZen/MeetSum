@@ -321,7 +321,7 @@ describe.each(backends)("IntegrationStore (%s)", (name, make) => {
 
   it("applies token writes only to the active row at the expected generation", async (context) => {
     const store = storeOrSkip(context)
-    const created = await store.createConnection(connection({ config: { defaultChannelId: "C1", _gen: 99 } }))
+    const created = await store.createConnection(connection({ config: { defaultChannelId: "C1" } }))
     const id = created.ok ? created.connection.id : ""
 
     expect(created.ok && created.connection.generation).toBe(0)

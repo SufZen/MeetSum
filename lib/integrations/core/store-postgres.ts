@@ -17,7 +17,6 @@ import {
   MAX_CONNECTIONS_PER_WORKSPACE,
   MAX_RULES_PER_EVENT,
   MAX_RULES_PER_WORKSPACE,
-  GENERATION_CONFIG_KEY,
   linkKeyParts,
   type ConnectionPatch,
   type DeliveryPatch,
@@ -64,13 +63,6 @@ function defined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T
 }
 
-function withoutGeneration(config: Record<string, unknown>): Record<string, unknown> {
-  const { [GENERATION_CONFIG_KEY]: _gen, ...rest } = config
-
-  void _gen
-  return rest
-}
-
 function toConnection(row: Row): StoredConnection {
   return defined({
     id: String(row.id),
@@ -85,8 +77,8 @@ function toConnection(row: Row): StoredConnection {
     refreshTokenEnc: str(row.refresh_token_enc),
     tokenType: str(row.token_type),
     expiresAt: iso(row.expires_at),
-    config: withoutGeneration(json<Record<string, unknown>>(row.config, {})),
-    generation: Number(json<Record<string, unknown>>(row.config, {})[GENERATION_CONFIG_KEY] ?? 0) || 0,
+    config: json<Record<string, unknown>>(row.config, {}),
+    generation: Number(row.token_generation ?? 0) || 0,
     createdByUserId: str(row.created_by_user_id),
     lastUsedAt: iso(row.last_used_at),
     lastRefreshedAt: iso(row.last_refreshed_at),
@@ -278,19 +270,13 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
     const { config, generation, ...rest } = patch
     const sets = setClause(rest, CONNECTION_COLUMNS, values)
 
-    if (config !== undefined || generation !== undefined) {
-      let base = "config"
-      let gen = `coalesce(config->'${GENERATION_CONFIG_KEY}', '0'::jsonb)`
-
-      if (config !== undefined) {
-        values.push(JSON.stringify(withoutGeneration(config)))
-        base = `$${values.length}::jsonb`
-      }
-      if (generation !== undefined) {
-        values.push(generation)
-        gen = `to_jsonb($${values.length}::int)`
-      }
-      sets.push(`config = ${base} || jsonb_build_object('${GENERATION_CONFIG_KEY}', ${gen})`)
+    if (config !== undefined) {
+      values.push(JSON.stringify(config))
+      sets.push(`config = $${values.length}::jsonb`)
+    }
+    if (generation !== undefined) {
+      values.push(generation)
+      sets.push(`token_generation = $${values.length}::int`)
     }
     sets.push("updated_at = now()")
 
@@ -298,7 +284,7 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
 
     if (expectedGeneration !== undefined) {
       values.push(expectedGeneration)
-      condition = ` and status = 'active' and coalesce((config->>'${GENERATION_CONFIG_KEY}')::int, 0) = $${values.length}`
+      condition = ` and status = 'active' and token_generation = $${values.length}`
     }
 
     const [row] = await rows(
@@ -332,9 +318,9 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
         `insert into integration_connections (
            id, workspace_id, provider, user_id, status, account_label, external_account_id, scopes,
            access_token_enc, refresh_token_enc, token_type, expires_at, config, created_by_user_id,
-           last_used_at, last_refreshed_at, last_error, revoked_at)
+           last_used_at, last_refreshed_at, last_error, revoked_at, token_generation)
          select $1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, $11, $12::timestamptz, $13::jsonb, $14,
-                $15::timestamptz, $16::timestamptz, $17, $18::timestamptz
+                $15::timestamptz, $16::timestamptz, $17, $18::timestamptz, $19::int
           where (select count(*) from integration_connections
                   where workspace_id = $2 and status <> 'revoked') < ${MAX_CONNECTIONS_PER_WORKSPACE}
          returning *`,
@@ -351,12 +337,13 @@ export function createPostgresIntegrationStore(db: Queryable): IntegrationStore 
           input.refreshTokenEnc ?? null,
           input.tokenType ?? null,
           input.expiresAt ?? null,
-          JSON.stringify({ ...withoutGeneration(input.config ?? {}), [GENERATION_CONFIG_KEY]: input.generation ?? 0 }),
+          JSON.stringify(input.config ?? {}),
           input.createdByUserId ?? null,
           input.lastUsedAt ?? null,
           input.lastRefreshedAt ?? null,
           input.lastError ?? null,
           input.revokedAt ?? null,
+          input.generation ?? 0,
         ]
       )
 

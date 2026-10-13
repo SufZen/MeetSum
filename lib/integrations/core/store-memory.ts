@@ -10,7 +10,6 @@ import {
   MAX_CONNECTIONS_PER_WORKSPACE,
   MAX_RULES_PER_EVENT,
   MAX_RULES_PER_WORKSPACE,
-  GENERATION_CONFIG_KEY,
   linkKeyParts,
   type ConnectionPatch,
   type IntegrationStore,
@@ -32,10 +31,7 @@ function applyConnectionPatch(row: StoredConnection, patch: ConnectionPatch): St
   for (const [key, value] of Object.entries(patch) as [keyof ConnectionPatch, unknown][]) {
     if (value === undefined) continue
     if (key === "config") {
-      const { [GENERATION_CONFIG_KEY]: _gen, ...config } = value as Record<string, unknown>
-
-      void _gen
-      next.config = clone(config)
+      next.config = clone(value as Record<string, unknown>)
       continue
     }
     if (value === null) delete (next as Record<string, unknown>)[key]
@@ -107,10 +103,7 @@ export function createMemoryIntegrationStore(): IntegrationStore {
         throw new Error("duplicate key value violates unique constraint uq_integration_connections_account")
       }
 
-      const { [GENERATION_CONFIG_KEY]: _gen, ...config } = input.config ?? {}
-
-      void _gen
-      const row: StoredConnection = { ...clone(input), config: clone(config), generation: input.generation ?? 0, createdAt: now(), updatedAt: now() }
+      const row: StoredConnection = { ...clone(input), config: clone(input.config ?? {}), generation: input.generation ?? 0, createdAt: now(), updatedAt: now() }
 
       connections.set(row.id, row)
       return { ok: true, connection: clone(row) }

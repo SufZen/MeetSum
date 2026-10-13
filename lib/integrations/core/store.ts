@@ -45,13 +45,13 @@ export type StoredConnection = {
   refreshTokenEnc?: string
   tokenType?: string
   expiresAt?: string
-  /** Non-secret config; never contains the reserved `_gen` key (see `generation`). */
+  /** Non-secret config only. */
   config: Record<string, unknown>
   /**
    * Token generation: bumped by every disconnect and reconnect. Token writes
    * are conditional on `status = 'active'` and the generation read before
    * the write, so a refresh racing a disconnect can never resurrect tokens.
-   * Persisted as `config._gen` (no dedicated column in migration 027).
+   * Persisted in `integration_connections.token_generation` (migration 028).
    */
   generation: number
   createdByUserId?: string
@@ -83,9 +83,6 @@ export type ConnectionPatch = Partial<
   lastError?: string | null
   generation?: number
 }
-
-/** Key under which `generation` is persisted inside `config`. */
-export const GENERATION_CONFIG_KEY = "_gen"
 
 export type NewConnection = Omit<StoredConnection, "createdAt" | "updatedAt" | "generation"> & { generation?: number }
 

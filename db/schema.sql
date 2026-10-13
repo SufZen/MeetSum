@@ -1378,6 +1378,10 @@ alter table webhook_subscriptions
 alter table webhook_deliveries
   add column if not exists payload_version smallint not null default 1;
 
+-- 028: token generation (compare-and-set token writes; was config._gen).
+alter table integration_connections
+  add column if not exists token_generation integer not null default 0;
+
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
   on conflict (id) do nothing;
