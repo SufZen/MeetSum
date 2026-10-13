@@ -159,11 +159,11 @@ describe("internationalization", () => {
     expect(formatMessage("{missing} stays", {})).toBe("{missing} stays")
   })
 
-  it("keeps dictionary keys complete for every locale", () => {
+  it("keeps dictionary keys complete for every locale (he may add `_two` plural forms)", () => {
     const englishKeys = Object.keys(dictionaries.en).sort()
 
     for (const locale of SUPPORTED_LOCALES) {
-      expect(Object.keys(dictionaries[locale]).sort()).toEqual(englishKeys)
+      expect(Object.keys(dictionaries[locale]).filter((key) => !key.endsWith("_two")).sort()).toEqual(englishKeys)
     }
   })
 })

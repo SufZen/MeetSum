@@ -8,6 +8,7 @@
 //   node design-system/check.mjs --write-baseline <file>      # record the current counts
 //   node design-system/check.mjs --json                       # machine-readable
 //   node design-system/check.mjs components app               # custom roots (every rule)
+//   node design-system/check.mjs --rules raw-palette,hex-literal  # only these rules
 //
 // Rules
 //   physical-direction  ml-/mr-/pl-/pr-/left-/right-/text-left/border-l…  → use ms-/me-/ps-/pe-/start-/end-/text-start/border-s
@@ -35,7 +36,8 @@ const optionValue = (name) => {
 }
 const baselineFile = optionValue("--baseline")
 const writeBaselineFile = optionValue("--write-baseline")
-const optionValues = new Set([baselineFile, writeBaselineFile].filter(Boolean))
+const rulesOption = optionValue("--rules")
+const optionValues = new Set([baselineFile, writeBaselineFile, rulesOption].filter(Boolean))
 const roots = args.filter((a) => !a.startsWith("--") && !optionValues.has(a))
 
 const UI_ROOTS = ["components", "app"]
@@ -105,8 +107,16 @@ function filesOf(root) {
   return fileCache.get(root)
 }
 
-const report = Object.fromEntries(Object.keys(RULES).map((r) => [r, { total: 0, files: {} }]))
-for (const [rule, spec] of Object.entries(RULES)) {
+const selectedRules = rulesOption ? rulesOption.split(",").map((rule) => rule.trim()).filter(Boolean) : Object.keys(RULES)
+for (const rule of selectedRules) {
+  if (!RULES[rule]) {
+    console.error(`Unknown rule: ${rule}`)
+    process.exit(2)
+  }
+}
+
+const report = Object.fromEntries(selectedRules.map((r) => [r, { total: 0, files: {} }]))
+for (const [rule, spec] of Object.entries(RULES).filter(([rule]) => selectedRules.includes(rule))) {
   const ruleRoots = roots.length ? roots : spec.roots
   const seen = new Set()
 
