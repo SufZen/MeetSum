@@ -30,6 +30,58 @@ const MAX_P = 4
 
 export type SharePasswordError = "password_invalid" | "password_too_short" | "password_too_long"
 
+/** A share password check could not start: too many are already queued (the caller answers 429/503). */
+export class ShareVerifyBusyError extends Error {
+  constructor() {
+    super("Share password verification is busy")
+    this.name = "ShareVerifyBusyError"
+  }
+}
+
+export type ConcurrencyLimiter = {
+  run: <T>(task: () => Promise<T>) => Promise<T>
+  /** Running and queued counts (tests, metrics). */
+  stats: () => { running: number; queued: number }
+}
+
+/**
+ * At most `max` tasks run at once; up to `maxQueue` wait in FIFO order and
+ * any more are rejected with `ShareVerifyBusyError` (no unbounded backlog).
+ */
+export function createConcurrencyLimiter(max: number, maxQueue: number): ConcurrencyLimiter {
+  let running = 0
+  const queue: Array<() => void> = []
+  const release = () => {
+    running -= 1
+    queue.shift()?.()
+  }
+
+  return {
+    async run(task) {
+      if (running >= max) {
+        if (queue.length >= maxQueue) throw new ShareVerifyBusyError()
+        await new Promise<void>((resolve) => queue.push(resolve))
+      }
+      running += 1
+      try {
+        return await task()
+      } finally {
+        release()
+      }
+    },
+    stats: () => ({ running, queued: queue.length }),
+  }
+}
+
+/**
+ * scrypt verifications in flight per process (each takes ~32 MiB and tens of
+ * ms of CPU): `MEETSUM_SHARE_VERIFY_CONCURRENCY` (default 4), 32 queued.
+ */
+const verifyLimiter = createConcurrencyLimiter(
+  Math.max(1, Number.parseInt(process.env.MEETSUM_SHARE_VERIFY_CONCURRENCY ?? "", 10) || 4),
+  32
+)
+
 function scrypt(password: string, salt: Buffer, keyLength: number, options: ScryptOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     scryptCallback(password.normalize("NFC"), salt, keyLength, options, (error, key) => (error ? reject(error) : resolve(key)))
@@ -96,12 +148,14 @@ export async function verifySharePassword(password: string, stored: string | nul
 
   if (expected.length < 16 || expected.length > 64) return false
 
-  const actual = await scrypt(password, Buffer.from(saltRaw, "base64"), expected.length, {
-    N: n,
-    r,
-    p,
-    maxmem: Math.max(MAX_MEM, 256 * n * r),
-  })
+  const actual = await verifyLimiter.run(() =>
+    scrypt(password, Buffer.from(saltRaw, "base64"), expected.length, {
+      N: n,
+      r,
+      p,
+      maxmem: Math.max(MAX_MEM, 256 * n * r),
+    })
+  )
 
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }

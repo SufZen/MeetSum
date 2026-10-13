@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/api/responses"
-import { verifySharePassword } from "@/lib/sharing/share-password"
+import { ShareVerifyBusyError, verifySharePassword } from "@/lib/sharing/share-password"
 import { withPublicRoute } from "@/lib/auth/authz"
 import { getSessionSecret } from "@/lib/auth/session"
 import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
@@ -14,6 +14,12 @@ import { getShareMediaCookiePath } from "@/lib/sharing/share-media-access"
 
 /** Password attempts per IP per share token. */
 const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
+
+/**
+ * Password attempts per share token across every IP (a botnet rotating IPs
+ * still gets 30 guesses per 10 minutes for one link).
+ */
+const SHARE_VERIFY_TOKEN_RATE_LIMIT = { maxRequests: 30, windowMs: 10 * 60_000 }
 
 function isFormSubmission(request: Request) {
   const contentType = request.headers.get("content-type") ?? ""
@@ -85,9 +91,24 @@ export const POST = withPublicRoute<{ token: string }>(
         : NextResponse.json({ valid: true, passwordRequired: false })
     }
 
+    const tokenLimit = rateLimitRequest(request, SHARE_VERIFY_TOKEN_RATE_LIMIT, `share-verify-token:${token}`)
+
+    if (tokenLimit.blocked) {
+      return form ? redirectToShare(token, "rate_limited") : tokenLimit.blocked
+    }
+
     const password = await readPassword(request, form)
-    const isValid =
-      Boolean(password) && (await verifySharePassword(password, share.passwordHash))
+    let isValid = false
+
+    try {
+      isValid = Boolean(password) && (await verifySharePassword(password, share.passwordHash))
+    } catch (error) {
+      if (!(error instanceof ShareVerifyBusyError)) throw error
+
+      return form
+        ? redirectToShare(token, "rate_limited")
+        : NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": "5" } })
+    }
 
     if (!isValid) {
       if (form) return redirectToShare(token, "invalid")
