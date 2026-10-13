@@ -149,6 +149,39 @@ const invocations: Record<
     repo.replaceTranscriptSegments("meet_1", [
       { id: "seg_1", speaker: "A", startMs: 0, endMs: 1, text: "hi" },
     ]),
+  // M3 Step 0: stubs that throw "not implemented (M3)" (no SQL yet).
+  replaceTranscript: (repo) =>
+    repo
+      .replaceTranscript("meet_1", {
+        segments: [{ id: "seg_1", speaker: "Speaker 1", startMs: 0, endMs: 1, text: "hi" }],
+        speakers: [{ label: "Speaker 1", talkTimeMs: 1, wordCount: 1, segmentCount: 1 }],
+      })
+      .catch((error: Error) => error),
+  listMeetingSpeakers: (repo) =>
+    repo.listMeetingSpeakers("meet_1").catch((error: Error) => error),
+  updateMeetingSpeaker: (repo) =>
+    repo
+      .updateMeetingSpeaker("meet_1", "speaker_1", { mappingStatus: "confirmed" })
+      .catch((error: Error) => error),
+  mergeMeetingSpeakers: (repo) =>
+    repo
+      .mergeMeetingSpeakers("meet_1", "speaker_1", "speaker_2")
+      .catch((error: Error) => error),
+  setSpeakerSuggestions: (repo) =>
+    repo
+      .setSpeakerSuggestions("meet_1", [{ speakerId: "speaker_1", suggestion: null }])
+      .catch((error: Error) => error),
+  listSpeakerProfiles: (repo) =>
+    repo.listSpeakerProfiles().catch((error: Error) => error),
+  recordConfirmedSpeaker: (repo) =>
+    repo
+      .recordConfirmedSpeaker({
+        meetingId: "meet_1",
+        speakerId: "speaker_1",
+        participant: { name: "Dana" },
+        aliases: [],
+      })
+      .catch((error: Error) => error),
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),

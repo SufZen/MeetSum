@@ -80,6 +80,7 @@ function term(
  * Hebrew transliterations of technical terms. Distinctive multi-letter terms
  * accept attached prefixes; short/ambiguous ones (Gemma `גמה`, MCP `אם סי פי`)
  * are strict whole words so ordinary Hebrew (`דוגמה`, `מגמה`, `ואם`) survives.
+ * The same terms seed DEFAULT_ASR_GLOSSARY (lib/ai/asr) — keep them in sync.
  */
 const TECHNICAL_TERM_REPLACEMENTS: TermReplacement[] = [
   term("סופרבייס", "Supabase", true),
@@ -234,15 +235,20 @@ export function detectMeetingLanguages(
  * ("שומעים אותי?") and removes echoes: a segment identical to the immediately
  * previous kept segment from the same speaker within 2 s. Repeating the same
  * sentence later in the meeting is kept — it may be intentional.
+ *
+ * `rewriteTerms: false` (M3) leaves segment text untouched so it stays in
+ * sync with word timings; the ASR glossary already handled the terms.
  */
 export function cleanupTranscriptSegments(
-  segments: TranscriptSegment[]
+  segments: TranscriptSegment[],
+  options: { rewriteTerms?: boolean } = {}
 ): TranscriptSegment[] {
+  const rewriteTerms = options.rewriteTerms ?? true
   const kept: TranscriptSegment[] = []
   let previous: { segment: TranscriptSegment; normalized: string } | undefined
 
   for (const segment of segments) {
-    const text = replaceTechnicalTerms(segment.text).trim()
+    const text = (rewriteTerms ? replaceTechnicalTerms(segment.text) : segment.text).trim()
     const normalized = normalizeText(text).trim()
 
     if (!normalized) continue

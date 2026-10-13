@@ -26,6 +26,7 @@ import type {
 import {
   MeetingExternalIdConflictError,
   MeetingScopeError,
+  notImplementedM3,
 } from "@/lib/meetings/repository"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
@@ -1496,6 +1497,34 @@ export function createPostgresMeetingRepository(
       })
 
       return segments
+    },
+
+    async replaceTranscript() {
+      return notImplementedM3("replaceTranscript")
+    },
+
+    async listMeetingSpeakers() {
+      return notImplementedM3("listMeetingSpeakers")
+    },
+
+    async updateMeetingSpeaker() {
+      return notImplementedM3("updateMeetingSpeaker")
+    },
+
+    async mergeMeetingSpeakers() {
+      return notImplementedM3("mergeMeetingSpeakers")
+    },
+
+    async setSpeakerSuggestions() {
+      return notImplementedM3("setSpeakerSuggestions")
+    },
+
+    async listSpeakerProfiles() {
+      return notImplementedM3("listSpeakerProfiles")
+    },
+
+    async recordConfirmedSpeaker() {
+      return notImplementedM3("recordConfirmedSpeaker")
     },
 
     async upsertMeetingIntelligence(

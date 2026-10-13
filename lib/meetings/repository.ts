@@ -1,5 +1,6 @@
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import type { MeetingStatus } from "@/lib/meetings/state"
+import type { TranscriptWord } from "@/lib/meetings/transcript-words"
 import { canViewMeeting } from "@/lib/meetings/visibility"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
 import {
@@ -43,6 +44,112 @@ export type TranscriptSegment = {
   text: string
   confidence?: number
   language?: string
+  /** `speakers.id` of the segment's speaker (M3). */
+  speakerId?: string
+  /** Word timings (M3); absent on legacy segments. */
+  words?: TranscriptWord[]
+  /** Increments on every speaker change (M3). */
+  turnIndex?: number
+  /** Where the segment came from, e.g. `asr` or `meet` (M3). */
+  source?: string
+}
+
+export type SpeakerMappingStatus = "unmapped" | "suggested" | "confirmed" | "rejected"
+
+export type SpeakerSuggestionReason = {
+  kind:
+    | "meet_alignment"
+    | "self_intro"
+    | "addressed_by_name"
+    | "single_remaining"
+    | "organizer_owner"
+    | "workspace_memory"
+    | "voiceprint"
+  detail: string
+  weight: number
+}
+
+export type SpeakerSuggestion = {
+  participantId?: string
+  profileId?: string
+  name: string
+  email?: string
+  score: number
+  reasons: SpeakerSuggestionReason[]
+  computedAt: string
+}
+
+/** One diarized speaker of a meeting (`speakers` row, M3). */
+export type MeetingSpeaker = {
+  id: string
+  meetingId: string
+  label: string
+  displayName?: string
+  participantId?: string
+  profileId?: string
+  mappingStatus: SpeakerMappingStatus
+  suggestion?: SpeakerSuggestion
+  source: string
+  talkTimeMs: number
+  wordCount: number
+  segmentCount: number
+  firstStartMs?: number
+  confirmedAt?: string
+}
+
+/** Workspace memory of a confirmed speaker (`speaker_profiles`, M3). */
+export type SpeakerProfile = {
+  id: string
+  workspaceId: string
+  displayName: string
+  email?: string
+  aliases: string[]
+  confirmedCount: number
+  voiceEmbedding?: number[]
+  embeddingModel?: string
+}
+
+/** Per-speaker stats written by `replaceTranscript` (M3). */
+export type TranscriptSpeakerInput = {
+  label: string
+  source?: string
+  talkTimeMs: number
+  wordCount: number
+  segmentCount: number
+  firstStartMs?: number
+  embedding?: number[]
+  embeddingModel?: string
+}
+
+export type ReplaceTranscriptInput = {
+  segments: TranscriptSegment[]
+  speakers: TranscriptSpeakerInput[]
+  asrRunId?: string
+}
+
+export type MeetingSpeakerPatch = {
+  displayName?: string | null
+  participantId?: string | null
+  profileId?: string | null
+  mappingStatus?: SpeakerMappingStatus
+  suggestion?: SpeakerSuggestion | null
+  confirmedByUserId?: string | null
+}
+
+export type SpeakerSuggestionUpdate = {
+  speakerId: string
+  suggestion: SpeakerSuggestion | null
+  mappingStatus?: SpeakerMappingStatus
+  participantId?: string | null
+}
+
+export type RecordConfirmedSpeakerInput = {
+  meetingId: string
+  speakerId: string
+  participant: { name: string; email?: string }
+  aliases: string[]
+  embedding?: number[]
+  embeddingModel?: string
 }
 
 export type MeetingSummary = {
@@ -253,6 +360,8 @@ export type MeetingRecord = {
   meetConferenceRecords?: MeetConferenceRecord[]
   aiRuns?: AiRunRecord[]
   qualityWarnings?: MeetingQualityWarning[]
+  /** Diarized speakers (M3). */
+  speakers?: MeetingSpeaker[]
   externalSource?: string
   externalId?: string
   workspaceId?: string
@@ -348,6 +457,32 @@ export type MeetingRepository = {
     meetingId: string,
     segments: TranscriptSegment[]
   ) => Promise<TranscriptSegment[]>
+  /**
+   * Replaces segments (with words) and upserts speakers in one transaction
+   * (M3). Never creates meeting_participants for speaker labels.
+   */
+  replaceTranscript: (
+    meetingId: string,
+    input: ReplaceTranscriptInput
+  ) => Promise<{ segments: TranscriptSegment[]; speakers: MeetingSpeaker[] }>
+  listMeetingSpeakers: (meetingId: string) => Promise<MeetingSpeaker[]>
+  updateMeetingSpeaker: (
+    meetingId: string,
+    speakerId: string,
+    patch: MeetingSpeakerPatch
+  ) => Promise<MeetingSpeaker>
+  /** Moves the source speaker's segments to the target and deletes the source. */
+  mergeMeetingSpeakers: (
+    meetingId: string,
+    sourceId: string,
+    targetId: string
+  ) => Promise<MeetingSpeaker>
+  setSpeakerSuggestions: (
+    meetingId: string,
+    items: SpeakerSuggestionUpdate[]
+  ) => Promise<MeetingSpeaker[]>
+  listSpeakerProfiles: () => Promise<SpeakerProfile[]>
+  recordConfirmedSpeaker: (input: RecordConfirmedSpeakerInput) => Promise<SpeakerProfile>
   upsertMeetingIntelligence: (
     meetingId: string,
     intelligence: MeetingIntelligence,
@@ -447,6 +582,11 @@ export type MeetingRepository = {
 
 function normalize(value: string): string {
   return value.toLowerCase()
+}
+
+/** Placeholder for M3 repository methods that are not implemented yet. */
+export function notImplementedM3(method: string): never {
+  throw new Error(`${method}: not implemented (M3)`)
 }
 
 function createId(prefix: string): string {
@@ -934,6 +1074,34 @@ export function createInMemoryMeetingRepository(
 
       meetings.set(meetingId, { ...meeting, transcript: segments })
       return segments
+    },
+
+    async replaceTranscript() {
+      return notImplementedM3("replaceTranscript")
+    },
+
+    async listMeetingSpeakers() {
+      return notImplementedM3("listMeetingSpeakers")
+    },
+
+    async updateMeetingSpeaker() {
+      return notImplementedM3("updateMeetingSpeaker")
+    },
+
+    async mergeMeetingSpeakers() {
+      return notImplementedM3("mergeMeetingSpeakers")
+    },
+
+    async setSpeakerSuggestions() {
+      return notImplementedM3("setSpeakerSuggestions")
+    },
+
+    async listSpeakerProfiles() {
+      return notImplementedM3("listSpeakerProfiles")
+    },
+
+    async recordConfirmedSpeaker() {
+      return notImplementedM3("recordConfirmedSpeaker")
     },
 
     async upsertMeetingIntelligence(
