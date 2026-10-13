@@ -3,11 +3,12 @@ import type { Metadata } from "next"
 import "../../globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { DirectionProvider } from "@/components/ui/direction"
+import { clipShareLocale } from "@/lib/clips/share-payload"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { fontVariables } from "@/lib/fonts"
 import { cn } from "@/lib/utils"
 
-import { loadShare } from "./load-share"
+import { loadClipShare, loadShare } from "./load-share"
 
 export const metadata: Metadata = {
   title: "MeetSum shared meeting",
@@ -17,7 +18,8 @@ export const metadata: Metadata = {
 /**
  * Root layout for public share links. `/share/*` lives outside
  * `app/[locale]`, so it needs its own <html>/<body>, global styles, fonts and
- * theme. Document language/direction follow the shared meeting's language.
+ * theme. Document language/direction follow the shared meeting's language
+ * (for a clip share: the clip's meeting language).
  */
 export default async function ShareLayout({
   children,
@@ -27,8 +29,13 @@ export default async function ShareLayout({
   params: Promise<{ token: string }>
 }>) {
   const { token } = await params
-  const result = await loadShare(token)
-  const { lang, dir } = getShareDocumentLocale(result?.meeting)
+  const clip = await loadClipShare(token)
+  const { lang, dir } =
+    clip.kind === "clip"
+      ? clipShareLocale(clip.view.meeting.language)
+      : clip.kind === "clip_unavailable"
+        ? getShareDocumentLocale(undefined)
+        : getShareDocumentLocale((await loadShare(token))?.meeting)
 
   return (
     <html

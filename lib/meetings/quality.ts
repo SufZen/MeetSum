@@ -143,6 +143,15 @@ export function deriveMeetingQualityWarnings(
     })
   }
 
+  if (meeting.intelligence?.generation?.languageCheck === "failed") {
+    warnings.push({
+      code: "summary_language_mismatch",
+      severity: "warning",
+      title: "Summary language mismatch",
+      detail: `The summary is not fully in the expected language (${meeting.intelligence.generation.language ?? "unknown"}) even after a retry. Regenerate or review it.`,
+    })
+  }
+
   const incompleteTasks = (meeting.summary?.actionItems ?? []).filter(
     (item) => item.status !== "done" && (!item.owner || !item.dueDate)
   )

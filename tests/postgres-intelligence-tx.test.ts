@@ -85,6 +85,7 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
     ]
     let selects = 0
     const { pool, connection, statements, release } = createFakePool((text) => {
+      if (/taken_id/.test(text)) return { rows: [] }
       if (/from action_items/.test(text) && /select/.test(text)) {
         selects += 1
         return selects === 1
@@ -172,28 +173,224 @@ describe("Postgres upsertMeetingIntelligence transaction", () => {
 })
 
 describe("Postgres updateActionItem", () => {
-  it("marks content edits as user-edited and tracks completion", async () => {
+  function recordingRepository(row: Record<string, unknown>) {
     const calls: Array<{ text: string; values: unknown[] }> = []
     const repository = createPostgresMeetingRepository(
       {
         query: async (text, values = []) => {
-          calls.push({ text, values })
-          return {
-            rows: [actionRow({ id: "act_1", title: "Renamed", edited_by_user: true })],
+          calls.push({ text: text.replace(/\s+/g, " ").trim(), values })
+          if (/select m\.started_at/.test(text)) {
+            return { rows: [{ started_at: "2026-10-15T09:00:00.000Z" }] }
           }
+          return { rows: [actionRow(row)] }
         },
       },
       scope
     )
 
+    return { calls, repository }
+  }
+
+  /** Value bound to the placeholder assigned to `column` in the SET list. */
+  function setValue(call: { text: string; values: unknown[] }, column: string) {
+    const match = new RegExp(`${column} = \\$(\\d+)`).exec(call.text)
+
+    return match ? call.values[Number(match[1]) - 1] : undefined
+  }
+
+  it("marks content edits as user-edited and tracks completion", async () => {
+    const { calls, repository } = recordingRepository({
+      id: "act_1",
+      title: "Renamed",
+      edited_by_user: true,
+    })
+
     const item = await repository.updateActionItem("act_1", { title: "Renamed" })
     await repository.updateActionItem("act_1", { status: "done" })
 
-    expect(calls[0].text).toContain("edited_by_user = edited_by_user or $7")
-    expect(calls[0].text).toContain("completed_at")
-    expect(calls[0].values[6]).toBe(true)
-    expect(calls[1].values[6]).toBe(false)
-    expect(calls[1].values[3]).toBe("done")
+    expect(calls[0].text).toMatch(/edited_by_user = edited_by_user or \$\d+/)
+    expect(calls[0].values).toContain(true)
+    expect(calls[1].text).toContain("completed_at = case when")
+    expect(setValue(calls[1], "status")).toBe("done")
+    expect(calls[1].values).toContain(false)
+    expect(calls[1].values).not.toContain(true)
     expect(item).toMatchObject({ id: "act_1", editedByUser: true, origin: "ai" })
+  })
+
+  it("parses a due phrase against the meeting start and marks it user-set", async () => {
+    const { calls, repository } = recordingRepository({
+      id: "act_1",
+      title: "Send",
+      due_on: "2026-10-18",
+      due_text: "עד יום ראשון",
+      due_source: "user",
+    })
+
+    const item = await repository.updateActionItem("act_1", { dueText: "עד יום ראשון" })
+
+    // Scoped lookup of the meeting's started_at first, then the update.
+    expect(calls[0].text).toMatch(/^select m\.started_at from action_items ai join meetings m/)
+    const update = calls[1]
+
+    expect(update.text).toMatch(/^update action_items set/)
+    expect(setValue(update, "due_on")).toBe("2026-10-18")
+    expect(setValue(update, "due_text")).toBe("עד יום ראשון")
+    expect(setValue(update, "due_source")).toBe("user")
+    expect(setValue(update, "due_date")).toBe("2026-10-18T12:00:00.000Z")
+    expect(update.values).toContain(true)
+    expect(item).toMatchObject({ dueOn: "2026-10-18", dueText: "עד יום ראשון", dueSource: "user" })
+  })
+
+  it("re-validates owner ids in SQL (meeting participant, workspace member)", async () => {
+    const { calls, repository } = recordingRepository({ id: "act_1", title: "Send" })
+
+    await repository.updateActionItem("act_1", {
+      ownerText: "דנה",
+      ownerParticipantId: "participant_1",
+      ownerUserId: "user_dana",
+    })
+
+    const update = calls[0]
+
+    expect(update.text).toContain(
+      "owner_participant_id = (select mp.id from meeting_participants mp where mp.id = $"
+    )
+    expect(update.text).toContain("mp.meeting_id = action_items.meeting_id")
+    expect(update.text).toContain("from memberships mb where mb.user_id = $")
+    expect(update.values).toEqual(
+      expect.arrayContaining(["דנה", "participant_1", "user_dana", "ws_default"])
+    )
+    // A due edit was not requested, so the due columns are untouched.
+    expect(update.text).not.toContain("due_on =")
+  })
+
+  it("clears the due date with dueOn null", async () => {
+    const { calls, repository } = recordingRepository({ id: "act_1", title: "Send" })
+
+    await repository.updateActionItem("act_1", { dueOn: null })
+
+    expect(setValue(calls[0], "due_on")).toBeNull()
+    expect(setValue(calls[0], "due_source")).toBeNull()
+    expect(setValue(calls[0], "due_date")).toBeNull()
+  })
+})
+
+describe("Postgres upsertMeetingIntelligence M5 columns", () => {
+  it("writes workspace, owner linkage, due fields and the template/prompt version", async () => {
+    const { pool, connection } = createFakePool((text) => {
+      if (/insert into summaries/.test(text)) return { rows: [{ id: "summary_1" }] }
+      return { rows: [] }
+    })
+    const repository = createPostgresMeetingRepository(pool, scope)
+
+    await repository.upsertMeetingIntelligence("meet_1", {
+      ...intelligenceBase,
+      tags: [],
+      generation: { provider: "anthropic", templateKey: "hebrew_business", promptVersion: "m5.1" },
+      actionItems: [
+        {
+          ...task("task_1", "לשלוח הצעה"),
+          ownerText: "דנה",
+          ownerParticipantId: "participant_1",
+          ownerSpeakerId: "speaker_1",
+          ownerUserId: "user_dana",
+          dueOn: "2026-10-18",
+          dueText: "עד יום ראשון",
+          dueSource: "parser",
+          sourceSegmentId: "seg_1",
+        },
+      ],
+    })
+
+    const insert = connection.query.mock.calls.find(([text]) =>
+      /insert into action_items/.test(text)
+    )!
+    const values = insert[1] as unknown[]
+
+    expect(insert[0]).toContain("workspace_id, owner_text, owner_participant_id")
+    expect(values.slice(11)).toEqual([
+      "ws_default",
+      "דנה",
+      "participant_1",
+      "speaker_1",
+      "user_dana",
+      "2026-10-18",
+      "עד יום ראשון",
+      "parser",
+      "seg_1",
+    ])
+
+    const summary = connection.query.mock.calls.find(([text]) =>
+      /insert into summaries/.test(text)
+    )!
+
+    expect(summary[0]).toContain("template_key, prompt_version")
+    expect((summary[1] as unknown[]).slice(-2)).toEqual(["hebrew_business", "m5.1"])
+  })
+
+  it("never writes an invalid due_on", async () => {
+    const { pool, connection } = createFakePool((text) =>
+      /insert into summaries/.test(text) ? { rows: [{ id: "summary_1" }] } : { rows: [] }
+    )
+
+    await createPostgresMeetingRepository(pool, scope).upsertMeetingIntelligence("meet_1", {
+      ...intelligenceBase,
+      tags: [],
+      actionItems: [{ ...task("task_1", "x"), dueOn: "next week" }],
+    })
+
+    const insert = connection.query.mock.calls.find(([text]) =>
+      /insert into action_items/.test(text)
+    )!
+
+    expect((insert[1] as unknown[])[16]).toBeNull()
+  })
+})
+
+describe("Postgres upsertMeetingIntelligence action item ids", () => {
+  it("persists the same AI task id in two meetings without a primary-key collision", async () => {
+    // A tiny action_items table with a global primary key, like Postgres.
+    const table = new Map<string, { meetingId: string; title: string }>()
+    const { pool } = createFakePool((text, values) => {
+      if (/taken_id/.test(text)) {
+        const [ids, meetingId] = values as [string[], string]
+
+        return {
+          rows: ids
+            .filter((id) => table.has(id) && table.get(id)!.meetingId !== meetingId)
+            .map((id) => ({ taken_id: id })),
+        }
+      }
+      if (/insert into action_items/.test(text)) {
+        const [id, meetingId, title] = values as [string, string, string]
+
+        if (table.has(id)) throw Object.assign(new Error("duplicate key"), { code: "23505" })
+        table.set(id, { meetingId, title })
+        return { rows: [] }
+      }
+      if (/from action_items/.test(text) && /select/.test(text)) {
+        const meetingId = values[0] as string
+
+        return {
+          rows: [...table]
+            .filter(([, row]) => row.meetingId === meetingId)
+            .map(([id, row]) => actionRow({ id, title: row.title })),
+        }
+      }
+      if (/insert into summaries/.test(text)) return { rows: [{ id: "summary_1" }] }
+      return { rows: [] }
+    })
+    const repository = createPostgresMeetingRepository(pool, scope)
+    const payload = { ...intelligenceBase, tags: [], actionItems: [task("task_weekly", "Send weekly report")] }
+
+    await repository.upsertMeetingIntelligence("meet_1", payload)
+    await expect(repository.upsertMeetingIntelligence("meet_2", payload)).resolves.toBeDefined()
+
+    const rows = [...table].map(([id, row]) => ({ id, ...row }))
+
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.meetingId).sort()).toEqual(["meet_1", "meet_2"])
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2)
+    expect(rows.find((row) => row.meetingId === "meet_2")!.id).toMatch(/^act_/)
   })
 })

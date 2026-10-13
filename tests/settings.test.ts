@@ -92,6 +92,55 @@ describe("app settings", () => {
     })
   })
 
+  it("has the M5 intelligence defaults", async () => {
+    await expect(getAppSettings(DEFAULT_WORKSPACE_ID)).resolves.toMatchObject({
+      llmProviderPreference: "auto",
+      summaryTemplate: "general",
+      summaryLanguageMode: "meeting",
+      autoTitleMode: "generic_only",
+      aiFeatures: { sentiment: true, prepBriefs: true },
+    })
+  })
+
+  it("accepts template keys as strings (built-in, legacy, custom, auto)", async () => {
+    for (const key of ["hebrew_business", "real-estate", "custom:acme-qbr", "auto"]) {
+      const settings = await updateAppSettings(DEFAULT_WORKSPACE_ID, { summaryTemplate: key })
+
+      expect(settings.summaryTemplate).toBe(key)
+    }
+    await expect(
+      updateAppSettings(DEFAULT_WORKSPACE_ID, { summaryTemplate: "custom:Not A Slug" })
+    ).resolves.toMatchObject({ summaryTemplate: "general" })
+  })
+
+  it("normalizes the M5 keys", async () => {
+    const settings = await updateAppSettings(DEFAULT_WORKSPACE_ID, {
+      llmProviderPreference: "openai",
+      summaryLanguageMode: "fr",
+      autoTitleMode: "sometimes",
+      aiFeatures: { sentiment: false, prepBriefs: "yes" },
+    } as never)
+
+    expect(settings).toMatchObject({
+      llmProviderPreference: "auto",
+      summaryLanguageMode: "meeting",
+      autoTitleMode: "generic_only",
+      aiFeatures: { sentiment: false, prepBriefs: true },
+    })
+
+    await expect(
+      updateAppSettings(DEFAULT_WORKSPACE_ID, {
+        llmProviderPreference: "anthropic",
+        summaryLanguageMode: "mixed",
+        autoTitleMode: "off",
+      })
+    ).resolves.toMatchObject({
+      llmProviderPreference: "anthropic",
+      summaryLanguageMode: "mixed",
+      autoTitleMode: "off",
+    })
+  })
+
   it("resolves the default meeting language from the language mode", () => {
     expect(resolveDefaultMeetingLanguage({ meetingLanguageMode: "auto" })).toBe("he")
     expect(resolveDefaultMeetingLanguage({ meetingLanguageMode: "en" })).toBe("en")

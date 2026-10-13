@@ -25,6 +25,7 @@ import type {
   MeetingRepository,
   GetShareMediaByToken,
   MeetingShare,
+  MeetingTitleSource,
   MeetingVisibility,
   RepoScope,
   ReplaceTranscriptInput,
@@ -38,7 +39,9 @@ import type {
   TranscriptSegment,
 } from "@/lib/meetings/repository"
 import {
+  ActionItemNotFoundError,
   MeetingExternalIdConflictError,
+  MeetingNotFoundError,
   MeetingScopeError,
   NothingToUndoError,
   SegmentNotFoundError,
@@ -67,6 +70,15 @@ import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { DEFAULT_SHARE_SECTIONS } from "@/lib/sharing/share-sections"
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import { getMeetingDurationMs } from "@/lib/meetings/duration"
+import { dueDateFromDueOn, parseDueDate } from "@/lib/tasks/due-date"
+import {
+  hasOwnerPatch,
+  isContentPatch,
+  isDateOnly,
+  ownerTextOf,
+  resolveDuePatch,
+} from "@/lib/tasks/patch"
+import { getTaskTimeZone } from "@/lib/tasks/time-zone"
 import {
   deriveMeetingQualityWarnings,
   type TranscriptQualityStats,
@@ -96,6 +108,9 @@ type MeetingRow = {
   /** M4 (021). */
   duration_ms?: number | null
   transcript_version?: number | null
+  /** M5 (022). */
+  template_key?: string | null
+  title_source?: MeetingTitleSource | null
 }
 
 type TranscriptRow = {
@@ -198,6 +213,19 @@ type ActionItemRow = {
   origin?: ActionItem["origin"] | null
   original_title?: string | null
   completed_at?: string | Date | null
+  /** M5 (022). */
+  workspace_id?: string | null
+  meeting_id?: string | null
+  owner_text?: string | null
+  owner_participant_id?: string | null
+  owner_speaker_id?: string | null
+  owner_user_id?: string | null
+  due_on?: string | Date | null
+  due_text?: string | null
+  due_source?: ActionItem["dueSource"] | null
+  source_segment_id?: string | null
+  created_by_user_id?: string | null
+  created_at?: string | Date | null
 }
 
 type TagRow = { name: MeetingTag }
@@ -237,6 +265,9 @@ type MeetingShareRow = {
   created_by: string | null
   created_at: string | Date
   updated_at: string | Date
+  /** M5 (022). */
+  scope?: MeetingShare["scope"] | null
+  clip_id?: string | null
 }
 
 type ExportRecordRow = {
@@ -505,6 +536,8 @@ function mapMeetingRow(row: MeetingRow): MeetingRecord {
     ...(row.transcript_version !== undefined && row.transcript_version !== null
       ? { transcriptVersion: Number(row.transcript_version) }
       : {}),
+    ...(row.template_key ? { templateKey: row.template_key } : {}),
+    ...(row.title_source ? { titleSource: row.title_source } : {}),
   }
 }
 
@@ -536,6 +569,8 @@ function mapMeetingShare(row: MeetingShareRow): MeetingShare {
     createdBy: row.created_by ?? undefined,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
+    scope: row.scope ?? "meeting",
+    clipId: row.clip_id ?? undefined,
   }
 }
 
@@ -567,7 +602,35 @@ function mapActionItem(row: ActionItemRow): ActionItem {
     origin: row.origin ?? "ai",
     originalTitle: row.original_title ?? undefined,
     completedAt: row.completed_at ? toIso(row.completed_at) : undefined,
+    ownerText: row.owner_text ?? undefined,
+    ownerParticipantId: row.owner_participant_id ?? undefined,
+    ownerSpeakerId: row.owner_speaker_id ?? undefined,
+    ownerUserId: row.owner_user_id ?? undefined,
+    dueOn: row.due_on ? toDateOnly(row.due_on) : undefined,
+    dueText: row.due_text ?? undefined,
+    dueSource: row.due_source ?? undefined,
+    sourceSegmentId: row.source_segment_id ?? undefined,
+    meetingId: row.meeting_id ?? undefined,
+    workspaceId: row.workspace_id ?? undefined,
+    createdByUserId: row.created_by_user_id ?? undefined,
+    createdAt: row.created_at ? toIso(row.created_at) : undefined,
   }
+}
+
+/** Maps an `action_items` row selected with `actionItemColumns` (tasks store). */
+export function mapTaskActionItemRow(row: Record<string, unknown>): ActionItem {
+  return mapActionItem(row as unknown as ActionItemRow)
+}
+
+/** `date` columns: node-postgres returns a local-midnight Date. */
+function toDateOnly(value: string | Date): string {
+  if (typeof value === "string") return value.slice(0, 10)
+
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
 }
 
 function mapMediaAsset(row: MediaAssetRow): MediaAsset {
@@ -915,11 +978,42 @@ function mapMeetConferenceRecords(rows: MeetArtifactRow[]): MeetConferenceRecord
   return [...records.values()]
 }
 
-const ACTION_ITEM_COLUMNS = `
-  id, title, owner, status, due_date, priority, confidence,
-  source_quote, source_start_ms, kind, edited_by_user, origin,
-  original_title, completed_at
-`
+const ACTION_ITEM_COLUMN_LIST = [
+  "id",
+  "title",
+  "owner",
+  "status",
+  "due_date",
+  "priority",
+  "confidence",
+  "source_quote",
+  "source_start_ms",
+  "kind",
+  "edited_by_user",
+  "origin",
+  "original_title",
+  "completed_at",
+  // M5 (022)
+  "workspace_id",
+  "meeting_id",
+  "owner_text",
+  "owner_participant_id",
+  "owner_speaker_id",
+  "owner_user_id",
+  "due_on",
+  "due_text",
+  "due_source",
+  "source_segment_id",
+  "created_by_user_id",
+  "created_at",
+] as const
+
+const ACTION_ITEM_COLUMNS = ACTION_ITEM_COLUMN_LIST.join(", ")
+
+/** Action-item columns qualified with `alias` (the tasks store joins meetings). */
+export function actionItemColumns(alias: string): string {
+  return ACTION_ITEM_COLUMN_LIST.map((column) => `${alias}.${column}`).join(", ")
+}
 
 /** Meeting columns, qualified with `alias` (is_favorite is per user, M2). */
 function meetingColumns(alias = "m") {
@@ -940,6 +1034,8 @@ function meetingColumns(alias = "m") {
     "visibility",
     "duration_ms",
     "transcript_version",
+    "template_key",
+    "title_source",
   ]
     .map((column) => `${alias}.${column}`)
     .join(", ")
@@ -947,7 +1043,7 @@ function meetingColumns(alias = "m") {
 
 const SHARE_COLUMNS = `
   id, meeting_id, token, visibility, revoked, expires_at,
-  included_sections, created_by, created_at, updated_at
+  included_sections, created_by, created_at, updated_at, scope, clip_id
 `
 
 /**
@@ -2157,7 +2253,7 @@ export function createPostgresMeetingRepository(
       `
         select ${SHARE_COLUMNS}
         from meeting_shares
-        where meeting_id = $1
+        where meeting_id = $1 and scope = 'meeting'
         ${activeOnly ? "and revoked = false" : ""}
         order by created_at desc
         limit 1
@@ -2985,7 +3081,8 @@ export function createPostgresMeetingRepository(
     },
 
     async renameMeeting(id, title) {
-      const row = await updateScopedMeeting(client, id, "title = $2", [title])
+      // A user rename: AI titles never overwrite it (M5).
+      const row = await updateScopedMeeting(client, id, "title = $2, title_source = 'user'", [title])
 
       if (!row) throw new Error(`Meeting not found: ${id}`)
       return mapMeetingRow(row)
@@ -3127,8 +3224,21 @@ export function createPostgresMeetingRepository(
           [meetingId]
         )
         const existing = (existingResult.rows as ActionItemRow[]).map(mapActionItem)
-        const plan = mergeActionItems(existing, intelligence.actionItems, () =>
-          createId("act")
+        // action_items.id is a global primary key: an incoming id another
+        // meeting already uses gets a fresh id instead of failing the tx.
+        const incomingIds = intelligence.actionItems.map((item) => item.id).filter(Boolean)
+        const takenResult = incomingIds.length
+          ? await tx.query(
+              `select id as taken_id from action_items where id = any($1::text[]) and meeting_id <> $2`,
+              [incomingIds, meetingId]
+            )
+          : { rows: [] }
+        const takenIds = (takenResult.rows as Array<{ taken_id: string }>).map((row) => row.taken_id)
+        const plan = mergeActionItems(
+          existing,
+          intelligence.actionItems,
+          () => createId("act"),
+          takenIds
         )
 
         if (plan.remove.length) {
@@ -3137,6 +3247,20 @@ export function createPostgresMeetingRepository(
             [meetingId, plan.remove]
           )
         }
+
+        // M5: owner ids are re-validated in SQL (same meeting / workspace
+        // member) so a stale or derived id can never break the FK or leak.
+        const m5Values = (item: ActionItem) => [
+          workspaceId,
+          item.ownerText ?? null,
+          item.ownerParticipantId ?? null,
+          item.ownerSpeakerId ?? null,
+          item.ownerUserId ?? null,
+          isDateOnly(item.dueOn) ? item.dueOn : null,
+          item.dueText ?? null,
+          item.dueSource ?? null,
+          item.sourceSegmentId ?? null,
+        ]
 
         for (const item of plan.update) {
           await tx.query(
@@ -3155,6 +3279,23 @@ export function createPostgresMeetingRepository(
                   original_title = $3,
                   edited_by_user = false,
                   completed_at = null,
+                  workspace_id = $12,
+                  owner_text = $13,
+                  owner_participant_id = (
+                    select mp.id from meeting_participants mp
+                    where mp.id = $14 and mp.meeting_id = $2
+                  ),
+                  owner_speaker_id = (
+                    select sp.id from speakers sp where sp.id = $15 and sp.meeting_id = $2
+                  ),
+                  owner_user_id = (
+                    select mb.user_id from memberships mb
+                    where mb.user_id = $16 and mb.workspace_id = $12
+                  ),
+                  due_on = $17::date,
+                  due_text = $18,
+                  due_source = $19,
+                  source_segment_id = $20,
                   updated_at = now()
               where id = $1 and meeting_id = $2
             `,
@@ -3170,6 +3311,7 @@ export function createPostgresMeetingRepository(
               item.sourceQuote ?? null,
               item.sourceStartMs ?? null,
               item.kind ?? null,
+              ...m5Values(item),
             ]
           )
         }
@@ -3180,11 +3322,18 @@ export function createPostgresMeetingRepository(
               insert into action_items (
                 id, meeting_id, title, owner, status, due_date, priority,
                 confidence, source_quote, source_start_ms, kind,
-                origin, original_title, edited_by_user
+                origin, original_title, edited_by_user,
+                workspace_id, owner_text, owner_participant_id, owner_speaker_id,
+                owner_user_id, due_on, due_text, due_source, source_segment_id
               )
               values (
                 $1, $2, $3, $4, $5, $6, coalesce($7, 'normal'), $8, $9, $10,
-                coalesce($11, 'explicit'), 'ai', $3, false
+                coalesce($11, 'explicit'), 'ai', $3, false,
+                $12, $13,
+                (select mp.id from meeting_participants mp where mp.id = $14 and mp.meeting_id = $2),
+                (select sp.id from speakers sp where sp.id = $15 and sp.meeting_id = $2),
+                (select mb.user_id from memberships mb where mb.user_id = $16 and mb.workspace_id = $12),
+                $17::date, $18, $19, $20
               )
             `,
             [
@@ -3199,6 +3348,7 @@ export function createPostgresMeetingRepository(
               item.sourceQuote ?? null,
               item.sourceStartMs ?? null,
               item.kind ?? null,
+              ...m5Values(item),
             ]
           )
         }
@@ -3236,9 +3386,10 @@ export function createPostgresMeetingRepository(
         const summaryResult = await tx.query(
           `
             insert into summaries (
-              id, meeting_id, overview, language, model_provider, intelligence_run_id
+              id, meeting_id, overview, language, model_provider, intelligence_run_id,
+              template_key, prompt_version
             )
-            values ($1, $2, $3, $4, $5, $6)
+            values ($1, $2, $3, $4, $5, $6, $7, $8)
             returning id
           `,
           [
@@ -3248,6 +3399,8 @@ export function createPostgresMeetingRepository(
             intelligence.languageMetadata.primaryLanguage,
             provider,
             runId,
+            intelligence.generation?.templateKey ?? null,
+            intelligence.generation?.promptVersion ?? null,
           ]
         )
         const summaryId = (summaryResult.rows[0] as { id: string }).id
@@ -3270,35 +3423,74 @@ export function createPostgresMeetingRepository(
     },
 
     async updateActionItem(id, patch) {
-      const contentEdited =
-        patch.title !== undefined ||
-        patch.owner !== undefined ||
-        patch.dueDate !== undefined ||
-        patch.priority !== undefined
-      const values: unknown[] = [
-        id,
-        patch.title ?? null,
-        patch.owner ?? null,
-        patch.status ?? null,
-        coerceDueDate(patch.dueDate),
-        patch.priority ?? null,
-        contentEdited,
-      ]
+      const timeZone = getTaskTimeZone()
+      let anchor = new Date().toISOString()
+
+      // A due phrase without a date is parsed against the meeting start.
+      if (patch.dueOn === undefined && patch.dueText) {
+        const lookupValues: unknown[] = [id]
+        const lookup = await client.query(
+          `
+            select m.started_at
+            from action_items ai
+            join meetings m on m.id = ai.meeting_id
+            where ai.id = $1 and ${scoped("m", lookupValues)}
+          `,
+          lookupValues
+        )
+        const row = lookup.rows[0] as { started_at: string | Date } | undefined
+
+        if (!row) throw new ActionItemNotFoundError(id)
+        anchor = toIso(row.started_at)
+      }
+
+      const due = resolveDuePatch(patch, anchor, timeZone)
+      const values: unknown[] = [id]
+      const param = (value: unknown) => {
+        values.push(value)
+        return `$${values.length}`
+      }
+      const sets: string[] = []
+
+      if (patch.title !== undefined) sets.push(`title = ${param(patch.title)}`)
+      if (patch.priority !== undefined) sets.push(`priority = ${param(patch.priority)}`)
+      if (patch.status !== undefined) {
+        const status = param(patch.status)
+
+        sets.push(
+          `status = ${status}`,
+          `completed_at = case when ${status}::text = 'done' then coalesce(completed_at, now()) else null end`
+        )
+      }
+      if (hasOwnerPatch(patch)) {
+        const text = param(ownerTextOf(patch))
+        const participant = param(patch.ownerParticipantId ?? null)
+        const user = param(patch.ownerUserId ?? null)
+        const ws = param(workspaceId)
+        const participantSql = `select mp.id from meeting_participants mp where mp.id = ${participant} and mp.meeting_id = action_items.meeting_id`
+
+        sets.push(
+          `owner_text = ${text}`,
+          `owner_participant_id = (${participantSql})`,
+          `owner_speaker_id = (select sp.id from speakers sp where sp.participant_id = ${participant} and sp.meeting_id = action_items.meeting_id order by sp.first_start_ms asc nulls last, sp.id asc limit 1)`,
+          `owner_user_id = (select mb.user_id from memberships mb where mb.user_id = ${user} and mb.workspace_id = ${ws})`,
+          `owner = coalesce(${text}, (select mp.name from meeting_participants mp where mp.id = ${participant} and mp.meeting_id = action_items.meeting_id))`
+        )
+      }
+      if (due) {
+        sets.push(
+          `due_on = ${param(due.dueOn)}::date`,
+          `due_text = ${param(due.dueText)}`,
+          `due_source = ${param(due.dueSource)}`,
+          `due_date = ${param(due.dueDate)}::timestamptz`
+        )
+      }
+      sets.push(`edited_by_user = edited_by_user or ${param(isContentPatch(patch))}`, "updated_at = now()")
+
       const result = await client.query(
         `
           update action_items
-          set title = coalesce($2, title),
-              owner = coalesce($3, owner),
-              status = coalesce($4, status),
-              due_date = coalesce($5, due_date),
-              priority = coalesce($6, priority),
-              edited_by_user = edited_by_user or $7,
-              completed_at = case
-                when $4::text = 'done' then coalesce(completed_at, now())
-                when $4::text = 'open' then null
-                else completed_at
-              end,
-              updated_at = now()
+          set ${sets.join(",\n              ")}
           where id = $1
             and exists (
               select 1 from meetings m
@@ -3310,8 +3502,146 @@ export function createPostgresMeetingRepository(
       )
       const row = result.rows[0] as ActionItemRow | undefined
 
-      if (!row) throw new Error(`Action item not found: ${id}`)
+      if (!row) throw new ActionItemNotFoundError(id)
       return mapActionItem(row)
+    },
+
+    async getActionItem(id) {
+      const values: unknown[] = [id]
+      const result = await client.query(
+        `
+          select ${ACTION_ITEM_COLUMNS}
+          from action_items
+          where id = $1
+            and exists (
+              select 1 from meetings m
+              where m.id = action_items.meeting_id and ${scoped("m", values)}
+            )
+        `,
+        values
+      )
+      const row = result.rows[0] as ActionItemRow | undefined
+
+      return row ? mapActionItem(row) : undefined
+    },
+
+    async createActionItem(meetingId, input, actor) {
+      const title = input.title.trim()
+
+      if (!title) throw new Error("Action item title is required")
+
+      const meetingRow = await selectMeeting(client, "m.id = $1", [meetingId])
+
+      if (!meetingRow) throw new MeetingNotFoundError(meetingId)
+
+      const dueText = input.dueText?.trim() || null
+      const dueOn = isDateOnly(input.dueOn)
+        ? input.dueOn
+        : dueText
+          ? (parseDueDate(dueText, {
+              anchor: toIso(meetingRow.started_at),
+              timeZone: getTaskTimeZone(),
+              strict: true,
+            })?.date ?? null)
+          : null
+      const result = await client.query(
+        `
+          insert into action_items (
+            id, meeting_id, workspace_id, title, owner, status, due_date, priority,
+            kind, origin, original_title, edited_by_user,
+            owner_text, owner_participant_id, owner_speaker_id, owner_user_id,
+            due_on, due_text, due_source, source_segment_id, source_start_ms,
+            created_by_user_id
+          )
+          values (
+            $1, $2, $3, $4,
+            coalesce($5, (select mp.name from meeting_participants mp where mp.id = $6 and mp.meeting_id = $2)),
+            'open', $7, coalesce($8, 'normal'),
+            'explicit', 'user', $4, true,
+            $5,
+            (select mp.id from meeting_participants mp where mp.id = $6 and mp.meeting_id = $2),
+            (select sp.id from speakers sp where sp.participant_id = $6 and sp.meeting_id = $2 order by sp.first_start_ms asc nulls last, sp.id asc limit 1),
+            (select mb.user_id from memberships mb where mb.user_id = $9 and mb.workspace_id = $3),
+            $10::date, $11, $12,
+            (select ts.id from transcript_segments ts where ts.id = $13 and ts.meeting_id = $2),
+            $14,
+            (select u.id from users u where u.id = $15)
+          )
+          returning ${ACTION_ITEM_COLUMNS}
+        `,
+        [
+          createId("act"),
+          meetingId,
+          workspaceId,
+          title,
+          input.ownerText?.trim() || null,
+          input.ownerParticipantId ?? null,
+          dueOn ? dueDateFromDueOn(dueOn) : null,
+          input.priority ?? null,
+          input.ownerUserId ?? null,
+          dueOn,
+          dueText,
+          dueOn || dueText ? "user" : null,
+          input.sourceSegmentId ?? null,
+          input.sourceStartMs ?? null,
+          actor.userId ?? null,
+        ]
+      )
+
+      const row = result.rows[0] as ActionItemRow | undefined
+
+      if (!row) throw new Error("Unable to create action item")
+      return mapActionItem(row)
+    },
+
+    async deleteActionItem(id) {
+      const values: unknown[] = [id]
+      const result = await client.query(
+        `
+          delete from action_items
+          where id = $1
+            and exists (
+              select 1 from meetings m
+              where m.id = action_items.meeting_id and ${scoped("m", values)}
+            )
+          returning id
+        `,
+        values
+      )
+
+      return result.rows.length > 0
+    },
+
+    async setMeetingTemplate(id, templateKey) {
+      const row = await updateScopedMeeting(client, id, "template_key = $2", [templateKey])
+
+      if (!row) throw new Error(`Meeting not found: ${id}`)
+      return mapMeetingRow(row)
+    },
+
+    async applyAiTitle(id, title) {
+      const values: unknown[] = [id, title]
+      const result = await client.query(
+        `
+          update meetings m
+          set title = $2, title_source = 'ai'
+          where m.id = $1 and m.title_source <> 'user' and ${scoped("m", values)}
+          returning m.id
+        `,
+        values
+      )
+
+      return result.rows.length > 0
+    },
+
+    async setMeetingTitle(id, title, source: MeetingTitleSource) {
+      const row = await updateScopedMeeting(client, id, "title = $2, title_source = $3", [
+        title,
+        source,
+      ])
+
+      if (!row) throw new Error(`Meeting not found: ${id}`)
+      return mapMeetingRow(row)
     },
 
     async createJob(input) {
@@ -3676,13 +4006,15 @@ export function createPostgresMeetingRepository(
 
         if (!updated) return undefined
 
-        // Leaving `link` revokes every active share in the same transaction.
+        // Leaving `link` revokes the meeting-scope shares in the same
+        // transaction; going `private` also revokes clip shares (M5).
         if (visibility !== "link") {
           await tx.query(
             `
               update meeting_shares
               set revoked = true, updated_at = now()
               where meeting_id = $1 and revoked = false
+                ${visibility === "private" ? "" : "and scope = 'meeting'"}
             `,
             [meetingId]
           )
@@ -3760,6 +4092,7 @@ export function createPostgresMeetingRepository(
           from meeting_shares s
           join meetings m on m.id = s.meeting_id
           where s.token = $1
+            and s.scope = 'meeting'
             and s.revoked = false
             and (s.expires_at is null or s.expires_at > now())
             and m.visibility = 'link'
@@ -3951,6 +4284,7 @@ export function createPostgresShareLookup(client: Queryable): {
           from meeting_shares s
           join meetings m on m.id = s.meeting_id
           where s.token = $1
+            and s.scope = 'meeting'
             and s.revoked = false
             and (s.expires_at is null or s.expires_at > now())
             and m.visibility = 'link'
@@ -3990,11 +4324,12 @@ export function createPostgresShareLookup(client: Queryable): {
         `
           select s.id, s.meeting_id, s.token, s.visibility, s.revoked,
                  s.expires_at, s.included_sections, s.created_by,
-                 s.created_at, s.updated_at,
+                 s.created_at, s.updated_at, s.scope, s.clip_id,
                  m.workspace_id as meeting_workspace_id
           from meeting_shares s
           join meetings m on m.id = s.meeting_id
           where s.token = $1
+            and s.scope = 'meeting'
             and s.revoked = false
             and (s.expires_at is null or s.expires_at > now())
             and m.visibility = 'link'

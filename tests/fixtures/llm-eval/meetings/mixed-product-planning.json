@@ -1,0 +1,27 @@
+{
+  "_synthetic": true,
+  "id": "mixed-product-planning",
+  "title": "תכנון מוצר — Q4 roadmap",
+  "language": "mixed",
+  "startedAt": "2026-10-14T13:00:00.000Z",
+  "tags": ["product", "code-switched", "english-speaker"],
+  "segments": [
+    { "id": "s1", "speaker": "Sarah", "startMs": 0, "endMs": 9000, "text": "Let's lock the Q4 roadmap. The top request is offline recording on mobile." },
+    { "id": "s2", "speaker": "עידו", "startMs": 9500, "endMs": 20000, "text": "מבחינת engineering זה שישה שבועות לפחות. נצטרך לוותר על ה-calendar sync החדש." },
+    { "id": "s3", "speaker": "Sarah", "startMs": 20500, "endMs": 28000, "text": "Calendar sync is promised to two enterprise customers, so we can't drop it." },
+    { "id": "s4", "speaker": "ליאת", "startMs": 28500, "endMs": 39000, "text": "אז נעשה offline recording ב-MVP מצומצם, רק אנדרואיד, ונדחה את iOS לינואר." },
+    { "id": "s5", "speaker": "Sarah", "startMs": 39500, "endMs": 44000, "text": "Agreed. Android first, iOS in January." },
+    { "id": "s6", "speaker": "עידו", "startMs": 44500, "endMs": 53000, "text": "אני אכתוב design doc ל-offline mode עד יום חמישי בשבוע הבא." },
+    { "id": "s7", "speaker": "Sarah", "startMs": 53500, "endMs": 62000, "text": "I'll update the customers about the calendar sync date by Friday." },
+    { "id": "s8", "speaker": "ליאת", "startMs": 62500, "endMs": 70000, "text": "ואני אעדכן את ה-roadmap בכלי ואשתף עם כל הצוות." }
+  ],
+  "reference": {
+    "actionItems": [
+      { "title": "לכתוב design doc ל-offline mode", "owner": "עידו", "dueOn": "2026-10-22" },
+      { "title": "Update the customers about the calendar sync date", "owner": "Sarah", "dueOn": "2026-10-16" },
+      { "title": "לעדכן את ה-roadmap ולשתף עם הצוות", "owner": "ליאת" }
+    ],
+    "decisions": ["Offline recording ב-MVP לאנדרואיד בלבד, iOS נדחה לינואר", "Calendar sync נשאר ברבעון"],
+    "keyTopics": ["offline recording", "calendar sync", "roadmap"]
+  }
+}

@@ -1,5 +1,7 @@
 import { jsonError } from "@/lib/api/responses"
 import { withPublicRoute } from "@/lib/auth/authz"
+import { serveClipMedia } from "@/lib/clips/share-media"
+import { lookupClipShare } from "@/lib/clips/store"
 import { serveMeetingMedia } from "@/lib/media/proxy"
 import { authorizeShareMediaRequest } from "@/lib/sharing/share-media-access"
 
@@ -8,6 +10,21 @@ export const dynamic = "force-dynamic"
 
 async function handle(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+
+  // M5: clip-scope tokens resolve first and never fall through to the
+  // meeting recording, whatever their gate outcome.
+  let clip: Awaited<ReturnType<typeof lookupClipShare>>
+
+  try {
+    clip = await lookupClipShare(token)
+  } catch (error) {
+    console.error("Clip share lookup failed", (error as Error)?.name ?? error)
+    return jsonError("Not found", 404)
+  }
+
+  if (clip.kind === "clip") return serveClipMedia({ request, clip: clip.view.clip })
+  if (clip.kind === "clip_unavailable") return jsonError("Not found", 404)
+
   const access = await authorizeShareMediaRequest(request, token)
 
   if (!access) return jsonError("Not found", 404)
@@ -16,13 +33,13 @@ async function handle(request: Request, { params }: { params: Promise<{ token: s
 }
 
 const REASON =
-  "Public share recording (opt-in media section); the unguessable token plus the share password cookie are the credential."
+  "Public share recording (opt-in media section) or a shared clip's audio; the unguessable token plus the share password cookie are the credential."
 
 /**
- * GET /api/share/:token/media?variant=audio|video — the shared meeting's
- * recording, proxied (never presigned). 404 unless the share is active,
- * public sharing is enabled, the share includes `media` and any password
- * was verified.
+ * GET /api/share/:token/media — a shared clip's audio (clip tokens: only the
+ * clip object), or the shared meeting's recording (meeting tokens: M4
+ * semantics, `?variant=audio|video`). Always proxied, never presigned.
+ * 404 unless every gate passes.
  */
 export const GET = withPublicRoute<{ token: string }>(REASON, handle)
 

@@ -1,13 +1,15 @@
 import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 
+import { ClipShareView } from "@/components/clips/clip-share-view"
 import { SharedMeetingPlayer } from "@/components/share/shared-meeting-player"
 import { getSessionSecret } from "@/lib/auth/session"
+import { buildClipSharePayload } from "@/lib/clips/share-payload"
 import { formatDurationLabel } from "@/lib/meetings/duration"
 import { SHARE_ACCESS_COOKIE } from "@/lib/sharing/share-access"
 import { loadSharePageData } from "@/lib/sharing/share-payload"
 
-import { loadShare } from "./load-share"
+import { loadClipShare, loadShare } from "./load-share"
 
 const SHARE_ERROR_MESSAGES: Record<string, string> = {
   invalid: "Incorrect password. Please try again.",
@@ -22,6 +24,16 @@ export default async function PublicMeetingSharePage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const { token } = await params
+
+  // M5: a clip token renders only the clip and never opens the meeting —
+  // a clip token that fails any gate is a plain 404.
+  const clip = await loadClipShare(token)
+
+  if (clip.kind === "clip") {
+    return <ClipShareView token={token} payload={buildClipSharePayload(clip.view)} />
+  }
+  if (clip.kind === "clip_unavailable") notFound()
+
   const sp = await searchParams
   const cookieStore = await cookies()
   // Password gate: the password is POSTed to /api/share/:token/verify, which

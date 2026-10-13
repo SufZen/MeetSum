@@ -27,10 +27,12 @@
     "backup:full": "sh scripts/backup-full.sh",
     "backup:restore": "sh scripts/restore-full.sh",
     "asr:evaluate": "tsx scripts/evaluate-hebrew-asr.ts",
+    "llm:evaluate": "tsx scripts/evaluate-hebrew-summaries.ts",
     "mcp": "node mcp/server.mjs",
     "worker": "tsx worker/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@aws-sdk/client-s3": "^3.1036.0",
     "@aws-sdk/lib-storage": "~3.1036.0",
     "@aws-sdk/s3-request-presigner": "~3.1036.0",

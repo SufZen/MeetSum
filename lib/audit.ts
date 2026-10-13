@@ -52,6 +52,20 @@ export type AuditAction =
   | "meeting.transcript.edited"
   | "meeting.transcript.reverted"
   | "media.prepare.failed"
+  | "template.created"
+  | "template.updated"
+  | "template.archived"
+  | "meeting.template.changed"
+  | "action_item.created"
+  | "action_item.updated"
+  | "action_item.deleted"
+  | "clip.created"
+  | "clip.updated"
+  | "clip.deleted"
+  | "clip.shared"
+  | "comment.created"
+  | "comment.deleted"
+  | "comment.resolved"
 
 export type RecordAuditLogInput = {
   action: AuditAction

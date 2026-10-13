@@ -50,6 +50,12 @@ export type SegmentRowProps = {
   onCopy: (segmentId: string, withText: boolean) => void
   /** Text to restore into the editor after a failed save. */
   draft?: string
+  /** M5: extra hover actions (comment, react, clip) before the ⋯ menu. */
+  actionsSlot?: ReactNode
+  /** M5: always-visible badges after the timecode (comment count, reactions). */
+  badgeSlot?: ReactNode
+  /** M5: part of the current clip selection. */
+  selected?: boolean
 }
 
 function SegmentRowImpl({
@@ -72,6 +78,9 @@ function SegmentRowImpl({
   onReassign,
   onCopy,
   draft,
+  actionsSlot,
+  badgeSlot,
+  selected = false,
 }: SegmentRowProps) {
   const { store } = useMeetingPlayer()
   const active = usePlayerState((state) => state.activeSegmentIndex === index)
@@ -106,13 +115,15 @@ function SegmentRowImpl({
     <article
       aria-current={active ? "true" : undefined}
       aria-label={`${speaker.name}, ${time}`}
+      data-selected={selected || undefined}
       data-segment-id={segment.id}
       style={{ ["--c" as string]: color }}
       className={cn(
         "group/seg relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-lg py-2.5 ps-2 pe-3 transition-[background-color,box-shadow] duration-(--dur-3) ease-standard hover:bg-surface-2",
         active &&
           "bg-[color-mix(in_oklch,var(--c)_9%,var(--surface))] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--c)_28%,transparent)] hover:bg-[color-mix(in_oklch,var(--c)_9%,var(--surface))]",
-        flashing && "animate-ms-flash"
+        flashing && "animate-ms-flash",
+        selected && "bg-brand-soft-2 shadow-[inset_0_0_0_1px_var(--brand)] hover:bg-brand-soft-2"
       )}
     >
       <SpeakerAvatar
@@ -138,7 +149,9 @@ function SegmentRowImpl({
           {time}
         </button>
         {edited ? <small className="text-xs text-fg-3">{t.transcriptEditedBadge}</small> : null}
-        <span className="ms-auto opacity-0 transition-opacity duration-(--dur-1) group-focus-within/seg:opacity-100 group-hover/seg:opacity-100 has-aria-expanded:opacity-100">
+        {badgeSlot}
+        <span className="ms-auto flex items-center gap-0.5 opacity-0 transition-opacity duration-(--dur-1) group-focus-within/seg:opacity-100 group-hover/seg:opacity-100 has-aria-expanded:opacity-100 has-aria-pressed:opacity-100">
+          {actionsSlot}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

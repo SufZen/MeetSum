@@ -282,7 +282,8 @@ export function AiProvenance({
   children,
   className,
 }: {
-  state: "ai" | "edited" | "streaming"
+  /** `auto`: machine-made but not AI (heuristic summary) — no iris mark. */
+  state: "ai" | "edited" | "streaming" | "auto"
   /** "AI · from 3 speakers", "Edited by Ran", "Writing"… localised by the caller */
   label: string
   /** direction of the content's language — required, never "auto" for known text */
@@ -292,7 +293,9 @@ export function AiProvenance({
   children: ReactNode
   className?: string
 }) {
-  const human = state === "edited"
+  // Iris (AI) styling only for AI content; edited and automatic content use
+  // the neutral frame.
+  const human = state === "edited" || state === "auto"
   return (
     <div
       dir={dir}
@@ -306,7 +309,11 @@ export function AiProvenance({
       )}
     >
       <span className={cn("inline-flex items-center gap-1 text-xs font-medium", human ? "text-fg-3" : "text-ai-text")}>
-        {human ? <Pencil aria-hidden className="size-3" /> : <CitedMark className="size-3.5" />}
+        {state === "edited" ? (
+          <Pencil aria-hidden className="size-3" />
+        ) : state === "auto" ? null : (
+          <CitedMark className="size-3.5" />
+        )}
         {label}
       </span>
       <div className="text-md text-fg">

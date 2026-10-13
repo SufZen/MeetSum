@@ -1,0 +1,282 @@
+{
+  "judge": "gemini:gemini-3.5-pro",
+  "synthetic": true,
+  "records": [
+    {
+      "meetingId": "he-board-update",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-board-update",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-deal-review",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-deal-review",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-one-on-one",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-one-on-one",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-sales-call",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-sales-call",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-standup-codeswitch",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "he-standup-codeswitch",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "mixed-product-planning",
+      "a": "gemini:gemini-3.8-flash",
+      "b": "gemini:gemini-3.5-flash-lite",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    },
+    {
+      "meetingId": "mixed-product-planning",
+      "a": "gemini:gemini-3.5-flash-lite",
+      "b": "gemini:gemini-3.8-flash",
+      "verdicts": {
+        "faithfulness": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "coverage": {
+          "winner": "B",
+          "rationale": "Synthetic verdict."
+        },
+        "hebrew_fluency": {
+          "winner": "A",
+          "rationale": "Synthetic verdict."
+        },
+        "action_item_recall": {
+          "winner": "tie",
+          "rationale": "Synthetic verdict."
+        }
+      }
+    }
+  ]
+}

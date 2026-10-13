@@ -12,11 +12,17 @@ import type {
 } from "./types"
 
 export type {
+  Chapter,
   ContentLanguage,
+  IntelligenceGeneration,
   MeetingIntelligence,
   MeetingLanguageMetadata,
   MeetingTag,
   SmartTask,
+  SummaryItem,
+  SummaryItemKind,
+  SummaryItemRef,
+  TemplateSectionOutput,
 } from "./types"
 
 const HEBREW_SCRIPT = /[\u0590-\u05ff]/
@@ -444,6 +450,13 @@ export function extractSmartTasks(
     })
 }
 
+function isHebrewMeeting(language: string | undefined, primaryLanguage: string | undefined): boolean {
+  const code = (value: string | undefined) => value?.trim().toLowerCase().split(/[-_]/)[0]
+  const primary = code(primaryLanguage)
+
+  return primary === "he" || primary === "iw" || ["he", "iw", "heb"].includes(code(language) ?? "")
+}
+
 export function buildMeetingIntelligence(
   meeting: MeetingRecord
 ): MeetingIntelligence {
@@ -451,9 +464,13 @@ export function buildMeetingIntelligence(
   const languageMetadata = detectMeetingLanguages(transcript)
   const actionItems = extractSmartTasks(transcript)
   const tags = generateAutoTags(transcript)
+  // The heuristic text follows the meeting language (he/en), like AI output.
+  const hebrew = isHebrewMeeting(meeting.language, languageMetadata.primaryLanguage)
   const overview =
     meeting.summary?.overview ??
-    `${meeting.title} includes ${transcript.length} cleaned transcript segments and ${actionItems.length} suggested tasks.`
+    (hebrew
+      ? `${meeting.title}: ${transcript.length} קטעי תמלול מנוקים ו-${actionItems.length} משימות מוצעות.`
+      : `${meeting.title} includes ${transcript.length} cleaned transcript segments and ${actionItems.length} suggested tasks.`)
 
   return {
     overview,
@@ -468,7 +485,7 @@ export function buildMeetingIntelligence(
     commitments: transcript
       .filter((segment) => /commit|מתחייב|by next|עד יום/i.test(segment.text))
       .map((segment) => segment.text),
-    followUpDraft: `Follow-up for ${meeting.title}: ${actionItems
+    followUpDraft: `${hebrew ? "מעקב עבור" : "Follow-up for"} ${meeting.title}: ${actionItems
       .map((item) => item.title)
       .join(" ")}`.trim(),
     timestampedQuotes: transcript.slice(0, 5).map((segment) => ({
