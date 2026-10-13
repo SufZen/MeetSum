@@ -18,7 +18,7 @@ const T = 1_760_000_000
 
 describe("webhook signature v2", () => {
   it("matches the documented vector", () => {
-    // HMAC-SHA256("whsec_test_secret_1234", "1760000000." + BODY), also in docs/webhooks/verifying-signatures.md.
+    // HMAC-SHA256("whsec_test_secret_1234", "1760000000." + BODY); the same vector is in docs/api-reference.md.
     expect(computeWebhookSignatureV2(BODY, SECRET, T)).toBe(
       "0e55d105497846c2677e19306f1917ee1eb519bb12214d54507ab2f2a79fbbaa"
     )
