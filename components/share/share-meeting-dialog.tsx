@@ -16,6 +16,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -56,6 +57,13 @@ const PASSWORD_ERRORS: Record<string, keyof Dictionary> = {
   password_invalid: "shareDialogPasswordTooShort",
 }
 
+/** What the link field shows: the link, "creating…", or the revoked notice. */
+export function shareLinkFieldState(input: { shareLink: string; revoked: boolean }): "ready" | "creating" | "revoked" {
+  if (input.shareLink) return "ready"
+
+  return input.revoked ? "revoked" : "creating"
+}
+
 async function shareRequest(meetingId: string, method: "POST" | "PATCH", body: unknown) {
   const response = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}/share`, {
     method,
@@ -83,6 +91,8 @@ export function ShareMeetingDialog({
   const [password, setPassword] = useState("")
   const [passwordError, setPasswordError] = useState<keyof Dictionary | null>(null)
   const [busy, setBusy] = useState(false)
+  const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false)
+  const [linkRevoked, setLinkRevoked] = useState(false)
   // A public link widens a private meeting to the workspace: confirm first.
   const [sharePrivateConfirm, setSharePrivateConfirm] = useState(meeting.visibility === "private")
 
@@ -94,15 +104,18 @@ export function ShareMeetingDialog({
 
   async function createShareLink() {
     setSharePrivateConfirm(false)
+    setBusy(true)
 
     const { ok, json } = await shareRequest(meeting.id, "POST", {})
 
+    setBusy(false)
     if (!ok) {
       toast.error(json.reason === "meeting_manage_required" ? t.visibilityReadOnly : t.shareDialogCreateFailed)
       return
     }
 
     applyShare(json)
+    setLinkRevoked(false)
     onVisibilityChange?.(meeting.id, "link")
   }
 
@@ -176,7 +189,12 @@ export function ShareMeetingDialog({
   }
 
   async function revokeShareLink() {
-    if (await patchShare({ revoked: true }, t.shareDialogRevoked)) setShareLink("")
+    if (await patchShare({ revoked: true }, t.shareDialogRevoked)) {
+      setShareLink("")
+      setLinkRevoked(true)
+      setEditingPassword(false)
+      setPassword("")
+    }
   }
 
   async function copyLink() {
@@ -186,7 +204,8 @@ export function ShareMeetingDialog({
     toast.success(t.shareDialogLinkCopied)
   }
 
-  const linkReady = Boolean(shareLink) && !sharePrivateConfirm
+  const linkField = shareLinkFieldState({ shareLink, revoked: linkRevoked })
+  const linkReady = linkField === "ready" && !sharePrivateConfirm
   const passwordOn = passwordProtected || editingPassword
   const passwordErrorId = `${ids}-password-error`
 
@@ -203,6 +222,15 @@ export function ShareMeetingDialog({
             <p>{t.sharePrivateWarning}</p>
             <div>
               <Button onClick={() => void createShareLink()}>{t.visibilityConfirm}</Button>
+            </div>
+          </div>
+        ) : linkField === "revoked" ? (
+          <div role="status" className="grid gap-3 rounded-md border border-line bg-surface-2 p-3 text-sm leading-5">
+            <p>{t.shareDialogRevokedState}</p>
+            <div>
+              <Button disabled={busy} onClick={() => void createShareLink()}>
+                {t.shareDialogCreateNew}
+              </Button>
             </div>
           </div>
         ) : (
@@ -323,7 +351,7 @@ export function ShareMeetingDialog({
             variant="destructive"
             disabled={!linkReady || busy}
             title={t.shareDialogRevokeHint}
-            onClick={() => void revokeShareLink()}
+            onClick={() => setRevokeConfirmOpen(true)}
           >
             {t.shareDialogRevoke}
           </Button>
@@ -342,6 +370,15 @@ export function ShareMeetingDialog({
             {t.shareDialogCopyLink}
           </Button>
         </DialogFooter>
+        <ConfirmDialog
+          open={revokeConfirmOpen}
+          onOpenChange={setRevokeConfirmOpen}
+          title={t.shareDialogRevokeConfirmTitle}
+          description={t.shareDialogRevokeConfirmDescription}
+          confirmLabel={t.shareDialogRevoke}
+          destructive
+          onConfirm={() => revokeShareLink()}
+        />
       </DialogContent>
     </Dialog>
   )
