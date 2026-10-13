@@ -175,7 +175,7 @@ describe("chunkTranscript", () => {
     expect(chunk.segmentOffsets).toEqual([11, 22, 46])
   })
 
-  it("takes the majority segment language, falling back to the meeting language", () => {
+  it("decides the chunk language by the Hebrew-letter ratio of its own text (>= 0.3 → he), like Ask", () => {
     const mixed: TranscriptSegment[] = [
       { id: "a", speaker: "A", startMs: 0, endMs: 1, text: "hello", language: "en" },
       { id: "b", speaker: "A", startMs: 1, endMs: 2, text: "world", language: "en" },
@@ -183,12 +183,26 @@ describe("chunkTranscript", () => {
     ]
 
     expect(chunkTranscript({ segments: mixed, speakers: [] })[0].language).toBe("en")
+
+    // Mostly Hebrew with English terms: the ASR tagged most segments "en".
+    const mostlyHebrew: TranscriptSegment[] = [
+      { id: "a", speaker: "דנה", startMs: 0, endMs: 1, text: "נעבור ל Supabase בגלל ה pricing", language: "en" },
+      { id: "b", speaker: "דנה", startMs: 1, endMs: 2, text: "וגם ה dashboard החדש", language: "en" },
+      { id: "c", speaker: "דנה", startMs: 2, endMs: 3, text: "אני מסכים לגמרי", language: "he" },
+    ]
+
+    expect(chunkTranscript({ segments: mostlyHebrew, speakers: [] })[0].language).toBe("he")
+  })
+
+  it("falls back to the segment majority, then the meeting language, when the text has no letters", () => {
+    const digits: TranscriptSegment[] = [
+      { id: "a", speaker: "A", startMs: 0, endMs: 1, text: "1 2 3" },
+      { id: "b", speaker: "A", startMs: 1, endMs: 2, text: "4 5 6" },
+    ]
+
+    expect(chunkTranscript({ segments: digits, speakers: [], meetingLanguage: "he" })[0].language).toBe("he")
     expect(
-      chunkTranscript({
-        segments: mixed.map(({ language, ...segment }) => (void language, segment)),
-        speakers: [],
-        meetingLanguage: "he",
-      })[0].language
-    ).toBe("he")
+      chunkTranscript({ segments: digits.map((segment) => ({ ...segment, language: "en" })), speakers: [], meetingLanguage: "he" })[0].language
+    ).toBe("en")
   })
 })

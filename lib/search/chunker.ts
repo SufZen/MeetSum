@@ -288,6 +288,29 @@ function overlapLines(previous: Line[] | undefined, overlapChars: number): Line[
   return groupTurns(taken)
 }
 
+/** Hebrew share of letters at which a text counts as Hebrew (as Ask's HEBREW_QUESTION_RATIO). */
+export const HEBREW_CHUNK_RATIO = 0.3
+
+/**
+ * Chunk language from its own segment texts (speaker labels excluded): at
+ * least 30% Hebrew letters → `he`, else `en` — consistent with Ask's
+ * question rule, and robust to ASR tagging code-switched Hebrew as `en`.
+ * Without letters: the segment majority, then the meeting language.
+ */
+function chunkLanguage(pieces: Piece[], fallback: TextLanguage | undefined, text: string): TextLanguage {
+  let letters = 0
+  let hebrew = 0
+
+  for (const ch of pieces.map((piece) => piece.text).join(" ")) {
+    if (!/\p{L}/u.test(ch)) continue
+    letters += 1
+    if (ch >= "א" && ch <= "ת") hebrew += 1
+  }
+  if (letters > 0) return hebrew / letters >= HEBREW_CHUNK_RATIO ? "he" : "en"
+
+  return majorityLanguage(pieces, fallback, text)
+}
+
 function majorityLanguage(pieces: Piece[], fallback: TextLanguage | undefined, text: string): TextLanguage {
   const counts = new Map<TextLanguage, number>()
 
@@ -347,7 +370,7 @@ function toDraft(
     speakerIds: [...new Set(ownPieces.map((piece) => piece.speakerId).filter((id): id is string => Boolean(id)))],
     startMs: Math.min(...ownPieces.map((piece) => piece.startMs)),
     endMs: Math.max(...ownPieces.map((piece) => piece.endMs)),
-    language: majorityLanguage(ownPieces, meetingLanguage, text),
+    language: chunkLanguage(ownPieces, meetingLanguage, text),
     text,
     textNorm: norm,
     textStem: stems,
