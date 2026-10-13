@@ -35,6 +35,13 @@ describe("not-found routes", () => {
     expect((nextConfig as { experimental?: { globalNotFound?: boolean } }).experimental?.globalNotFound).toBe(true)
   })
 
+  it("the locale layout redirects an unsupported locale segment into the default locale", () => {
+    const source = readFileSync(path.join(root, "app/[locale]/layout.tsx"), "utf8")
+
+    expect(source).toContain("redirect(`/${DEFAULT_LOCALE}/${encodeURIComponent(locale)}`)")
+    expect(source).not.toMatch(/^\s*notFound\(\)/m)
+  })
+
   it("a bad locale or locale-less path redirects into the default locale (then the localized 404)", () => {
     expect(routeLocale("/xx", { acceptLanguage: "he" })).toEqual({ kind: "redirect", pathname: "/he/xx", status: 307 })
     expect(routeLocale("/xx/yy", { acceptLanguage: "he" })).toEqual({ kind: "redirect", pathname: "/he/xx/yy", status: 307 })

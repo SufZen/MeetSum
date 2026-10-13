@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { notFound } from "next/navigation"
+import { redirect } from "next/navigation"
 
 import "../globals.css"
 import { I18nProvider } from "@/components/i18n-provider"
@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { DirectionProvider } from "@/components/ui/direction"
 import { Toaster } from "@/components/ui/sonner"
 import {
+  DEFAULT_LOCALE,
   getLocaleDirection,
   isSupportedLocale,
   type SupportedLocale,
@@ -30,8 +31,12 @@ export default async function LocaleLayout({
 }>) {
   const { locale } = await params
 
+  // A path the proxy let through with an unsupported first segment (e.g.
+  // `/xx/file.php`): send it into the default locale, where the catch-all
+  // renders the localized 404 (a notFound() here would bypass every
+  // localized boundary and show Next's default English page).
   if (!isSupportedLocale(locale)) {
-    notFound()
+    redirect(`/${DEFAULT_LOCALE}/${encodeURIComponent(locale)}`)
   }
 
   const supportedLocale = locale as SupportedLocale
