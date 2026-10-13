@@ -4,38 +4,38 @@
   "routes": {
     "/[locale]": {
       "budgetKb": 300,
-      "baselineKb": 413.9
+      "baselineKb": 393.9
     },
     "/[locale]/analytics": {
       "budgetKb": 330,
-      "baselineKb": 330
+      "baselineKb": 228.7
     },
     "/[locale]/onboarding": {
       "budgetKb": 260,
-      "baselineKb": 260
+      "baselineKb": 236.6
     },
     "/share/[token]": {
       "budgetKb": 220,
-      "baselineKb": 246.3
+      "baselineKb": 236.9
     },
     "/[locale]/login": {
-      "baselineKb": 201
+      "baselineKb": 223
     },
     "/[locale]/tasks": {
-      "baselineKb": 301.7
+      "baselineKb": 312.7
     },
     "/[locale]/search": {
-      "baselineKb": 296.3
+      "baselineKb": 306.3
     },
     "/[locale]/rooms/[id]": {
-      "baselineKb": 244.7
+      "baselineKb": 228.6
     },
     "/[locale]/invite/[token]": {
-      "baselineKb": 219
+      "baselineKb": 230.3
     },
     "/[locale]/unsubscribe": {
-      "baselineKb": 196.7
+      "baselineKb": 218.6
     }
   },
-  "newRoutes": "analytics and onboarding are Step 0 stubs: their baseline starts at the budget until Package C lands them, then --write-baseline lowers it."
+  "newRoutes": "Baselines re-measured at the M9 Integration step (merged A-D tree): analytics and onboarding landed; login/tasks/search/invite/unsubscribe were raised to the measured values (shared [locale] chrome grew in A-D)."
 }
