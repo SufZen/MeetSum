@@ -311,6 +311,21 @@ export function createMemoryBotSessionStore(
         .map(copy)
     },
 
+    async listCompletedWithoutFinalize(since) {
+      const cutoff = since.getTime()
+
+      return [...sessions.values()]
+        .filter(
+          (item) =>
+            item.status === "completed" &&
+            item.recordingStatus === "none" &&
+            item.recordingEnabled &&
+            item.joinedAt !== null &&
+            time(item.updatedAt) >= cutoff
+        )
+        .map(copy)
+    },
+
     async update(id, patch: BotSessionPatch, options: BotUpdateOptions) {
       const session = scoped(id, options?.workspaceId)
 

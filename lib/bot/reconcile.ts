@@ -38,24 +38,6 @@ export type ReconcileDeps = {
   ) => Promise<{ applied: boolean; session: BotSessionRecord; sideEffects: BotSideEffect[] }>
   resyncRules: (workspaceId: string) => Promise<unknown>
   dispatchNow: (sessionId: string, workspaceId: string) => Promise<unknown>
-  /** Live workspaces (for the completed-without-finalize sweep). */
-  listWorkspaceIds: () => Promise<string[]>
-}
-
-async function defaultWorkspaceIds(): Promise<string[]> {
-  if (process.env.MEETSUM_STORAGE !== "postgres") {
-    const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants")
-
-    return [DEFAULT_WORKSPACE_ID]
-  }
-
-  const { getDatabasePool } = await import("@/lib/db/client")
-  const result = await getDatabasePool().query(
-    `select distinct workspace_id from bot_sessions
-      where status = 'completed' and recording_status = 'none' and updated_at > now() - interval '1 day'`
-  )
-
-  return (result.rows as Array<{ workspace_id: string }>).map((row) => row.workspace_id)
 }
 
 export function resolveReconcileDeps(deps: Partial<ReconcileDeps> = {}): ReconcileDeps {
@@ -76,7 +58,6 @@ export function resolveReconcileDeps(deps: Partial<ReconcileDeps> = {}): Reconci
     dispatchNow:
       deps.dispatchNow ??
       ((sessionId, workspaceId) => dispatchNow(sessionId, { store, queue, config, now, provider, workspaceId })),
-    listWorkspaceIds: deps.listWorkspaceIds ?? defaultWorkspaceIds,
   }
 }
 
@@ -258,20 +239,10 @@ export async function runBotReconcile(
   const cutoff = new Date(nowMs - FINALIZE_LOOKBACK_MS)
 
   await guard("finalize sweep", async () => {
-    for (const workspaceId of await d.listWorkspaceIds()) {
-      for (const session of await d.store.listActive(workspaceId, { since: cutoff })) {
-        if (
-          session.status !== "completed" ||
-          session.recordingStatus !== "none" ||
-          !session.recordingEnabled ||
-          !session.joinedAt
-        ) {
-          continue
-        }
-
-        await sideEffects(d, session, ["enqueue_finalize"])
-        stats.finalizeEnqueued += 1
-      }
+    // SYSTEM list across workspaces; each side effect is keyed to the row's own workspace.
+    for (const session of await d.store.listCompletedWithoutFinalize(cutoff)) {
+      await sideEffects(d, session, ["enqueue_finalize"])
+      stats.finalizeEnqueued += 1
     }
   })
 

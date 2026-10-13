@@ -50,7 +50,6 @@ function setup(provider = fakeProvider()) {
     applySnapshot,
     resyncRules: vi.fn(async () => undefined),
     dispatchNow: vi.fn(async () => undefined),
-    listWorkspaceIds: async () => ["ws_a"],
   }
 
   return {
@@ -73,7 +72,7 @@ async function sessionAt(ctx: ReturnType<typeof setup>, overrides: Partial<BotSe
   const created = await ctx.store.create(input(rest))
 
   if (status && status !== "scheduled") {
-    await ctx.store.transition(created.id, { status, at: when, source: "webhook", workspaceId: "ws_a" })
+    await ctx.store.transition(created.id, { status, at: when, source: "webhook", workspaceId: created.workspaceId })
   }
   return created
 }
@@ -205,6 +204,30 @@ describe("runBotReconcile", () => {
     expect((await runBotReconcile({}, ctx.deps)).finalizeEnqueued).toBe(1)
     expect(ctx.queue.jobs.filter((job) => job.name === "bot.finalize").map((job) => job.payload)).toEqual([
       { sessionId: completed.id, workspaceId: "ws_a" },
+    ])
+  })
+
+  it("(e) sweeps every workspace and keys each finalize to the session's own workspace", async () => {
+    const ctx = setup()
+    const w1 = await sessionAt(ctx, { status: "active", nativeMeetingId: "aaa-aaaa-aaa", calendarEventId: "cal_w1" }, minutesAgo(40))
+    const w2 = await sessionAt(
+      ctx,
+      { status: "active", workspaceId: "ws_b", nativeMeetingId: "bbb-bbbb-bbb", calendarEventId: "cal_w2" },
+      minutesAgo(40)
+    )
+
+    await ctx.store.transition(w1.id, { status: "completed", at: minutesAgo(30), source: "webhook", workspaceId: "ws_a" })
+    await ctx.store.transition(w2.id, { status: "completed", at: minutesAgo(30), source: "webhook", workspaceId: "ws_b" })
+
+    expect((await runBotReconcile({}, ctx.deps)).finalizeEnqueued).toBe(2)
+    expect(
+      ctx.queue.jobs
+        .filter((job) => job.name === "bot.finalize")
+        .map((job) => job.payload)
+        .sort((a, b) => String((a as { workspaceId: string }).workspaceId).localeCompare(String((b as { workspaceId: string }).workspaceId)))
+    ).toEqual([
+      { sessionId: w1.id, workspaceId: "ws_a" },
+      { sessionId: w2.id, workspaceId: "ws_b" },
     ])
   })
 

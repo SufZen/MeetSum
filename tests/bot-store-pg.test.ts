@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest"
 import { BotSessionConflictError, type BotSessionStore } from "@/lib/bot/store"
 import { createMemoryBotSessionStore } from "@/lib/bot/store-memory"
 import { createPostgresBotSessionStore } from "@/lib/bot/store-postgres"
+import { processVexaWebhook } from "@/lib/bot/webhook-handler"
+import { signVexaWebhook } from "@/lib/bot/webhook-verify"
+
+import { testBotConfig } from "./fixtures/vexa/api/harness"
 
 /**
  * M7 B1 bot store against a recording Queryable (statement shapes, workspace
@@ -306,6 +310,102 @@ describe("postgres bot store (recording queryable)", () => {
       await store.getForWebhook({ platform: "google_meet", nativeMeetingId: "abc-defg-hij" })
     ).toBeUndefined()
     expect(await store.getForWebhook({ vexaMeetingId: "nope" })).toBeUndefined()
+  })
+})
+
+const TX_CONTROL = /^(begin|commit|rollback)$/
+
+describe("postgres bot store: every per-session statement binds workspace_id", () => {
+  it("covers create, get, getForUpdate, update, transition (both branches), event mark and recordEvent", async () => {
+    const { db, statements } = recordingDb({ withConnect: true })
+    const store = createPostgresBotSessionStore(db)
+
+    await store.create({ workspaceId: "ws_1", origin: "manual", platform: "google_meet", nativeMeetingId: "abc-defg-hij", botName: "B" })
+    await store.get("bot_1", { workspaceId: "ws_1" })
+    await store.withTransaction((tx) => store.getForUpdate("bot_1", tx, { workspaceId: "ws_1" }))
+    await store.update("bot_1", { error: "x" }, { workspaceId: "ws_1" })
+    await store.transition("bot_1", { status: "active", at: new Date(), source: "api", workspaceId: "ws_1" })
+    await store.transition("bot_1", { status: "joining", at: new Date(), source: "api", workspaceId: "ws_1" })
+    await store.transition("bot_1", {
+      status: "active",
+      at: new Date(),
+      source: "webhook",
+      workspaceId: "ws_1",
+      event: { eventId: "botevt_1" },
+    })
+    await store.recordEvent({ workspaceId: "ws_1", source: "webhook", eventType: "x" })
+    await store.findByCalendarEvent("ws_1", "cal")
+    await store.listForMeeting("ws_1", "meet_1")
+    await store.listActive("ws_1")
+    await store.countCreatedSince("ws_1", new Date())
+
+    const data = statements.filter((statement) => !TX_CONTROL.test(statement.text))
+
+    expect(data.length).toBeGreaterThanOrEqual(14)
+    for (const statement of data) {
+      if (statement.text.startsWith("insert into")) {
+        // Inserts bind the workspace as a value (bot_sessions $2, bot_events $3).
+        expect(statement.text).toMatch(/\(\s*id, (bot_session_id, )?workspace_id/)
+        expect(statement.values).toContain("ws_1")
+      } else {
+        expect(statement.text).toMatch(/workspace_id = \$\d+/)
+        expect(statement.values).toContain("ws_1")
+      }
+      expect(statement.values).not.toContain("ws_2")
+    }
+  })
+
+  it("lists completed-without-finalize instance-wide (system), with its own predicate", async () => {
+    const { db, statements } = recordingDb()
+    const store = createPostgresBotSessionStore(db)
+
+    await store.listCompletedWithoutFinalize(new Date("2026-10-12T00:00:00Z"))
+    expect(statements[0].text).toBe(
+      "select * from bot_sessions where status = 'completed' and recording_status = 'none' and recording_enabled and joined_at is not null and updated_at >= $1 order by updated_at asc limit 200"
+    )
+  })
+
+  it("webhook path: one unscoped getForWebhook, then every write binds the session's own workspace", async () => {
+    const secret = "whsec_0123456789abcdef0123456789abcdef"
+    const { db, statements } = recordingDb({
+      withConnect: true,
+      rows: [sessionRow({ id: "bot_w2", workspace_id: "ws_2", vexa_meeting_id: "4242", status: "requested" })],
+    })
+    const store = createPostgresBotSessionStore(db)
+    const rawBody = JSON.stringify({
+      event_type: "meeting.status_change",
+      event_id: "evt_1",
+      // A payload cannot address a workspace, even if it tries.
+      workspace_id: "ws_1",
+      data: { meeting: { id: 4242, platform: "google_meet", native_meeting_id: "abc-defg-hij", status: "active" } },
+    })
+    const now = new Date()
+    const ts = String(Math.floor(now.getTime() / 1000))
+    const result = await processVexaWebhook(
+      {
+        headers: new Headers({ "x-webhook-timestamp": ts, "x-webhook-signature": signVexaWebhook(secret, ts, rawBody) }),
+        rawBody,
+      },
+      {
+        store,
+        config: testBotConfig({ VEXA_WEBHOOK_SECRET: secret }),
+        enqueue: async () => undefined,
+        now: () => now,
+      }
+    )
+
+    expect(result.status).toBe(200)
+
+    const data = statements.filter((statement) => !TX_CONTROL.test(statement.text))
+    const [lookup, ...writes] = data
+
+    expect(lookup.text).toMatch(/^select \* from bot_sessions where vexa_meeting_id = \$1/)
+    expect(writes.length).toBeGreaterThan(0)
+    for (const statement of writes) {
+      expect(statement.text).toMatch(/workspace_id/)
+      expect(statement.values).toContain("ws_2")
+      expect(statement.values).not.toContain("ws_1")
+    }
   })
 })
 

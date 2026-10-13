@@ -422,6 +422,17 @@ export function createPostgresBotSessionStore(db: Queryable): BotSessionStore {
       )
     },
 
+    async listCompletedWithoutFinalize(since) {
+      return many(
+        db,
+        `select * from bot_sessions
+         where status = 'completed' and recording_status = 'none'
+           and recording_enabled and joined_at is not null and updated_at >= $1
+         order by updated_at asc limit 200`,
+        [since.toISOString()]
+      )
+    },
+
     async update(id, patch: BotSessionPatch, options) {
       const workspaceId = requireWorkspace(options?.workspaceId)
       const values: unknown[] = [id, workspaceId]

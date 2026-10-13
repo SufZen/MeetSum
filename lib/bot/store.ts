@@ -23,7 +23,7 @@ import { getDatabasePool } from "@/lib/db/client"
  * documented as such: `getForWebhook` (webhook resolution; the caller takes
  * the workspace from the returned row, never from the payload) and the
  * instance-wide worker lists (`listOpen`, `listDueForDispatch`,
- * `listPurgeable`, `countLive` without a workspace, `pruneEventPayloads`).
+ * `listPurgeable`, `listCompletedWithoutFinalize`, `countLive` without a workspace, `pruneEventPayloads`).
  */
 
 export type BotEventSource = "webhook" | "poll" | "api"
@@ -223,6 +223,12 @@ export interface BotSessionStore {
   listDueForDispatch(now: Date): Promise<BotSessionRecord[]>
   /** SYSTEM: Vexa artifacts due for deletion (B6), instance-wide. */
   listPurgeable(before: Date): Promise<BotSessionRecord[]>
+  /**
+   * SYSTEM (reconcile branch e), instance-wide: `completed` sessions updated
+   * at or after `since` that joined, expect a recording and never finalized
+   * (`recording_status = 'none'`). Rows carry their own workspace.
+   */
+  listCompletedWithoutFinalize(since: Date): Promise<BotSessionRecord[]>
   /** Undefined when not found in the workspace or `expectedRev` does not match. */
   update(
     id: string,
