@@ -10,6 +10,10 @@
 
 # testing
 /coverage
+# Playwright output. M9 e2e/RTL screenshots and the axe report go to
+# test-results/m9-screenshots/ and are never committed (user decision).
+/test-results/
+/playwright-report/
 
 # next.js
 /.next/
