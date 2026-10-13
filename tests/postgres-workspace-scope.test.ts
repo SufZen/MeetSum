@@ -146,6 +146,7 @@ const invocations: Record<
     }),
   findMediaAssetBySourceFile: (repo) =>
     repo.findMediaAssetBySourceFile!("drive", "file_1", { meetingId: "meet_1" }),
+  deleteMediaAsset: (repo) => repo.deleteMediaAsset!("asset_1", { meetingId: "meet_1" }),
   findMeetingByExternalId: (repo) => repo.findMeetingByExternalId("calendar", "evt_1"),
   createMeetingIfAbsent: (repo) =>
     repo.createMeetingIfAbsent({
@@ -454,6 +455,7 @@ describe("postgres meeting repository workspace scoping", () => {
       "updateJob",
       "listJobs",
       "findMediaAssetBySourceFile",
+      "deleteMediaAsset",
     ] as const) {
       for (const scope of Object.values(scopes)) {
         const { client, statements } = recordingClient()
@@ -568,6 +570,7 @@ describe("postgres meeting repository workspace scoping", () => {
           "updateJob",
           "createJob",
           "findMediaAssetBySourceFile",
+          "deleteMediaAsset",
           // Workspace-level speaker memory: no meeting involved.
           "listSpeakerProfiles",
         ].includes(method)

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   discardMeeting: vi.fn(),
   createMediaAsset: vi.fn(),
   findMediaAssetBySourceFile: vi.fn(),
+  deleteMediaAsset: vi.fn(),
   replaceTranscriptSegments: vi.fn(),
   listJobs: vi.fn(),
   enqueueMeetSumJob: vi.fn(),
@@ -38,6 +39,7 @@ const scopedRepository = {
   discardMeeting: mocks.discardMeeting,
   createMediaAsset: mocks.createMediaAsset,
   findMediaAssetBySourceFile: mocks.findMediaAssetBySourceFile,
+  deleteMediaAsset: mocks.deleteMediaAsset,
   replaceTranscriptSegments: mocks.replaceTranscriptSegments,
   listJobs: mocks.listJobs,
 }
@@ -197,6 +199,40 @@ describe("desktop capture upload routes", () => {
     )
     formDataSpy.mockRestore()
     arrayBufferSpy.mockRestore()
+  })
+
+  it("deletes the stored media and its asset row when a plain upload can't be queued (no duplicate pile-up on retry)", async () => {
+    mocks.enqueueMeetSumJob.mockRejectedValue(new Error("redis down"))
+    mocks.deleteMediaAsset.mockResolvedValue(true)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const { POST } = await import("@/app/api/meetings/[id]/upload/route")
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await POST(await uploadRequest(formWith({ file: wavFile() })), {
+        params: Promise.resolve({ id: "meet_known" }),
+      })
+
+      expect(response.status).toBe(500)
+    }
+
+    expect(mocks.createMediaAsset).toHaveBeenCalledTimes(3)
+    expect(mocks.deleteMediaAsset).toHaveBeenCalledTimes(3)
+    expect(mocks.deleteMediaAsset).toHaveBeenCalledWith("asset_1", { meetingId: "meet_known" })
+    expect(mocks.deleteMeetingObject).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps a desktop capture's stored media on a queue failure, so the retry reuses it", async () => {
+    mocks.enqueueMeetSumJob.mockRejectedValue(new Error("redis down"))
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const { POST } = await import("@/app/api/meetings/[id]/upload/route")
+    const response = await POST(
+      await uploadRequest(formWith({ captureMetadata: { captureId: "cap_keep" }, file: wavFile() })),
+      { params: Promise.resolve({ id: "meet_known" }) }
+    )
+
+    expect(response.status).toBe(500)
+    expect(mocks.deleteMediaAsset).not.toHaveBeenCalled()
+    expect(mocks.deleteMeetingObject).not.toHaveBeenCalled()
   })
 
   it("requires meeting:create (viewers get 403 before any byte is read)", async () => {

@@ -780,6 +780,11 @@ export type MeetingRepository = {
     sourceFileId: string,
     options?: { meetingId?: string }
   ) => Promise<MediaAsset | undefined>
+  /**
+   * Deletes one media-asset row of a visible meeting (an upload whose
+   * processing could not be queued); the caller deletes the stored object.
+   */
+  deleteMediaAsset?: (id: string, options: { meetingId: string }) => Promise<boolean>
   findMeetingByExternalId: (
     source: string,
     externalId: string
@@ -1891,6 +1896,15 @@ export function createInMemoryMeetingRepository(
 
       meetings.set(meeting.id, updated)
       return asset
+    },
+
+    async deleteMediaAsset(id, options) {
+      const meeting = visibleMeetings().find((candidate) => candidate.id === options.meetingId)
+      const assets = meeting?.mediaAssets ?? []
+
+      if (!meeting || !assets.some((asset) => asset.id === id)) return false
+      meetings.set(meeting.id, { ...meeting, mediaAssets: assets.filter((asset) => asset.id !== id) })
+      return true
     },
 
     async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {

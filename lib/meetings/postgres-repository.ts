@@ -2441,6 +2441,23 @@ export function createPostgresMeetingRepository(
       return mapMediaAsset(row)
     },
 
+    async deleteMediaAsset(id, options) {
+      const values: unknown[] = [id, options.meetingId, workspaceId]
+      const result = await client.query(
+        `
+          delete from media_assets a
+          where a.id = $1 and a.meeting_id = $2 and a.workspace_id = $3
+          and exists (
+            select 1 from meetings m
+            where m.id = a.meeting_id and ${scoped("m", values)}
+          )
+        `,
+        values
+      )
+
+      return (result.rowCount ?? 0) > 0
+    },
+
     async findMediaAssetBySourceFile(source, sourceFileId, options = {}) {
       const values: unknown[] = [source, sourceFileId, workspaceId]
       const meetingFilter = options.meetingId
