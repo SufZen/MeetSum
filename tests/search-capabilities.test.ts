@@ -142,7 +142,7 @@ describe("indexMatchesKey", () => {
     expect(indexMatchesKey(HNSW_DEF, KEY)).toBe(true)
     expect(indexMatchesKey(HNSW_DEF, { ...KEY, dimensions: 153 })).toBe(false)
     expect(indexMatchesKey(HNSW_DEF.replace("(dimensions = 1536)", "(dimensions = 15360)"), KEY)).toBe(false)
-    expect(indexMatchesKey(HNSW_DEF.replace("hnsw", "btree"), KEY)).toBe(false)
+    expect(indexMatchesKey(HNSW_DEF.replace("USING hnsw", "USING btree"), KEY)).toBe(false)
     expect(indexMatchesKey(HNSW_DEF, { model: "gemini-embedding-002", dimensions: 1536 })).toBe(false)
   })
 })
