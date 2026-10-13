@@ -1,14 +1,34 @@
 import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
+import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { searchContextFrom, searchRateLimitKey, searchRateLimitUnavailable } from "@/lib/search/context"
+import { listSearchFacets } from "@/lib/search/facets"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 /**
- * GET /api/search/facets — filter values from visible meetings
- * (docs/parity/m6.md, B7; owner: Package B). STEP 0 STUB: 501.
+ * GET /api/search/facets — filter values (people, speakers, rooms, tags,
+ * languages, meeting types, sources) from the caller's visible meetings
+ * (docs/parity/m6.md, B7).
  */
-export const GET = withAuthz("meeting:read", async () => {
-  return NextResponse.json({ error: "not_implemented" }, { status: 501 })
+export const GET = withAuthz("meeting:read", async (request, ctx) => {
+  // Same bucket as search: facets run aggregate queries.
+  const limitKey = searchRateLimitKey(ctx)
+
+  if (!limitKey) return searchRateLimitUnavailable()
+
+  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
+
+  if (rateLimit.blocked) return rateLimit.blocked
+
+  try {
+    // Body is the frozen `SearchFacets` contract itself.
+    return NextResponse.json(await listSearchFacets(searchContextFrom(ctx)), { headers: rateLimit.headers })
+  } catch (error) {
+    console.error("[search] facets failed:", error instanceof Error ? error.name : "unknown")
+
+    return NextResponse.json({ error: "Facets failed" }, { status: 500, headers: rateLimit.headers })
+  }
 })
