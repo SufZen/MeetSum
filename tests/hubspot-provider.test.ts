@@ -200,8 +200,9 @@ describe("hubspot oauth", () => {
 
   it("exchanges the code and labels the account by hub id/domain", async () => {
     const { fetch, calls } = createFakeFetch([
-      { match: `POST ${API}/oauth/v1/token`, respond: json(fixture("hubspot/token.json")) },
-      { match: `POST ${API}/oauth/v3/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
+      // Routes match by prefix: the longer introspect path goes first.
+      { match: `POST ${API}/oauth/2026-03/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
+      { match: `POST ${API}/oauth/2026-03/token`, respond: json(fixture("hubspot/token.json")) },
     ])
     const result = await exchangeHubspotCode("code-1", { redirectUri: "https://app/cb" }, { fetch, env: ENV, now: NOW })
 
@@ -222,21 +223,21 @@ describe("hubspot oauth", () => {
 
   it("tests a connection by introspecting the token in a form body", async () => {
     const { fetch, calls } = createFakeFetch([
-      { match: `POST ${API}/oauth/v3/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
+      { match: `POST ${API}/oauth/2026-03/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
     ])
 
     await expect(hubspotTokenInfo(fetch, "tok-secret-123", ENV)).resolves.toMatchObject({ hub_id: 24242424 })
-    expect(calls[0]?.url).toBe(`${API}/oauth/v3/token/introspect`)
+    expect(calls[0]?.url).toBe(`${API}/oauth/2026-03/token/introspect`)
     expect(calls[0]?.body).toMatchObject({ token: "tok-secret-123" })
   })
 
   it("expired token → refresh; a dead refresh token → auth (needs_reauth)", async () => {
-    const ok = createFakeFetch([{ match: `POST ${API}/oauth/v1/token`, respond: json(fixture("hubspot/token.json")) }])
+    const ok = createFakeFetch([{ match: `POST ${API}/oauth/2026-03/token`, respond: json(fixture("hubspot/token.json")) }])
 
     await expect(refreshHubspotToken("r", { fetch: ok.fetch, env: ENV, now: NOW })).resolves.toMatchObject({ accessToken: "fixture-hs-access-token-AAA" })
     expect(ok.calls[0]?.body).toMatchObject({ grant_type: "refresh_token", refresh_token: "r" })
 
-    const bad = createFakeFetch([{ match: `POST ${API}/oauth/v1/token`, respond: json(fixture("hubspot/refresh-bad.json"), 400) }])
+    const bad = createFakeFetch([{ match: `POST ${API}/oauth/2026-03/token`, respond: json(fixture("hubspot/refresh-bad.json"), 400) }])
     const error = await refreshHubspotToken("r", { fetch: bad.fetch, env: ENV }).catch((caught: unknown) => caught)
 
     expect(error).toMatchObject({ kind: "auth" })
@@ -244,10 +245,10 @@ describe("hubspot oauth", () => {
   })
 
   it("revokes the refresh token with a form POST (never in the URL), tolerating 404", async () => {
-    const { fetch, calls } = createFakeFetch([{ match: `POST ${API}/oauth/v3/token/revoke`, respond: json(undefined, 404) }])
+    const { fetch, calls } = createFakeFetch([{ match: `POST ${API}/oauth/2026-03/token/revoke`, respond: json(undefined, 404) }])
 
     await revokeHubspotToken({ accessToken: "a", refreshToken: "fixture-hs-refresh-token-RRR", scopes: [] }, { fetch, env: ENV })
-    expect(calls[0]?.url).toBe(`${API}/oauth/v3/token/revoke`)
+    expect(calls[0]?.url).toBe(`${API}/oauth/2026-03/token/revoke`)
     expect(calls[0]?.body).toMatchObject({ token: "fixture-hs-refresh-token-RRR", token_type_hint: "refresh_token", client_id: "hs-client" })
   })
 })

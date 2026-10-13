@@ -1,5 +1,7 @@
 {
   "status": "BAD_REFRESH_TOKEN",
   "message": "missing or unknown refresh token",
+  "error": "invalid_grant",
+  "error_description": "refresh token is invalid, expired or revoked",
   "correlationId": "c0ffee00-0000-0000-0000-000000000002"
 }

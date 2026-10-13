@@ -66,9 +66,15 @@ export type HubspotOAuthDeps = { fetch: ProviderFetch; env?: NodeJS.ProcessEnv; 
 
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string }
 
+/**
+ * Code exchange and refresh. Verified 2026-10-14 against
+ * https://developers.hubspot.com/docs/api-reference/legacy/authentication/oauth-tokens/v1/migration-guide:
+ * `POST /oauth/v1/token` is deprecated (errors from 2027-02-16) and maps to
+ * `POST /oauth/2026-03/token` with the same form parameters and response.
+ */
 async function postToken(deps: HubspotOAuthDeps, form: Record<string, string>): Promise<TokenSet> {
   const config = requireEnv(deps.env ?? process.env)
-  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/v1/token`, {
+  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/2026-03/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, ...form }).toString(),
@@ -104,10 +110,10 @@ type AccessTokenInfo = { active?: boolean; hub_id?: number | string; hub_domain?
 /**
  * Token introspection: hub id/domain and granted scopes.
  *
- * VERIFY against current HubSpot docs before the first live run. Checked
- * 2026-10-13: `POST /oauth/v3/token/introspect`, form-urlencoded
- * `client_id`, `client_secret`, `token`, `token_type_hint` (the versioned
- * reference also lists `/oauth/2026-03/token/introspect`); the response has
+ * Verified 2026-10-14 (M10 R2): the date-versioned
+ * `POST /oauth/2026-03/token/introspect` replaces `/oauth/v3/token/introspect`
+ * (v3 paths go unsupported after September 2027), form-urlencoded
+ * `client_id`, `client_secret`, `token`, `token_type_hint`; the response has
  * `hub_id` and `scopes` (required) and `hub_domain` (optional). It replaces
  * the legacy `GET /oauth/v1/access-tokens/{token}`, which put the access
  * token in the URL path (proxy and access logs). No account-info fallback is
@@ -120,7 +126,7 @@ export async function hubspotTokenInfo(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<AccessTokenInfo> {
   const config = requireEnv(env)
-  const response = await fetch("hubspot", `${HUBSPOT_API}/oauth/v3/token/introspect`, {
+  const response = await fetch("hubspot", `${HUBSPOT_API}/oauth/2026-03/token/introspect`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams({
@@ -165,10 +171,11 @@ export async function refreshHubspotToken(refreshToken: string, deps: HubspotOAu
 /**
  * Best-effort revoke of the refresh token; a 404 is already revoked.
  *
- * VERIFY against current HubSpot docs before the first live run. Checked
- * 2026-10-13: `POST /oauth/v3/token/revoke`, form-urlencoded `client_id`,
- * `client_secret`, `token`, `token_type_hint` (the versioned reference also
- * lists `/oauth/2026-03/token/revoke`). It replaces the legacy
+ * Verified 2026-10-14 (M10 R2): the v1 migration guide maps
+ * `DELETE /oauth/v1/refresh-tokens/{token}` to `POST /oauth/2026-03/token/revoke`
+ * with a form-urlencoded body (`client_id`, `client_secret`, `token`,
+ * `token_type_hint`); its status codes are not documented, so a 404 is still
+ * treated as already revoked (live-run checklist). It replaces the legacy
  * `DELETE /oauth/v1/refresh-tokens/{token}`, which put the refresh token in
  * the URL path.
  */
@@ -176,7 +183,7 @@ export async function revokeHubspotToken(tokens: TokenSet, deps: HubspotOAuthDep
   if (!tokens.refreshToken) return
 
   const config = requireEnv(deps.env ?? process.env)
-  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/v3/token/revoke`, {
+  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/2026-03/token/revoke`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams({

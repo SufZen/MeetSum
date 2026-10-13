@@ -75,10 +75,18 @@ export async function tokenEndpointError(response: Response): Promise<ProviderEr
   return new ProviderError("invalid", `microsoft token endpoint ${response.status}`, { providerCode: code })
 }
 
-/** Maps a failed Graph response. 410 keeps `syncStateNotFound` for a delta reset. */
+/**
+ * Maps a failed Graph response. 410 keeps `syncStateNotFound` for a delta
+ * reset. Verified 2026-10-14 (https://learn.microsoft.com/en-us/graph/errors):
+ * apps should walk the nested `innererror` codes, and an expired delta token
+ * can surface as a 40X with `syncStateNotFound` there, so that code wins.
+ */
 export async function graphError(response: Response): Promise<ProviderError> {
-  const body = (await readJson(response)) as { error?: { code?: unknown } } | undefined
-  const code = safeCode(body?.error?.code)
+  const body = (await readJson(response)) as
+    | { error?: { code?: unknown; innererror?: { code?: unknown; innererror?: { code?: unknown } } } }
+    | undefined
+  const nested = [body?.error?.innererror?.code, body?.error?.innererror?.innererror?.code].map(safeCode)
+  const code = nested.includes("syncStateNotFound") ? "syncStateNotFound" : safeCode(body?.error?.code)
   const kind = kindForStatus(response.status)
 
   return new ProviderError(kind, `graph ${response.status}`, {

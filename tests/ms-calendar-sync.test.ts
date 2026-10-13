@@ -246,12 +246,16 @@ describe("runOutlookCalendarSync (PGlite)", () => {
 
     const h = harness({
       cursor: { deltaLink: DELTA_1, windowStart: "2026-10-12T12:00:00.000Z", windowEnd: "2026-10-27T12:00:00.000Z", fullSyncAt: "2026-10-13T11:00:00.000Z" },
-      routes: [{ match: `GET ${DELTA_1}`, respond: json(fixture("microsoft/delta-incremental.json")) }],
+      routes: [
+        { match: `GET ${DELTA_1}`, respond: json(fixture("microsoft/delta-incremental.json")) },
+        // The removed event is gone (404), so @removed is a real cancellation.
+        { match: "GET https://graph.microsoft.com/v1.0/me/events/AAMkAGzoom1", respond: json({ error: { code: "ErrorItemNotFound" } }, 404) },
+      ],
     })
     const stats = await runOutlookCalendarSync(h.deps)
 
     expect(stats).toMatchObject({ full: false, cancelled: 1 })
-    expect(h.calls).toHaveLength(1)
+    expect(h.calls).toHaveLength(2)
     expect(h.botCancel).toHaveLength(1)
 
     const zoom = await rows<{ status: string; meeting_status: string }>(
@@ -262,6 +266,34 @@ describe("runOutlookCalendarSync (PGlite)", () => {
     expect(zoom).toEqual([{ status: "cancelled", meeting_status: "failed" }])
     expect(h.saved[0]?.calendarSync.deltaLink).toContain("delta-token-2")
     expect(h.saved[0]?.calendarSync.fullSyncAt).toBe("2026-10-13T11:00:00.000Z")
+  })
+
+  it("does not cancel on @removed when the event still exists outside the window (M10 R2)", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    await db!.query("update calendar_events set status = 'confirmed' where external_event_id = 'AAMkAGzoom1'")
+    await db!.query(
+      "update meetings set status = 'scheduled' where calendar_event_id in (select id from calendar_events where external_event_id = 'AAMkAGzoom1')"
+    )
+    const h = harness({
+      cursor: { deltaLink: DELTA_1, windowStart: "2026-10-12T12:00:00.000Z", windowEnd: "2026-10-27T12:00:00.000Z", fullSyncAt: "2026-10-13T11:00:00.000Z" },
+      routes: [
+        { match: `GET ${DELTA_1}`, respond: json(fixture("microsoft/delta-incremental.json")) },
+        { match: "GET https://graph.microsoft.com/v1.0/me/events/AAMkAGzoom1", respond: json({ id: "AAMkAGzoom1", isCancelled: false }) },
+      ],
+    })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats).toMatchObject({ full: false, cancelled: 0, skipped: 1 })
+    expect(h.botCancel).toHaveLength(0)
+    expect(h.calls[1]?.url).toContain("/me/events/AAMkAGzoom1?$select=id,isCancelled")
+
+    const zoom = await rows<{ status: string; meeting_status: string }>(
+      `select ce.status, m.status as meeting_status from calendar_events ce join meetings m on m.calendar_event_id = ce.id
+        where ce.external_event_id = 'AAMkAGzoom1'`
+    )
+
+    expect(zoom).toEqual([{ status: "confirmed", meeting_status: "scheduled" }])
   })
 
   it("restarts a full sync on 410 syncStateNotFound", async (context) => {
