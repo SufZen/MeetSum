@@ -218,7 +218,7 @@ const cases: Case[] = [
   },
   {
     name: "POST /api/meetings/:id/speakers/assign",
-    write: "assignSpeakerToParticipant",
+    write: "updateMeetingSpeaker",
     foreign: (data) =>
       assignSpeaker(
         jsonRequest(`${BASE}/api/meetings/m_w1/speakers/assign`, "POST", {

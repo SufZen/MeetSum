@@ -46,3 +46,9 @@ npm-debug.log*
 
 # Large docs assets not needed at build or runtime
 docs/presentation
+
+# Separate RunPod GPU worker image (built from asr-worker/Dockerfile)
+asr-worker
+# Design-system showcase (static prototype, not app source)
+design-system/showcase
+public/ds

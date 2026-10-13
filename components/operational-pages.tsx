@@ -31,6 +31,7 @@ import { Switch } from "@/components/ui/switch"
 import { WorkspaceSyncPanel, type WorkspaceStatusView } from "@/components/workspace-sync-panel"
 import type { MainPanelKey } from "@/components/main-sidebar"
 import { useWorkspace } from "@/components/workspace-context"
+import { AsrGlossaryEditor } from "@/components/asr-glossary-editor"
 import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import { dictionaries, type Dictionary } from "@/lib/i18n/dictionaries"
 import { SUPPORTED_LOCALES, type SupportedLocale } from "@/lib/i18n/locales"
@@ -2454,6 +2455,7 @@ export function OperationalPage({
               </div>
             </OpsCard>
           ) : null}
+          {settingsSection === "AI settings" ? <AsrGlossaryEditor dictionary={t} /> : null}
           {settingsSection === "Live meeting" ? (
             <OpsCard
               icon={RadioTowerIcon}

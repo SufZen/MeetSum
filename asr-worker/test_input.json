@@ -1,0 +1,16 @@
+{
+  "input": {
+    "schema": "meetsum-asr/v1",
+    "audio": {
+      "type": "url",
+      "url": "https://replace-with-a-presigned-url.example.com/asr-handoff/sample.ogg"
+    },
+    "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+    "language": "he",
+    "diarize": true,
+    "min_speakers": 1,
+    "max_speakers": 6,
+    "hotwords": "Supabase, Gemini, Claude Code, RealizeOS, MCP",
+    "word_timestamps": true
+  }
+}
