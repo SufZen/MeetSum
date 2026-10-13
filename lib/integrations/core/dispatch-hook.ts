@@ -19,12 +19,43 @@ export type IntegrationEventInput = {
   actionItemId?: string
 }
 
-export async function enqueueIntegrationEvent(input: IntegrationEventInput, queue?: IntegrationQueuePort): Promise<void> {
+/**
+ * Never blocks the processing pipeline: the enqueue runs in the background
+ * (bounded by MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS, default 5 s) and a failure
+ * is only logged. Pass `options.wait` to await it (tests, scripts).
+ */
+export async function enqueueIntegrationEvent(
+  input: IntegrationEventInput,
+  queue?: IntegrationQueuePort,
+  options: { wait?: boolean } = {}
+): Promise<void> {
+  const work = enqueueNow(input, queue)
+
+  if (options.wait || queue) {
+    await work
+    return
+  }
+  void work
+}
+
+function timeoutMs(): number {
+  const parsed = Number(process.env.MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000
+}
+
+async function enqueueNow(input: IntegrationEventInput, queue?: IntegrationQueuePort): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
   try {
     if (!input.workspaceId || !input.meetingId || !input.eventId) return
     if (!(RULE_TRIGGERS as readonly string[]).includes(input.eventName)) return
 
-    await (queue ?? getIntegrationQueuePort()).enqueue(
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("integration dispatch enqueue timed out")), timeoutMs())
+      timer.unref?.()
+    })
+    const enqueue = (queue ?? getIntegrationQueuePort()).enqueue(
       "integration.dispatch",
       {
         workspaceId: input.workspaceId,
@@ -35,7 +66,11 @@ export async function enqueueIntegrationEvent(input: IntegrationEventInput, queu
       },
       { jobId: dispatchJobId(input.eventId) }
     )
+
+    await Promise.race([enqueue, timeout])
   } catch (error) {
     integrationLog.error("dispatch enqueue failed", error)
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }

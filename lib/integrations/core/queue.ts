@@ -60,6 +60,8 @@ export function getIntegrationQueue(): IntegrationQueue {
   queue ??= new Queue<IntegrationJobPayloads[IntegrationJobName], unknown, IntegrationJobName>(INTEGRATIONS_QUEUE, {
     connection: { url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379" },
   })
+  // A Redis outage must never become an unhandled 'error' event.
+  queue.on("error", () => undefined)
 
   return queue
 }
