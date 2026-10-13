@@ -6,6 +6,7 @@ import { createThreadStore, resetMemoryThreadStoreForTesting } from "@/lib/ask/t
 import type { AskStreamEvent } from "@/lib/ask/types"
 import type { AuthContext } from "@/lib/auth/authz"
 import { createInMemoryMeetingDatabase, type InMemoryMeetingDatabase } from "@/lib/meetings/repository"
+import { setRateLimitStoreForTesting } from "@/lib/rate-limit"
 import type { MeetingChunk, RetrievedPassage, RetrieveRequest, RetrieveResult, SearchContext } from "@/lib/search/types"
 
 import { createTestCtx, testMeeting } from "./helpers/route-ctx"
@@ -140,6 +141,8 @@ beforeEach(() => {
   database = seed()
   resetMemoryThreadStoreForTesting()
   resetAskCountersForTesting()
+  setRateLimitStoreForTesting(new Map())
+  delete process.env.MEETSUM_RATE_LIMIT
   delete process.env.MEETSUM_STORAGE
   delete process.env.MEETSUM_ASK_DAILY_LIMIT_PER_USER
   delete process.env.MEETSUM_ASK_FULL_TRANSCRIPT_TOKENS
@@ -150,6 +153,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setAskDepsForTesting(undefined)
+  setRateLimitStoreForTesting(undefined)
   for (const spy of logSpies) spy.mockRestore()
 })
 

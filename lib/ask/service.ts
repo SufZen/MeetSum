@@ -1,9 +1,13 @@
 /**
  * AskMeetSum (docs/parity/m6.md, C7; owner: Package C).
  *
- * 1. Daily cap (`MEETSUM_ASK_DAILY_LIMIT_PER_USER`; API keys and
- *    non-persisted asks are counted in memory per principal). The per-minute
- *    `ask` rate limit is applied by the routes.
+ * 1. The per-minute `ask` rate limit, enforced HERE for every entry point
+ *    (SSE, `askOnce`/JSON, the compat routes, thread follow-ups) on one
+ *    bucket keyed `${workspaceId}:${userId|apiKeyCreatorId}` only (never a
+ *    header, thread id, scope or question), failing closed when the limiter
+ *    store errors. Routes additionally apply their per-IP `ask` limit.
+ *    Then the daily cap (`MEETSUM_ASK_DAILY_LIMIT_PER_USER`; API keys and
+ *    non-persisted asks are counted in memory per principal).
  * 2. Scope: meeting via the caller's scoped repository (invisible = 404),
  *    room via `listRooms()` (foreign = 404), or every visible meeting.
  * 3. Persist the user message (user principals, `persist !== false`).
@@ -41,6 +45,7 @@ import type { MeetingRecord } from "@/lib/meetings/repository"
 import { searchContextFrom } from "@/lib/search/context"
 import { retrievePassages } from "@/lib/search/retrieve"
 import type { RetrievedPassage } from "@/lib/search/types"
+import { checkRateLimit, RATE_LIMIT_PRESETS } from "@/lib/rate-limit"
 import { getAppSettings } from "@/lib/settings/app-settings"
 
 export type AskDeps = {
@@ -75,6 +80,30 @@ export function resetAskCountersForTesting() {
 
 function principalKeyOf(ctx: AuthContext): string {
   return `${ctx.workspace.id}|${ctx.principal === "user" ? `user:${ctx.user?.id}` : `key:${ctx.apiKey?.id}`}`
+}
+
+/**
+ * The one `ask` rate-limit bucket of a principal: workspace plus the user
+ * (an API key counts against the user who created it; a key without a
+ * creator gets its own bucket).
+ */
+export function askRateLimitKey(ctx: Pick<AuthContext, "principal" | "user" | "apiKey" | "workspace">): string {
+  const subject =
+    ctx.principal === "user"
+      ? ctx.user?.id
+        ? `user:${ctx.user.id}`
+        : "user:unknown"
+      : ctx.apiKey?.createdByUserId
+        ? `user:${ctx.apiKey.createdByUserId}`
+        : `api_key:${ctx.apiKey?.id ?? "unknown"}`
+
+  return `ask:${ctx.workspace.id}:${subject}`
+}
+
+/** Consumes one `ask` slot; false when blocked (or when the store fails). */
+function consumeAskRateLimit(ctx: AuthContext): boolean {
+  if (process.env.MEETSUM_RATE_LIMIT === "false") return true
+  return checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask).allowed
 }
 
 function today(): string {
@@ -192,7 +221,13 @@ export async function* askStream(
   let finalize: Finalizer = async () => {}
 
   try {
-    // 1. Daily cap.
+    // 1. Per-minute limit (one bucket per principal, every entry point), then the daily cap.
+    if (!consumeAskRateLimit(ctx)) {
+      yield errorEvent("rate_limited", language)
+      return
+    }
+
+    // Daily cap.
     const used = (store ? await store.countUserQuestionsToday() : 0) + ephemeralCount(counterKey)
 
     if (config.dailyLimitPerUser > 0 && used >= config.dailyLimitPerUser) {
