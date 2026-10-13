@@ -32,7 +32,7 @@ const BASE = "http://localhost/api/meetings"
 
 const transcript: TranscriptSegment[] = [
   { id: "s1", speaker: "Speaker 1", speakerId: "spk_1", startMs: 0, endMs: 10_000, text: "שלום, מה הסטטוס?" },
-  { id: "s2", speaker: "Speaker 2", speakerId: "spk_2", startMs: 10_100, endMs: 30_000, text: "הכל מוכן כאילו" },
+  { id: "s2", speaker: "Speaker 2", speakerId: "spk_2", startMs: 9_900, endMs: 30_000, text: "הכל מוכן כאילו" },
 ]
 
 let database: InMemoryMeetingDatabase

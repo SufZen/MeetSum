@@ -53,13 +53,14 @@ const speakers = [speaker("spk_dana", "Speaker 1", "דנה"), speaker("spk_avi",
 
 /**
  * Dana: 0–30s, 31–60s (one 60 s monologue, gap 1 s), 120–150s.
- * Avi: 60.1–120s (interrupts Dana: gap 100 ms), 150–180s.
+ * Avi: 59.9–120s (interrupts Dana: starts 100 ms before she ends), 151–180s.
+ * Dana then starts right as Avi ends (back-to-back: not an interruption).
  * Raw words keep fillers that the cleaned text dropped.
  */
 const fixture: TranscriptSegment[] = [
   seg("s1", "spk_dana", 0, 30_000, "שלום לכולם, נתחיל", "אה שלום לכולם נתחיל"),
   seg("s2", "spk_dana", 31_000, 60_000, "מה הסטטוס של ה-API?", "מה הסטטוס של כאילו ה-API"),
-  seg("s3", "spk_avi", 60_100, 120_000, "הכל מוכן. Do you want a demo?", "um הכל מוכן Do you want a demo"),
+  seg("s3", "spk_avi", 59_900, 120_000, "הכל מוכן. Do you want a demo?", "um הכל מוכן Do you want a demo"),
   seg("s4", "spk_dana", 120_000, 150_000, "כן", "כן"),
   seg("s5", "spk_avi", 151_000, 180_000, "מעולה, נשלח מחר", "מעולה נשלח מחר"),
 ]
@@ -70,7 +71,7 @@ describe("computeMeetingAnalytics", () => {
     const [dana, avi] = metrics.speakers
 
     expect(metrics.basis).toBe("words")
-    expect(metrics.totalTalkTimeMs).toBe(177_900)
+    expect(metrics.totalTalkTimeMs).toBe(178_100)
     expect(dana).toMatchObject({
       speakerId: "spk_dana",
       label: "Speaker 1",
@@ -79,26 +80,43 @@ describe("computeMeetingAnalytics", () => {
       wordCount: 10,
       longestMonologueMs: 60_000,
       questions: 1,
-      interruptions: 1,
+      interruptions: 0,
       // אה + כאילו out of 10 words
       fillerPer100Words: 20,
     })
-    expect(dana.share).toBeCloseTo(89_000 / 177_900, 4)
+    expect(dana.share).toBeCloseTo(89_000 / 178_100, 4)
     expect(dana.wpm).toBeCloseTo(10 / (89_000 / 60_000), 1)
     expect(avi).toMatchObject({
       speakerId: "spk_avi",
       label: "Speaker 2",
-      talkTimeMs: 88_900,
+      talkTimeMs: 89_100,
       wordCount: 11,
-      longestMonologueMs: 59_900,
+      longestMonologueMs: 60_100,
       questions: 1,
       interruptions: 1,
     })
     expect(avi.fillerPer100Words).toBeCloseTo((1 / 11) * 100, 2)
     expect(metrics.totalWords).toBe(21)
     expect(metrics.totalQuestions).toBe(2)
-    expect(metrics.interruptions).toBe(2)
+    expect(metrics.interruptions).toBe(1)
     expect(metrics.fillerPer100Words).toBeCloseTo((3 / 21) * 100, 2)
+  })
+
+  it("counts an interruption only on overlap, not on back-to-back or short-gap turns", () => {
+    const metrics = computeMeetingAnalytics(
+      [
+        { id: "a", speaker: "A", startMs: 0, endMs: 1000, text: "one" },
+        { id: "b", speaker: "B", startMs: 1000, endMs: 2000, text: "two" },
+        { id: "c", speaker: "A", startMs: 2100, endMs: 3000, text: "three" },
+        { id: "d", speaker: "B", startMs: 2900, endMs: 4000, text: "four" },
+      ],
+      []
+    )
+
+    expect(metrics.speakers.map((entry) => [entry.label, entry.interruptions])).toEqual([
+      ["A", 0],
+      ["B", 1],
+    ])
   })
 
   it("falls back to segment text when any segment has no words", () => {

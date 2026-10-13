@@ -80,4 +80,5 @@ export type MeetingAnalyticsRecord = {
 }
 
 /** Bumped when the metric definitions change. */
-export const MEETING_ANALYTICS_VERSION = 1
+// 2: interruptions count only overlaps (stored v1 rows are recomputed).
+export const MEETING_ANALYTICS_VERSION = 2

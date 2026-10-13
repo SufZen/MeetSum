@@ -13,8 +13,6 @@ import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repositor
 
 /** Same-speaker segments closer than this belong to one monologue. */
 export const MONOLOGUE_GAP_MS = 1500
-/** A speaker change closer than this (or overlapping) is an interruption. */
-export const INTERRUPTION_GAP_MS = 200
 
 /** Grouping key of a segment's speaker: the M3 speaker id, else the label. */
 export function speakerKey(segment: Pick<TranscriptSegment, "speaker" | "speakerId">): string {
@@ -112,7 +110,10 @@ export function computeMeetingAnalytics(
     entry.questions += countQuestions(segment.text)
 
     if (previous && speakerKey(previous) !== entry.key) {
-      if (segment.startMs - previous.endMs < INTERRUPTION_GAP_MS) entry.interruptions += 1
+      // Only an overlap (the next speaker starts before the previous segment
+      // ends) is an interruption: back-to-back ASR segments and short gaps
+      // are normal turn-taking.
+      if (segment.startMs < previous.endMs) entry.interruptions += 1
     }
 
     if (monologue && monologue.key === entry.key && segment.startMs - monologue.endMs < MONOLOGUE_GAP_MS) {
