@@ -5,6 +5,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { isUsableTemplateKey } from "@/lib/ai/templates/catalog"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 /**
  * PATCH /api/meetings/:id/template `{templateKey: string | null}` (M5 D6):
@@ -35,6 +36,8 @@ export const PATCH = withAuthz<{ id: string }>("meeting:write", async (request, 
     targetId: id,
     metadata: { from: meeting.templateKey ?? null, to: templateKey },
   })
+
+  await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "template" })
 
   return NextResponse.json({ meeting: { id: updated.id, templateKey: updated.templateKey ?? null } })
 })

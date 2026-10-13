@@ -2,6 +2,15 @@ import { NextResponse } from "next/server"
 
 import { withAuthz } from "@/lib/auth/authz"
 import type { JobRecord, JobStatus } from "@/lib/meetings/repository"
+import { meetingStageTitle } from "@/lib/meetings/work-status"
+
+const STAGE_PROGRESS: Record<string, number> = {
+  "audio.transcribe": 0.35,
+  "summary.generate": 0.65,
+  // M6: the summarize path's persist step (was the inline "meeting.index").
+  "summary.persist": 0.7,
+  "meeting.index": 0.85,
+}
 
 function serializeJob(job: JobRecord) {
   const stage =
@@ -14,18 +23,14 @@ function serializeJob(job: JobRecord) {
   return {
     ...job,
     stage,
+    stageTitle: meetingStageTitle(stage, "en"),
+    stageTitleHe: meetingStageTitle(stage, "he"),
     progress:
       job.status === "completed"
         ? 1
         : job.status === "failed"
           ? 0
-          : stage === "audio.transcribe"
-            ? 0.35
-            : stage === "summary.generate"
-              ? 0.65
-              : stage === "meeting.index"
-                ? 0.85
-                : 0.15,
+          : (STAGE_PROGRESS[stage] ?? 0.15),
   }
 }
 

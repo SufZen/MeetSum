@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { getMeetingWorkStatus } from "@/lib/meetings/work-status"
+import { getMeetingWorkStatus, meetingStageTitle } from "@/lib/meetings/work-status"
 import type { JobRecord, MeetingRecord } from "@/lib/meetings/repository"
 
 function meeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
@@ -146,6 +146,80 @@ describe("meeting work status", () => {
       primaryAction: "none",
       progress: 1,
     })
+  })
+
+  it("ignores background search-index jobs on a finished meeting (M6)", () => {
+    const finished = meeting({
+      status: "completed",
+      summary: { overview: "Done.", decisions: [], actionItems: [] },
+      transcript: [
+        {
+          id: "segment_1",
+          speaker: "Ran",
+          startMs: 0,
+          endMs: 5000,
+          text: "We should continue with the VPS setup.",
+          language: "en",
+          confidence: 0.9,
+        },
+      ],
+    })
+
+    for (const name of ["meeting.index", "search.index.sweep"]) {
+      for (const jobStatus of ["queued", "active", "failed"] as const) {
+        const status = getMeetingWorkStatus(finished, [
+          job({
+            id: "job_pipeline",
+            name: "meeting.summarize",
+            status: "completed",
+            result: { stage: "completed" },
+            updatedAt: "2026-05-07T10:00:00.000Z",
+          }),
+          job({
+            id: "job_index",
+            name,
+            status: jobStatus,
+            result: { stage: "meeting.index" },
+            updatedAt: "2026-05-07T11:00:00.000Z",
+          }),
+        ])
+
+        expect(status.kind, `${name} ${jobStatus}`).toBe("completed")
+        expect(status.jobId, `${name} ${jobStatus}`).toBeUndefined()
+      }
+    }
+  })
+
+  it("still reports a real pipeline job that is newer than a background index job", () => {
+    const status = getMeetingWorkStatus(meeting({ status: "summarizing" }), [
+      job({
+        id: "job_index",
+        name: "meeting.index",
+        status: "active",
+        updatedAt: "2026-05-07T11:00:00.000Z",
+      }),
+      job({
+        id: "job_summary",
+        name: "meeting.summarize",
+        status: "active",
+        result: { stage: "summary.persist" },
+        updatedAt: "2026-05-07T10:30:00.000Z",
+      }),
+    ])
+
+    expect(status).toMatchObject({
+      kind: "processing",
+      jobId: "job_summary",
+      stage: "summary.persist",
+      title: "Saving summary",
+      progress: 0.7,
+    })
+  })
+
+  it("labels the summary.persist stage in Hebrew and English", () => {
+    expect(meetingStageTitle("summary.persist", "en")).toBe("Saving summary")
+    expect(meetingStageTitle("summary.persist", "he")).toBe("שומר את הסיכום")
+    expect(meetingStageTitle("unknown.stage")).toBeUndefined()
   })
 
   it("marks future Google meetings as capture armed", () => {

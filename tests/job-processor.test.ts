@@ -647,31 +647,59 @@ describe("processJob dispatch", () => {
     )
   })
 
-  it("meeting.index never transcribes", async () => {
+  it("meeting.index builds the search index and never transcribes", async () => {
     const meeting = await seedMeeting()
     await addAsset(meeting.id, "meetings/a/first.m4a")
     await mocks.repository.replaceTranscriptSegments(meeting.id, [
       { id: "seg_1", speaker: "A", startMs: 0, endMs: 1000, text: "hello" },
     ])
+    mocks.query.mockImplementation(async (sql: string) =>
+      sql.includes("for update") ? { rows: [{ transcript_version: 1 }] } : { rows: [] }
+    )
 
-    const result = await processJob(await makeJob("meeting.index", { meetingId: meeting.id }))
+    const result = await processJob(
+      await makeJob("meeting.index", { meetingId: meeting.id, workspaceId: meeting.workspaceId })
+    )
 
-    expect(result).toEqual({
-      meetingId: meeting.id,
-      indexed: false,
-      reason: "search indexing ships in M6",
-    })
+    expect(result).toMatchObject({ meetingId: meeting.id, state: "ready", mode: "lexical" })
+    expect((result as { chunks: number }).chunks).toBeGreaterThan(0)
+    const insert = mocks.query.mock.calls.find(([sql]) => String(sql).startsWith("insert into meeting_chunks"))
+
+    expect(insert?.[1]).toContain(meeting.id)
     expect(mocks.transcribe).not.toHaveBeenCalled()
     expect(mocks.summarize).not.toHaveBeenCalled()
   })
 
-  it("meeting.index without a transcript fails permanently", async () => {
+  it("meeting.index without a transcript is a clean no-op (no failed job)", async () => {
+    const meeting = await seedMeeting()
+    const job = await makeJob("meeting.index", { meetingId: meeting.id, workspaceId: meeting.workspaceId })
+
+    await expect(processJob(job)).resolves.toMatchObject({ meetingId: meeting.id, state: "skipped", chunks: 0 })
+    expect((await mocks.repository.getJob(String(job.data.jobRecordId)))?.status).toBe("completed")
+    expect(
+      mocks.query.mock.calls.some(([sql]) => String(sql).includes("search_index_state = 'skipped'"))
+    ).toBe(true)
+    expect(mocks.transcribe).not.toHaveBeenCalled()
+  })
+
+  it("search.index.sweep enqueues meeting.index for the workspace's stale meetings", async () => {
     const meeting = await seedMeeting()
 
-    await expect(
-      processJob(await makeJob("meeting.index", { meetingId: meeting.id }))
-    ).rejects.toBeInstanceOf(UnrecoverableError)
-    expect(mocks.transcribe).not.toHaveBeenCalled()
+    mocks.query.mockImplementation(async (sql: string) =>
+      sql.includes("from meetings m") && sql.includes("search_index_state")
+        ? { rows: [{ id: meeting.id, workspace_id: "ws_default" }] }
+        : { rows: [] }
+    )
+
+    const job = await makeJob("search.index.sweep", { workspaceId: "ws_default" })
+    const result = await processJob(job)
+
+    expect(result).toEqual({ selected: 1, enqueued: 1, failed: 0 })
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      "meeting.index",
+      { meetingId: meeting.id, workspaceId: "ws_default", reason: "sweep" },
+      { jobId: `meeting.index-${meeting.id}` }
+    )
   })
 })
 

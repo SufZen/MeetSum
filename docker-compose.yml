@@ -32,7 +32,7 @@ services:
       - minio
 
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:0.8.1-pg17
     environment:
       POSTGRES_DB: meetings
       POSTGRES_USER: meetings

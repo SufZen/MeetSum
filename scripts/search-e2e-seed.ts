@@ -1,0 +1,127 @@
+/**
+ * M6 browser e2e seed (docs/parity/m6.md, B9; Acceptance #13).
+ *
+ *   npm run search:e2e-seed
+ *
+ * Needs DATABASE_URL (migrated, 025 applied) and MEETSUM_SESSION_SECRET (the
+ * app's). Run the app with MEETSUM_EMBEDDING_PROVIDER=hash for hybrid mode.
+ *
+ * Seeds two workspaces and three users (owner W1, member W1, owner W2), a
+ * subset of the eval corpus as media-less meetings (transcript plus
+ * intelligence) in W1, one private W1 meeting owned by the W1 owner, and one
+ * W2 meeting sharing a colliding term. Indexes every meeting inline with
+ * `indexMeeting`. Signed test session cookies and the seeded ids go to
+ * E2E_ENV_FILE (default `.secrets/e2e.env`, gitignored), never to stdout.
+ * Re-running replaces the seeded rows (ids prefixed `e2e_`) and succeeds
+ * after a partial run (every insert tolerates existing rows).
+ */
+import { mkdir, writeFile } from "node:fs/promises"
+import path from "node:path"
+
+import { createSessionCookie, getSessionSecret } from "@/lib/auth/session"
+import { getDatabasePool } from "@/lib/db/client"
+import type { MeetingRecord } from "@/lib/meetings/repository"
+import { loadCorpus } from "@/lib/search/eval/corpus"
+import { seedPgliteMeetings } from "@/lib/search/eval/pglite"
+import { indexMeeting } from "@/lib/search/indexer"
+
+const W1 = "e2e_ws_1"
+const W2 = "e2e_ws_2"
+const USERS = {
+  w1Owner: { id: "e2e_user_w1_owner", email: "e2e-w1-owner@example.test", workspace: W1, role: "owner" },
+  w1Member: { id: "e2e_user_w1_member", email: "e2e-w1-member@example.test", workspace: W1, role: "member" },
+  w2Owner: { id: "e2e_user_w2_owner", email: "e2e-w2-owner@example.test", workspace: W2, role: "owner" },
+} as const
+/** Appears in the W1 private meeting and in the W2 meeting only. */
+export const E2E_COLLIDING_TERM = "פלמינגו"
+const SEED_MEETINGS = ["m01", "m03", "m05", "m07", "m12"]
+
+function seededMeetings(): MeetingRecord[] {
+  const corpus = loadCorpus()
+  const rename = (meeting: MeetingRecord, id: string, workspaceId: string, overrides: Partial<MeetingRecord> = {}) => {
+    const map = (value: string) => value.replace(new RegExp(`^${meeting.id}_`), `${id}_`)
+
+    return {
+      ...meeting,
+      id,
+      workspaceId,
+      ownerUserId: workspaceId === W1 ? USERS.w1Owner.id : USERS.w2Owner.id,
+      visibility: "workspace" as const,
+      contexts: (meeting.contexts ?? []).map((context) => ({ ...context, id: `e2e_${workspaceId}_${context.id}` })),
+      speakers: (meeting.speakers ?? []).map((speaker) => ({ ...speaker, id: map(speaker.id), meetingId: id })),
+      transcript: (meeting.transcript ?? []).map((segment) => ({
+        ...segment,
+        id: map(segment.id),
+        speakerId: segment.speakerId ? map(segment.speakerId) : undefined,
+      })),
+      ...overrides,
+    }
+  }
+  const byId = (id: string) => corpus.meetings.find((meeting) => meeting.id === id)!
+  const shared = SEED_MEETINGS.map((id) => rename(byId(id), `e2e_${id}`, W1))
+  const privateMeeting = rename(byId("m09"), "e2e_private", W1, {
+    title: "שיחה פרטית",
+    visibility: "private",
+  })
+  const w2 = rename(byId("m11"), "e2e_w2", W2, { title: "Workspace 2 meeting" })
+
+  privateMeeting.transcript = [...privateMeeting.transcript!, { ...privateMeeting.transcript![0], id: "e2e_private_s99", startMs: 99_000, endMs: 105_000, text: `הזכרנו את ה${E2E_COLLIDING_TERM}` }]
+  w2.transcript = [...w2.transcript!, { ...w2.transcript![0], id: "e2e_w2_s99", startMs: 99_000, endMs: 105_000, text: `גם כאן ${E2E_COLLIDING_TERM}` }]
+
+  return [...shared, privateMeeting, w2]
+}
+
+async function main() {
+  const secret = getSessionSecret()
+  const pool = getDatabasePool()
+  const meetings = seededMeetings()
+
+  await pool.query("delete from meetings where id like 'e2e\\_%'")
+  for (const user of Object.values(USERS)) {
+    await pool.query("insert into users (id, email) values ($1, $2) on conflict do nothing", [user.id, user.email])
+  }
+  for (const workspace of [W1, W2]) {
+    await pool.query("insert into workspaces (id, name, slug) values ($1, $1, $1) on conflict do nothing", [workspace])
+  }
+  for (const user of Object.values(USERS)) {
+    await pool.query(
+      "insert into memberships (workspace_id, user_id, role) values ($1, $2, $3) on conflict (workspace_id, user_id) do update set role = excluded.role",
+      [user.workspace, user.id, user.role]
+    )
+  }
+
+  await seedPgliteMeetings({ client: pool }, meetings)
+
+  const states: Record<string, number> = {}
+
+  for (const meeting of meetings) {
+    const result = await indexMeeting({ workspaceId: meeting.workspaceId! }, meeting.id, { force: true })
+
+    states[result.state] = (states[result.state] ?? 0) + 1
+  }
+
+  const file = process.env.E2E_ENV_FILE ?? path.join(".secrets", "e2e.env")
+  const cookie = (user: (typeof USERS)[keyof typeof USERS]) => createSessionCookie({ userId: user.id, email: user.email }, { secret }).value
+  const lines = [
+    "# Generated by npm run search:e2e-seed. Test-only session cookies; do not commit.",
+    `E2E_W1_OWNER_COOKIE=${cookie(USERS.w1Owner)}`,
+    `E2E_W1_MEMBER_COOKIE=${cookie(USERS.w1Member)}`,
+    `E2E_W2_OWNER_COOKIE=${cookie(USERS.w2Owner)}`,
+    `E2E_W1_WORKSPACE=${W1}`,
+    `E2E_W2_WORKSPACE=${W2}`,
+    `E2E_PRIVATE_MEETING=e2e_private`,
+    `E2E_W2_MEETING=e2e_w2`,
+    `E2E_COLLIDING_TERM=${E2E_COLLIDING_TERM}`,
+  ]
+
+  await mkdir(path.dirname(path.resolve(file)), { recursive: true })
+  await writeFile(file, `${lines.join("\n")}\n`, { mode: 0o600 })
+  console.log(`Seeded ${meetings.length} meetings in 2 workspaces; index states: ${JSON.stringify(states)}.`)
+  console.log(`Test credentials written to ${file}.`)
+  await pool.end()
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error)
+  process.exit(1)
+})

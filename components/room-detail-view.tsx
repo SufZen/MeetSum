@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import {
   CalendarDaysIcon,
   CheckCircle2Icon,
@@ -8,14 +7,14 @@ import {
   ClockIcon,
   ClipboardListIcon,
   MessageSquareIcon,
-  SendIcon,
   UsersIcon,
   FileAudioIcon,
   ArrowLeftIcon,
-  Loader2Icon,
 } from "lucide-react"
 import Link from "next/link"
 
+import { LazyAskPanel } from "@/components/ask/lazy"
+import { formatMessage, getDictionary } from "@/lib/i18n/dictionaries"
 import { formatDurationLabel } from "@/lib/meetings/duration"
 import type { RoomDetail, RoomMeetingSummary, RoomTask, RoomParticipant, RoomArtifact } from "@/lib/rooms"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -150,60 +149,17 @@ function ArtifactRow({ artifact }: { artifact: RoomArtifact }) {
   )
 }
 
-function AskRoom({ roomId }: { roomId: string }) {
-  const [question, setQuestion] = useState("")
-  const [answer, setAnswer] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  async function handleAsk() {
-    if (!question.trim() || loading) return
-    setLoading(true)
-    setAnswer(null)
-
-    try {
-      const res = await fetch(`/api/rooms/${roomId}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
-      })
-      const data = await res.json()
-      setAnswer(data.answer ?? data.text ?? "No answer available.")
-    } catch {
-      setAnswer("Failed to get an answer. Please try again.")
-    } finally {
-      setLoading(false)
-    }
-  }
+/** M6: room-scope AskMeetSum (streamed, cited answers), code split. */
+function AskRoom({ roomId, roomName, locale }: { roomId: string; roomName: string; locale: SupportedLocale }) {
+  const dictionary = getDictionary(locale)
 
   return (
-    <div className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-fg">
-        <MessageSquareIcon className="size-4 text-brand-text" />
-        Ask this room
-      </h2>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-          placeholder="Ask a question about this room's meetings..."
-          className="flex-1 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-brand focus:outline-none"
-        />
-        <button
-          onClick={handleAsk}
-          disabled={loading || !question.trim()}
-          className="grid size-9 place-items-center rounded-md bg-brand text-white disabled:opacity-50"
-        >
-          {loading ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-        </button>
-      </div>
-      {answer && (
-        <div className="mt-3 rounded-md border border-line bg-surface-2 p-3 text-sm text-fg">
-          {answer}
-        </div>
-      )}
-    </div>
+    <LazyAskPanel
+      locale={locale}
+      dictionary={dictionary}
+      scope={{ kind: "room", roomId }}
+      scopeLabel={roomName ? formatMessage(dictionary.askScopeRoom, { name: roomName }) : dictionary.askScopeRoomUnnamed}
+    />
   )
 }
 
@@ -262,7 +218,7 @@ export function RoomDetailView({
 
         {/* Ask */}
         <div className="mb-8">
-          <AskRoom roomId={room.id} />
+          <AskRoom roomId={room.id} roomName={room.name} locale={locale} />
         </div>
 
         {/* Content Grid */}

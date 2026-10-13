@@ -10,6 +10,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 /**
  * POST /api/meetings/:id/speakers/merge
@@ -62,6 +63,8 @@ export const POST = withAuthz<{ id: string }>(
         targetLabel: target.label,
       },
     })
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "speakers" })
 
     return NextResponse.json({ speaker }, { headers: rateLimit.headers })
   }

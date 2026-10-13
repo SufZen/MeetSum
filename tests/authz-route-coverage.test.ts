@@ -192,6 +192,25 @@ describe("API route authz coverage", () => {
       "templates/[id] GET": "workspace:read",
       "templates/[id] PATCH": "settings:write",
       "templates/[id] DELETE": "settings:write",
+      // M6 search
+      "search GET": "meeting:read",
+      "search/facets GET": "meeting:read",
+      "meetings/search GET": "meeting:read",
+      "memory/search GET": "meeting:read",
+      // M6 ask (threads also require a user principal)
+      "ask POST": "meeting:read",
+      "ask/threads GET": "meeting:read",
+      "ask/threads POST": "meeting:read",
+      "ask/threads/[id] GET": "meeting:read",
+      "ask/threads/[id] PATCH": "meeting:read",
+      "ask/threads/[id] DELETE": "meeting:read",
+      "ask/messages/[id]/feedback POST": "meeting:read",
+      "meetings/[id]/ask POST": "meeting:read",
+      "rooms/[id]/ask POST": "meeting:read", // was workspace:read
+      "memory/ask POST": "meeting:read",
+      // M6 admin
+      "admin/search/status GET": "ops:read",
+      "admin/search/reindex POST": "settings:write",
     }
     const permissionPattern = (method: string) =>
       new RegExp(
@@ -274,6 +293,77 @@ describe("API route authz coverage", () => {
       source.indexOf("authorizeShareMediaRequest(request, token)")
     )
     expect(source).toMatch(/serveClipMedia\(/)
+  })
+
+  describe("M6 search and ask routes", () => {
+    const source = (route: string) => routes.find((candidate) => candidate.route === route)?.source
+    const ASK_ROUTES = ["ask", "ask/threads", "ask/threads/[id]", "ask/messages/[id]/feedback"]
+    const THREAD_ROUTES = ["ask/threads", "ask/threads/[id]", "ask/messages/[id]/feedback"]
+    const M6_ROUTES = [
+      "search",
+      "search/facets",
+      ...ASK_ROUTES,
+      "admin/search/status",
+      "admin/search/reindex",
+      "meetings/search",
+      "memory/search",
+      "meetings/[id]/ask",
+      "rooms/[id]/ask",
+      "memory/ask",
+    ]
+
+    it("runs the ask routes on node and never caches them", () => {
+      for (const route of ASK_ROUTES) {
+        const text = source(route)
+
+        expect(text, route).toBeDefined()
+        expect(text, route).toMatch(/export const runtime = "nodejs"/)
+        expect(text, route).toMatch(/export const dynamic = "force-dynamic"/)
+      }
+    })
+
+    it("serves threads to user principals only", () => {
+      for (const route of THREAD_ROUTES) {
+        const text = source(route) ?? ""
+        const handlerCount = handlersOf(routes.find((candidate) => candidate.route === route)!).length
+
+        expect(text.match(/createThreadStore\(ctx\)/g)?.length ?? 0, route).toBe(handlerCount)
+        expect(text.match(/if \(!store\) return userRequired\(\)/g)?.length ?? 0, route).toBe(handlerCount)
+      }
+    })
+
+    it("rate-limits search and ask with their presets", () => {
+      // Search routes may pass a per-principal limiter key as the third argument.
+      for (const route of ["search", "search/facets", "meetings/search", "memory/search"]) {
+        expect(source(route), route).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.search[,)]/)
+      }
+      expect(source("ask")).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.ask[,)]/)
+    })
+
+    it("rate-limits meetings/[id]/ask, rooms/[id]/ask and memory/ask with RATE_LIMIT_PRESETS.ask", () => {
+      for (const route of ["meetings/[id]/ask", "rooms/[id]/ask", "memory/ask"]) {
+        const text = source(route)
+
+        expect(text, route).toBeDefined()
+        expect(text, route).toMatch(/rateLimitRequest\(request, RATE_LIMIT_PRESETS\.ask[,)]/)
+        expect(text, route).not.toMatch(/RATE_LIMIT_PRESETS\.(search|ai|default)/)
+      }
+    })
+
+    it("never audits question or answer text", () => {
+      for (const route of M6_ROUTES) {
+        for (const args of callArguments(source(route) ?? "", "recordAuditLog")) {
+          expect(args, route).not.toMatch(/\b(question|q|content|body)\b/)
+        }
+      }
+    })
+
+    it("keeps search and ask routes off the database pool and the system repository", () => {
+      for (const route of routes.filter((candidate) => /^(search|ask)(\/|$)/.test(candidate.route))) {
+        expect(route.source, route.route).not.toMatch(/@\/lib\/db\/client|\bgetSystemMeetingRepository\b/)
+        expect(SYSTEM_REPOSITORY_ROUTES.has(route.route), route.route).toBe(false)
+      }
+    })
   })
 
   it("passes a workspace to every recordAuditLog call", () => {

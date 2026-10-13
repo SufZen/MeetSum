@@ -8,6 +8,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import type { MeetingParticipant } from "@/lib/meetings/repository"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 const roles = ["organizer", "attendee", "speaker", "unknown"]
 const attendanceStatuses = [
@@ -73,6 +74,8 @@ export const PATCH = withAuthz<{ id: string; participantId: string }>(
         participantId,
         patch
       )
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "participants" })
 
       return NextResponse.json({ participant })
     } catch (error) {

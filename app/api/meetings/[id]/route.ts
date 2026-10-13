@@ -8,6 +8,7 @@ import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import type { MeetingDetailResponse } from "@/lib/meetings/transcript-wire"
 import { withoutWords } from "@/lib/meetings/transcript-wire"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import { deleteMeetingObjects } from "@/lib/storage/object-storage"
 
 const MEETING_TITLE_MAX_CHARS = 200
@@ -85,6 +86,8 @@ export const PATCH = withAuthz<{ id: string }>(
       targetId: id,
       metadata: { from: meeting.title, to: title },
     })
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "renamed" })
 
     return NextResponse.json({ meeting: renamed })
   }

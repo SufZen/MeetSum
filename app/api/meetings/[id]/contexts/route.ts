@@ -6,6 +6,7 @@ import {
 } from "@/app/api/_lib/meeting-access"
 import { jsonError } from "@/lib/api/responses"
 import { withAuthz } from "@/lib/auth/authz"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 export const POST = withAuthz<{ id: string }>(
   "meeting:write",
@@ -30,6 +31,8 @@ export const POST = withAuthz<{ id: string }>(
 
     try {
       const meeting = await ctx.meetings.linkMeetingContext(id, contextId)
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "contexts" })
 
       return NextResponse.json({ meeting })
     } catch (error) {

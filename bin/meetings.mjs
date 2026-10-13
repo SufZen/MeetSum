@@ -139,7 +139,7 @@ program
 
     console.log(
       JSON.stringify(
-        await request(`/api/meetings/${meetingId}/upload`, {
+        await request(`/api/meetings/${encodeURIComponent(meetingId)}/upload`, {
           method: "POST",
           body: formData,
         }),
@@ -150,16 +150,54 @@ program
   })
 
 program
+  .command("search")
+  .argument("<query>", "Search text (Hebrew-aware)")
+  .option("--room <id>", "Room (context) id")
+  .option("--from <date>", "From date (YYYY-MM-DD, inclusive)")
+  .option("--to <date>", "To date (YYYY-MM-DD, inclusive)")
+  .option("--type <meetingType>", "Meeting type")
+  .option("--chunks", "Return passages instead of meetings")
+  .option("--limit <n>", "Results per page")
+  .option("--cursor <cursor>", "Next page cursor from a previous result")
+  .action(async (query, options) => {
+    const params = new URLSearchParams({ q: query, group: options.chunks ? "chunk" : "meeting" })
+
+    for (const [key, value] of [
+      ["room", options.room],
+      ["from", options.from],
+      ["to", options.to],
+      ["type", options.type],
+      ["limit", options.limit],
+      ["cursor", options.cursor],
+    ]) {
+      if (value) params.set(key, value)
+    }
+
+    console.log(JSON.stringify(await request(`/api/search?${params}`), null, 2))
+  })
+
+program
   .command("ask")
-  .argument("<question>", "Question for meeting memory")
-  .requiredOption("--meeting <id>", "Meeting id")
+  .argument("<question>", "Question answered from meeting content, with citations")
+  .option("--meeting <id>", "Ask about one meeting")
+  .option("--room <id>", "Ask across one room's meetings")
   .action(async (question, options) => {
+    if (options.meeting && options.room) {
+      throw new Error("Use either --meeting or --room, not both")
+    }
+
+    const scope = options.meeting
+      ? { kind: "meeting", meetingId: options.meeting }
+      : options.room
+        ? { kind: "room", roomId: options.room }
+        : { kind: "workspace" }
+
     console.log(
       JSON.stringify(
-        await request(`/api/meetings/${options.meeting}/ask`, {
+        await request("/api/ask", {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ question }),
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ question, scope }),
         }),
         null,
         2

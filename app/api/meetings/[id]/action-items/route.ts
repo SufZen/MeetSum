@@ -10,6 +10,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { isNotFoundError } from "@/lib/meetings/repository"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import {
   checkOwnerIds,
   createActionItemSchema,
@@ -80,6 +81,8 @@ export const POST = withAuthz<{ id: string }>(
       metadata: { meetingId: id },
     })
     await notifyAssignment(ctx, actionItem, meeting, undefined)
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "action_items" })
 
     return NextResponse.json({ actionItem }, { status: 201 })
   }

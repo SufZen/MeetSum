@@ -902,10 +902,19 @@ export type MeetingRepository = {
   ) => Promise<JobRecord>
   getJob: (id: string) => Promise<JobRecord | undefined>
   listJobs: (filters?: { meetingId?: string; status?: JobStatus }) => Promise<JobRecord[]>
+  /**
+   * Full records of the best-matching visible meetings (M6: delegates to
+   * `lib/search/service` hybrid search; falls back to the legacy scoped
+   * substring lookup when the index has no match, e.g. unindexed meetings).
+   */
   searchMeetings: (
     query: string,
     options?: { limit?: number }
   ) => Promise<MeetingRecord[]>
+  /**
+   * @deprecated M6: unused. Ask goes through `lib/ask/service` (`askOnce`,
+   * `askStream`) with retrieval from `lib/search/retrieve`.
+   */
   askMeetingMemory: (
     meetingId: string,
     question: string
@@ -2639,6 +2648,19 @@ export function createInMemoryMeetingRepository(
       query: string,
       options?: { limit?: number }
     ): Promise<MeetingRecord[]> {
+      // M6: hybrid search first (dynamic import: lib/search reads this repository).
+      const { scopePrincipalKey, searchMeetingIds } = await import("@/lib/search/service")
+      const ids = await searchMeetingIds(
+        { scope, workspaceId, principalKey: scopePrincipalKey(scope), meetings: this },
+        query,
+        { limit: options?.limit }
+      ).catch(() => [] as string[])
+      const found = (await Promise.all(ids.map((id) => this.getMeeting(id)))).filter(
+        (meeting): meeting is MeetingRecord => Boolean(meeting)
+      )
+
+      if (found.length) return found
+
       return listFullMeetingsPage({
         query: normalize(query),
         limit: options?.limit,
@@ -2646,6 +2668,7 @@ export function createInMemoryMeetingRepository(
       }).meetings
     },
 
+    /** @deprecated M6: unused; see MeetingRepository.askMeetingMemory. */
     async askMeetingMemory(
       meetingId: string,
       question: string

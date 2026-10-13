@@ -1,11 +1,29 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { MeetingRecord } from "@/lib/meetings/repository"
+import { createTestCtx, routeParams, setRouteCtx, testMeeting } from "./helpers/route-ctx"
 
-type SearchResult = {
+vi.mock("@/lib/auth/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/authz")>()
+  const { mockAuthzModule } = await import("./helpers/route-ctx")
+
+  return mockAuthzModule(actual)
+})
+
+import { GET } from "@/app/api/meetings/search/route"
+import { createInMemoryMeetingDatabase, type InMemoryMeetingDatabase } from "@/lib/meetings/repository"
+import { setRateLimitStoreForTesting } from "@/lib/rate-limit"
+import { createMemorySearchEngine } from "@/lib/search/memory-engine"
+import { setSearchEngineForTesting } from "@/lib/search/service"
+
+/**
+ * GET /api/meetings/search (legacy compat route) over the real M6 stack: the
+ * route, the scoped repository, B's search service and the memory engine with
+ * A's real chunker and normalizer. No local copy of the search logic.
+ */
+
+type Result = {
   id: string
   title: string
-  startedAt: string
   status: string
   source: string
   overview: string
@@ -14,148 +32,125 @@ type SearchResult = {
   isFavorite: boolean
 }
 
-function searchMeetings(
-  meetings: Partial<MeetingRecord>[],
-  options: { q?: string; tag?: string; status?: string; source?: string; limit?: number }
-): SearchResult[] {
-  const { q, tag, status, source, limit = 20 } = options
+let database: InMemoryMeetingDatabase
 
-  return meetings
-    .filter((m) => {
-      if (q) {
-        const lower = q.toLowerCase()
-        const titleMatch = (m.title ?? "").toLowerCase().includes(lower)
-        const participantMatch = (m.participants ?? []).some((p) =>
-          p.toLowerCase().includes(lower)
-        )
-        const overviewMatch = (m.summary?.overview ?? "").toLowerCase().includes(lower)
-
-        if (!titleMatch && !participantMatch && !overviewMatch) return false
-      }
-
-      if (tag && !(m.tags ?? []).some((t) => String(t).toLowerCase() === tag.toLowerCase())) {
-        return false
-      }
-
-      if (status && m.status !== status) return false
-      if (source && m.source !== source) return false
-
-      return true
-    })
-    .slice(0, limit)
-    .map((m) => ({
-      id: m.id!,
-      title: m.title!,
-      startedAt: m.startedAt!,
-      status: m.status!,
-      source: m.source!,
-      overview: (m.summary?.overview ?? "").slice(0, 200),
-      participantCount: m.participants?.length ?? 0,
-      tags: (m.tags ?? []) as string[],
-      isFavorite: m.isFavorite ?? false,
-    }))
+function seed() {
+  return createInMemoryMeetingDatabase([
+    testMeeting({
+      id: "m1",
+      title: "Engineering Standup",
+      language: "en",
+      startedAt: "2026-05-28T09:00:00Z",
+      source: "google_meet",
+      participants: ["Alice", "Bob"],
+      summary: { overview: "Discussed Sprint 5 progress.", decisions: [], actionItems: [] },
+      tags: ["technical", "product"],
+    }),
+    testMeeting({
+      id: "m2",
+      title: "Sales Pipeline Review",
+      language: "en",
+      startedAt: "2026-05-28T14:00:00Z",
+      source: "upload",
+      participants: ["Charlie", "Diana"],
+      summary: { overview: "Reviewed Q3 sales pipeline targets.", decisions: [], actionItems: [] },
+      tags: ["sales", "follow-up-needed"],
+      transcript: [
+        { id: "seg_m2_1", speaker: "Charlie", startMs: 0, endMs: 4000, text: "The renewal forecast looks strong this quarter." },
+      ],
+    }),
+    testMeeting({
+      id: "m3",
+      title: "Product Design Workshop",
+      language: "en",
+      status: "summarizing",
+      startedAt: "2026-05-27T10:00:00Z",
+      source: "google_meet",
+      participants: ["Alice", "Eve"],
+      tags: ["product", "technical"],
+    }),
+    testMeeting({
+      id: "m_private",
+      title: "Private Standup Notes",
+      language: "en",
+      visibility: "private",
+      ownerUserId: "user_owner",
+      summary: { overview: "Standup about compensation.", decisions: [], actionItems: [] },
+    }),
+    testMeeting({
+      id: "m_w2",
+      title: "Engineering Standup W2",
+      language: "en",
+      workspaceId: "ws_b",
+      summary: { overview: "Other workspace standup.", decisions: [], actionItems: [] },
+    }),
+  ])
 }
 
-const sampleMeetings: Partial<MeetingRecord>[] = [
-  {
-    id: "m1",
-    title: "Engineering Standup",
-    startedAt: "2026-05-28T09:00:00Z",
-    status: "completed",
-    source: "google_meet",
-    participants: ["Alice", "Bob"],
-    summary: { overview: "Discussed Sprint 5 progress.", decisions: [], actionItems: [] },
-    tags: ["technical" as const, "product" as const],
-    isFavorite: true,
-  },
-  {
-    id: "m2",
-    title: "Sales Pipeline Review",
-    startedAt: "2026-05-28T14:00:00Z",
-    status: "completed",
-    source: "upload",
-    participants: ["Charlie", "Diana"],
-    summary: { overview: "Reviewed Q3 sales pipeline targets.", decisions: [], actionItems: [] },
-    tags: ["sales" as const, "follow-up-needed" as const],
-    isFavorite: false,
-  },
-  {
-    id: "m3",
-    title: "Product Design Workshop",
-    startedAt: "2026-05-27T10:00:00Z",
-    status: "summarizing",
-    source: "google_meet",
-    participants: ["Alice", "Eve"],
-    summary: undefined,
-    tags: ["product" as const, "technical" as const],
-  },
-]
+async function search(query: string): Promise<{ status: number; meetings: Result[] }> {
+  const response = await GET(new Request(`http://localhost/api/meetings/search?${query}`), routeParams({}))
+  const body = await response.json()
 
-describe("meeting search", () => {
-  it("searches by title keyword", () => {
-    const results = searchMeetings(sampleMeetings, { q: "standup" })
+  return { status: response.status, meetings: body.meetings ?? [] }
+}
 
-    expect(results).toHaveLength(1)
-    expect(results[0].title).toBe("Engineering Standup")
+const ids = (meetings: Result[]) => meetings.map((meeting) => meeting.id).sort()
+
+beforeEach(async () => {
+  database = seed()
+  setRateLimitStoreForTesting(new Map())
+  setSearchEngineForTesting(createMemorySearchEngine())
+  setRouteCtx(await createTestCtx({ database, userId: "user_me", workspaceId: "ws_a" }))
+})
+
+afterEach(() => {
+  setRouteCtx(undefined)
+  setSearchEngineForTesting(undefined)
+  setRateLimitStoreForTesting(undefined)
+})
+
+describe("GET /api/meetings/search (real route and search service)", () => {
+  it("finds meetings by title keyword, only in the caller's workspace and visibility", async () => {
+    const { status, meetings } = await search("q=standup")
+
+    expect(status).toBe(200)
+    expect(ids(meetings)).toEqual(["m1"])
   })
 
-  it("searches by participant name", () => {
-    const results = searchMeetings(sampleMeetings, { q: "charlie" })
-
-    expect(results).toHaveLength(1)
-    expect(results[0].id).toBe("m2")
+  it("finds meetings by summary overview text", async () => {
+    expect(ids((await search("q=Q3%20sales")).meetings)).toContain("m2")
   })
 
-  it("searches by summary overview text", () => {
-    const results = searchMeetings(sampleMeetings, { q: "Q3 sales" })
-
-    expect(results).toHaveLength(1)
-    expect(results[0].id).toBe("m2")
+  it("finds meetings by transcript text (M6 index)", async () => {
+    expect(ids((await search("q=renewal%20forecast")).meetings)).toEqual(["m2"])
   })
 
-  it("filters by tag", () => {
-    const results = searchMeetings(sampleMeetings, { tag: "sales" })
-
-    expect(results).toHaveLength(1)
-    expect(results[0].id).toBe("m2")
+  it("filters by tag, source and status", async () => {
+    expect(ids((await search("tag=sales")).meetings)).toEqual(["m2"])
+    expect(ids((await search("q=review&source=upload")).meetings)).toEqual(["m2"])
+    expect(ids((await search("status=summarizing")).meetings)).toEqual(["m3"])
   })
 
-  it("filters by status", () => {
-    const results = searchMeetings(sampleMeetings, { status: "completed" })
+  it("respects limit and keeps the response shape", async () => {
+    const { meetings } = await search("status=completed&limit=1")
 
-    expect(results).toHaveLength(2)
+    expect(meetings).toHaveLength(1)
+
+    const [standup] = (await search("q=standup")).meetings
+
+    expect(standup).toMatchObject({
+      id: "m1",
+      title: "Engineering Standup",
+      source: "google_meet",
+      overview: "Discussed Sprint 5 progress.",
+      participantCount: 2,
+      tags: ["technical", "product"],
+    })
+    expect(typeof standup.isFavorite).toBe("boolean")
   })
 
-  it("filters by source", () => {
-    const results = searchMeetings(sampleMeetings, { source: "upload" })
-
-    expect(results).toHaveLength(1)
-    expect(results[0].id).toBe("m2")
-  })
-
-  it("combines q + tag filter", () => {
-    const results = searchMeetings(sampleMeetings, { q: "alice", tag: "product" })
-
-    expect(results).toHaveLength(2)
-    expect(results.map((r) => r.id)).toContain("m1")
-    expect(results.map((r) => r.id)).toContain("m3")
-  })
-
-  it("respects limit", () => {
-    const results = searchMeetings(sampleMeetings, { status: "completed", limit: 1 })
-
-    expect(results).toHaveLength(1)
-  })
-
-  it("returns empty for no matches", () => {
-    const results = searchMeetings(sampleMeetings, { q: "nonexistent" })
-
-    expect(results).toHaveLength(0)
-  })
-
-  it("preserves isFavorite flag", () => {
-    const results = searchMeetings(sampleMeetings, { q: "standup" })
-
-    expect(results[0].isFavorite).toBe(true)
+  it("returns nothing for no matches and 400 without parameters", async () => {
+    expect((await search("q=nonexistentterm")).meetings).toEqual([])
+    expect((await search("")).status).toBe(400)
   })
 })

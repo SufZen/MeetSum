@@ -14,6 +14,7 @@ import {
 import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 /**
  * POST /api/meetings/:id/speakers/assign — legacy single mapping.
@@ -58,6 +59,8 @@ export const POST = withAuthz<{ id: string }>(
         participantId,
       },
     })
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "speakers" })
 
     return NextResponse.json({
       participant: { ...participant, speakerLabel },

@@ -11,6 +11,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 /**
  * POST /api/meetings/:id/transcript/segments/:segmentId/undo
@@ -43,6 +44,8 @@ export const POST = withAuthz<{ id: string; segmentId: string }>(
         targetId: id,
         metadata: { segmentId, revision: result.segment.revision ?? 0 },
       })
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "transcript.edited" })
 
       return NextResponse.json(mutationResponse(result))
     } catch (error) {

@@ -13,6 +13,7 @@ import { withAuthz } from "@/lib/auth/authz"
 import type { SegmentPatch } from "@/lib/meetings/repository"
 import { transcriptEditMaxChars } from "@/lib/meetings/transcript-edit"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 
 const SPEAKER_NAME_MAX_CHARS = 120
 
@@ -123,6 +124,8 @@ export const PATCH = withAuthz<{ id: string; segmentId: string }>(
           },
         })
       }
+
+      await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: id, reason: "transcript.edited" })
 
       return NextResponse.json(mutationResponse(result))
     } catch (error) {

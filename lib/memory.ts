@@ -1,5 +1,15 @@
+/**
+ * Meeting memory (legacy shapes, kept for the compat routes and the room
+ * panel). M6: a shim over the search memory engine's matcher, so it uses
+ * A's Hebrew normalizer (prefixes `ו/ה/ב/כ/ל/מ/ש`, final letters, niqqud)
+ * and keeps short tokens (`על`, `AI`, `Q3`) instead of dropping them.
+ * New code should use `lib/search/service` (`searchWorkspace`).
+ */
 import type { MeetingTag } from "@/lib/intelligence"
 import type { ActionItem, MeetingRecord, TranscriptSegment } from "@/lib/meetings/repository"
+import { normalizeQuery } from "@/lib/search/hebrew-normalize"
+import { textMatchesQuery } from "@/lib/search/memory-engine"
+import type { NormalizedQuery } from "@/lib/search/types"
 
 export type MemoryMatchSource =
   | "summary"
@@ -31,19 +41,8 @@ export type MemorySearchResult = {
   matchCount: number
 }
 
-function tokenize(value: string) {
-  return value
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}_-]+/u)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2)
-}
-
-function textMatches(text: string | undefined, tokens: string[]) {
-  if (!text || !tokens.length) return false
-  const normalized = text.toLowerCase()
-
-  return tokens.some((token) => normalized.includes(token))
+function textMatches(text: string | undefined, query: NormalizedQuery) {
+  return textMatchesQuery(text, query)
 }
 
 function citationBase(meeting: MeetingRecord) {
@@ -53,7 +52,7 @@ function citationBase(meeting: MeetingRecord) {
   }
 }
 
-function meetingMatches(meeting: MeetingRecord, tokens: string[]) {
+function meetingMatches(meeting: MeetingRecord, tokens: NormalizedQuery) {
   const matches: MemoryCitation[] = []
   const base = citationBase(meeting)
 
@@ -157,7 +156,8 @@ export function buildMeetingMemoryResults(
   query: string,
   options: { limit?: number; filters?: MemorySearchFilters } = {}
 ): MemorySearchResult[] {
-  const tokens = tokenize(query)
+  const tokens = normalizeQuery(query)
+  const hasQuery = tokens.tokens.length > 0
   const limit = Math.max(1, Math.min(Math.trunc(options.limit ?? 8), 20))
   const filters = options.filters ?? {}
   const hasFilters = Object.values(filters).some(Boolean)
@@ -168,7 +168,7 @@ export function buildMeetingMemoryResults(
 
   return filtered
     .map((meeting) => {
-      const matches = tokens.length ? meetingMatches(meeting, tokens) : []
+      const matches = hasQuery ? meetingMatches(meeting, tokens) : []
 
       return {
         id: meeting.id,
@@ -192,7 +192,7 @@ export function buildMeetingMemoryResults(
         matchCount: matches.length,
       }
     })
-    .filter((result) => !tokens.length || result.matchCount > 0)
+    .filter((result) => !hasQuery || result.matchCount > 0)
     .sort((a, b) => b.matchCount - a.matchCount || b.startedAt.localeCompare(a.startedAt))
     .slice(0, limit)
 }

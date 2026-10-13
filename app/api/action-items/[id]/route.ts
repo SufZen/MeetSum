@@ -9,6 +9,7 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { withAuthz } from "@/lib/auth/authz"
 import { isNotFoundError } from "@/lib/meetings/repository"
+import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import {
   actionItemPatchSchema,
   checkOwnerIds,
@@ -81,6 +82,8 @@ export const PATCH = withAuthz<{ id: string }>(
     })
     await notifyAssignment(ctx, actionItem, meeting, current.ownerUserId)
 
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: meeting.id, reason: "action_items" })
+
     return NextResponse.json({ actionItem })
   }
 )
@@ -116,6 +119,8 @@ export const DELETE = withAuthz<{ id: string }>(
       targetId: id,
       metadata: { meetingId: meeting.id, origin: current.origin ?? "ai" },
     })
+
+    await requestMeetingReindex({ workspaceId: ctx.workspace.id, meetingId: meeting.id, reason: "action_items" })
 
     return NextResponse.json({ deleted: true, id })
   }

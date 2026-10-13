@@ -24,7 +24,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
-import { AskMeetingPanel, type AskCitation } from "@/components/ask-meeting-panel"
+import { AskMeetingPanel } from "@/components/ask-meeting-panel"
 import { useJson } from "@/components/intelligence/use-json"
 import { MeetingHeader } from "@/components/meeting-header"
 import { MeetingSummaryView } from "@/components/meeting-summary-view"
@@ -179,15 +179,9 @@ export function MeetingWorkspace({
   dictionary,
   meeting,
   jobs,
-  question,
-  answer,
-  askCitations,
-  asking,
   transcript,
   permissions = { canWrite: false, canManage: false },
   initialMs,
-  onQuestionChange,
-  onAsk,
   onToggleActionItem,
   onReprocessMeeting,
   onProcessMeeting,
@@ -212,17 +206,11 @@ export function MeetingWorkspace({
   locale: SupportedLocale
   meeting: MeetingRecord | null
   jobs: JobRecord[]
-  question: string
-  answer?: string
-  askCitations?: readonly AskCitation[]
-  asking?: boolean
   /** Transcript of the selected meeting (`useMeetingTranscript`). */
   transcript?: MeetingTranscriptHandle
   permissions?: MeetingPermissions
   /** `?t=` for this meeting, in ms. */
   initialMs?: number
-  onQuestionChange: (value: string) => void
-  onAsk: () => void
   onToggleActionItem: (item: ActionItem) => void
   onReprocessMeeting: (mode: ReprocessMode) => void
   onProcessMeeting: () => void
@@ -244,6 +232,9 @@ export function MeetingWorkspace({
   onDelete?: () => Promise<boolean>
 }) {
   const [tab, setTab] = useState<TabValue>("summary")
+  // M6: the Ask panel loads on first open and then stays mounted, so a
+  // conversation survives tab switches (citations seek from the Ask tab).
+  const [askOpened, setAskOpened] = useState(false)
   // Compact player: a tab pane scrolled, or (short viewports) the whole column.
   const [paneCompact, setPaneCompact] = useState(false)
   const [columnCompact, setColumnCompact] = useState(false)
@@ -403,6 +394,7 @@ export function MeetingWorkspace({
           value={tab}
           onValueChange={(value) => {
             setTab(value as TabValue)
+            if (value === "ask") setAskOpened(true)
             setPaneCompact(false)
           }}
           className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 lg:min-h-120"
@@ -481,19 +473,12 @@ export function MeetingWorkspace({
             />
           </TabsContent>
 
-          <TabsContent value="ask" className={scrollPane} onScroll={trackCompact}>
+          <TabsContent value="ask" keepMounted className={scrollPane} onScroll={trackCompact}>
             <div className="mx-auto max-w-3xl">
-              <AskMeetingPanel
-                dictionary={dictionary}
-                question={question}
-                answer={answer}
-                citations={askCitations}
-                answerDir={directionForLanguage(meeting.language)}
-                asking={asking}
-                disabled={!meeting}
-                onQuestionChange={onQuestionChange}
-                onAsk={onAsk}
-              />
+              {/* M6: streamed, cited answers; code split, mounted only on this tab. */}
+              {askOpened || tab === "ask" ? (
+                <AskMeetingPanel dictionary={dictionary} locale={locale} meetingId={meeting.id} />
+              ) : null}
             </div>
           </TabsContent>
 

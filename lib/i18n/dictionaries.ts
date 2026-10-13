@@ -8,6 +8,8 @@ import {
   intelligenceMessagesHe,
 } from "@/lib/i18n/m5/intelligence"
 import { tasksMessagesEn, tasksMessagesHe } from "@/lib/i18n/m5/tasks"
+import { askMessagesEn, askMessagesHe } from "@/lib/i18n/m6/ask"
+import { searchMessagesEn, searchMessagesHe } from "@/lib/i18n/m6/search"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import {
   workspaceMessagesEn,
@@ -85,6 +87,8 @@ export const dictionaries = {
     ...tasksMessagesEn,
     ...clipsMessagesEn,
     ...commentsMessagesEn,
+    ...searchMessagesEn,
+    ...askMessagesEn,
   },
   he: {
     appSubtitle: "מודיעין פגישות מבוסס AI",
@@ -154,6 +158,8 @@ export const dictionaries = {
     ...tasksMessagesHe,
     ...clipsMessagesHe,
     ...commentsMessagesHe,
+    ...searchMessagesHe,
+    ...askMessagesHe,
   },
   pt: {
     appSubtitle: "Inteligencia de reunioes com IA",
@@ -223,6 +229,8 @@ export const dictionaries = {
     ...tasksMessagesEn,
     ...clipsMessagesEn,
     ...commentsMessagesEn,
+    ...searchMessagesEn,
+    ...askMessagesEn,
   },
   es: {
     appSubtitle: "Inteligencia de reuniones con IA",
@@ -292,6 +300,8 @@ export const dictionaries = {
     ...tasksMessagesEn,
     ...clipsMessagesEn,
     ...commentsMessagesEn,
+    ...searchMessagesEn,
+    ...askMessagesEn,
   },
   it: {
     appSubtitle: "Intelligence riunioni AI-first",
@@ -361,6 +371,8 @@ export const dictionaries = {
     ...tasksMessagesEn,
     ...clipsMessagesEn,
     ...commentsMessagesEn,
+    ...searchMessagesEn,
+    ...askMessagesEn,
   },
 } as const
 

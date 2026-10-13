@@ -72,6 +72,8 @@ export type AuditAction =
   | "comment.created"
   | "comment.deleted"
   | "comment.resolved"
+  | "search.reindex.requested"
+  | "ask.thread.deleted"
 
 export type RecordAuditLogInput = {
   action: AuditAction
