@@ -92,7 +92,7 @@ export const tasksMessagesHe: Record<keyof typeof tasksMessagesEn, string> = {
   tasksEmpty: "אין משימות שתואמות את הסינון.",
   tasksEmptyMeeting: "אין עדיין משימות.",
   tasksLoadMore: "טעינת עוד",
-  tasksLoading: "טוען משימות",
+  tasksLoading: "טעינת משימות…",
   tasksLoadError: "לא הצלחנו לטעון את המשימות. כדאי לבדוק את החיבור ולנסות שוב.",
   tasksRetry: "ניסיון חוזר",
   tasksOpenMeeting: "פתיחה בפגישה",
