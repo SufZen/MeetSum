@@ -41,6 +41,7 @@ import type {
 import { summarizeSpeakerStats } from "@/lib/meetings/speakers/stats"
 import { refreshSpeakerSuggestions } from "@/lib/meetings/speakers/suggest"
 import type { TranscriptWord } from "@/lib/meetings/transcript-words"
+import { redactAsrErrorMessage } from "@/lib/ai/asr/errors"
 import { getAsrGlossary } from "@/lib/settings/asr-glossary"
 import {
   getSystemMeetingRepository,
@@ -676,7 +677,9 @@ async function processMediaJob(
         jobId: jobRecordId,
         provider: error instanceof AsrError ? error.provider : "asr-router",
         metadata: { providerMode: "asr-router", ...inputAsset },
-        error: errorMessage(error),
+        // Attempt errors are already redacted by the router; anything else
+        // (bare provider errors) is redacted here before it is stored.
+        error: redactAsrErrorMessage(errorMessage(error)),
       })
     }
     if (isPermanentAsrError(error)) throw toPermanentError(error)

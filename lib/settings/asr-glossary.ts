@@ -1,4 +1,4 @@
-import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
+import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr/default-glossary"
 import { getDatabasePool } from "@/lib/db/client"
 import type { AsrGlossary, GlossaryTerm } from "@/lib/ai/asr/types"
 
