@@ -27,6 +27,32 @@ export function stripMarks(value: string): string {
   return value.normalize("NFKC").replace(/\p{M}/gu, "").replace(/’/gu, "'")
 }
 
+export const MAX_DISPLAY_NAME_CHARS = 80
+
+/**
+ * Sanitises an externally supplied display name (Meet participants choose
+ * their own): strips control characters and bidi embedding/override/isolate
+ * marks (U+202A–U+202E, U+2066–U+2069, plus LRM/RLM/ALM) so a crafted name
+ * cannot visually spoof surrounding text, collapses whitespace, trims and
+ * caps at 80 characters. Empty result → undefined.
+ */
+export function sanitizeDisplayName(
+  value: string | undefined | null,
+  maxChars = MAX_DISPLAY_NAME_CHARS
+): string | undefined {
+  if (typeof value !== "string") return undefined
+
+  const cleaned = value
+    .normalize("NFC")
+    .replace(/[‪-‮⁦-⁩‎‏؜]/gu, "")
+    .replace(/\p{Cc}/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+  const capped = [...cleaned].slice(0, maxChars).join("").trim()
+
+  return capped || undefined
+}
+
 /** Generic diarization / placeholder names that never identify a person. */
 export function isGenericSpeakerName(value: string): boolean {
   return /^(?:(?:speaker|דובר|דוברת)\s*\d*|google meet smart notes)$/iu.test(

@@ -209,11 +209,31 @@ describe("Meet participant names (M3)", () => {
       "page-2"
     )
     expect(participants).toEqual([
-      { name: "conferenceRecords/rec-1/participants/p-dana", displayName: "דנה כהן" },
-      { name: "conferenceRecords/rec-1/participants/p-ran", displayName: "Ran Levi" },
-      { name: "conferenceRecords/rec-1/participants/p-guest", displayName: "Guest Maya" },
-      { name: "conferenceRecords/rec-1/participants/p-phone", displayName: "+972-5x-xxx-1234" },
+      {
+        name: "conferenceRecords/rec-1/participants/p-dana",
+        displayName: "דנה כהן",
+        kind: "signedin",
+        userId: "users/111",
+      },
+      {
+        name: "conferenceRecords/rec-1/participants/p-ran",
+        displayName: "Ran Levi",
+        kind: "signedin",
+        userId: "users/222",
+      },
+      {
+        name: "conferenceRecords/rec-1/participants/p-guest",
+        displayName: "Guest Maya",
+        kind: "anonymous",
+      },
+      {
+        name: "conferenceRecords/rec-1/participants/p-phone",
+        displayName: "+972-5x-xxx-1234",
+        kind: "phone",
+      },
     ])
+    // No resolver → no verified emails, so no Meet name can confirm.
+    expect(participants.some((participant) => participant.verifiedEmail)).toBe(false)
   })
 
   it("names transcript speakers from participants and builds the Meet timeline", async () => {

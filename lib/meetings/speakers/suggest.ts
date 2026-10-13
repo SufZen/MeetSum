@@ -228,8 +228,13 @@ export function suggestSpeakerMappings(
       {
         speakerId: speaker.id,
         suggestion,
+        // Meet timeline evidence rests on self-chosen display names: it may
+        // suggest, never auto-confirm (verified Meet identities confirm via
+        // planMeetSpeakerMappings instead).
         mappingStatus:
-          options.autoConfirmScore !== undefined && score >= options.autoConfirmScore
+          options.autoConfirmScore !== undefined &&
+          score >= options.autoConfirmScore &&
+          !result.reasons.some((reason) => reason.kind === "meet_alignment")
             ? ("confirmed" as const)
             : ("suggested" as const),
       },

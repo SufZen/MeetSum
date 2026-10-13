@@ -9,7 +9,8 @@ import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
 import type { RepoScope, TranscriptSegment } from "@/lib/meetings/repository"
-import type { MeetTimelineEntry } from "@/lib/meetings/speakers/types"
+import { sanitizeDisplayName } from "@/lib/meetings/speakers/names"
+import type { MeetSpeakerIdentity, MeetTimelineEntry } from "@/lib/meetings/speakers/types"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 
 type SyncStatus = "idle" | "running" | "completed" | "failed"
@@ -40,12 +41,24 @@ type MeetApiParticipant = {
   phoneUser?: { displayName?: string }
 }
 
-/** A conference participant's resource name and display name. */
+/** A conference participant's resource name, display name and identity. */
 export type MeetParticipantName = {
   /** `conferenceRecords/{record}/participants/{participant}` */
   name: string
+  /** Sanitised, self-chosen display name — never proof of identity. */
   displayName: string
+  kind: MeetSpeakerIdentity["kind"]
+  /** `users/{id}` of a signed-in participant. */
+  userId?: string
+  /** Email the Google user id verifiably resolved to (resolver only). */
+  verifiedEmail?: string
 }
+
+/**
+ * Resolves a signed-in participant's Google user id (`users/{id}`) to a
+ * verified email (e.g. Admin Directory). Absent → no Meet name ever confirms.
+ */
+export type MeetUserEmailResolver = (userId: string) => Promise<string | undefined>
 
 type MeetApiTranscriptEntry = {
   name?: string
@@ -110,6 +123,8 @@ export type MeetTranscriptArtifactImportResult = {
   importedSmartNotes: number
   /** Who spoke when per the Meet transcript (empty for smart notes only). */
   meetTimeline: MeetTimelineEntry[]
+  /** Identity behind each Meet speaker label (verification for confirm). */
+  meetSpeakers: MeetSpeakerIdentity[]
 }
 
 export type MeetRecordingArtifactImportResult = {
@@ -245,8 +260,11 @@ export function convertMeetTranscriptEntriesToSegments(
       return {
         id: transcriptEntryId(entry.name, index),
         speaker:
-          (entry.participant && options.participantNames?.[entry.participant]?.trim()) ||
-          participantLabel(entry.participant, index),
+          sanitizeDisplayName(
+            entry.participant ? options.participantNames?.[entry.participant] : undefined
+          ) ??
+          sanitizeDisplayName(participantLabel(entry.participant, index)) ??
+          `Speaker ${index + 1}`,
         startMs,
         endMs,
         text: entry.text?.trim() ?? "",
@@ -257,14 +275,53 @@ export function convertMeetTranscriptEntriesToSegments(
     })
 }
 
-/** Display name of a Meet participant resource (signed-in, anonymous or phone). */
+/**
+ * Sanitised display name of a Meet participant resource (signed-in,
+ * anonymous or phone). Self-chosen: used as a label/suggestion only.
+ */
 export function meetParticipantDisplayName(participant: MeetApiParticipant): string | undefined {
-  const name =
+  return sanitizeDisplayName(
     participant.signedinUser?.displayName ??
-    participant.anonymousUser?.displayName ??
-    participant.phoneUser?.displayName
+      participant.anonymousUser?.displayName ??
+      participant.phoneUser?.displayName
+  )
+}
 
-  return name?.trim() || undefined
+function meetParticipantKind(participant: MeetApiParticipant): MeetSpeakerIdentity["kind"] {
+  if (participant.signedinUser) return "signedin"
+  if (participant.anonymousUser) return "anonymous"
+  if (participant.phoneUser) return "phone"
+  return "unknown"
+}
+
+/**
+ * Identity behind each speaker label. A label shared by several Meet
+ * participants is ambiguous → `unknown`, unverified.
+ */
+export function buildMeetSpeakerIdentities(
+  participants: readonly MeetParticipantName[]
+): MeetSpeakerIdentity[] {
+  const byLabel = new Map<string, MeetParticipantName[]>()
+
+  for (const participant of participants) {
+    const list = byLabel.get(participant.displayName) ?? []
+
+    list.push(participant)
+    byLabel.set(participant.displayName, list)
+  }
+
+  return [...byLabel.entries()].map(([label, list]) => {
+    if (list.length !== 1) return { label, kind: "unknown" as const }
+
+    const [participant] = list
+    const identity: MeetSpeakerIdentity = { label, kind: participant.kind }
+
+    if (participant.userId) identity.userId = participant.userId
+    if (participant.kind === "signedin" && participant.userId && participant.verifiedEmail) {
+      identity.verifiedEmail = participant.verifiedEmail.trim().toLowerCase()
+    }
+    return identity
+  })
 }
 
 /** `{participant resource name: display name}` for convertMeetTranscriptEntriesToSegments. */
@@ -546,7 +603,8 @@ export async function listMeetParticipants(
   token: string,
   conferenceRecordName: string,
   fetchImpl: typeof fetch = fetch,
-  limit = Number(process.env.MEETSUM_MEET_PARTICIPANT_LIMIT ?? 500)
+  limit = Number(process.env.MEETSUM_MEET_PARTICIPANT_LIMIT ?? 500),
+  resolveUserEmail?: MeetUserEmailResolver
 ): Promise<MeetParticipantName[]> {
   const participants: MeetParticipantName[] = []
   let pageToken: string | undefined
@@ -568,9 +626,25 @@ export async function listMeetParticipants(
     for (const participant of page) {
       const displayName = meetParticipantDisplayName(participant)
 
-      if (participant.name && displayName) {
-        participants.push({ name: participant.name, displayName })
+      if (!participant.name || !displayName) continue
+
+      const entry: MeetParticipantName = {
+        name: participant.name,
+        displayName,
+        kind: meetParticipantKind(participant),
       }
+      const userId = participant.signedinUser?.user
+
+      if (entry.kind === "signedin" && userId) {
+        entry.userId = userId
+        // Only the resolver (Google identity → email) may verify an email.
+        const email = resolveUserEmail
+          ? await resolveUserEmail(userId).catch(() => undefined)
+          : undefined
+
+        if (email?.includes("@")) entry.verifiedEmail = email.trim().toLowerCase()
+      }
+      participants.push(entry)
     }
     pageToken = body.nextPageToken
 
@@ -580,22 +654,27 @@ export async function listMeetParticipants(
   return participants
 }
 
-/** Best-effort participant names: an API failure falls back to ids. */
-async function participantNamesFor(
+/** Best-effort participants: an API failure falls back to ids (no identities). */
+async function participantsFor(
   token: string,
   conferenceRecordName: string,
-  cache: Map<string, Promise<Record<string, string>>>
+  cache: Map<string, Promise<MeetParticipantName[]>>,
+  resolveUserEmail?: MeetUserEmailResolver
 ) {
-  let names = cache.get(conferenceRecordName)
+  let participants = cache.get(conferenceRecordName)
 
-  if (!names) {
-    names = listMeetParticipants(token, conferenceRecordName)
-      .then(meetParticipantNameMap)
-      .catch(() => ({}))
-    cache.set(conferenceRecordName, names)
+  if (!participants) {
+    participants = listMeetParticipants(
+      token,
+      conferenceRecordName,
+      fetch,
+      undefined,
+      resolveUserEmail
+    ).catch(() => [])
+    cache.set(conferenceRecordName, participants)
   }
 
-  return names
+  return participants
 }
 
 async function findMeetCalendarMatch(options: {
@@ -1124,6 +1203,8 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
   workspaceId: string
   meetingId: string
   artifactIds?: string[]
+  /** Verifies signed-in participants' emails; without it Meet names only suggest. */
+  resolveUserEmail?: MeetUserEmailResolver
 }): Promise<MeetTranscriptArtifactImportResult> {
   const { subject } = options
   const candidates = await listMeetingTranscriptArtifactCandidates({
@@ -1142,7 +1223,8 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
   let driveToken: string | undefined
   const transcriptSegments: TranscriptSegment[] = []
   const meetTimeline: MeetTimelineEntry[] = []
-  const participantNameCache = new Map<string, Promise<Record<string, string>>>()
+  const participantCache = new Map<string, Promise<MeetParticipantName[]>>()
+  const meetParticipants: MeetParticipantName[] = []
   let importedEntries = 0
   let importedSmartNotes = 0
 
@@ -1150,14 +1232,25 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
     const baseTime = candidate.conferenceStartTime ?? candidate.artifactStartTime
 
     if (candidate.artifactType === "transcript") {
-      const [entries, participantNames] = await Promise.all([
+      const [entries, participants] = await Promise.all([
         listTranscriptEntriesForArtifact(meetToken, candidate.artifactName),
-        participantNamesFor(meetToken, candidate.conferenceRecordName, participantNameCache),
+        participantsFor(
+          meetToken,
+          candidate.conferenceRecordName,
+          participantCache,
+          options.resolveUserEmail
+        ),
       ])
       const segments = convertMeetTranscriptEntriesToSegments(entries, {
         baseTime,
-        participantNames,
+        participantNames: meetParticipantNameMap(participants),
       })
+
+      for (const participant of participants) {
+        if (!meetParticipants.some((known) => known.name === participant.name)) {
+          meetParticipants.push(participant)
+        }
+      }
 
       importedEntries += segments.length
       transcriptSegments.push(...segments)
@@ -1193,6 +1286,7 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
     importedEntries,
     importedSmartNotes,
     meetTimeline: meetTimeline.sort((a, b) => a.startMs - b.startMs),
+    meetSpeakers: buildMeetSpeakerIdentities(meetParticipants),
   }
 }
 
@@ -1228,14 +1322,15 @@ export async function loadMeetTimelineForMeeting(options: {
     }).catch(() => [])
     const recordingStart = recordings.find((recording) => recording.startTime)?.startTime
     const token = await getMeetAccessToken(options.subject)
-    const cache = new Map<string, Promise<Record<string, string>>>()
+    const cache = new Map<string, Promise<MeetParticipantName[]>>()
     const timeline: MeetTimelineEntry[] = []
 
     for (const candidate of candidates) {
-      const [entries, participantNames] = await Promise.all([
+      const [entries, participants] = await Promise.all([
         listTranscriptEntriesForArtifact(token, candidate.artifactName),
-        participantNamesFor(token, candidate.conferenceRecordName, cache),
+        participantsFor(token, candidate.conferenceRecordName, cache),
       ])
+      const participantNames = meetParticipantNameMap(participants)
 
       timeline.push(
         ...buildMeetTimeline(

@@ -1,4 +1,5 @@
 import { findCandidateForPerson } from "@/lib/meetings/speakers/candidates"
+import { sanitizeDisplayName } from "@/lib/meetings/speakers/names"
 import type { SignalContext } from "@/lib/meetings/speakers/signals/context"
 import type { MeetTimelineEntry } from "@/lib/meetings/speakers/types"
 
@@ -20,7 +21,9 @@ export function meetAlignmentSignal(context: SignalContext, timeline: readonly M
   const byCandidate = new Map<string, MeetTimelineEntry[]>()
 
   for (const entry of timeline) {
-    const candidate = findCandidateForPerson(context.candidates, entry)
+    // Self-chosen display names: matched by sanitised name only (suggestion).
+    const name = sanitizeDisplayName(entry.name)
+    const candidate = name ? findCandidateForPerson(context.candidates, { name }) : undefined
 
     if (!candidate) continue
 

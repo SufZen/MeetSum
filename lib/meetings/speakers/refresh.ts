@@ -8,6 +8,7 @@ import { normalizeName } from "@/lib/meetings/speakers/names"
 import { suggestSpeakerMappings } from "@/lib/meetings/speakers/suggest"
 import {
   speakerSuggestOptionsFromEnv,
+  type MeetSpeakerIdentity,
   type MeetTimelineEntry,
 } from "@/lib/meetings/speakers/types"
 
@@ -16,6 +17,11 @@ export type RefreshSpeakerSuggestionsOptions = {
   meetTimeline?: MeetTimelineEntry[]
   /** Best-effort loader (e.g. Google Meet); failures are ignored. */
   loadMeetTimeline?: () => Promise<MeetTimelineEntry[] | undefined>
+  /**
+   * Identities behind Meet speaker labels (from the import). Without them a
+   * Meet name can only suggest, never confirm.
+   */
+  meetIdentities?: MeetSpeakerIdentity[]
   env?: NodeJS.ProcessEnv
   now?: Date
 }
@@ -84,7 +90,10 @@ export async function refreshSpeakerSuggestions(
   const bySpeaker = new Map(suggestions.map((item) => [item.speakerId, item]))
   // Speakers of an imported Meet transcript are named by Meet itself.
   const meetPlans = new Map(
-    planMeetSpeakerMappings(speakers, participants, options.now).map((plan) => [
+    planMeetSpeakerMappings(speakers, participants, {
+      identities: options.meetIdentities,
+      now: options.now,
+    }).map((plan) => [
       plan.speakerId,
       plan,
     ])

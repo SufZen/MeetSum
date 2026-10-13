@@ -866,6 +866,10 @@ describe("processJob ASR router (M3)", () => {
     const meeting = await seedMeeting()
     const meet = await import("@/lib/google/meet-artifacts")
     const meetTimeline = [{ name: "דנה כהן", startMs: 3_000, endMs: 7_000 }]
+    const meetSpeakers = [
+      { label: "דנה כהן", kind: "anonymous" as const },
+      { label: "Ran Levi", kind: "signedin" as const, userId: "users/222" },
+    ]
 
     vi.mocked(meet.importMeetTranscriptArtifactsForMeeting).mockResolvedValue({
       meetingId: meeting.id,
@@ -877,7 +881,9 @@ describe("processJob ASR router (M3)", () => {
       importedEntries: 2,
       importedSmartNotes: 0,
       meetTimeline,
+      meetSpeakers,
     })
+    const recordConfirmed = vi.spyOn(mocks.repository, "recordConfirmedSpeaker")
 
     await processJob(
       await makeJob("artifact.import", { meetingId: meeting.id, subject: "ops@example.com" })
@@ -891,8 +897,12 @@ describe("processJob ASR router (M3)", () => {
     ])
     expect(mocks.refreshSuggestions).toHaveBeenCalledWith(expect.anything(), meeting.id, {
       meetTimeline,
+      meetIdentities: meetSpeakers,
     })
     expect(mocks.transcribe).not.toHaveBeenCalled()
+    // Automatic import never writes workspace speaker memory.
+    expect(recordConfirmed).not.toHaveBeenCalled()
+    expect(await mocks.repository.listSpeakerProfiles()).toEqual([])
   })
 
   it("re-summarizing a worded transcript never rewrites its text", async () => {

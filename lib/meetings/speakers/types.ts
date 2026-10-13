@@ -6,6 +6,21 @@ export type MeetTimelineEntry = {
   endMs: number
 }
 
+/**
+ * Identity behind a Meet transcript speaker label. Display names are chosen
+ * by participants (anonymous/phone guests freely), so only a signed-in user
+ * whose Google identity resolved to a verified email can confirm a mapping.
+ */
+export type MeetSpeakerIdentity = {
+  /** Sanitised display name used as the speaker label. */
+  label: string
+  kind: "signedin" | "anonymous" | "phone" | "unknown"
+  /** `users/{id}` of a signed-in participant. */
+  userId?: string
+  /** Email the Google identity verifiably resolved to (lowercase). */
+  verifiedEmail?: string
+}
+
 /** Tunables of the speaker suggestion engine (defaults per docs/parity/m3.md). */
 export type SpeakerSuggestOptions = {
   /** Minimum combined score to suggest (MEETSUM_SPEAKER_SUGGEST_THRESHOLD). */

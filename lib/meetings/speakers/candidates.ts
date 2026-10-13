@@ -7,6 +7,7 @@ import {
   isGenericSpeakerName,
   nameTokens,
   normalizeName,
+  sanitizeDisplayName,
   startsWithTokens,
 } from "@/lib/meetings/speakers/names"
 import type { MeetTimelineEntry } from "@/lib/meetings/speakers/types"
@@ -120,14 +121,18 @@ export function buildCandidates(
   }
 
   for (const entry of meetTimeline) {
-    if (findCandidateForPerson(candidates, entry) || isGenericSpeakerName(entry.name)) continue
+    // Meet display names are self-chosen: sanitised, never trusted as email.
+    const name = sanitizeDisplayName(entry.name)
+
+    if (!name || isGenericSpeakerName(name) || findCandidateForPerson(candidates, { name })) {
+      continue
+    }
 
     candidates.push({
-      key: `meet:${normalizeName(entry.name)}`,
-      name: entry.name,
-      email: entry.email,
+      key: `meet:${normalizeName(name)}`,
+      name,
       isParticipant: false,
-      nameForms: forms(entry.name),
+      nameForms: forms(name),
       aliasForms: [],
     })
   }

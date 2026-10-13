@@ -993,7 +993,12 @@ async function processArtifactImportJob(
     segments: meetSegments,
     speakers: summarizeSpeakerStats(meetSegments, "meet"),
   })
-  await refreshSuggestionsSafely(scope, meetingId, { meetTimeline: imported.meetTimeline })
+  // Meet names only confirm through verified identities (meetSpeakers);
+  // import never writes speaker profiles.
+  await refreshSuggestionsSafely(scope, meetingId, {
+    meetTimeline: imported.meetTimeline,
+    meetIdentities: imported.meetSpeakers,
+  })
   await setStage(scope, jobRecordId, {
     stage: "summary.generate",
     importedEntries: imported.importedEntries,

@@ -3,33 +3,46 @@ import type {
   MeetingSpeaker,
   SpeakerSuggestionUpdate,
 } from "@/lib/meetings/repository"
-import { isGenericSpeakerName, normalizeName } from "@/lib/meetings/speakers/names"
+import {
+  isGenericSpeakerName,
+  normalizeName,
+  sanitizeDisplayName,
+} from "@/lib/meetings/speakers/names"
+import type { MeetSpeakerIdentity } from "@/lib/meetings/speakers/types"
 
-/** Weight of a Meet transcript naming a speaker (no matching participant). */
-export const MEET_NAMED_WEIGHT = 0.9
+/**
+ * Weight of a name-only Meet match. Display names are self-chosen (anyone can
+ * join as "Dana"), so a name never confirms — it only suggests.
+ */
+export const MEET_NAME_ONLY_WEIGHT = 0.6
 
-function participantKeys(participant: MeetingParticipant): string[] {
-  const keys = [normalizeName(participant.name)]
+function sameEmail(a?: string, b?: string) {
+  return Boolean(a && b && a.trim().toLowerCase() === b.trim().toLowerCase())
+}
 
-  if (participant.email) {
-    keys.push(normalizeName(participant.email), normalizeName(participant.email.split("@")[0]))
-  }
-  return keys.filter(Boolean)
+function nameMatches(participant: MeetingParticipant, key: string): boolean {
+  return normalizeName(participant.name) === key
 }
 
 /**
- * Mapping updates for speakers of an imported Meet transcript (labels are
- * real display names): a label matching one participant's name/email →
- * confirmed with that participant; otherwise suggested by name. Speakers that
- * are already confirmed/rejected, generic labels and ambiguous names are left
- * alone.
+ * Mapping updates for speakers of an imported Meet transcript. Security model
+ * (Meet display names are attacker-controlled):
+ * - confirmed + participant only when the label's Meet participant is a
+ *   signed-in user whose Google identity resolved to a verified email equal
+ *   to exactly one meeting participant's email;
+ * - everything else (anonymous, phone, unresolved signed-in users, unknown
+ *   identity) is at most `suggested` (meet_alignment, weight 0.6), pointing
+ *   at a participant only when the name matches exactly one;
+ * - never touches speaker profiles (only an explicit user confirmation does).
+ * Already confirmed/rejected speakers and generic labels are left alone.
  */
 export function planMeetSpeakerMappings(
   speakers: readonly MeetingSpeaker[],
   participants: readonly MeetingParticipant[],
-  now: Date = new Date()
+  options: { identities?: readonly MeetSpeakerIdentity[]; now?: Date } = {}
 ): SpeakerSuggestionUpdate[] {
-  const computedAt = now.toISOString()
+  const computedAt = (options.now ?? new Date()).toISOString()
+  const identities = new Map((options.identities ?? []).map((identity) => [identity.label, identity]))
   const realParticipants = participants.filter(
     (participant) =>
       !participant.id.startsWith("derived_") && !isGenericSpeakerName(participant.name)
@@ -40,13 +53,19 @@ export function planMeetSpeakerMappings(
     if (speaker.mappingStatus === "confirmed" || speaker.mappingStatus === "rejected") return []
     if (isGenericSpeakerName(speaker.label)) return []
 
-    const key = normalizeName(speaker.label)
-    const matches = realParticipants.filter((participant) =>
-      participantKeys(participant).includes(key)
-    )
+    const name = sanitizeDisplayName(speaker.label)
 
-    if (matches.length === 1) {
-      const [participant] = matches
+    if (!name) return []
+
+    const identity = identities.get(speaker.label)
+    const verifiedEmail =
+      identity?.kind === "signedin" && identity.userId ? identity.verifiedEmail : undefined
+    const emailMatches = verifiedEmail
+      ? realParticipants.filter((participant) => sameEmail(participant.email, verifiedEmail))
+      : []
+
+    if (emailMatches.length === 1) {
+      const [participant] = emailMatches
 
       return [
         {
@@ -55,13 +74,13 @@ export function planMeetSpeakerMappings(
           mappingStatus: "confirmed",
           suggestion: {
             participantId: participant.id,
-            name: participant.name,
+            name: sanitizeDisplayName(participant.name) ?? name,
             email: participant.email,
             score: 1,
             reasons: [
               {
                 kind: "meet_alignment",
-                detail: "Named by the Google Meet transcript",
+                detail: "Signed-in Google Meet participant with a verified matching email",
                 weight: 1,
               },
             ],
@@ -71,18 +90,25 @@ export function planMeetSpeakerMappings(
       ]
     }
 
+    const key = normalizeName(name)
+    const nameMatched = realParticipants.filter((participant) => nameMatches(participant, key))
+    const participant = nameMatched.length === 1 ? nameMatched[0] : undefined
+
     return [
       {
         speakerId: speaker.id,
         mappingStatus: "suggested",
         suggestion: {
-          name: speaker.label,
-          score: MEET_NAMED_WEIGHT,
+          ...(participant
+            ? { participantId: participant.id, email: participant.email }
+            : {}),
+          name: participant ? (sanitizeDisplayName(participant.name) ?? name) : name,
+          score: MEET_NAME_ONLY_WEIGHT,
           reasons: [
             {
               kind: "meet_alignment",
-              detail: "Named by the Google Meet transcript",
-              weight: MEET_NAMED_WEIGHT,
+              detail: "Display name from the Google Meet transcript (not verified)",
+              weight: MEET_NAME_ONLY_WEIGHT,
             },
           ],
           computedAt,
