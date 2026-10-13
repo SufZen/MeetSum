@@ -144,6 +144,26 @@ describe("retrievePassages", () => {
     expect(hybrid.lexicalHits).toBe(1)
   })
 
+  it("ignores Hebrew and English function words when counting lexical hits (refusal gate)", async () => {
+    const chatter = chunk("c1", "m1", ["s1"], { text: "מה אמרנו על זה בפגישה", textNorm: "מה אמרנו על זה בפגישה" })
+    const run = (question: string, chunks = [chatter]) =>
+      retrievePassages(ctx, { question, scope: { kind: "workspace" } }, { engine: engine(chunks).fake, env: {} })
+
+    // Only scaffolding words matched: no lexical hit, so the gate refuses without an LLM call.
+    expect((await run("מה אמרנו על זה בפגישה?")).lexicalHits).toBe(0)
+    expect((await run("What did we say about this in the meeting?", [
+      chunk("e1", "m1", ["s1"], { text: "what did we say about this", textNorm: "what did we say about this" }),
+    ])).lexicalHits).toBe(0)
+
+    // A content word in the chunk still counts (prefixed forms through variants).
+    const budget = chunk("c2", "m1", ["s2"], { text: "התקציב אושר", textNorm: "התקציב אושר" })
+
+    expect((await run("מה אמרנו על התקציב?", [budget])).lexicalHits).toBe(1)
+    expect((await run("What did we say about Supabase?", [
+      chunk("e2", "m1", ["s1"], { text: "we moved to supabase", textNorm: "we moved to supabase" }),
+    ])).lexicalHits).toBe(1)
+  })
+
   it("passes the caller signal to the query embedding", async () => {
     const { fake } = engine([chunk("c1", "m1", ["s1"])], { vector: true })
     const queryVector = vi.fn(async () => [1])
