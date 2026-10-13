@@ -4,7 +4,7 @@ import { withAuthz } from "@/lib/auth/authz"
 import { apiError, auditActor, limitFor, readJsonBody } from "@/lib/integrations/core/api"
 import { auditIntegration } from "@/lib/integrations/core/audit"
 import { loadConnectionFor } from "@/lib/integrations/core/connection-access"
-import { disconnectConnection, mergeConfig, toConnectionDTO, validateConfigPatch } from "@/lib/integrations/core/connections"
+import { disconnectConnection, patchConnectionConfig, toConnectionDTO, validateConfigPatch } from "@/lib/integrations/core/connections"
 import { getIntegrationStore } from "@/lib/integrations/core/store"
 
 /**
@@ -30,7 +30,8 @@ export const PATCH = withAuthz<{ id: string }>("integrations:connect", async (re
 
   if (!patch.ok) return apiError(patch.error, 400)
 
-  const updated = await store.updateConnection(ctx.workspace.id, id, { config: mergeConfig(access.connection.config, patch.config) })
+  // Merged under the row lock into the current config (never the copy read above).
+  const updated = await patchConnectionConfig(store, ctx.workspace.id, id, patch.config)
 
   if (!updated) return apiError("not_found", 404)
 

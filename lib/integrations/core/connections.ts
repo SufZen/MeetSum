@@ -187,6 +187,26 @@ export function mergeConfig(current: Record<string, unknown>, patch: Record<stri
   return next
 }
 
+/**
+ * Applies a validated config patch under the row lock, merging into the
+ * config as it is NOW (not as the caller read it earlier). An unlocked
+ * read-modify-write lost keys written in between: a concurrent PATCH (e.g.
+ * the default destination and the manual-send switch saved together), the
+ * Outlook sync's `lastSync` (wiring `mergeConfig`) or a reconnect.
+ */
+export async function patchConnectionConfig(
+  store: IntegrationStore,
+  workspaceId: string,
+  id: string,
+  patch: Record<string, unknown>
+): Promise<StoredConnection | undefined> {
+  return store.withConnectionLock(workspaceId, id, async (current, update) => {
+    if (!current || current.status === "revoked") return undefined
+
+    return update({ config: mergeConfig(current.config, patch) })
+  })
+}
+
 /** What providers receive for tests, pickers and destination checks. */
 export function providerCtx(row: StoredConnection, store?: IntegrationStore): ProviderCtx {
   return {

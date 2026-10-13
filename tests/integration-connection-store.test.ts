@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
   disconnectConnection,
+  patchConnectionConfig,
   toConnectionDTO,
   upsertConnectionFromOAuth,
   validateConfigPatch,
@@ -141,6 +142,33 @@ describe("connection store and tokens", () => {
         store
       )
     ).toEqual({ ok: false, reason: "cap" })
+  })
+
+  it("merges a config PATCH into the current row, not a stale read (no lost keys)", async () => {
+    const created = await upsertConnectionFromOAuth(
+      { workspaceId: "ws_a", provider: "notion", actorUserId: "u", exchange: exchange({ config: { botId: "bot_1" } }) },
+      store
+    )
+
+    if (!created.ok) throw new Error("setup")
+    const stale = created.connection
+
+    // Written after the route's access check read the row (another PATCH, a sync, a reconnect).
+    await store.withConnectionLock("ws_a", stale.id, async (row, update) => update({ config: { ...row!.config, allowManualSend: false } }))
+
+    const [a, b] = await Promise.all([
+      patchConnectionConfig(store, "ws_a", stale.id, { defaultDatabaseId: "db_1", defaultDatabaseTitle: "פגישות" }),
+      patchConnectionConfig(store, "ws_a", stale.id, { defaultDatabaseTitle: "פגישות" }),
+    ])
+
+    expect(a && b).toBeTruthy()
+    expect((await store.getConnection("ws_a", stale.id))?.config).toEqual({
+      botId: "bot_1",
+      allowManualSend: false,
+      defaultDatabaseId: "db_1",
+      defaultDatabaseTitle: "פגישות",
+    })
+    expect(await patchConnectionConfig(store, "ws_b", stale.id, { defaultDatabaseId: "x" })).toBeUndefined()
   })
 
   it("accepts only the per-provider config allowlist", () => {
