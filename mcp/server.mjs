@@ -10,9 +10,13 @@ import { z } from "zod"
  * act on exactly one workspace and only see meetings visible there
  * (workspace/link meetings plus private meetings owned by the key creator).
  * Scopes (admin ⊃ write ⊃ read):
- *   read  — search_meetings, get_meeting_summary, get_transcript_segments,
- *           ask_meeting_memory, list_action_items, create_followup_draft
- *           (a read key is enough for the read tools)
+ *   read  — search_meetings, get_meeting, get_meeting_summary,
+ *           get_transcript_segments, ask_meeting_memory, list_action_items,
+ *           create_followup_draft (a read key is enough for the read tools)
+ *
+ * M4: the meeting list is lightweight (no transcript/summary) and the meeting
+ * detail omits the transcript unless `?include=transcript`; segments come
+ * from `/api/meetings/:id/transcript`.
  *   write — send_context_to_realizeos
  */
 const appUrl = process.env.MEETINGS_APP_URL ?? "http://127.0.0.1:3000"
@@ -97,6 +101,30 @@ server.registerTool(
   },
 )
 
+/** Segment without word timings (compact tool output). */
+function segmentText({ words, ...segment }) {
+  void words
+  return segment
+}
+
+server.registerTool(
+  "get_meeting",
+  {
+    title: "Get meeting",
+    description: "Fetch one meeting with its summary and transcript segments.",
+    inputSchema: { meetingId: z.string() },
+  },
+  async ({ meetingId }) => {
+    const { meeting } = await request(
+      `/api/meetings/${encodeURIComponent(meetingId)}?include=transcript`,
+    )
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(meeting, null, 2) }],
+    }
+  },
+)
+
 server.registerTool(
   "get_meeting_summary",
   {
@@ -105,7 +133,7 @@ server.registerTool(
     inputSchema: { meetingId: z.string() },
   },
   async ({ meetingId }) => {
-    const { meeting } = await request(`/api/meetings/${meetingId}`)
+    const { meeting } = await request(`/api/meetings/${encodeURIComponent(meetingId)}`)
 
     return {
       content: [
@@ -123,11 +151,16 @@ server.registerTool(
     inputSchema: { meetingId: z.string() },
   },
   async ({ meetingId }) => {
-    const { meeting } = await request(`/api/meetings/${meetingId}`)
+    const { segments } = await request(
+      `/api/meetings/${encodeURIComponent(meetingId)}/transcript`,
+    )
 
     return {
       content: [
-        { type: "text", text: JSON.stringify(meeting.transcript ?? [], null, 2) },
+        {
+          type: "text",
+          text: JSON.stringify((segments ?? []).map(segmentText), null, 2),
+        },
       ],
     }
   },
@@ -162,7 +195,17 @@ server.registerTool(
   },
   async () => {
     const { meetings } = await request("/api/meetings")
-    const actionItems = meetings.flatMap((meeting) =>
+    // List items carry only `actionItemCount`; the items come from the detail.
+    const details = await Promise.all(
+      meetings
+        .filter((meeting) => (meeting.actionItemCount ?? 0) > 0)
+        .map((meeting) =>
+          request(`/api/meetings/${encodeURIComponent(meeting.id)}`).then(
+            (body) => body.meeting,
+          ),
+        ),
+    )
+    const actionItems = details.flatMap((meeting) =>
       (meeting.summary?.actionItems ?? []).map((item) => ({
         ...item,
         meetingId: meeting.id,
@@ -184,7 +227,7 @@ server.registerTool(
     inputSchema: { meetingId: z.string() },
   },
   async ({ meetingId }) => {
-    const { meeting } = await request(`/api/meetings/${meetingId}`)
+    const { meeting } = await request(`/api/meetings/${encodeURIComponent(meetingId)}`)
     const draft = {
       subject: `Follow-up: ${meeting.title}`,
       body: [

@@ -9,10 +9,10 @@ import {
   useState,
   useTransition,
 } from "react"
+import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { AdminPanel } from "@/components/admin/admin-panel"
 import {
   DriveRecordingPickerDrawer,
   type DriveImportResult,
@@ -28,17 +28,23 @@ import {
   type MeetingSortMode,
 } from "@/components/meeting-inbox-panel"
 import { MeetingRightRail } from "@/components/meeting-right-rail"
-import { MeetingWorkspace } from "@/components/meeting-workspace"
+import { MeetingWorkspace, type MeetingPermissions } from "@/components/meeting-workspace"
 import { localizeSpeakerLabel } from "@/components/speaker-display"
-import { OperationalPage } from "@/components/operational-pages"
+import { TalkTimePanel } from "@/components/talk-time-panel"
+import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   TopCommandBar,
   type AiProviderStatus,
   type SyncTarget,
 } from "@/components/top-command-bar"
 import type { WorkspaceStatusView } from "@/components/workspace-sync-panel"
+import {
+  SLOW_STATUS_POLL_MS,
+  nextPollDelay,
+} from "@/lib/client/polling"
 import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
@@ -46,17 +52,69 @@ import { selectRecentRooms } from "@/lib/rooms"
 import type {
   ActionItem,
   JobRecord,
+  MeetingAnswer,
+  MeetingListItem,
   MeetingParticipant,
   MeetingRecord,
   MeetingVisibility,
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
+import type { MeetingDetailResponse } from "@/lib/meetings/transcript-wire"
+import { parseTimeParam } from "@/lib/player/deep-link"
+
+// Secondary panels load on demand so the meetings view stays light.
+const panelLoading = () => (
+  <div aria-busy="true" className="min-h-[calc(100svh-3.5rem)] animate-pulse bg-surface-2" />
+)
+const AdminPanel = dynamic(
+  () => import("@/components/admin/admin-panel").then((mod) => mod.AdminPanel),
+  { loading: panelLoading }
+)
+const OperationalPage = dynamic(
+  () => import("@/components/operational-pages").then((mod) => mod.OperationalPage),
+  { loading: panelLoading }
+)
 
 type MeetingPageState = {
   limit: number
   offset: number
   total: number
   hasMore: boolean
+}
+
+type DetailEntry = { meeting: MeetingRecord; permissions: MeetingPermissions }
+
+const DETAIL_CACHE_SIZE = 10
+const NO_PERMISSIONS: MeetingPermissions = { canWrite: false, canManage: false }
+const IDLE_MEETING_STATUSES = new Set(["completed", "failed", "scheduled", "created"])
+
+/** Inbox fields of a full record (keeps list-only counters it lacks). */
+function listItemFromRecord(record: MeetingRecord, previous?: MeetingListItem): MeetingListItem {
+  const {
+    transcript,
+    intelligence: _intelligence,
+    aiRuns: _aiRuns,
+    suggestedAgentRuns: _suggestedAgentRuns,
+    meetConferenceRecords: _meetConferenceRecords,
+    speakers: _speakers,
+    summary,
+    ...rest
+  } = record
+
+  void [_intelligence, _aiRuns, _suggestedAgentRuns, _meetConferenceRecords, _speakers]
+
+  return {
+    ...previous,
+    ...rest,
+    transcriptSegmentCount:
+      record.transcriptSegmentCount ?? transcript?.length ?? previous?.transcriptSegmentCount ?? 0,
+    actionItemCount: summary?.actionItems.length ?? previous?.actionItemCount ?? 0,
+    hasMedia: (record.mediaAssets?.length ?? 0) > 0 || Boolean(previous?.hasMedia),
+  }
+}
+
+function isActiveJob(job: JobRecord) {
+  return job.status === "queued" || job.status === "active"
 }
 
 function hasImportableMeetArtifacts(meeting: MeetingRecord | null) {
@@ -78,7 +136,7 @@ export function CommandCenterShell({
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
-  meetings: MeetingRecord[]
+  meetings: MeetingListItem[]
   rooms: SidebarRoom[]
   user?: SidebarUser
 }) {
@@ -102,6 +160,12 @@ export function CommandCenterShell({
   const [activePanel, setActivePanel] = useState<MainPanelKey>("meetings")
   const [askQuestion, setAskQuestion] = useState(dictionary.askDefaultQuestion)
   const [askAnswer, setAskAnswer] = useState("")
+  const [askCitations, setAskCitations] = useState<MeetingAnswer["citations"]>([])
+  const [detail, setDetail] = useState<DetailEntry | null>(null)
+  const detailCacheRef = useRef(new Map<string, DetailEntry>())
+  const detailAbortRef = useRef<AbortController | null>(null)
+  const [deepLinkTime, setDeepLinkTime] = useState<{ meetingId: string; ms: number } | null>(null)
+  const [shareSections, setShareSections] = useState<string[] | null>(null)
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [providers, setProviders] = useState<ProviderStatusView[]>([])
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatusView>()
@@ -125,11 +189,33 @@ export function CommandCenterShell({
   // A ?meeting= deep link (e.g. from a room page) may point outside the
   // current page of meetings; fetch it once and keep it pinned in the list
   // until the user selects a different meeting.
-  const deepLinkedMeetingRef = useRef<MeetingRecord | null>(null)
+  const deepLinkedMeetingRef = useRef<MeetingListItem | null>(null)
   const deepLinkAttemptRef = useRef<string | null>(null)
+  const deepLinkTimeReadRef = useRef(false)
+
+  /** LRU of meeting details (most recent last). */
+  const rememberDetail = useCallback((entry: DetailEntry) => {
+    const cache = detailCacheRef.current
+
+    cache.delete(entry.meeting.id)
+    cache.set(entry.meeting.id, entry)
+    while (cache.size > DETAIL_CACHE_SIZE) cache.delete(cache.keys().next().value as string)
+    setDetail((current) =>
+      !current || current.meeting.id === entry.meeting.id ? entry : current
+    )
+  }, [])
 
   useEffect(() => {
-    const meetingId = new URLSearchParams(window.location.search).get("meeting")
+    const params = new URLSearchParams(window.location.search)
+    const meetingId = params.get("meeting")
+
+    if (!deepLinkTimeReadRef.current) {
+      deepLinkTimeReadRef.current = true
+
+      const ms = parseTimeParam(params.get("t"))
+
+      if (meetingId && ms !== undefined) queueMicrotask(() => setDeepLinkTime({ meetingId, ms }))
+    }
 
     if (!meetingId) return
     if (meetingRecords.some((meeting) => meeting.id === meetingId)) {
@@ -141,11 +227,14 @@ export function CommandCenterShell({
     deepLinkAttemptRef.current = meetingId
     void fetch(`/api/meetings/${encodeURIComponent(meetingId)}`)
       .then((response) => (response.ok ? response.json() : undefined))
-      .then((body: { meeting?: MeetingRecord } | undefined) => {
-        const linked = body?.meeting
+      .then((body: Partial<MeetingDetailResponse> | undefined) => {
+        const record = body?.meeting
 
-        if (!linked) return
+        if (!record) return
 
+        const linked = listItemFromRecord(record)
+
+        rememberDetail({ meeting: record, permissions: body?.permissions ?? NO_PERMISSIONS })
         deepLinkedMeetingRef.current = linked
         setMeetingRecords((current) =>
           current.some((meeting) => meeting.id === linked.id)
@@ -155,43 +244,110 @@ export function CommandCenterShell({
         setSelectedMeetingId(linked.id)
       })
       .catch(() => undefined)
-  }, [meetingRecords])
+  }, [meetingRecords, rememberDetail])
 
-  async function refreshOperationalState() {
-    const [providersResponse, workspaceResponse, jobsResponse] =
-      await Promise.all([
-        fetch("/api/ai/providers/status"),
-        fetch("/api/workspace/status"),
-        fetch("/api/jobs"),
-      ])
+  // Jobs drive the adaptive poll; completions refresh the list and detail.
+  const jobsSeenRef = useRef(new Map<string, JobRecord["status"]>())
+  const onJobsFinishedRef = useRef<(meetingIds: Set<string>) => void>(() => undefined)
 
-    if (providersResponse.ok) {
+  const refreshJobs = useCallback(async () => {
+    const response = await fetch("/api/jobs").catch(() => undefined)
+
+    if (!response?.ok) return
+
+    const body = await response.json()
+    const nextJobs: JobRecord[] = body.jobs ?? []
+    const seen = jobsSeenRef.current
+    const finished = new Set<string>()
+
+    for (const job of nextJobs) {
+      const before = seen.get(job.id)
+
+      if (
+        job.meetingId &&
+        (before === "queued" || before === "active") &&
+        (job.status === "completed" || job.status === "failed")
+      ) {
+        finished.add(job.meetingId)
+      }
+      seen.set(job.id, job.status)
+    }
+
+    setJobs(nextJobs)
+    if (finished.size) onJobsFinishedRef.current(finished)
+  }, [])
+
+  const refreshStatus = useCallback(async () => {
+    const [providersResponse, workspaceResponse] = await Promise.all([
+      fetch("/api/ai/providers/status").catch(() => undefined),
+      fetch("/api/workspace/status").catch(() => undefined),
+    ])
+
+    if (providersResponse?.ok) {
       const body = await providersResponse.json()
       setProviders(body.providers ?? [])
     }
-    if (workspaceResponse.ok) {
+    if (workspaceResponse?.ok) {
       const body = await workspaceResponse.json()
       setWorkspaceStatus(body.workspace)
     }
-    if (jobsResponse.ok) {
-      const body = await jobsResponse.json()
-      setJobs(body.jobs ?? [])
-    }
+  }, [])
+
+  async function refreshOperationalState() {
+    await Promise.all([refreshJobs(), refreshStatus()])
   }
 
+  // Providers and workspace status: on mount and every 5 minutes.
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void refreshOperationalState()
-    }, 0)
-    const intervalId = window.setInterval(() => {
-      void refreshOperationalState()
-    }, 8000)
+    const timeoutId = window.setTimeout(() => void refreshStatus(), 0)
+    const intervalId = window.setInterval(() => void refreshStatus(), SLOW_STATUS_POLL_MS)
 
     return () => {
       window.clearTimeout(timeoutId)
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [refreshStatus])
+
+  // Jobs: 5 s while anything processes, 60 s idle, paused while hidden.
+  const pollInputsRef = useRef({ activeJobs: 0, selectedProcessing: false })
+  const kickPollRef = useRef<() => void>(() => undefined)
+
+  useEffect(() => {
+    let timeoutId: number | undefined
+    let cancelled = false
+
+    const schedule = () => {
+      window.clearTimeout(timeoutId)
+      if (cancelled) return
+
+      const delay = nextPollDelay({
+        ...pollInputsRef.current,
+        hidden: document.visibilityState === "hidden",
+      })
+
+      if (delay === null) return
+      timeoutId = window.setTimeout(() => {
+        void refreshJobs().finally(schedule)
+      }, delay)
+    }
+    const onVisibility = () => {
+      window.clearTimeout(timeoutId)
+      if (document.visibilityState === "visible") void refreshJobs().finally(schedule)
+    }
+
+    kickPollRef.current = () => {
+      window.clearTimeout(timeoutId)
+      schedule()
+    }
+    timeoutId = window.setTimeout(() => void refreshJobs().finally(schedule), 0)
+    document.addEventListener("visibilitychange", onVisibility)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [refreshJobs])
 
   useEffect(() => {
     const saved = window.localStorage.getItem("meetsum_theme")
@@ -221,10 +377,81 @@ export function CommandCenterShell({
       }
     : undefined
 
-  const selectedMeeting =
+  const selectedListItem =
     meetingRecords.find((meeting) => meeting.id === selectedMeetingId) ??
     meetingRecords[0] ??
     null
+  // The full record comes from `/api/meetings/[id]`; until it arrives the
+  // list row (a subset of the record) renders the header.
+  const selectedDetail =
+    detail && selectedListItem && detail.meeting.id === selectedListItem.id ? detail : null
+  const selectedMeeting: MeetingRecord | null = selectedDetail?.meeting ?? selectedListItem
+  const selectedPermissions = selectedDetail?.permissions ?? NO_PERMISSIONS
+  const selectedId = selectedListItem?.id
+  const transcript = useMeetingTranscript(selectedDetail ? selectedId : undefined, {
+    version: selectedDetail?.meeting.transcriptVersion,
+  })
+
+  const loadDetail = useCallback(
+    async (meetingId: string) => {
+      detailAbortRef.current?.abort()
+
+      const controller = new AbortController()
+
+      detailAbortRef.current = controller
+
+      try {
+        const response = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}`, {
+          signal: controller.signal,
+        })
+        const body = (await response.json().catch(() => ({}))) as Partial<MeetingDetailResponse> & {
+          error?: string
+        }
+
+        if (!response.ok || !body.meeting) throw new Error(body.error ?? "Unable to refresh meeting")
+
+        const entry: DetailEntry = { meeting: body.meeting, permissions: body.permissions ?? NO_PERMISSIONS }
+
+        rememberDetail(entry)
+        setMeetingRecords((current) =>
+          current.map((meeting) =>
+            meeting.id === meetingId ? listItemFromRecord(entry.meeting, meeting) : meeting
+          )
+        )
+
+        return entry
+      } catch (error) {
+        if (controller.signal.aborted) return undefined
+        throw error
+      }
+    },
+    [rememberDetail]
+  )
+
+  // Selecting a meeting shows its cached detail at once and revalidates.
+  useEffect(() => {
+    if (!selectedId) return
+
+    const cached = detailCacheRef.current.get(selectedId)
+
+    queueMicrotask(() => {
+      setDetail(cached ?? null)
+      void loadDetail(selectedId).catch(() => undefined)
+    })
+  }, [loadDetail, selectedId])
+
+  // Keep the adaptive poll's inputs current; wake it when work starts.
+  const activeJobCount = jobs.filter(isActiveJob).length
+  const selectedProcessing = Boolean(
+    selectedMeeting && !IDLE_MEETING_STATUSES.has(selectedMeeting.status)
+  )
+
+  useEffect(() => {
+    const wasBusy = pollInputsRef.current.activeJobs > 0 || pollInputsRef.current.selectedProcessing
+
+    pollInputsRef.current = { activeJobs: activeJobCount, selectedProcessing }
+    if (!wasBusy && (activeJobCount > 0 || selectedProcessing)) kickPollRef.current()
+  }, [activeJobCount, selectedProcessing])
 
   const selectMeeting = useCallback((meetingId: string) => {
     if (deepLinkedMeetingRef.current?.id !== meetingId) {
@@ -235,13 +462,28 @@ export function CommandCenterShell({
     const params = new URLSearchParams(window.location.search)
 
     params.set("meeting", meetingId)
+    params.delete("t")
     router.replace(`?${params.toString()}`, { scroll: false })
   }, [router])
+
+  // Answers and their citations belong to one meeting's transcript.
+  useEffect(() => {
+    queueMicrotask(() => {
+      setAskAnswer("")
+      setAskCitations([])
+    })
+  }, [selectedMeetingId])
 
   async function refreshMeeting(meetingId = selectedMeeting?.id) {
     if (!meetingId) return
 
-    const response = await fetch(`/api/meetings/${meetingId}`)
+    detailCacheRef.current.delete(meetingId)
+    if (meetingId === selectedId) {
+      await loadDetail(meetingId)
+      return
+    }
+
+    const response = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}`)
     const body = await response.json()
 
     if (!response.ok) {
@@ -249,7 +491,19 @@ export function CommandCenterShell({
     }
 
     setMeetingRecords((current) =>
-      current.map((meeting) => (meeting.id === meetingId ? body.meeting : meeting))
+      current.map((meeting) =>
+        meeting.id === meetingId ? listItemFromRecord(body.meeting, meeting) : meeting
+      )
+    )
+  }
+
+  /** A full record came back from a mutation (favorite, tags, rename). */
+  function upsertMeetingRecord(record: MeetingRecord) {
+    const cached = detailCacheRef.current.get(record.id)
+
+    if (cached) rememberDetail({ ...cached, meeting: { ...cached.meeting, ...record } })
+    setMeetingRecords((current) =>
+      current.map((meeting) => (meeting.id === record.id ? listItemFromRecord(record, meeting) : meeting))
     )
   }
 
@@ -274,7 +528,8 @@ export function CommandCenterShell({
     }
 
     const meetingsBody = await meetingsResponse.json()
-    const nextMeetings: MeetingRecord[] = meetingsBody.meetings ?? []
+    const listItems: MeetingListItem[] = meetingsBody.meetings ?? []
+    const nextMeetings = listItems
     const pinned = deepLinkedMeetingRef.current
     const keepPinned = Boolean(
       pinned && !nextMeetings.some((meeting) => meeting.id === pinned.id)
@@ -299,7 +554,7 @@ export function CommandCenterShell({
     } else if (
       nextMeetings.length &&
       !(keepPinned && pinned?.id === selectedMeetingId) &&
-      !nextMeetings.some((meeting: MeetingRecord) => meeting.id === selectedMeetingId)
+      !nextMeetings.some((meeting) => meeting.id === selectedMeetingId)
     ) {
       setSelectedMeetingId(nextMeetings[0].id)
     }
@@ -322,6 +577,19 @@ export function CommandCenterShell({
     return () => window.clearTimeout(timeoutId)
   }, [refreshMeetings, query])
 
+  // Job completed/failed for meeting X: refresh the list; if X is selected,
+  // refetch its detail and transcript (the ETag makes an unchanged one a 304).
+  useEffect(() => {
+    onJobsFinishedRef.current = (meetingIds) => {
+      void refreshMeetings()
+      if (selectedId && meetingIds.has(selectedId)) {
+        detailCacheRef.current.delete(selectedId)
+        void loadDetail(selectedId).catch(() => undefined)
+        transcript.refetch()
+      }
+    }
+  })
+
   async function createMeetingForFile(file: File) {
     const response = await fetch("/api/meetings", {
       method: "POST",
@@ -340,7 +608,9 @@ export function CommandCenterShell({
       throw new Error(body.error ?? "Unable to create meeting")
     }
 
-    setMeetingRecords((current) => [body.meeting, ...current].slice(0, pageSize))
+    setMeetingRecords((current) =>
+      [listItemFromRecord(body.meeting as MeetingRecord), ...current].slice(0, pageSize)
+    )
     setSelectedMeetingId(body.meeting.id)
     setActivePanel("meetings")
     return body.meeting as MeetingRecord
@@ -403,7 +673,9 @@ export function CommandCenterShell({
     }
 
     if (body.meeting) {
-      setMeetingRecords((current) => [body.meeting, ...current].slice(0, pageSize))
+      setMeetingRecords((current) =>
+        [listItemFromRecord(body.meeting as MeetingRecord), ...current].slice(0, pageSize)
+      )
       setSelectedMeetingId(body.meeting.id)
       setActivePanel("meetings")
     }
@@ -454,6 +726,7 @@ export function CommandCenterShell({
     if (!selectedMeeting) return
 
     setAskAnswer("")
+    setAskCitations([])
     const response = await fetch(`/api/meetings/${selectedMeeting.id}/ask`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -467,6 +740,7 @@ export function CommandCenterShell({
     }
 
     setAskAnswer(body.answer.answer)
+    setAskCitations(Array.isArray(body.answer.citations) ? body.answer.citations : [])
     toast.success("Meeting answer ready")
   }
 
@@ -630,13 +904,37 @@ export function CommandCenterShell({
     }
 
     setShareLink(body.url)
+    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : null)
     setMeetingVisibility(meetingId, "link")
+  }
+
+  /** "Include recording" adds or removes the opt-in `media` share section. */
+  async function setShareIncludesRecording(include: boolean) {
+    if (!selectedMeeting || !shareSections) return
+
+    const next = include
+      ? [...shareSections.filter((section) => section !== "media"), "media"]
+      : shareSections.filter((section) => section !== "media")
+    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ includedSections: next }),
+    })
+    const body = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      toast.error(body.error ?? "Unable to update share link")
+      return
+    }
+
+    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : next)
   }
 
   async function openShareDialog() {
     if (!selectedMeeting) return
 
     setShareLink("")
+    setShareSections(null)
     setShareOpen(true)
 
     // A public link widens a private meeting to the workspace: confirm first.
@@ -701,11 +999,7 @@ export function CommandCenterShell({
       return
     }
 
-    setMeetingRecords((current) =>
-      current.map((meeting) =>
-        meeting.id === selectedMeeting.id ? body.meeting : meeting
-      )
-    )
+    upsertMeetingRecord(body.meeting)
   }
 
   async function openParticipantsDialog() {
@@ -749,9 +1043,59 @@ export function CommandCenterShell({
   }
 
   async function handleSpeakersChanged() {
-    // Speaker mapping only changes speaker rows; reload the meeting so the
-    // transcript shows the resolved names.
-    await refreshMeeting(selectedMeeting?.id)
+    // Speaker mapping or a transcript edit changed speaker rows/stats; reload
+    // the detail (talk time, counts, version).
+    await refreshMeeting(selectedMeeting?.id).catch(() => undefined)
+  }
+
+  async function renameMeeting(title: string): Promise<boolean> {
+    if (!selectedMeeting) return false
+
+    const response = await fetch(`/api/meetings/${encodeURIComponent(selectedMeeting.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).catch(() => undefined)
+    const body = await response?.json().catch(() => ({}))
+
+    if (!response?.ok) {
+      toast.error(dictionary.meetingRenameFailed)
+      return false
+    }
+
+    // PATCH answers `{ meeting }`; anything else is revalidated, not guessed.
+    if (body?.meeting) upsertMeetingRecord(body.meeting)
+    else void loadDetail(selectedMeeting.id).catch(() => undefined)
+    toast.success(dictionary.meetingRenamed)
+    return true
+  }
+
+  async function deleteMeeting(): Promise<boolean> {
+    if (!selectedMeeting) return false
+
+    const meetingId = selectedMeeting.id
+    const response = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}`, {
+      method: "DELETE",
+    }).catch(() => undefined)
+
+    if (!response?.ok) {
+      toast.error(dictionary.meetingDeleteFailed)
+      return false
+    }
+
+    const position = meetingRecords.findIndex((meeting) => meeting.id === meetingId)
+    const remaining = meetingRecords.filter((meeting) => meeting.id !== meetingId)
+    const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
+
+    detailCacheRef.current.delete(meetingId)
+    if (deepLinkedMeetingRef.current?.id === meetingId) deepLinkedMeetingRef.current = null
+    setMeetingRecords(remaining)
+    setMeetingPage((page) => ({ ...page, total: Math.max(0, page.total - 1) }))
+    if (next) selectMeeting(next.id)
+    else setSelectedMeetingId("")
+    toast.success(dictionary.meetingDeleted)
+    void refreshMeetings(next?.id)
+    return true
   }
 
   function openTagsDialog() {
@@ -781,11 +1125,7 @@ export function CommandCenterShell({
       return
     }
 
-    setMeetingRecords((current) =>
-      current.map((meeting) =>
-        meeting.id === selectedMeeting.id ? body.meeting : meeting
-      )
-    )
+    upsertMeetingRecord(body.meeting)
     setTagsOpen(false)
     toast.success("Tags updated")
   }
@@ -1019,7 +1359,7 @@ export function CommandCenterShell({
 
           if (response.ok && body.meeting) {
             setMeetingRecords((current) => [
-              body.meeting,
+              listItemFromRecord(body.meeting as MeetingRecord),
               ...current.filter((meeting) => meeting.id !== targetMeetingId),
             ])
           }
@@ -1051,8 +1391,14 @@ export function CommandCenterShell({
     })
   }
 
+  // lg–2xl has two columns, so the rail wraps to a second row: keep the first
+  // row a full viewport tall (inbox + meeting) and scroll down to the rail,
+  // instead of letting the implicit row halve the meeting column.
+  const defaultMeetingsViewClass =
+    "grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:grid-cols-[330px_minmax(0,1fr)] lg:grid-rows-[100%] lg:auto-rows-max lg:overflow-y-auto ms-scrollbar 2xl:grid-cols-[330px_minmax(0,1fr)_270px] 2xl:overflow-hidden"
+
   const defaultMeetingsView = (
-    <div className="grid min-h-[calc(100svh-3.5rem)] grid-cols-1 bg-surface-2 lg:h-[calc(100svh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_270px]">
+    <div className={defaultMeetingsViewClass}>
       <MeetingInboxPanel
         dictionary={dictionary}
         locale={locale}
@@ -1093,7 +1439,15 @@ export function CommandCenterShell({
         jobs={jobs}
         question={askQuestion}
         answer={askAnswer}
+        askCitations={askCitations}
         asking={isPending}
+        transcript={transcript}
+        permissions={selectedPermissions}
+        initialMs={
+          deepLinkTime && deepLinkTime.meetingId === selectedMeeting?.id ? deepLinkTime.ms : undefined
+        }
+        onRename={renameMeeting}
+        onDelete={deleteMeeting}
         onQuestionChange={setAskQuestion}
         onAsk={askMeeting}
         onToggleActionItem={toggleActionItem}
@@ -1127,6 +1481,20 @@ export function CommandCenterShell({
         onProcessMeeting={processMeeting}
         onSuggestAgents={suggestAgents}
         onApproveAgentRun={approveAgentRun}
+        talkTime={
+          selectedMeeting &&
+          (transcript.data?.speakers ?? selectedMeeting.speakers ?? []).some(
+            (speaker) => speaker.talkTimeMs > 0
+          ) ? (
+            <TalkTimePanel
+              dictionary={dictionary}
+              locale={locale}
+              speakers={transcript.data?.speakers ?? selectedMeeting.speakers ?? []}
+              participants={selectedMeeting.participantDetails ?? []}
+              segments={transcript.data?.segments ?? []}
+            />
+          ) : undefined
+        }
       />
     </div>
   )
@@ -1179,7 +1547,8 @@ export function CommandCenterShell({
                     <h2 className="text-lg font-semibold">Share meeting</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                       Public link includes summary, decisions, action items,
-                      participants, and transcript. Audio remains private.
+                      participants, and transcript. The recording is included
+                      only when you tick it below.
                     </p>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setShareOpen(false)}>
@@ -1205,7 +1574,21 @@ export function CommandCenterShell({
                     />
                   </div>
                 )}
-                {selectedMeeting && !selectedMeeting.summary?.overview ? (
+                {!sharePrivateConfirm && selectedMeeting?.mediaAssets?.length ? (
+                  <label className="mt-3 flex items-start gap-2.5 text-sm">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={Boolean(shareSections?.includes("media"))}
+                      disabled={!shareSections}
+                      onCheckedChange={(checked) => void setShareIncludesRecording(Boolean(checked))}
+                    />
+                    <span className="grid">
+                      <span className="font-medium">{dictionary.shareIncludeRecording}</span>
+                      <span className="text-xs text-fg-3">{dictionary.shareIncludeRecordingHint}</span>
+                    </span>
+                  </label>
+                ) : null}
+                {selectedDetail && !selectedDetail.meeting.summary?.overview ? (
                   <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
                     This meeting has no generated summary yet. The public page
                     will still open, but it may only show metadata, participants,

@@ -10,6 +10,31 @@ import { jsonError } from "@/lib/api/responses"
 import { recordAuditLog } from "@/lib/audit"
 import { canManageMeeting, withAuthz } from "@/lib/auth/authz"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import {
+  InvalidShareSectionError,
+  parseShareSections,
+  type ShareSection,
+} from "@/lib/sharing/share-sections"
+
+/**
+ * `includedSections` of a share request: undefined when absent, the parsed
+ * list when valid, or an error response for an unknown section (M4: the
+ * recording, `media`, is only shared when listed explicitly).
+ */
+function requestedSections(body: { includedSections?: unknown }):
+  | { sections?: ShareSection[] }
+  | { error: Response } {
+  if (body.includedSections === undefined) return {}
+
+  try {
+    return { sections: parseShareSections(body.includedSections) }
+  } catch (error) {
+    if (error instanceof InvalidShareSectionError) {
+      return { error: jsonError(`Unknown share section: ${error.section}`, 400) }
+    }
+    throw error
+  }
+}
 
 function shareUrl(request: Request, token: string) {
   const url = new URL(request.url)
@@ -32,6 +57,9 @@ export const POST = withAuthz<{ id: string }>(
     if (!canManageMeeting(ctx, meeting)) return meetingManageForbidden()
 
     const body = await request.json().catch(() => ({}))
+    const requested = requestedSections(body ?? {})
+
+    if ("error" in requested) return requested.error
 
     try {
       const settings = await getAppSettings(ctx.workspace.id)
@@ -40,13 +68,14 @@ export const POST = withAuthz<{ id: string }>(
         return jsonError("Public sharing is disabled in Settings", 403)
       }
 
+      // Defaults never include the recording (`media` is opt-in).
       const defaultSections = [
         "summary",
         "decisions",
         settings.shareActionsByDefault ? "action_items" : undefined,
         settings.shareTranscriptByDefault ? "transcript" : undefined,
         "participants",
-      ].filter((section): section is string => Boolean(section))
+      ].filter((section): section is ShareSection => Boolean(section))
 
       const previousVisibility = meeting.visibility
 
@@ -57,9 +86,7 @@ export const POST = withAuthz<{ id: string }>(
       const share = await ctx.meetings.createMeetingShare({
         meetingId: id,
         createdBy: ctx.audit.actor,
-        includedSections: Array.isArray(body.includedSections)
-          ? body.includedSections.map(String)
-          : defaultSections,
+        includedSections: requested.sections ?? defaultSections,
       })
       await recordAuditLog({
         ...auditActor(ctx),
@@ -97,6 +124,9 @@ export const PATCH = withAuthz<{ id: string }>(
     if (!canManageMeeting(ctx, meeting)) return meetingManageForbidden()
 
     const body = await request.json().catch(() => ({}))
+    const requested = requestedSections(body ?? {})
+
+    if ("error" in requested) return requested.error
 
     try {
       const settings = await getAppSettings(ctx.workspace.id)
@@ -108,9 +138,7 @@ export const PATCH = withAuthz<{ id: string }>(
       const share = await ctx.meetings.updateMeetingShare(id, {
         revoked: typeof body.revoked === "boolean" ? body.revoked : undefined,
         regenerate: body.regenerate === true,
-        includedSections: Array.isArray(body.includedSections)
-          ? body.includedSections.map(String)
-          : undefined,
+        includedSections: requested.sections,
       })
       await recordAuditLog({
         ...auditActor(ctx),

@@ -47,9 +47,11 @@ export function GoogleContextCard({
   const artifactCountLabel = artifacts.length
     ? `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} linked`
     : "No artifacts linked"
+  // M4: the detail no longer carries the transcript, only its segment count.
+  const segmentCount = meeting?.transcriptSegmentCount ?? meeting?.transcript?.length ?? 0
   const hasProcessSource = Boolean(
       meeting?.mediaAssets?.some((asset) => asset.storageKey) ||
-      meeting?.transcript?.length ||
+      segmentCount ||
       transcripts.length ||
       smartNotes.length ||
       recordings.length
@@ -88,8 +90,8 @@ export function GoogleContextCard({
     {
       icon: FileTextIcon,
       label: "Transcript",
-      value: meeting?.transcript?.length
-        ? `${meeting.transcript.length} transcript segments in MeetSum`
+      value: segmentCount
+        ? `${segmentCount} transcript segments in MeetSum`
         : transcripts.length
           ? `${transcripts.length} transcript artifact${transcripts.length === 1 ? "" : "s"} found`
           : "No transcript artifact linked yet",
@@ -188,7 +190,7 @@ export function GoogleContextCard({
           }
         >
           {(transcripts.length || smartNotes.length || recordings.length) &&
-          !meeting?.transcript?.length &&
+          !segmentCount &&
           !meeting?.mediaAssets?.length
             ? transcripts.length
               ? "Import transcript artifact"

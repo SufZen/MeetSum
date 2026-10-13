@@ -1,7 +1,7 @@
 import { getDatabasePool } from "@/lib/db/client"
 import type { RepoScope } from "@/lib/meetings/repository"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
-import { deleteMeetingObject } from "@/lib/storage/object-storage"
+import { deleteMeetingObjects } from "@/lib/storage/object-storage"
 
 export type MediaAssetView = {
   id: string
@@ -12,6 +12,10 @@ export type MediaAssetView = {
   contentType: string
   sizeBytes: number
   retention: "audio" | "video"
+  /** M4: `original` or a derived `playback` rendition. */
+  kind: "original" | "playback"
+  derivedFromAssetId?: string
+  durationMs?: number
   createdAt: string
 }
 
@@ -24,6 +28,10 @@ type MediaAssetRow = {
   content_type: string
   size_bytes: string | number
   retention: "audio" | "video"
+  kind?: "original" | "playback" | null
+  derived_from_asset_id?: string | null
+  duration_ms?: number | null
+  peaks_storage_key?: string | null
   created_at: string | Date
 }
 
@@ -44,6 +52,11 @@ function mapMediaAsset(row: MediaAssetRow): MediaAssetView {
         ? row.size_bytes
         : Number.parseInt(row.size_bytes, 10),
     retention: row.retention,
+    kind: row.kind ?? "original",
+    ...(row.derived_from_asset_id ? { derivedFromAssetId: row.derived_from_asset_id } : {}),
+    ...(row.duration_ms !== null && row.duration_ms !== undefined
+      ? { durationMs: Number(row.duration_ms) }
+      : {}),
     createdAt: toIso(row.created_at),
   }
 }
@@ -74,7 +87,8 @@ export async function listMediaAssets(
   const result = await getDatabasePool().query(
     `
       select a.id, a.meeting_id, m.title as meeting_title, a.storage_key,
-             a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
+             a.filename, a.content_type, a.size_bytes, a.retention, a.kind,
+             a.derived_from_asset_id, a.duration_ms, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
       where a.workspace_id = $1 and ${visible}
@@ -100,7 +114,8 @@ export async function deleteMediaAsset(scope: RepoScope, id: string) {
   const result = await pool.query(
     `
       select a.id, a.meeting_id, m.title as meeting_title, a.storage_key,
-             a.filename, a.content_type, a.size_bytes, a.retention, a.created_at
+             a.filename, a.content_type, a.size_bytes, a.retention, a.kind,
+             a.derived_from_asset_id, a.duration_ms, a.peaks_storage_key, a.created_at
       from media_assets a
       join meetings m on m.id = a.meeting_id
       where a.id = $1 and a.workspace_id = $2 and ${visible}
@@ -111,11 +126,44 @@ export async function deleteMediaAsset(scope: RepoScope, id: string) {
 
   if (!row) throw new MediaAssetNotFoundError()
 
-  await deleteMeetingObject(row.storage_key)
+  // M4: derived playback renditions (rows cascade) and the peaks object go
+  // with the original. Objects first: a storage failure keeps the rows.
+  const derived = await pool.query(
+    "select storage_key from media_assets where derived_from_asset_id = $1 and workspace_id = $2",
+    [id, scope.workspaceId]
+  )
+  const keys = [
+    ...(derived.rows as Array<{ storage_key: string }>).map((item) => item.storage_key),
+    ...(row.peaks_storage_key ? [row.peaks_storage_key] : []),
+    row.storage_key,
+  ]
+  const removed = await deleteMeetingObjects(keys)
+
+  if (removed.failed.length) {
+    throw new Error(`Could not delete ${removed.failed.length} stored object(s)`)
+  }
+
   await pool.query("delete from media_assets where id = $1 and workspace_id = $2", [
     id,
     scope.workspaceId,
   ])
 
   return mapMediaAsset(row)
+}
+
+/**
+ * Deletes superseded playback rendition rows (M4 media.prepare). Postgres
+ * only; the caller deletes their objects. Originals are never touched.
+ */
+export async function deletePlaybackAssetRows(
+  workspaceId: string | undefined,
+  assetIds: string[]
+): Promise<void> {
+  if (!assetIds.length || process.env.MEETSUM_STORAGE !== "postgres") return
+  if (!workspaceId) throw new Error("workspaceId is required")
+
+  await getDatabasePool().query(
+    "delete from media_assets where id = any($1::text[]) and workspace_id = $2 and kind = 'playback'",
+    [assetIds, workspaceId]
+  )
 }

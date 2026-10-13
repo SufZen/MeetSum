@@ -149,6 +149,9 @@ create table if not exists meetings (
   owner_user_id text references users(id) on delete set null,
   visibility text not null default 'workspace'
     constraint meetings_visibility_check check (visibility in ('private','workspace','link')),
+  -- M4 (021): media duration, else max(transcript_segments.end_ms).
+  duration_ms integer,
+  transcript_version integer not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -201,7 +204,7 @@ create table if not exists meeting_favorites (
 
 create table if not exists media_assets (
   id text primary key,
-  meeting_id text not null references meetings(id),
+  meeting_id text not null references meetings(id) on delete cascade,
   storage_key text not null,
   filename text,
   content_type text not null,
@@ -212,12 +215,20 @@ create table if not exists media_assets (
   checksum_sha256 text,
   metadata jsonb not null default '{}'::jsonb,
   workspace_id text not null references workspaces(id),
+  -- M4 (021): playback renditions, peaks and preparation state.
+  kind text not null default 'original'
+    constraint media_assets_kind_check check (kind in ('original','playback')),
+  derived_from_asset_id text references media_assets(id) on delete cascade,
+  duration_ms integer,
+  peaks_storage_key text,
+  prepared_at timestamptz,
+  prepare_error text,
   created_at timestamptz not null default now()
 );
 
 create table if not exists speakers (
   id text primary key,
-  meeting_id text not null references meetings(id),
+  meeting_id text not null references meetings(id) on delete cascade,
   label text not null,
   display_name text,
   workspace_id text references workspaces(id) on delete cascade,
@@ -244,7 +255,7 @@ create table if not exists speakers (
 
 create table if not exists transcript_segments (
   id text primary key,
-  meeting_id text not null references meetings(id),
+  meeting_id text not null references meetings(id) on delete cascade,
   speaker_id text references speakers(id),
   start_ms integer not null,
   end_ms integer not null,
@@ -255,12 +266,32 @@ create table if not exists transcript_segments (
   words jsonb,
   turn_index integer,
   source text not null default 'asr',
-  asr_run_id text
+  asr_run_id text,
+  -- M4 (021): transcript editing.
+  revision integer not null default 0,
+  edited_at timestamptz,
+  edited_by_user_id text references users(id) on delete set null
+);
+
+-- M4 (021): prior states of edited segments (undo).
+create table if not exists transcript_segment_revisions (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  meeting_id text not null references meetings(id) on delete cascade,
+  segment_id text not null references transcript_segments(id) on delete cascade,
+  revision integer not null,
+  text text not null,
+  words jsonb,
+  speaker_id text,
+  source text not null,
+  created_by_user_id text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  reverted_at timestamptz
 );
 
 create table if not exists summaries (
   id text primary key,
-  meeting_id text not null references meetings(id),
+  meeting_id text not null references meetings(id) on delete cascade,
   overview text not null,
   language text not null default 'he',
   model_provider text,
@@ -270,14 +301,14 @@ create table if not exists summaries (
 
 create table if not exists summary_sections (
   id text primary key,
-  summary_id text not null references summaries(id),
+  summary_id text not null references summaries(id) on delete cascade,
   kind text not null,
   content jsonb not null
 );
 
 create table if not exists action_items (
   id text primary key,
-  meeting_id text not null references meetings(id),
+  meeting_id text not null references meetings(id) on delete cascade,
   title text not null,
   owner text,
   status text not null default 'open',
@@ -297,7 +328,8 @@ create table if not exists action_items (
 
 create table if not exists ai_runs (
   id text primary key,
-  meeting_id text references meetings(id),
+  -- M4 (021): runs survive a meeting delete with a null meeting_id.
+  meeting_id text references meetings(id) on delete set null,
   provider text not null,
   task text not null,
   status text not null,
@@ -318,7 +350,7 @@ create table if not exists ai_runs (
 
 create table if not exists agent_runs (
   id text primary key,
-  meeting_id text references meetings(id),
+  meeting_id text references meetings(id) on delete cascade,
   agent text not null,
   status text not null,
   payload jsonb not null default '{}'::jsonb,
@@ -641,6 +673,12 @@ create index if not exists idx_audit_logs_workspace
 
 create index if not exists idx_media_assets_workspace
   on media_assets(workspace_id, created_at desc);
+
+create index if not exists idx_media_assets_meeting_kind
+  on media_assets(meeting_id, kind, created_at desc);
+
+create index if not exists idx_segment_revisions_segment
+  on transcript_segment_revisions(segment_id, revision desc);
 
 create index if not exists idx_google_identities_workspace
   on google_identities(workspace_id);

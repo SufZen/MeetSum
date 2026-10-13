@@ -25,7 +25,25 @@ const mocks = vi.hoisted(() => ({
   refreshSuggestions: vi.fn(),
   loadMeetTimeline: vi.fn(),
   glossary: vi.fn(),
+  enqueue: vi.fn(),
+  prepare: vi.fn(),
+  deleteObjects: vi.fn(),
+  audit: vi.fn(),
 }))
+
+vi.mock("@/lib/jobs/queue", () => ({ enqueueMeetSumJob: mocks.enqueue }))
+
+vi.mock("@/lib/media/prepare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/media/prepare")>()
+
+  return { ...actual, prepareMediaAsset: mocks.prepare }
+})
+
+vi.mock("@/lib/storage/object-storage", () => ({
+  deleteMeetingObjects: mocks.deleteObjects,
+}))
+
+vi.mock("@/lib/audit", () => ({ recordAuditLog: mocks.audit }))
 
 vi.mock("@/lib/meetings/store", () => {
   const repository = new Proxy(
@@ -282,6 +300,13 @@ beforeEach(() => {
   mocks.renewTeamsSubscriptions.mockReset()
   mocks.pollCalendar.mockReset()
   mocks.applyMediaRetention.mockReset()
+  mocks.enqueue.mockReset().mockResolvedValue({ id: "job_prepare" })
+  mocks.prepare.mockReset().mockResolvedValue({ status: "prepared", playback: "none" })
+  mocks.deleteObjects.mockReset().mockImplementation(async (keys: string[]) => ({
+    deleted: keys,
+    failed: [],
+  }))
+  mocks.audit.mockReset().mockResolvedValue(undefined)
   mocks.repositoryWorkspaces.length = 0
   process.env.MEETSUM_STORAGE = "postgres"
 })
@@ -978,11 +1003,13 @@ describe("processJob ASR router (M3)", () => {
 
     await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
     const replaceSegments = vi.spyOn(mocks.repository, "replaceTranscriptSegments")
+    const replaceTranscript = vi.spyOn(mocks.repository, "replaceTranscript")
     const before = (await mocks.repository.getMeeting(meeting.id))?.transcript
 
     await processJob(await makeJob("meeting.summarize", { meetingId: meeting.id, mode: "summary" }))
 
     expect(replaceSegments).not.toHaveBeenCalled()
+    expect(replaceTranscript).not.toHaveBeenCalled()
     expect((await mocks.repository.getMeeting(meeting.id))?.transcript).toEqual(before)
   })
 })
@@ -1061,5 +1088,183 @@ describe("processJob webhook payloads respect meeting visibility", () => {
       workspace_id: "ws_1",
       visibility: "private",
     })
+  })
+})
+
+describe("processJob media preparation (M4)", () => {
+  afterEach(() => {
+    delete process.env.MEETSUM_MEDIA_PREPARE
+  })
+
+  it("queues media.prepare for the processed original without failing on enqueue errors", async () => {
+    const meeting = await seedMeeting()
+    const asset = await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(mocks.enqueue).toHaveBeenCalledWith("media.prepare", {
+      meetingId: meeting.id,
+      workspaceId: "ws_1",
+      assetId: asset.id,
+    })
+
+    mocks.enqueue.mockRejectedValueOnce(new Error("redis down"))
+    await expect(
+      processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+    ).resolves.toMatchObject({ assetId: asset.id })
+  })
+
+  it("does not queue preparation when MEETSUM_MEDIA_PREPARE=false", async () => {
+    process.env.MEETSUM_MEDIA_PREPARE = "false"
+    const meeting = await seedMeeting()
+    await addAsset(meeting.id, "meetings/a/first.m4a")
+
+    await processJob(await makeJob("media.ingest", { meetingId: meeting.id }))
+
+    expect(mocks.enqueue).not.toHaveBeenCalled()
+  })
+
+  it("never transcribes a playback rendition, even when it is the newest asset", async () => {
+    const meeting = await seedMeeting()
+    const original = await addAsset(meeting.id, "meetings/a/original.wav")
+    const playback = await mocks.repository.createMediaAsset({
+      meetingId: meeting.id,
+      storageKey: "meetings/a/derived/playback.m4a",
+      contentType: "audio/mp4",
+      sizeBytes: 50,
+      kind: "playback",
+      derivedFromAssetId: original.id,
+    })
+
+    await processJob(await makeJob("meeting.transcribe", { meetingId: meeting.id }))
+    expect(mocks.transcribe.mock.calls[0][0].media.storageKey).toBe(original.storageKey)
+
+    await expect(
+      processJob(await makeJob("meeting.transcribe", { meetingId: meeting.id, assetId: playback.id }))
+    ).rejects.toBeInstanceOf(UnrecoverableError)
+    await expect(
+      processJob(
+        await makeJob("meeting.transcribe", {
+          meetingId: meeting.id,
+          storageKey: playback.storageKey,
+        })
+      )
+    ).resolves.toMatchObject({ assetId: original.id })
+  })
+
+  it("runs media.prepare without touching the meeting status", async () => {
+    const meeting = await seedMeeting()
+    const asset = await addAsset(meeting.id, "meetings/a/first.m4a")
+    await mocks.repository.updateMeetingStatus(meeting.id, "completed")
+    mocks.prepare.mockResolvedValue({ status: "prepared", assetId: asset.id, playback: "passthrough" })
+
+    const result = await processJob(
+      await makeJob("media.prepare", { meetingId: meeting.id, workspaceId: "ws_1", assetId: asset.id })
+    )
+
+    expect(result).toMatchObject({ status: "prepared" })
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ meetingId: meeting.id, assetId: asset.id, force: false })
+    )
+    expect((await mocks.repository.getMeeting(meeting.id))?.status).toBe("completed")
+  })
+
+  it("stores prepare_error and audits only on the final failed attempt; never fails the meeting", async () => {
+    const meeting = await seedMeeting()
+    const asset = await addAsset(meeting.id, "meetings/a/first.m4a")
+    await mocks.repository.updateMeetingStatus(meeting.id, "completed")
+    const updatePreparation = vi
+      .spyOn(mocks.repository, "updateMediaAssetPreparation")
+      .mockResolvedValue(asset)
+    mocks.prepare.mockRejectedValue(new Error("ffmpeg exploded"))
+    const data = { meetingId: meeting.id, workspaceId: "ws_1", assetId: asset.id }
+
+    await expect(
+      processJob(await makeJob("media.prepare", data, { attempts: 2, attemptsMade: 0 }))
+    ).rejects.toThrow("ffmpeg exploded")
+    expect(updatePreparation).not.toHaveBeenCalled()
+    expect(mocks.audit).not.toHaveBeenCalled()
+
+    await expect(
+      processJob(await makeJob("media.prepare", data, { attempts: 2, attemptsMade: 1 }))
+    ).rejects.toThrow("ffmpeg exploded")
+    expect(updatePreparation).toHaveBeenCalledWith(asset.id, {
+      prepareError: "ffmpeg exploded",
+    })
+    expect(mocks.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws_1",
+        action: "media.prepare.failed",
+        targetId: asset.id,
+      })
+    )
+    expect((await mocks.repository.getMeeting(meeting.id))?.status).toBe("completed")
+    expect(eventsNamed("meeting.process_failed")).toHaveLength(0)
+  })
+
+  it("fails media.prepare permanently when the meeting is gone", async () => {
+    const { MediaPreparePermanentError } = await import("@/lib/media/prepare")
+    mocks.prepare.mockRejectedValue(new MediaPreparePermanentError("Meeting not found: m_x"))
+
+    await expect(
+      processJob(
+        await makeJob("media.prepare", { meetingId: "m_x", workspaceId: "ws_1", assetId: "a_1" })
+      )
+    ).rejects.toBeInstanceOf(UnrecoverableError)
+  })
+
+  it("storage.delete deletes the keys and retries when some objects fail", async () => {
+    const keys = ["meetings/m/a.m4a", "meetings/m/derived/a.peaks.v1.json"]
+
+    await expect(
+      processJob(await makeJob("storage.delete", { workspaceId: "ws_1", keys }))
+    ).resolves.toEqual({ deleted: 2 })
+    expect(mocks.deleteObjects).toHaveBeenCalledWith(keys)
+
+    mocks.deleteObjects.mockResolvedValueOnce({
+      deleted: [keys[0]],
+      failed: [{ key: keys[1], error: "SlowDown" }],
+    })
+    const failure = await processJob(
+      await makeJob("storage.delete", { workspaceId: "ws_1", keys }, { attempts: 5 })
+    ).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).not.toBeInstanceOf(UnrecoverableError)
+    expect((failure as Error).message).toBe("1 of 2 object(s) could not be deleted")
+    await expect(
+      processJob(await makeJob("storage.delete", { workspaceId: "ws_1", keys: "nope" }))
+    ).rejects.toBeInstanceOf(UnrecoverableError)
+  })
+
+  it("transcript cleanup keeps edited segments and asks to preserve edits", async () => {
+    const meeting = await seedMeeting()
+    const base = (await mocks.repository.getMeeting(meeting.id))!
+    const transcript = [
+      { id: "s1", speaker: "Speaker 1", startMs: 0, endMs: 1000, text: "נתחיל בבקשה" },
+      { id: "s2", speaker: "Speaker 1", startMs: 1000, endMs: 1500, text: "נתחיל בבקשה" },
+      {
+        id: "s3",
+        speaker: "Speaker 1",
+        startMs: 1500,
+        endMs: 2500,
+        text: "נתחיל בבקשה",
+        source: "edited",
+      },
+      { id: "s4", speaker: "Speaker 1", startMs: 2500, endMs: 3000, text: "סיכום" },
+    ]
+    vi.spyOn(mocks.repository, "getMeeting").mockResolvedValue({ ...base, transcript })
+    const replaceTranscript = vi
+      .spyOn(mocks.repository, "replaceTranscript")
+      .mockResolvedValue({ segments: [], speakers: [] })
+
+    await processJob(
+      await makeJob("meeting.summarize", { meetingId: meeting.id, mode: "transcript-cleanup" })
+    )
+
+    expect(replaceTranscript).toHaveBeenCalledTimes(1)
+    const [, input, options] = replaceTranscript.mock.calls[0]
+    expect(options).toEqual({ preserveEdited: true })
+    expect(input.segments.map((segment) => segment.id)).toEqual(["s1", "s3", "s4"])
   })
 })

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import {
   AlertTriangleIcon,
   ActivityIcon,
@@ -18,20 +19,25 @@ import type {
   SuggestedAgentRun,
 } from "@/lib/meetings/repository"
 
+function latestAiRun(meeting: MeetingRecord | null, task: string) {
+  return meeting?.aiRuns?.find((run) => run.task === task)
+}
+
+/**
+ * Confidence of the transcription run (M4: the detail no longer carries the
+ * transcript); falls back to task confidences when the run has none.
+ */
 function computeConfidence(meeting: MeetingRecord | null) {
-  const transcript = meeting?.transcript ?? []
-  const actionItems = meeting?.summary?.actionItems ?? []
-  const values = [
-    ...transcript.map((segment) => segment.confidence).filter(Boolean),
-    ...actionItems.map((item) => item.confidence).filter(Boolean),
-  ] as number[]
+  const runConfidence = latestAiRun(meeting, "audio.transcribe")?.confidence
+
+  if (typeof runConfidence === "number" && Number.isFinite(runConfidence)) return runConfidence
+
+  const values = (meeting?.summary?.actionItems ?? [])
+    .map((item) => item.confidence)
+    .filter((value): value is number => typeof value === "number" && value > 0)
 
   if (!values.length) return undefined
   return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function latestAiRun(meeting: MeetingRecord | null, task: string) {
-  return meeting?.aiRuns?.find((run) => run.task === task)
 }
 
 function formatLatency(value: number | undefined) {
@@ -67,6 +73,7 @@ export function MeetingRightRail({
   onProcessMeeting,
   onSuggestAgents,
   onApproveAgentRun,
+  talkTime,
 }: {
   meeting: MeetingRecord | null
   jobs: JobRecord[]
@@ -79,6 +86,8 @@ export function MeetingRightRail({
   onProcessMeeting?: () => void
   onSuggestAgents: () => void
   onApproveAgentRun: (run: SuggestedAgentRun) => void
+  /** Talk-time panel (2xl rail). */
+  talkTime?: ReactNode
 }) {
   const confidence = computeConfidence(meeting)
   const percent = confidence ? Math.round(confidence * 100) : undefined
@@ -98,15 +107,17 @@ export function MeetingRightRail({
   const qualityWarnings = meeting?.qualityWarnings ?? []
 
   return (
-    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:h-full lg:border-l lg:border-line">
+    <aside className="ms-scrollbar grid min-h-0 content-start gap-3 overflow-y-auto bg-surface-2 p-3 lg:col-span-2 lg:grid-cols-2 lg:border-t lg:border-line 2xl:col-span-1 2xl:grid-cols-1 2xl:h-full 2xl:border-s 2xl:border-t-0">
       <PipelineTimeline meeting={meeting} jobs={jobs} />
+
+      {talkTime ? <section className="ms-card p-4">{talkTime}</section> : null}
 
       <section className="ms-card p-4">
         <h3 className="mb-4 text-sm font-semibold">AI Confidence</h3>
         {percent ? (
           <div className="flex items-center gap-4">
             <div
-              className="grid size-16 place-items-center rounded-full border-[5px] border-emerald-500 text-lg font-semibold"
+              className="grid size-16 place-items-center rounded-full border-4 border-ok text-lg font-semibold"
               aria-label={`AI confidence ${percent}%`}
             >
               {percent}%
@@ -116,7 +127,7 @@ export function MeetingRightRail({
                 {percent >= 80 ? "High" : percent >= 60 ? "Medium" : "Low"}
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Based on transcript and task confidence
+                Based on the transcription run
               </p>
             </div>
           </div>

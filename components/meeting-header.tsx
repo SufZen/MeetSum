@@ -1,19 +1,33 @@
+"use client"
+
+import { useState } from "react"
+import dynamic from "next/dynamic"
 import {
   CalendarIcon,
   ClockIcon,
   EllipsisIcon,
+  PencilIcon,
   Share2Icon,
   StarIcon,
+  Trash2Icon,
   UsersIcon,
 } from "lucide-react"
 
 import { MeetingVisibilityControl } from "@/components/meeting-visibility-control"
+import { directionForLanguage } from "@/components/speaker-display"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import { meetingDurationLabel } from "@/lib/meetings/duration"
 import type { MeetingRecord, MeetingVisibility } from "@/lib/meetings/repository"
+import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
 
 function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "google_meet") return "Google Meet"
@@ -22,6 +36,18 @@ function sourceLabel(source: MeetingRecord["source"]) {
   if (source === "upload") return "Upload"
   return source.replaceAll("_", " ")
 }
+
+const TITLE_MAX = 200
+
+// Loaded on demand: the chunk is fetched when the actions menu first opens.
+const RenameMeetingDialog = dynamic(
+  () => import("@/components/meeting-dialogs").then((mod) => mod.RenameMeetingDialog),
+  { ssr: false }
+)
+const DeleteMeetingDialog = dynamic(
+  () => import("@/components/meeting-dialogs").then((mod) => mod.DeleteMeetingDialog),
+  { ssr: false }
+)
 
 export function MeetingHeader({
   meeting,
@@ -32,6 +58,10 @@ export function MeetingHeader({
   onAddToRoom,
   dictionary,
   onVisibilityChanged,
+  canWrite = false,
+  canManage = false,
+  onRename,
+  onDelete,
 }: {
   meeting: MeetingRecord
   dictionary?: Dictionary
@@ -41,7 +71,18 @@ export function MeetingHeader({
   onToggleFavorite?: () => void
   onShowParticipants?: () => void
   onAddToRoom?: () => void
+  /** `meeting:write`: rename. */
+  canWrite?: boolean
+  /** `canManageMeeting`: delete. */
+  canManage?: boolean
+  onRename?: (title: string) => Promise<boolean>
+  onDelete?: () => Promise<boolean>
 }) {
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(meeting.title)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [dialogsReady, setDialogsReady] = useState(false)
   const formatter = new Intl.DateTimeFormat(locale === "he" ? "he-IL" : locale, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -49,6 +90,32 @@ export function MeetingHeader({
   const room = meeting.contexts?.[0]?.name ?? "No room"
   const participantCount =
     meeting.participantDetails?.length || meeting.participants.length || 0
+  const durationMs = getMeetingDurationMs(meeting)
+  const titleDir = directionForLanguage(meeting.language) ?? "auto"
+  const showMenu = Boolean(dictionary && ((canWrite && onRename) || (canManage && onDelete)))
+  const trimmedTitle = titleDraft.trim()
+
+  const submitRename = async () => {
+    if (!onRename || !trimmedTitle || trimmedTitle.length > TITLE_MAX) return
+    if (trimmedTitle === meeting.title) {
+      setRenameOpen(false)
+      return
+    }
+    setBusy(true)
+    const ok = await onRename(trimmedTitle)
+
+    setBusy(false)
+    if (ok) setRenameOpen(false)
+  }
+
+  const confirmDelete = async () => {
+    if (!onDelete) return
+    setBusy(true)
+    const ok = await onDelete()
+
+    setBusy(false)
+    if (ok) setDeleteOpen(false)
+  }
 
   return (
     <header className="border-b border-line bg-surface px-5 py-4 md:px-7">
@@ -67,15 +134,17 @@ export function MeetingHeader({
               />
             ) : null}
             <h1
-              dir="auto"
+              dir={titleDir}
               className="break-words text-lg font-semibold tracking-tight text-foreground md:text-xl"
             >
               {meeting.title}
             </h1>
             <button
-              className="rounded p-0.5 text-amber-400 hover:bg-surface-2"
+              className="rounded p-0.5 text-warn hover:bg-surface-2"
               onClick={onToggleFavorite}
               title={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
+              aria-label={meeting.isFavorite ? "Remove favorite" : "Add favorite"}
+              aria-pressed={Boolean(meeting.isFavorite)}
               type="button"
             >
               <StarIcon
@@ -91,7 +160,7 @@ export function MeetingHeader({
             </span>
             <span className="flex items-center gap-2">
               <ClockIcon aria-hidden="true" className="size-4" />
-              {meetingDurationLabel(meeting)}
+              <span className="[unicode-bidi:isolate]">{formatDurationLabel(durationMs, locale)}</span>
             </span>
             <div className="group relative">
               <button
@@ -103,17 +172,17 @@ export function MeetingHeader({
                 {participantCount || 0} participants
               </button>
               {meeting.participantDetails?.length ? (
-                <div className="pointer-events-none absolute start-0 top-full z-50 mt-2 hidden min-w-[240px] max-w-sm rounded-lg border border-line bg-surface p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="pointer-events-none absolute start-0 top-full z-50 mt-2 hidden min-w-60 max-w-sm rounded-lg border border-line bg-surface p-3 shadow-lg group-hover:pointer-events-auto group-hover:block">
+                  <div className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">
                     Participants
                   </div>
                   <div className="grid gap-1.5">
                     {meeting.participantDetails.slice(0, 12).map((p) => (
                       <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
                         <div className="min-w-0">
-                          <span className="font-medium text-foreground">{p.name}</span>
+                          <bdi className="font-medium text-foreground">{p.name}</bdi>
                           {p.email ? (
-                            <span className="ms-1 text-muted-foreground">{p.email}</span>
+                            <bdi className="ms-1 text-muted-foreground">{p.email}</bdi>
                           ) : null}
                         </div>
                         <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-2xs ${
@@ -141,8 +210,8 @@ export function MeetingHeader({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
-              <span className="size-2 rounded-full bg-emerald-500" />
-              {room}
+              <span className="size-2 rounded-full bg-ok" />
+              <bdi>{room}</bdi>
             </span>
             <Button
               variant="outline"
@@ -155,22 +224,74 @@ export function MeetingHeader({
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-8" onClick={onShare}>
+          <Button variant="secondary" size="sm" className="h-8" onClick={onShare}>
             <Share2Icon data-icon="inline-start" />
             Share
           </Button>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            className="h-8 w-8"
-            title="Meeting actions arrive in the next v0.1.0 slice"
-            disabled
-          >
-            <EllipsisIcon aria-hidden="true" />
-            <span className="sr-only">More</span>
-          </Button>
+          {showMenu && dictionary ? (
+            <DropdownMenu onOpenChange={(open) => open && setDialogsReady(true)}>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    className="size-8"
+                    aria-label={dictionary.meetingActions}
+                    title={dictionary.meetingActions}
+                  />
+                }
+              >
+                <EllipsisIcon aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                {canWrite && onRename ? (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setTitleDraft(meeting.title)
+                      setRenameOpen(true)
+                    }}
+                  >
+                    <PencilIcon />
+                    {dictionary.meetingRename}
+                  </DropdownMenuItem>
+                ) : null}
+                {canManage && onDelete ? (
+                  <>
+                    {canWrite && onRename ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+                      <Trash2Icon />
+                      {dictionary.meetingDelete}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </div>
+
+      {dictionary && (dialogsReady || renameOpen || deleteOpen) ? (
+        <>
+          <RenameMeetingDialog
+            dictionary={dictionary}
+            open={renameOpen}
+            onOpenChange={setRenameOpen}
+            value={titleDraft}
+            maxLength={TITLE_MAX}
+            busy={busy}
+            onValueChange={setTitleDraft}
+            onSubmit={() => void submitRename()}
+          />
+          <DeleteMeetingDialog
+            dictionary={dictionary}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={meeting.title}
+            busy={busy}
+            onConfirm={() => void confirmDelete()}
+          />
+        </>
+      ) : null}
     </header>
   )
 }

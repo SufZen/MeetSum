@@ -20,6 +20,8 @@ export type MeetSumJobName =
   | "realizeos.export"
   | "teams.subscription.renew"
   | "media.retention"
+  | "media.prepare"
+  | "storage.delete"
 
 export type MeetSumJobPayload = {
   meetingId?: string
@@ -68,6 +70,42 @@ export function getJobAttempts(
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 3
 }
 
+/** Per-enqueue overrides (M4). */
+export type EnqueueJobOptions = {
+  /**
+   * BullMQ job id for idempotent enqueues (no `:`; BullMQ rejects it). A
+   * duplicate add returns the existing job and the new jobs row is closed.
+   */
+  jobId?: string
+  attempts?: number
+}
+
+/** `media.prepare-<assetId>` (spec `media.prepare:<id>`; BullMQ forbids `:`). */
+export function mediaPrepareJobId(assetId: string) {
+  return `media.prepare-${assetId.replace(/:/g, "_")}`
+}
+
+/**
+ * Defaults per job name (M4): `media.prepare` is idempotent per asset and
+ * tried twice; `storage.delete` retries five times with exponential backoff.
+ */
+export function defaultJobOptions(
+  name: MeetSumJobName,
+  payload: MeetSumJobPayload
+): EnqueueJobOptions {
+  if (name === "media.prepare") {
+    return {
+      attempts: 2,
+      ...(typeof payload.assetId === "string" && payload.assetId
+        ? { jobId: mediaPrepareJobId(payload.assetId) }
+        : {}),
+    }
+  }
+  if (name === "storage.delete") return { attempts: 5 }
+
+  return {}
+}
+
 /**
  * Workspace of a job about to be enqueued: the explicit payload value, else
  * the meeting's workspace, else (Teams subscription renewal only, which is
@@ -114,30 +152,45 @@ async function persistJobWorkspace(jobId: string, workspaceId: string) {
  */
 export async function enqueueMeetSumJob(
   name: WorkspaceScopedJobName,
-  payload: WorkspaceScopedJobPayload
+  payload: WorkspaceScopedJobPayload,
+  options?: EnqueueJobOptions
 ): Promise<Awaited<ReturnType<typeof enqueueJob>>>
 export async function enqueueMeetSumJob(
   name: WorkspaceOptionalJobName,
-  payload?: MeetSumJobPayload
+  payload?: MeetSumJobPayload,
+  options?: EnqueueJobOptions
 ): Promise<Awaited<ReturnType<typeof enqueueJob>>>
 /** Dynamic job name (e.g. a retry): the workspace must be explicit. */
 export async function enqueueMeetSumJob(
   name: MeetSumJobName,
-  payload: WorkspaceScopedJobPayload
+  payload: WorkspaceScopedJobPayload,
+  options?: EnqueueJobOptions
 ): Promise<Awaited<ReturnType<typeof enqueueJob>>>
 export async function enqueueMeetSumJob(
   name: MeetSumJobName,
-  payload: MeetSumJobPayload = {}
+  payload: MeetSumJobPayload = {},
+  options: EnqueueJobOptions = {}
 ) {
-  return enqueueJob(name, payload)
+  return enqueueJob(name, payload, options)
 }
 
-async function enqueueJob(name: MeetSumJobName, payload: MeetSumJobPayload) {
+async function enqueueJob(
+  name: MeetSumJobName,
+  payload: MeetSumJobPayload,
+  options: EnqueueJobOptions = {}
+) {
   const workspaceId = await resolveEnqueueWorkspaceId(name, payload)
 
   if (!workspaceId) throw new JobWorkspaceRequiredError(name)
 
-  const attempts = getJobAttempts()
+  const { jobId, attempts: attemptsOverride } = {
+    ...defaultJobOptions(name, payload),
+    ...options,
+  }
+  const attempts =
+    attemptsOverride !== undefined && Number.isInteger(attemptsOverride) && attemptsOverride > 0
+      ? attemptsOverride
+      : getJobAttempts()
   const scopedPayload = { ...payload, workspaceId }
   const record = await getSystemMeetingRepository(workspaceId).createJob({
     name,
@@ -150,13 +203,27 @@ async function enqueueJob(name: MeetSumJobName, payload: MeetSumJobPayload) {
 
   await persistJobWorkspace(record.id, workspaceId)
 
-  await getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
-    jobId: record.id,
+  const added = await getMeetSumQueue().add(name, { ...scopedPayload, jobRecordId: record.id }, {
+    jobId: jobId ?? record.id,
     attempts,
     backoff: { type: "exponential", delay: 3000 },
     removeOnComplete: 250,
     removeOnFail: 500,
   })
+
+  // An idempotent id that already exists returns the existing BullMQ job:
+  // close the jobs row created for this ignored add.
+  const existingRecordId = (added as { data?: { jobRecordId?: unknown } } | undefined)?.data
+    ?.jobRecordId
+
+  if (jobId && typeof existingRecordId === "string" && existingRecordId !== record.id) {
+    await getSystemMeetingRepository(workspaceId)
+      .updateJob(record.id, {
+        status: "completed",
+        result: { deduplicated: true, existingJobRecordId: existingRecordId },
+      })
+      .catch(() => undefined)
+  }
 
   return record
 }

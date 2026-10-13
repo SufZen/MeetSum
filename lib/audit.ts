@@ -48,6 +48,10 @@ export type AuditAction =
   | "meeting.speaker.suggested"
   | "asr.glossary.updated"
   | "auth.login.denied"
+  | "meeting.renamed"
+  | "meeting.transcript.edited"
+  | "meeting.transcript.reverted"
+  | "media.prepare.failed"
 
 export type RecordAuditLogInput = {
   action: AuditAction

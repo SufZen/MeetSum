@@ -84,6 +84,12 @@ function recordingClient(override?: Responder) {
       if (/^(begin|commit|rollback)$/.test(normalized)) return { rows: [] }
       if (/^select count\(\*\)/.test(normalized)) return { rows: [{ total: 1 }] }
       if (/^select m\./.test(normalized)) return { rows: [UNIVERSAL_ROW] }
+      // M4: the (locked) segment of a transcript edit / undo.
+      if (/^select ts\.id, ts\.speaker_id\b.* where ts\.id = \$1/.test(normalized)) {
+        return {
+          rows: [{ ...UNIVERSAL_ROW, id: "seg_1", text: "hi", start_ms: 0, end_ms: 1000, revision: 0 }],
+        }
+      }
       if (/from (intelligence_runs|summaries|transcript_segments)\b/.test(normalized)) {
         return { rows: [] }
       }
@@ -187,6 +193,31 @@ const invocations: Record<
       participant: { name: "Dana" },
       aliases: ["דנה"],
     }),
+  // M4: transcript, edits/undo, rename, delete, media preparation, duration.
+  getMeetingTranscript: (repo) => repo.getMeetingTranscript("meet_1"),
+  getTranscriptVersion: (repo) => repo.getTranscriptVersion("meet_1"),
+  updateTranscriptSegment: (repo) =>
+    repo.updateTranscriptSegment("meet_1", "seg_1", {
+      expectedRevision: 0,
+      text: "hello",
+      newSpeakerName: "Dana",
+      scope: "turn",
+      actorUserId: "user_me",
+    }),
+  undoTranscriptSegment: (repo) =>
+    repo.undoTranscriptSegment("meet_1", "seg_1", {
+      expectedRevision: 0,
+      actorUserId: "user_me",
+    }),
+  listTranscriptRevisions: (repo) => repo.listTranscriptRevisions("meet_1", "seg_1"),
+  renameMeeting: (repo) => repo.renameMeeting("meet_1", "Renamed"),
+  deleteMeeting: (repo) => repo.deleteMeeting("meet_1"),
+  updateMediaAssetPreparation: (repo) =>
+    repo.updateMediaAssetPreparation("asset_1", {
+      durationMs: 1000,
+      preparedAt: "2026-05-01T09:00:00.000Z",
+    }),
+  setMeetingDurationMs: (repo) => repo.setMeetingDurationMs("meet_1", 1000, "transcript"),
   upsertMeetingIntelligence: (repo) =>
     repo.upsertMeetingIntelligence("meet_1", intelligence),
   updateActionItem: (repo) => repo.updateActionItem("act_1", { status: "done" }),
@@ -227,9 +258,9 @@ const invocations: Record<
 
 const MEETINGS_TABLE = /\bmeetings\b/
 const CHILD_TABLES =
-  /\b(transcript_segments|speakers|action_items|intelligence_runs|summaries|summary_sections|meeting_tags|meeting_participants|export_records|suggested_agent_runs|meeting_shares|meeting_contexts|media_assets|meeting_favorites|ai_runs)\b/
+  /\b(transcript_segments|transcript_segment_revisions|speakers|action_items|intelligence_runs|summaries|summary_sections|meeting_tags|meeting_participants|export_records|suggested_agent_runs|meeting_shares|meeting_contexts|media_assets|meeting_favorites|ai_runs)\b/
 const WORKSPACE_TABLES =
-  /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets|speaker_profiles)\b/
+  /\b(?:from|into|update|join) (jobs|contexts|tags|media_assets|speaker_profiles|transcript_segment_revisions)\b/
 
 /** Value bound to the first placeholder matched by `pattern` in `statement`. */
 function boundValues(statement: Statement, pattern: RegExp): unknown[] {
@@ -561,6 +592,21 @@ describe("postgres meeting repository workspace scoping", () => {
     // The meeting is then loaded through a system repo of its own workspace.
     expect(rest.filter((statement) => MEETINGS_TABLE.test(statement.text))[0].values).toContain(WS)
     expect(result?.meeting.workspaceId).toBe(WS)
+  })
+
+  it("share media lookup loads only the share and media rows (no hydration)", async () => {
+    const lookup = recordingClient()
+    const result = await createPostgresShareLookup(lookup.client).getShareMediaByToken("tok_1")
+    const [first, second, ...rest] = lookup.statements
+
+    expect(first.text).toContain("m.visibility = 'link'")
+    expect(first.text).toContain("s.revoked = false")
+    expect(first.text).toContain("(s.expires_at is null or s.expires_at > now())")
+    expect(second.text).toMatch(/from media_assets where meeting_id = \$1 and workspace_id = \$2/)
+    expect(second.values).toEqual(["meet_1", WS])
+    expect(rest).toHaveLength(0)
+    expect(result?.meeting).toMatchObject({ id: "meet_1", workspaceId: WS })
+    expect(result?.mediaAssets).toHaveLength(1)
   })
 
   it("revokes active shares only when leaving link visibility", async () => {

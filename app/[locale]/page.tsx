@@ -5,7 +5,6 @@ import { NoWorkspaceState } from "@/components/no-workspace-state"
 import { getServerAuthState } from "@/lib/auth/authz"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
-import { buildMeetingIntelligence } from "@/lib/intelligence"
 import { selectRecentRooms } from "@/lib/rooms"
 
 export default async function Page({
@@ -37,22 +36,13 @@ export default async function Page({
 
   const { ctx } = auth
   const user = auth.session.user
-  const [meetingList, rooms] = await Promise.all([
-    ctx.meetings.listMeetings({ limit: 5 }),
+  // Lightweight inbox rows; the selected meeting's detail and transcript are
+  // fetched client-side.
+  const [meetingPage, rooms] = await Promise.all([
+    ctx.meetings.listMeetingsPage({ limit: 5 }),
     ctx.meetings.listRooms().catch(() => []),
   ])
-  const meetings = meetingList.map((meeting) => {
-    const intelligence =
-      meeting.intelligence ?? buildMeetingIntelligence(meeting)
-
-    return {
-      ...meeting,
-      tags: meeting.tags ?? intelligence.tags,
-      intelligence,
-      languageMetadata:
-        meeting.languageMetadata ?? intelligence.languageMetadata,
-    }
-  })
+  const meetings = meetingPage.meetings
 
   return (
     <AppShell

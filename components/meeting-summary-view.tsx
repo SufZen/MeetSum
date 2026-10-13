@@ -1,3 +1,6 @@
+"use client"
+
+import type { ReactNode } from "react"
 import {
   CheckCircle2Icon,
   CopyIcon,
@@ -8,6 +11,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
+import { PlayerCitation } from "@/components/player/player-citation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -69,6 +73,7 @@ export function MeetingSummaryView({
   onFindDriveRecordings,
   onSyncMeetArtifacts,
   onCopyText,
+  talkTime,
 }: {
   dictionary: Dictionary
   meeting: MeetingRecord
@@ -81,13 +86,15 @@ export function MeetingSummaryView({
   onFindDriveRecordings: () => void
   onSyncMeetArtifacts: () => void
   onCopyText: (text: string, label: string) => void
+  /** Talk-time panel slot (shown under the overview). */
+  talkTime?: ReactNode
 }) {
   const actionItems = meeting.summary?.actionItems ?? []
   const quotes = meeting.intelligence?.timestampedQuotes ?? []
   const commitments = meeting.intelligence?.commitments ?? []
   const isUpcoming = meeting.status === "scheduled" && !meeting.summary
   const hasMedia = Boolean(meeting.mediaAssets?.some((asset) => asset.storageKey))
-  const hasTranscript = Boolean(meeting.transcript?.length)
+  const hasTranscript = (meeting.transcriptSegmentCount ?? meeting.transcript?.length ?? 0) > 0
   const hasMeetImportableArtifact = meeting.meetConferenceRecords?.some((record) =>
     record.artifacts.some((artifact) =>
       ["transcript", "smart_notes", "recording"].includes(artifact.artifactType)
@@ -271,6 +278,8 @@ export function MeetingSummaryView({
         )}
       </section>
 
+      {talkTime ? <div className="mt-8 max-w-3xl">{talkTime}</div> : null}
+
       <section className="mt-8 max-w-3xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{dictionary.decisions}</h2>
@@ -294,7 +303,7 @@ export function MeetingSummaryView({
             ? meeting.summary.decisions
             : ["No decisions extracted yet."]).map((decision) => (
             <div key={decision} className="flex items-start gap-3 text-sm text-foreground">
-              <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+              <CheckCircle2Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-ok-text" />
               <span className="leading-6">{decision}</span>
             </div>
           ))}
@@ -314,14 +323,19 @@ export function MeetingSummaryView({
                 onCheckedChange={() => onToggleActionItem(item)}
                 className="mt-1"
               />
-              <div className="min-w-0 leading-6 text-foreground">{item.title}</div>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 leading-6 text-foreground">
+                <span className="min-w-0">{item.title}</span>
+                {item.sourceStartMs !== undefined ? (
+                  <PlayerCitation startMs={item.sourceStartMs} source="action_item" dictionary={dictionary} />
+                ) : null}
+              </div>
               <div className="hidden items-center gap-2 text-muted-foreground md:flex">
                 {item.owner ? (
                   <>
-                    <span className="grid size-6 place-items-center rounded-full bg-rose-200 text-xs font-semibold text-rose-800">
-                      {item.owner.slice(0, 1).toUpperCase()}
+                    <span className="grid size-6 place-items-center rounded-full bg-surface-3 text-xs font-semibold text-fg-2">
+                      {Array.from(item.owner)[0]?.toLocaleUpperCase()}
                     </span>
-                    <span className="truncate">{item.owner}</span>
+                    <bdi className="truncate">{item.owner}</bdi>
                   </>
                 ) : (
                   <span className="truncate">{dictionary.unassigned}</span>
@@ -403,7 +417,7 @@ export function MeetingSummaryView({
       {quotes.length ? (
         <section className="mt-8">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Key Quotes</h2>
+            <h2 className="text-lg font-semibold">{dictionary.keyQuotesTitle}</h2>
             <Button
               variant="ghost"
               size="sm"
@@ -428,13 +442,18 @@ export function MeetingSummaryView({
             {quotes.map((quote) => (
               <div
                 key={`${quote.segmentId}-${quote.startMs}`}
-                className="grid gap-2 rounded-md border border-line bg-surface px-3 py-2 text-sm md:grid-cols-[72px_minmax(0,1fr)]"
+                className="flex items-baseline gap-3 rounded-md border border-line bg-surface px-3 py-2 text-sm"
               >
-                <span className="font-mono text-xs text-muted-foreground">
-                  {formatTimestamp(quote.startMs)}
+                <span className="w-16 shrink-0">
+                  <PlayerCitation
+                    segmentId={quote.segmentId}
+                    startMs={quote.startMs}
+                    source="quote"
+                    dictionary={dictionary}
+                  />
                 </span>
-                <span className="text-muted-foreground">
-                  {quote.speaker}: “{quote.text}”
+                <span className="min-w-0 text-muted-foreground">
+                  <bdi>{quote.speaker}</bdi>: “{quote.text}”
                 </span>
               </div>
             ))}

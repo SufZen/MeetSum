@@ -4,6 +4,7 @@ import type {
   MeetingParticipant,
   MeetingRecord,
 } from "@/lib/meetings/repository"
+import { getMeetingDurationMs } from "@/lib/meetings/duration"
 
 export type RoomTask = ActionItem & {
   meetingId: string
@@ -27,6 +28,8 @@ export type RoomMeetingSummary = {
   title: string
   status: MeetingRecord["status"]
   startedAt: string
+  /** Real duration (M4), undefined when unknown. */
+  durationMs?: number
   overview: string
   openTasks: number
   participants: number
@@ -124,6 +127,7 @@ export function buildRoomDetail(
       title: meeting.title,
       status: meeting.status,
       startedAt: meeting.startedAt,
+      durationMs: getMeetingDurationMs(meeting),
       overview: meeting.summary?.overview ?? "",
       openTasks:
         meeting.summary?.actionItems.filter((task) => task.status === "open")

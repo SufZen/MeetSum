@@ -1,18 +1,25 @@
+"use client"
+
 import { CalendarIcon, PencilIcon } from "lucide-react"
 
+import { PlayerCitation } from "@/components/player/player-citation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { ActionItem } from "@/lib/meetings/repository"
 
 export function ActionItemList({
   items = [],
   unassigned,
   onToggle,
+  dictionary,
 }: {
   items?: ActionItem[]
   unassigned: string
   onToggle?: (item: ActionItem) => void
+  /** Enables the "▶ 12:34" source chip (rendered only when it resolves). */
+  dictionary?: Dictionary
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -37,8 +44,15 @@ export function ActionItemList({
               )}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {dictionary && item.sourceStartMs !== undefined ? (
+                <PlayerCitation
+                  startMs={item.sourceStartMs}
+                  source="action_item"
+                  dictionary={dictionary}
+                />
+              ) : null}
               <Badge variant="outline" className="rounded-md">
-                {item.owner ?? unassigned}
+                {item.owner ? <bdi>{item.owner}</bdi> : unassigned}
               </Badge>
               <Button
                 size="icon-sm"
@@ -62,9 +76,6 @@ export function ActionItemList({
                 </span>
               )}
               {item.confidence && <span>{Math.round(item.confidence * 100)}% confidence</span>}
-              {item.sourceStartMs !== undefined && (
-                <span>{Math.floor(item.sourceStartMs / 1000)}s</span>
-              )}
             </div>
           )}
         </div>

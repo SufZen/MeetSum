@@ -8,10 +8,10 @@ import {
   UsersIcon,
 } from "lucide-react"
 import { useState } from "react"
+import dynamic from "next/dynamic"
 import { toast } from "sonner"
 
 import { updateMeetingVisibility } from "@/components/admin/api"
-import { ConfirmDialog } from "@/components/admin/confirm-dialog"
 import { visibilityLabel } from "@/components/admin/labels"
 import {
   DropdownMenu,
@@ -29,6 +29,12 @@ import type {
   MeetingVisibility,
 } from "@/lib/meetings/repository"
 import { roleRank } from "@/lib/workspaces/constants"
+
+// Only needed when leaving link sharing; loaded on first use.
+const ConfirmDialog = dynamic(
+  () => import("@/components/admin/confirm-dialog").then((mod) => mod.ConfirmDialog),
+  { ssr: false }
+)
 
 const ICONS: Record<MeetingVisibility, typeof LockIcon> = {
   private: LockIcon,
@@ -67,6 +73,8 @@ export function MeetingVisibilityControl({
   const current: MeetingVisibility = meeting.visibility ?? "workspace"
   const [pending, setPending] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<MeetingVisibility>()
+  // Stays mounted after the first prompt so the close animation can run.
+  const [confirmRequested, setConfirmRequested] = useState(false)
   const CurrentIcon = ICONS[current] ?? GlobeIcon
   const { label, hint } = visibilityLabel(t, current)
 
@@ -94,6 +102,7 @@ export function MeetingVisibilityControl({
     }
 
     if (current === "link") {
+      setConfirmRequested(true)
       setConfirmTarget(visibility)
       return
     }
@@ -164,15 +173,17 @@ export function MeetingVisibilityControl({
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ConfirmDialog
-        open={Boolean(confirmTarget)}
-        onOpenChange={(open) => !open && setConfirmTarget(undefined)}
-        title={t.visibilityLeaveLinkTitle}
-        description={t.visibilityLeaveLinkDescription}
-        confirmLabel={t.visibilityConfirm}
-        cancelLabel={t.cancel}
-        onConfirm={() => (confirmTarget ? apply(confirmTarget) : undefined)}
-      />
+      {confirmTarget || confirmRequested ? (
+        <ConfirmDialog
+          open={Boolean(confirmTarget)}
+          onOpenChange={(open) => !open && setConfirmTarget(undefined)}
+          title={t.visibilityLeaveLinkTitle}
+          description={t.visibilityLeaveLinkDescription}
+          confirmLabel={t.visibilityConfirm}
+          cancelLabel={t.cancel}
+          onConfirm={() => (confirmTarget ? apply(confirmTarget) : undefined)}
+        />
+      ) : null}
     </>
   )
 }

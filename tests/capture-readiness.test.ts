@@ -94,6 +94,18 @@ describe("meeting capture readiness", () => {
     expect(readiness.status).toBe("manual_capture")
     expect(readiness.primaryAction).toBe("upload")
   })
+
+  it("uses the segment count of a detail loaded without the transcript (M4)", () => {
+    const readiness = getMeetingCaptureReadiness(
+      meeting({ source: "upload", transcriptSegmentCount: 12 })
+    )
+
+    expect(readiness.status).toBe("ready_to_process")
+    expect(readiness.checks).toContainEqual({ key: "transcript", label: "Transcript", state: "ready" })
+    expect(
+      getMeetingCaptureReadiness(meeting({ source: "upload", transcriptSegmentCount: 0 })).status
+    ).toBe("manual_capture")
+  })
 })
 
 describe("job recovery grouping", () => {

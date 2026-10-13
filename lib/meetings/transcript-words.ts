@@ -4,6 +4,8 @@
  * Compact tuple format, one per word:
  *   [startMs, endMs, text, confidence | null]            same language as segment
  *   [startMs, endMs, text, confidence | null, language]  language differs
+ *   [startMs, endMs, text, confidence | null, language | null, 1]
+ *                                                        manually edited (M4)
  *
  * Times are integer milliseconds, confidence is rounded to 3 decimals. Words
  * carry no speaker: segments are speaker-homogeneous. This module is the only
@@ -17,11 +19,14 @@ export type TranscriptWord = {
   confidence?: number
   /** Present only when it differs from the segment language. */
   language?: string
+  /** Word created or changed by a manual transcript edit (M4). */
+  edited?: boolean
 }
 
 export type EncodedTranscriptWord =
   | [number, number, string, number | null]
   | [number, number, string, number | null, string]
+  | [number, number, string, number | null, string | null, 1]
 
 function roundConfidence(value: number | undefined): number | null {
   if (value === undefined || !Number.isFinite(value)) return null
@@ -42,9 +47,12 @@ export function encodeWords(
       roundConfidence(word.confidence),
     ]
 
-    return word.language && word.language !== segmentLanguage
-      ? [...base, word.language]
-      : base
+    const language =
+      word.language && word.language !== segmentLanguage ? word.language : undefined
+
+    if (word.edited) return [...base, language ?? null, 1]
+
+    return language ? [...base, language] : base
   })
 }
 
@@ -75,7 +83,7 @@ export function decodeWords(json: unknown): TranscriptWord[] {
   for (const entry of value) {
     if (!Array.isArray(entry) || entry.length < 3) continue
 
-    const [startMs, endMs, text, confidence, language] = entry as unknown[]
+    const [startMs, endMs, text, confidence, language, edited] = entry as unknown[]
 
     if (!isFiniteNumber(startMs) || !isFiniteNumber(endMs) || typeof text !== "string") {
       continue
@@ -85,6 +93,7 @@ export function decodeWords(json: unknown): TranscriptWord[] {
 
     if (isFiniteNumber(confidence)) word.confidence = confidence
     if (typeof language === "string" && language) word.language = language
+    if (edited === 1) word.edited = true
     words.push(word)
   }
 

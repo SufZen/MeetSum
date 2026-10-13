@@ -10,11 +10,11 @@ import { Input } from "@/components/ui/input"
 import { StatusPill } from "@/components/ui/meeting-atoms"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import { meetingDurationLabel } from "@/lib/meetings/duration"
 import type {
+  MeetingListItem,
   MeetingListSortMode,
-  MeetingRecord,
 } from "@/lib/meetings/repository"
+import { formatDurationLabel, getMeetingDurationMs } from "@/lib/meetings/duration"
 
 const quickFilters = [
   ["all", "All Meetings"],
@@ -35,11 +35,11 @@ const sortLabels: Record<MeetingSortMode, string> = {
   status: "Status",
 }
 
-function isDriveImport(meeting: MeetingRecord) {
+function isDriveImport(meeting: MeetingListItem) {
   return Boolean(meeting.mediaAssets?.some((asset) => asset.source === "google_drive"))
 }
 
-function sourceMeta(meeting: MeetingRecord) {
+function sourceMeta(meeting: MeetingListItem) {
   const source = meeting.source
 
   if (source === "upload" && isDriveImport(meeting)) {
@@ -52,7 +52,7 @@ function sourceMeta(meeting: MeetingRecord) {
   return { label: source.replaceAll("_", " "), dot: "bg-warn", icon: "A" }
 }
 
-function participantCount(meeting: MeetingRecord) {
+function participantCount(meeting: MeetingListItem) {
   return meeting.participantDetails?.length || meeting.participants.length
 }
 
@@ -76,7 +76,7 @@ function tagClass(tag: string) {
  * invented percentage.
  */
 function statusPill(
-  status: MeetingRecord["status"]
+  status: MeetingListItem["status"]
 ): { status: "failed" | "processing"; label: string } | null {
   if (status === "failed") return { status: "failed", label: "Failed" }
   if (status === "completed" || status === "scheduled" || status === "created") return null
@@ -126,7 +126,7 @@ export function MeetingInboxPanel({
 }: {
   dictionary: Dictionary
   locale: SupportedLocale
-  meetings: MeetingRecord[]
+  meetings: MeetingListItem[]
   selectedMeetingId?: string
   query: string
   activeFilter: string
@@ -166,7 +166,7 @@ export function MeetingInboxPanel({
   })
 
   return (
-    <section className="ms-no-x grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-line bg-surface">
+    <section className="ms-no-x grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-e border-line bg-surface">
       <div className="ms-no-x border-b border-line px-3 py-3">
         <div className="mb-2.5 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-base font-semibold">
@@ -251,7 +251,7 @@ export function MeetingInboxPanel({
                 <button
                   type="button"
                   data-selected={selected}
-                  className="ms-no-x grid min-h-[76px] gap-2 rounded-md border border-line bg-surface px-2.5 py-2.5 text-start shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-ring hover:bg-brand-soft/50 data-[selected=true]:border-ring data-[selected=true]:bg-brand-soft"
+                  className="ms-no-x grid min-h-19 gap-2 rounded-md border border-line bg-surface px-2.5 py-2.5 text-start shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:border-ring hover:bg-brand-soft/50 data-[selected=true]:border-ring data-[selected=true]:bg-brand-soft"
                   onClick={() => onSelectMeeting(meeting.id)}
                 >
                   <div className="flex min-w-0 items-start gap-2.5">
@@ -260,7 +260,7 @@ export function MeetingInboxPanel({
                     </div>
                     <div className="min-w-0 flex-1 overflow-hidden">
                       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                        <h3 className="ms-row-title text-sm font-semibold leading-5 text-foreground">
+                        <h3 dir="auto" className="ms-row-title text-sm font-semibold leading-5 text-foreground">
                           {meeting.title}
                         </h3>
                         <span className="shrink-0 font-mono text-xs text-muted-foreground">
@@ -271,7 +271,9 @@ export function MeetingInboxPanel({
                         <span className={`size-2 rounded-full ${source.dot}`} />
                         <span className="min-w-0 truncate">{source.label}</span>
                         <span>·</span>
-                        <span className="shrink-0">{meetingDurationLabel(meeting)}</span>
+                        <span className="shrink-0 [unicode-bidi:isolate]">
+                          {formatDurationLabel(getMeetingDurationMs(meeting), locale)}
+                        </span>
                         <span>·</span>
                         <span className="min-w-0 truncate">
                           {participantCount(meeting)} {participantCount(meeting) === 1 ? "participant" : "participants"}
@@ -283,7 +285,7 @@ export function MeetingInboxPanel({
                           <Badge
                             key={tag}
                             variant="secondary"
-                            className={`h-5 max-w-[112px] truncate rounded-md px-1.5 text-2xs font-medium ${tagClass(tag)}`}
+                            className={`h-5 max-w-28 truncate rounded-md px-1.5 text-2xs font-medium ${tagClass(tag)}`}
                           >
                             {tag}
                           </Badge>

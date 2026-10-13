@@ -22,6 +22,10 @@ export const PUBLIC_ALLOWLIST = [
   "locales GET",
   "share/[token]/verify GET",
   "share/[token]/verify POST",
+  // M4: shared recording + peaks, gated by share/section/password (404).
+  "share/[token]/media GET",
+  "share/[token]/media HEAD",
+  "share/[token]/media/peaks GET",
   "webhooks/zoom POST",
   "webhooks/teams POST",
   "webhooks/teams/lifecycle POST",

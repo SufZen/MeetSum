@@ -2,16 +2,33 @@
 
 import { ShieldAlertIcon } from "lucide-react"
 import { useState } from "react"
+import dynamic from "next/dynamic"
 
-import { ApiKeysSection } from "@/components/admin/api-keys-section"
-import { AuditLogSection } from "@/components/admin/audit-log-section"
-import { InvitationsSection } from "@/components/admin/invitations-section"
-import { MembersSection } from "@/components/admin/members-section"
+import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/permissions"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useWorkspace } from "@/components/workspace-context"
 import type { Permission } from "@/lib/auth/authz"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
+
+// Each section loads when its tab is first shown.
+const sectionLoading = () => <div aria-busy="true" className="h-40 animate-pulse rounded-lg bg-surface-2" />
+const MembersSection = dynamic(
+  () => import("@/components/admin/members-section").then((mod) => mod.MembersSection),
+  { loading: sectionLoading }
+)
+const InvitationsSection = dynamic(
+  () => import("@/components/admin/invitations-section").then((mod) => mod.InvitationsSection),
+  { loading: sectionLoading }
+)
+const ApiKeysSection = dynamic(
+  () => import("@/components/admin/api-keys-section").then((mod) => mod.ApiKeysSection),
+  { loading: sectionLoading }
+)
+const AuditLogSection = dynamic(
+  () => import("@/components/admin/audit-log-section").then((mod) => mod.AuditLogSection),
+  { loading: sectionLoading }
+)
 
 type AdminTab = "members" | "invitations" | "api-keys" | "audit"
 
@@ -22,12 +39,7 @@ const TAB_PERMISSIONS: Record<AdminTab, Permission> = {
   audit: "audit:read",
 }
 
-/** Permissions that make the admin panel worth showing in the sidebar. */
-export const ADMIN_PANEL_PERMISSIONS: Permission[] = [
-  "members:manage",
-  "api_keys:manage",
-  "audit:read",
-]
+export { ADMIN_PANEL_PERMISSIONS }
 
 export function AdminPanel({
   dictionary: t,
