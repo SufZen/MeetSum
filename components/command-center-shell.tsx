@@ -47,7 +47,7 @@ import { TalkTimePanel } from "@/components/talk-time-panel"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { ShareMeetingDialog } from "@/components/share/share-meeting-dialog"
 import {
   TopCommandBar,
   type AiProviderStatus,
@@ -185,7 +185,6 @@ export function CommandCenterShell({
   const detailCacheRef = useRef(new Map<string, DetailEntry>())
   const detailAbortRef = useRef<AbortController | null>(null)
   const [deepLinkTime, setDeepLinkTime] = useState<{ meetingId: string; ms: number } | null>(null)
-  const [shareSections, setShareSections] = useState<string[] | null>(null)
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [providers, setProviders] = useState<ProviderStatusView[]>([])
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatusView>()
@@ -209,8 +208,6 @@ export function CommandCenterShell({
   })
   const [drivePickerOpen, setDrivePickerOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  const [shareLink, setShareLink] = useState("")
-  const [sharePrivateConfirm, setSharePrivateConfirm] = useState(false)
   const [participantsOpen, setParticipantsOpen] = useState(false)
   const [participants, setParticipants] = useState<MeetingParticipant[]>([])
   const [tagsOpen, setTagsOpen] = useState(false)
@@ -904,106 +901,10 @@ export function CommandCenterShell({
     )
   }
 
-  async function createShareLink() {
+  function openShareDialog() {
     if (!selectedMeeting) return
 
-    setSharePrivateConfirm(false)
-    const meetingId = selectedMeeting.id
-    const response = await fetch(`/api/meetings/${meetingId}/share`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(
-        body.reason === "meeting_manage_required"
-          ? dictionary.visibilityReadOnly
-          : (body.error ?? "Unable to create share link")
-      )
-      return
-    }
-
-    setShareLink(body.url)
-    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : null)
-    setMeetingVisibility(meetingId, "link")
-  }
-
-  /** "Include recording" adds or removes the opt-in `media` share section. */
-  async function setShareIncludesRecording(include: boolean) {
-    if (!selectedMeeting || !shareSections) return
-
-    const next = include
-      ? [...shareSections.filter((section) => section !== "media"), "media"]
-      : shareSections.filter((section) => section !== "media")
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ includedSections: next }),
-    })
-    const body = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to update share link")
-      return
-    }
-
-    setShareSections(Array.isArray(body.share?.includedSections) ? body.share.includedSections : next)
-  }
-
-  async function openShareDialog() {
-    if (!selectedMeeting) return
-
-    setShareLink("")
-    setShareSections(null)
     setShareOpen(true)
-
-    // A public link widens a private meeting to the workspace: confirm first.
-    if (selectedMeeting.visibility === "private") {
-      setSharePrivateConfirm(true)
-      return
-    }
-
-    await createShareLink()
-  }
-
-  async function regenerateShareLink() {
-    if (!selectedMeeting) return
-
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ regenerate: true }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to regenerate share link")
-      return
-    }
-
-    setShareLink(body.url)
-    toast.success("Share link regenerated")
-  }
-
-  async function revokeShareLink() {
-    if (!selectedMeeting) return
-
-    const response = await fetch(`/api/meetings/${selectedMeeting.id}/share`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ revoked: true }),
-    })
-    const body = await response.json()
-
-    if (!response.ok) {
-      toast.error(body.error ?? "Unable to revoke share link")
-      return
-    }
-
-    setShareLink("")
-    toast.success("Share link revoked")
   }
 
   async function toggleFavorite() {
@@ -1627,103 +1528,16 @@ export function CommandCenterShell({
             onOpenChange={setDrivePickerOpen}
             onImported={handleDriveImported}
           />
-          {shareOpen ? (
-            <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-              <section className="w-full max-w-lg rounded-lg border border-line bg-surface p-5 shadow-xl">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">Share meeting</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Public link includes summary, decisions, action items,
-                      participants, and transcript. The recording is included
-                      only when you tick it below.
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => setShareOpen(false)}>
-                    Close
-                  </Button>
-                </div>
-                {sharePrivateConfirm ? (
-                  <div className="mt-4 grid gap-3 rounded-md border border-warn/40 bg-warn-soft p-3 text-sm leading-5 text-warn-text">
-                    <p>{dictionary.sharePrivateWarning}</p>
-                    <div>
-                      <Button onClick={() => void createShareLink()}>
-                        {dictionary.visibilityConfirm}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-md border border-line bg-surface-2 p-3">
-                    <input
-                      className="w-full bg-transparent text-sm outline-none"
-                      dir="ltr"
-                      readOnly
-                      value={shareLink || "Creating link..."}
-                    />
-                  </div>
-                )}
-                {!sharePrivateConfirm && selectedMeeting?.mediaAssets?.length ? (
-                  <label className="mt-3 flex items-start gap-2.5 text-sm">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={Boolean(shareSections?.includes("media"))}
-                      disabled={!shareSections}
-                      onCheckedChange={(checked) => void setShareIncludesRecording(Boolean(checked))}
-                    />
-                    <span className="grid">
-                      <span className="font-medium">{dictionary.shareIncludeRecording}</span>
-                      <span className="text-xs text-fg-3">{dictionary.shareIncludeRecordingHint}</span>
-                    </span>
-                  </label>
-                ) : null}
-                {selectedDetail && !selectedDetail.meeting.summary?.overview ? (
-                  <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs leading-5 text-warn-text">
-                    This meeting has no generated summary yet. The public page
-                    will still open, but it may only show metadata, participants,
-                    and any transcript that exists.
-                  </div>
-                ) : null}
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    disabled={!shareLink}
-                    onClick={() => copyText(shareLink, "Share link")}
-                  >
-                    Copy link
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="outline"
-                    onClick={() => window.open(shareLink, "_blank")}
-                  >
-                    Open
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="outline"
-                    onClick={regenerateShareLink}
-                    title={
-                      shareLink
-                        ? "Regenerate the public share token"
-                        : "Create the first share link before regenerating"
-                    }
-                  >
-                    Regenerate
-                  </Button>
-                  <Button
-                    disabled={!shareLink}
-                    variant="destructive"
-                    onClick={revokeShareLink}
-                    title={
-                      shareLink
-                        ? "Revoke this public share link"
-                        : "No active public link to revoke"
-                    }
-                  >
-                    Revoke
-                  </Button>
-                </div>
-              </section>
-            </div>
+          {shareOpen && selectedMeeting ? (
+            <ShareMeetingDialog
+              key={selectedMeeting.id}
+              meeting={selectedMeeting}
+              open={shareOpen}
+              onOpenChange={setShareOpen}
+              dictionary={dictionary}
+              hasSummary={!selectedDetail || Boolean(selectedDetail.meeting.summary?.overview)}
+              onVisibilityChange={setMeetingVisibility}
+            />
           ) : null}
           {payloadPreviewOpen ? (
             <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
