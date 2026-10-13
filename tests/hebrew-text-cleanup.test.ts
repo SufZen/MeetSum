@@ -230,3 +230,34 @@ describe("word-bounded auto tags", () => {
     expect(generateAutoTags(cleaned)).not.toContain("technical")
   })
 })
+
+describe("cleanupTranscriptSegments rewriteTerms: false (M3)", () => {
+  it("keeps text in sync with words and preserves speaker id, turn and words", () => {
+    const words = [
+      { startMs: 0, endMs: 400, text: "עברנו" },
+      { startMs: 500, endMs: 1_200, text: "לסופרבייס" },
+    ]
+    const segment: TranscriptSegment = {
+      ...seg("עברנו לסופרבייס"),
+      speakerId: "speaker_1",
+      turnIndex: 3,
+      source: "asr",
+      words,
+    }
+
+    const [kept] = cleanupTranscriptSegments([segment], { rewriteTerms: false })
+
+    expect(kept).toEqual(segment)
+    expect(cleanupTranscriptSegments([segment])[0].text).not.toBe(segment.text)
+  })
+
+  it("still drops fillers and echoes without rewriting terms", () => {
+    const first = seg("נדבר על סופרבייס", { speaker: "Speaker 1", startMs: 0, endMs: 1_000 })
+    const echo = seg("נדבר על סופרבייס", { speaker: "Speaker 1", startMs: 1_500, endMs: 2_000 })
+    const filler = seg("שומעים אותי?", { speaker: "Speaker 2", startMs: 2_500, endMs: 3_000 })
+
+    const cleaned = cleanupTranscriptSegments([first, echo, filler], { rewriteTerms: false })
+
+    expect(cleaned.map((segment) => segment.text)).toEqual(["נדבר על סופרבייס"])
+  })
+})

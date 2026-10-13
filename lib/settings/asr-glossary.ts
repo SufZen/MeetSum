@@ -1,4 +1,5 @@
 import { DEFAULT_ASR_GLOSSARY } from "@/lib/ai/asr"
+import { getDatabasePool } from "@/lib/db/client"
 import type { AsrGlossary, GlossaryTerm } from "@/lib/ai/asr/types"
 
 /**
@@ -151,27 +152,118 @@ export function parseAsrGlossary(value: unknown): ParseAsrGlossaryResult {
   return errors.length ? { ok: false, errors } : { ok: true, glossary: { version: 1, terms } }
 }
 
-/**
- * Effective glossary of a workspace (defaults merged with the workspace
- * setting). Stub: returns the built-in defaults until M3 storage lands.
- */
-export async function getAsrGlossary(workspaceId: string): Promise<AsrGlossary> {
-  void workspaceId
-  return {
-    version: 1,
-    terms: DEFAULT_ASR_GLOSSARY.terms.map((term) => ({
-      ...term,
-      aliases: [...term.aliases],
-    })),
+/** Raised by `updateAsrGlossary` for an invalid payload (route → 400). */
+export class AsrGlossaryValidationError extends Error {
+  readonly errors: AsrGlossaryFieldError[]
+
+  constructor(errors: AsrGlossaryFieldError[]) {
+    super("Invalid ASR glossary")
+    this.name = "AsrGlossaryValidationError"
+    this.errors = errors
   }
 }
 
-/** Validates and stores a workspace glossary. Stub until M3 storage lands. */
+function cloneGlossary(glossary: AsrGlossary): AsrGlossary {
+  return {
+    version: 1,
+    terms: glossary.terms.map((term) => ({ ...term, aliases: [...term.aliases] })),
+  }
+}
+
+const EMPTY_GLOSSARY: AsrGlossary = { version: 1, terms: [] }
+
+/** In-memory (non-postgres) workspace glossaries, keyed by workspace id. */
+const memoryGlossaries = new Map<string, AsrGlossary>()
+
+function usesPostgres(env: NodeJS.ProcessEnv = process.env) {
+  return env.MEETSUM_STORAGE === "postgres"
+}
+
+/**
+ * Defaults first, then workspace terms: a workspace term replaces the default
+ * with the same term (case-insensitive) in place; new terms are appended.
+ */
+export function mergeWorkspaceGlossary(
+  defaults: AsrGlossary,
+  workspace: AsrGlossary
+): AsrGlossary {
+  const terms: GlossaryTerm[] = defaults.terms.map((term) => ({
+    ...term,
+    aliases: [...term.aliases],
+  }))
+  const index = new Map(terms.map((term, position) => [term.term.toLocaleLowerCase(), position]))
+
+  for (const term of workspace.terms) {
+    const key = term.term.toLocaleLowerCase()
+    const copy = { ...term, aliases: [...term.aliases] }
+    const position = index.get(key)
+
+    if (position === undefined) {
+      index.set(key, terms.length)
+      terms.push(copy)
+    } else {
+      terms[position] = copy
+    }
+  }
+
+  return { version: 1, terms }
+}
+
+/**
+ * The workspace's own glossary setting (without defaults). A stored value
+ * that no longer validates is ignored (empty), never fatal for ASR.
+ */
+export async function getWorkspaceAsrGlossary(workspaceId: string): Promise<AsrGlossary> {
+  if (!usesPostgres()) {
+    return cloneGlossary(memoryGlossaries.get(workspaceId) ?? EMPTY_GLOSSARY)
+  }
+
+  const result = await getDatabasePool().query(
+    "select value from workspace_settings where workspace_id = $1 and key = $2",
+    [workspaceId, ASR_GLOSSARY_SETTING_KEY]
+  )
+  const row = result.rows[0] as { value?: unknown } | undefined
+
+  if (!row) return cloneGlossary(EMPTY_GLOSSARY)
+
+  const parsed = parseAsrGlossary(row.value)
+
+  return parsed.ok ? parsed.glossary : cloneGlossary(EMPTY_GLOSSARY)
+}
+
+/** Effective glossary of a workspace: DEFAULT_ASR_GLOSSARY merged with its setting. */
+export async function getAsrGlossary(workspaceId: string): Promise<AsrGlossary> {
+  return mergeWorkspaceGlossary(DEFAULT_ASR_GLOSSARY, await getWorkspaceAsrGlossary(workspaceId))
+}
+
+/**
+ * Validates and stores a workspace glossary (`workspace_settings.asrGlossary`).
+ * Throws AsrGlossaryValidationError with field errors when invalid. Returns
+ * the stored (normalized) workspace glossary.
+ */
 export async function updateAsrGlossary(
   workspaceId: string,
   glossary: unknown
 ): Promise<AsrGlossary> {
-  void workspaceId
-  void glossary
-  throw new Error("updateAsrGlossary: not implemented (M3)")
+  const parsed = parseAsrGlossary(glossary)
+
+  if (!parsed.ok) throw new AsrGlossaryValidationError(parsed.errors)
+
+  if (!usesPostgres()) {
+    memoryGlossaries.set(workspaceId, cloneGlossary(parsed.glossary))
+    return cloneGlossary(parsed.glossary)
+  }
+
+  await getDatabasePool().query(
+    `
+      insert into workspace_settings (workspace_id, key, value, updated_at)
+      values ($1, $2, $3::jsonb, now())
+      on conflict (workspace_id, key) do update
+        set value = excluded.value,
+            updated_at = now()
+    `,
+    [workspaceId, ASR_GLOSSARY_SETTING_KEY, JSON.stringify(parsed.glossary)]
+  )
+
+  return parsed.glossary
 }

@@ -1,11 +1,16 @@
 import { UnrecoverableError, Worker, type Job } from "bullmq"
 
 import {
+  AsrChainError,
+  AsrError,
+  transcribeWithRouter,
+  type AsrAttempt,
+  type AsrRouterResult,
+} from "@/lib/ai/asr"
+import {
   createSummaryProvider,
-  createTranscriptionProvider,
   getGeminiProviderMode,
   getSummaryRunMetadata,
-  getTranscriptionRunMetadata,
   TranscriptionUnavailableError,
 } from "@/lib/ai/providers"
 import { importPlatformRecording } from "@/lib/capture/recording-import"
@@ -16,6 +21,7 @@ import { getDatabasePool } from "@/lib/db/client"
 import {
   importMeetRecordingArtifactsForMeeting,
   importMeetTranscriptArtifactsForMeeting,
+  loadMeetTimelineForMeeting,
   syncMeetArtifacts,
 } from "@/lib/google/meet-artifacts"
 import { pollCalendar, pollDrive, pollGmail } from "@/lib/google/services"
@@ -30,7 +36,12 @@ import type {
   MeetingRecord,
   MeetingRepository,
   MeetingVisibility,
+  TranscriptSegment,
 } from "@/lib/meetings/repository"
+import { summarizeSpeakerStats } from "@/lib/meetings/speakers/stats"
+import { refreshSpeakerSuggestions } from "@/lib/meetings/speakers/suggest"
+import type { TranscriptWord } from "@/lib/meetings/transcript-words"
+import { getAsrGlossary } from "@/lib/settings/asr-glossary"
 import {
   getSystemMeetingRepository,
   resolveMeetingWorkspaceId,
@@ -256,42 +267,55 @@ async function deliverPlatformEvent(
 }
 
 async function recordAiRun(options: {
+  id?: string
   meetingId: string
+  workspaceId?: string
   task: string
   status: "completed" | "failed"
   startedAt: number
+  /** Defaults to now − startedAt. */
+  latencyMs?: number
   jobId?: string
   provider?: string
   model?: string
+  confidence?: number
+  costEstimate?: number
+  audioDurationMs?: number
   metadata?: Record<string, unknown>
   error?: string
 }) {
   if (process.env.MEETSUM_STORAGE !== "postgres") return
+
+  const confidence =
+    options.confidence ??
+    (typeof options.metadata?.confidence === "number" ? options.metadata.confidence : undefined)
 
   try {
     await getDatabasePool().query(
       `
         insert into ai_runs (
           id, meeting_id, provider, task, status, metadata, model,
-          latency_ms, confidence, started_at, completed_at, error, job_id
+          latency_ms, confidence, started_at, completed_at, error, job_id,
+          cost_estimate, audio_duration_ms, workspace_id
         )
-        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, now(), $11, $12)
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, now(), $11, $12, $13, $14, $15)
       `,
       [
-        `airun_${crypto.randomUUID()}`,
+        options.id ?? `airun_${crypto.randomUUID()}`,
         options.meetingId,
         options.provider ?? getGeminiProviderMode(),
         options.task,
         options.status,
         JSON.stringify(options.metadata ?? {}),
         options.model ?? null,
-        Date.now() - options.startedAt,
-        typeof options.metadata?.confidence === "number"
-          ? options.metadata.confidence
-          : null,
+        Math.round(options.latencyMs ?? Date.now() - options.startedAt),
+        confidence ?? null,
         new Date(options.startedAt).toISOString(),
         options.error ?? null,
         options.jobId ?? null,
+        options.costEstimate ?? null,
+        options.audioDurationMs === undefined ? null : Math.round(options.audioDurationMs),
+        options.workspaceId ?? null,
       ]
     )
   } catch (error) {
@@ -337,16 +361,6 @@ export function selectMediaAsset(
   }
 
   return newestAssetWithStorage(assets)
-}
-
-function withSelectedAsset(meeting: MeetingRecord, asset: MediaAsset): MeetingRecord {
-  return {
-    ...meeting,
-    mediaAssets: [
-      asset,
-      ...(meeting.mediaAssets ?? []).filter((candidate) => candidate.id !== asset.id),
-    ],
-  }
 }
 
 function platformImportRequest(
@@ -423,6 +437,7 @@ async function summarizeAndPersist(scope: JobScope, options: {
 
     await recordAiRun({
       meetingId: meeting.id,
+      workspaceId: scope.workspaceId,
       task: options.task,
       status: "failed",
       startedAt: summaryStartedAt,
@@ -439,6 +454,7 @@ async function summarizeAndPersist(scope: JobScope, options: {
 
   await recordAiRun({
     meetingId: meeting.id,
+    workspaceId: scope.workspaceId,
     task: options.task,
     status: "completed",
     startedAt: summaryStartedAt,
@@ -471,6 +487,139 @@ async function summarizeAndPersist(scope: JobScope, options: {
   return { intelligence, newActionItems }
 }
 
+/** Permanent ASR failures: retrying the same media can never succeed. */
+function isPermanentAsrError(error: unknown): boolean {
+  return (
+    error instanceof TranscriptionUnavailableError ||
+    (error instanceof AsrError && error.kind === "bad_input") ||
+    (error instanceof AsrChainError && !error.retryable)
+  )
+}
+
+/** One failed `audio.transcribe` ai_run per failed provider attempt. */
+async function recordFailedAsrAttempts(
+  scope: JobScope,
+  options: {
+    meetingId: string
+    jobRecordId?: string
+    attempts: AsrAttempt[]
+    startedAt: number
+    inputAsset: Record<string, unknown>
+  }
+) {
+  for (const attempt of options.attempts) {
+    if (attempt.ok) continue
+
+    await recordAiRun({
+      meetingId: options.meetingId,
+      workspaceId: scope.workspaceId,
+      task: "audio.transcribe",
+      status: "failed",
+      startedAt: options.startedAt,
+      latencyMs: attempt.elapsedMs,
+      jobId: options.jobRecordId,
+      provider: attempt.provider,
+      costEstimate: attempt.cost?.usd ?? undefined,
+      metadata: {
+        providerMode: attempt.provider,
+        errorKind: attempt.kind,
+        ...options.inputAsset,
+      },
+      error: attempt.error ?? "ASR attempt failed",
+    })
+  }
+}
+
+function toTranscriptSegments(result: AsrRouterResult): TranscriptSegment[] {
+  return result.segments.map((segment) => {
+    const converted: TranscriptSegment = {
+      id: `seg_${crypto.randomUUID()}`,
+      speaker: segment.speaker,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text,
+      turnIndex: segment.turnIndex,
+      source: "asr",
+      words: segment.words.map((word) => {
+        const converted: TranscriptWord = {
+          startMs: word.startMs,
+          endMs: word.endMs,
+          text: word.text,
+        }
+
+        if (word.confidence !== undefined) converted.confidence = word.confidence
+        if (word.language) converted.language = word.language
+        return converted
+      }),
+    }
+
+    if (segment.confidence !== undefined) converted.confidence = segment.confidence
+    if (segment.language) converted.language = segment.language
+    return converted
+  })
+}
+
+/** Segment confidence weighted by word count (segments without one skipped). */
+export function wordWeightedConfidence(segments: readonly TranscriptSegment[]) {
+  let total = 0
+  let weight = 0
+
+  for (const segment of segments) {
+    if (typeof segment.confidence !== "number") continue
+
+    const words = Math.max(1, segment.words?.length ?? 0)
+
+    total += segment.confidence * words
+    weight += words
+  }
+
+  return weight ? Number((total / weight).toFixed(4)) : undefined
+}
+
+/**
+ * Best-effort Meet transcript timeline for speaker suggestions on meetings
+ * with a Meet transcript artifact (Postgres + Google subject required).
+ */
+function meetTimelineLoader(
+  scope: JobScope,
+  meeting: MeetingRecord,
+  payload: MeetSumJobPayload
+) {
+  const hasMeetTranscript = (meeting.meetConferenceRecords ?? []).some((record) =>
+    record.artifacts.some((artifact) => artifact.artifactType === "transcript")
+  )
+
+  if (!hasMeetTranscript || process.env.MEETSUM_STORAGE !== "postgres") return undefined
+
+  return async () => {
+    const explicit =
+      typeof payload.subject === "string" ? payload.subject.trim().toLowerCase() : ""
+    const subject = explicit || (await loadWorkspaceGoogleSubject(scope.workspaceId))
+
+    if (!subject) return undefined
+
+    return loadMeetTimelineForMeeting({
+      meetingId: meeting.id,
+      workspaceId: scope.workspaceId,
+      subject,
+    })
+  }
+}
+
+/** Suggestion refresh must never fail the pipeline. */
+async function refreshSuggestionsSafely(
+  scope: JobScope,
+  meetingId: string,
+  options: Parameters<typeof refreshSpeakerSuggestions>[2] = {}
+) {
+  try {
+    return await refreshSpeakerSuggestions(scope.repo, meetingId, options)
+  } catch (error) {
+    console.warn("Speaker suggestion refresh failed", error)
+    return 0
+  }
+}
+
 async function processMediaJob(
   scope: JobScope,
   payload: MeetSumJobPayload,
@@ -488,58 +637,149 @@ async function processMediaJob(
   await setStage(scope, jobRecordId, { stage: "audio.transcribe", assetId: asset.id })
 
   const inputAsset = { inputAsset: asset.id, inputStorageKey: asset.storageKey }
+  const glossary = await getAsrGlossary(scope.workspaceId)
   const transcriptionStartedAt = Date.now()
-  const transcriptionProvider = createTranscriptionProvider()
-  let transcript: Awaited<ReturnType<typeof transcriptionProvider.transcribe>>
+  let result: AsrRouterResult
 
   try {
-    transcript = await transcriptionProvider.transcribe(
-      withSelectedAsset(meeting, asset)
-    )
+    result = await transcribeWithRouter({
+      meetingId: meeting.id,
+      workspaceId: scope.workspaceId,
+      language: meeting.language,
+      media: {
+        kind: "object",
+        storageKey: asset.storageKey,
+        contentType: asset.contentType,
+        filename: asset.filename,
+        sizeBytes: asset.sizeBytes,
+      },
+      glossary,
+      diarize: true,
+    })
   } catch (error) {
-    const run = getTranscriptionRunMetadata(transcriptionProvider)
+    const attempts = error instanceof AsrChainError ? error.attempts : []
+
+    await recordFailedAsrAttempts(scope, {
+      meetingId: meeting.id,
+      jobRecordId,
+      attempts,
+      startedAt: transcriptionStartedAt,
+      inputAsset,
+    })
+    if (!attempts.some((attempt) => !attempt.ok)) {
+      await recordAiRun({
+        meetingId: meeting.id,
+        workspaceId: scope.workspaceId,
+        task: "audio.transcribe",
+        status: "failed",
+        startedAt: transcriptionStartedAt,
+        jobId: jobRecordId,
+        provider: error instanceof AsrError ? error.provider : "asr-router",
+        metadata: { providerMode: "asr-router", ...inputAsset },
+        error: errorMessage(error),
+      })
+    }
+    if (isPermanentAsrError(error)) throw toPermanentError(error)
+    throw error
+  }
+
+  const elapsedMs = Date.now() - transcriptionStartedAt
+  const failedAttempts = result.attempts.filter((attempt) => !attempt.ok)
+
+  await recordFailedAsrAttempts(scope, {
+    meetingId: meeting.id,
+    jobRecordId,
+    attempts: failedAttempts,
+    startedAt: transcriptionStartedAt,
+    inputAsset,
+  })
+
+  const transcript = cleanupTranscriptSegments(toTranscriptSegments(result), {
+    rewriteTerms: false,
+  })
+  const wordCount = transcript.reduce(
+    (sum, segment) => sum + (segment.words?.length ?? 0),
+    0
+  )
+  const asrRunId = `airun_${crypto.randomUUID()}`
+  const confidence = wordWeightedConfidence(transcript)
+  const metadata = {
+    providerMode: result.provider,
+    attempts: result.attempts,
+    fallbackUsed: result.fallbackUsed,
+    attemptedProvider: failedAttempts[0]?.provider,
+    fallbackReason: failedAttempts[0]?.error,
+    language: result.language,
+    diarization: result.diarization,
+    speakerCount: new Set(transcript.map((segment) => segment.speaker)).size,
+    wordCount,
+    segmentCount: transcript.length,
+    glossaryTerms: glossary.terms.length,
+    glossaryReplacements: result.glossaryReplacements,
+    timings: result.timings,
+    rtf: result.durationMs > 0 ? Number((elapsedMs / result.durationMs).toFixed(4)) : null,
+    billedSeconds: result.cost.billedSeconds,
+    costBasis: result.cost.basis,
+    warnings: result.warnings,
+    ...inputAsset,
+    confidence,
+  }
+
+  if (!transcript.length) {
+    const noSpeech = new Error("No speech detected in the recording.")
 
     await recordAiRun({
+      id: asrRunId,
       meetingId: meeting.id,
+      workspaceId: scope.workspaceId,
       task: "audio.transcribe",
       status: "failed",
       startedAt: transcriptionStartedAt,
       jobId: jobRecordId,
-      provider: run.provider,
-      model: run.model,
-      metadata: { providerMode: run.provider, ...inputAsset },
-      error: errorMessage(error),
+      provider: result.provider,
+      model: result.model,
+      costEstimate: result.cost.usd ?? undefined,
+      audioDurationMs: result.durationMs,
+      metadata,
+      error: noSpeech.message,
     })
-    if (error instanceof TranscriptionUnavailableError) {
-      throw toPermanentError(error)
-    }
-    throw error
+    throw toPermanentError(noSpeech)
   }
 
-  const transcriptionRun = getTranscriptionRunMetadata(transcriptionProvider)
   await recordAiRun({
+    id: asrRunId,
     meetingId: meeting.id,
+    workspaceId: scope.workspaceId,
     task: "audio.transcribe",
     status: "completed",
     startedAt: transcriptionStartedAt,
     jobId: jobRecordId,
-    model: transcriptionRun.model,
-    provider: transcriptionRun.provider,
-    metadata: {
-      segments: transcript.length,
-      providerMode: transcriptionRun.provider,
-      fallbackUsed: transcriptionRun.fallbackUsed ?? false,
-      attemptedProvider: transcriptionRun.attemptedProvider,
-      fallbackReason: transcriptionRun.fallbackReason,
-      ...inputAsset,
-      confidence:
-        transcript.length > 0
-          ? transcript.reduce((sum, segment) => sum + (segment.confidence ?? 0), 0) /
-            transcript.length
-          : 0,
-    },
+    provider: result.provider,
+    model: result.model,
+    costEstimate: result.cost.usd ?? undefined,
+    audioDurationMs: result.durationMs,
+    confidence,
+    metadata,
   })
-  await scope.repo.replaceTranscriptSegments(meeting.id, transcript)
+  await scope.repo.replaceTranscript(meeting.id, {
+    segments: transcript,
+    speakers: result.speakers.map((speaker) => ({
+      label: speaker.label,
+      source: "asr",
+      talkTimeMs: speaker.talkTimeMs,
+      wordCount: speaker.wordCount,
+      segmentCount: speaker.segmentCount,
+      firstStartMs: speaker.firstStartMs,
+      embedding: speaker.embedding,
+      embeddingModel: speaker.embeddingModel,
+    })),
+    asrRunId,
+  })
+
+  const suggestedSpeakers = await refreshSuggestionsSafely(scope, meeting.id, {
+    loadMeetTimeline: meetTimelineLoader(scope, meeting, payload),
+  })
+
   await scope.repo.updateMeetingStatus(meeting.id, "summarizing")
   await setStage(scope, jobRecordId, {
     stage: "summary.generate",
@@ -578,6 +818,10 @@ async function processMediaJob(
     meetingId: meeting.id,
     assetId: asset.id,
     transcriptSegments: transcript.length,
+    asrProvider: result.provider,
+    fallbackUsed: result.fallbackUsed,
+    speakers: metadata.speakerCount,
+    suggestedSpeakers,
     tags: intelligence.tags,
   }
 }
@@ -592,8 +836,17 @@ async function processIntelligenceOnlyJob(
   await scope.repo.updateMeetingStatus(meeting.id, "summarizing")
   await setStage(scope, jobRecordId, { stage: "summary.generate", mode: payload.mode })
 
-  const cleanedTranscript = cleanupTranscriptSegments(meeting.transcript ?? [])
-  if (cleanedTranscript.length) {
+  const transcript = meeting.transcript ?? []
+  // Segments with word timings keep their text (the ASR glossary already
+  // handled terms); only fillers/echoes are dropped.
+  const cleanedTranscript = cleanupTranscriptSegments(transcript, {
+    rewriteTerms: !transcript.some((segment) => segment.words?.length),
+  })
+  const changed =
+    cleanedTranscript.length !== transcript.length ||
+    cleanedTranscript.some((segment, index) => segment.text !== transcript[index]?.text)
+
+  if (cleanedTranscript.length && changed) {
     await scope.repo.replaceTranscriptSegments(meeting.id, cleanedTranscript)
   }
 
@@ -726,10 +979,18 @@ async function processArtifactImportJob(
     }
   }
 
-  await scope.repo.replaceTranscriptSegments(
-    meetingId,
-    imported.transcriptSegments
-  )
+  // Meet transcripts name their speakers: segments/speakers are `meet`
+  // sourced, so a re-import keeps confirmed mappings.
+  const meetSegments = imported.transcriptSegments.map((segment) => ({
+    ...segment,
+    source: segment.source ?? "meet",
+  }))
+
+  await scope.repo.replaceTranscript(meetingId, {
+    segments: meetSegments,
+    speakers: summarizeSpeakerStats(meetSegments, "meet"),
+  })
+  await refreshSuggestionsSafely(scope, meetingId, { meetTimeline: imported.meetTimeline })
   await setStage(scope, jobRecordId, {
     stage: "summary.generate",
     importedEntries: imported.importedEntries,

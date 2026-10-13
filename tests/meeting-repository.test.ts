@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest"
 
 import { buildMeetingIntelligence, type SmartTask } from "@/lib/intelligence"
 import {
+  createInMemoryMeetingDatabase,
   createInMemoryMeetingRepository,
   type CreateMeetingInput,
+  type TranscriptSegment,
 } from "@/lib/meetings/repository"
 
 describe("meeting repository", () => {
@@ -396,5 +398,326 @@ describe("meeting repository", () => {
     expect(await repository.getMeeting(empty.id)).toBeUndefined()
     expect((await repository.getJob(job.id))?.meetingId).toBeUndefined()
     expect(await repository.discardMeeting("missing")).toBe(false)
+  })
+})
+
+describe("in-memory speaker data layer (M3)", () => {
+  async function seedDiarized() {
+    const repository = createInMemoryMeetingRepository()
+    const meeting = await repository.createMeeting({
+      title: "סנכרון שבועי",
+      source: "upload",
+      language: "he",
+      startedAt: "2026-10-01T09:00:00.000Z",
+      participants: ["dana@example.com", "Ran"],
+    })
+    const segments: TranscriptSegment[] = [
+      {
+        id: "seg_1",
+        speaker: "Speaker 1",
+        startMs: 0,
+        endMs: 2_000,
+        text: "שלום, אני דנה",
+        language: "he",
+        words: [
+          { startMs: 0, endMs: 600, text: "שלום," },
+          { startMs: 700, endMs: 1_200, text: "אני" },
+          { startMs: 1_300, endMs: 2_000, text: "דנה" },
+        ],
+      },
+      {
+        id: "seg_2",
+        speaker: "Speaker 2",
+        startMs: 2_500,
+        endMs: 4_000,
+        text: "היי דנה",
+        language: "he",
+        words: [
+          { startMs: 2_500, endMs: 3_000, text: "היי" },
+          { startMs: 3_100, endMs: 4_000, text: "דנה" },
+        ],
+      },
+      {
+        id: "seg_3",
+        speaker: "Speaker 1",
+        startMs: 4_500,
+        endMs: 6_000,
+        text: "נתחיל",
+        language: "he",
+        words: [{ startMs: 4_500, endMs: 6_000, text: "נתחיל" }],
+      },
+    ]
+    const written = await repository.replaceTranscript(meeting.id, {
+      segments,
+      speakers: [
+        { label: "Speaker 1", talkTimeMs: 3_500, wordCount: 4, segmentCount: 2, firstStartMs: 0 },
+        { label: "Speaker 2", talkTimeMs: 1_500, wordCount: 2, segmentCount: 1, firstStartMs: 2_500 },
+      ],
+      asrRunId: "airun_1",
+    })
+
+    return { repository, meeting, written, segments }
+  }
+
+  it("stores one speaker per label with words, turn indexes and no label participants", async () => {
+    const { repository, meeting, written } = await seedDiarized()
+    const stored = await repository.getMeeting(meeting.id)
+
+    expect(written.speakers.map((speaker) => [speaker.label, speaker.mappingStatus])).toEqual([
+      ["Speaker 1", "unmapped"],
+      ["Speaker 2", "unmapped"],
+    ])
+    expect(stored?.speakers).toHaveLength(2)
+    expect(stored?.transcript?.map((segment) => segment.turnIndex)).toEqual([0, 1, 2])
+    expect(stored?.transcript?.[0].words).toHaveLength(3)
+    expect(stored?.transcript?.every((segment) => segment.speakerId)).toBe(true)
+    expect(
+      (await repository.listMeetingParticipants(meeting.id)).some((participant) =>
+        /^Speaker \d+$/.test(participant.name)
+      )
+    ).toBe(false)
+  })
+
+  it("names segments through the participant link without rewriting text or words", async () => {
+    const { repository, meeting, written, segments } = await seedDiarized()
+    const dana = (await repository.listMeetingParticipants(meeting.id)).find(
+      (participant) => participant.email === "dana@example.com"
+    )!
+    const speaker1 = written.speakers.find((speaker) => speaker.label === "Speaker 1")!
+
+    const updated = await repository.updateMeetingSpeaker(meeting.id, speaker1.id, {
+      participantId: dana.id,
+      mappingStatus: "confirmed",
+    })
+    const stored = await repository.getMeeting(meeting.id)
+
+    expect(updated).toMatchObject({ displayName: "dana", mappingStatus: "confirmed" })
+    expect(updated.confirmedAt).toBeTruthy()
+    expect(stored?.transcript?.map((segment) => segment.speaker)).toEqual([
+      "dana",
+      "Speaker 2",
+      "dana",
+    ])
+    expect(stored?.transcript?.map((segment) => segment.text)).toEqual(
+      segments.map((segment) => segment.text)
+    )
+    expect(stored?.transcript?.map((segment) => segment.words)).toEqual(
+      segments.map((segment) => segment.words)
+    )
+  })
+
+  it("assignSpeakerToParticipant maps the speaker row instead of rewriting segments", async () => {
+    const { repository, meeting, segments } = await seedDiarized()
+    const ran = (await repository.listMeetingParticipants(meeting.id)).find(
+      (participant) => participant.name === "Ran"
+    )!
+
+    await repository.assignSpeakerToParticipant(meeting.id, "Speaker 2", ran.id)
+
+    const speakers = await repository.listMeetingSpeakers(meeting.id)
+    const stored = await repository.getMeeting(meeting.id)
+
+    expect(speakers.find((speaker) => speaker.label === "Speaker 2")).toMatchObject({
+      participantId: ran.id,
+      mappingStatus: "confirmed",
+      displayName: "Ran",
+    })
+    expect(stored?.transcript?.[1]).toMatchObject({ speaker: "Ran", text: segments[1].text })
+  })
+
+  it("rejects a participant of another meeting", async () => {
+    const { repository, meeting, written } = await seedDiarized()
+    const other = await repository.createMeeting({
+      title: "Other",
+      source: "upload",
+      language: "en",
+      startedAt: "2026-10-01T09:00:00.000Z",
+      participants: ["Eve"],
+    })
+    const [eve] = await repository.listMeetingParticipants(other.id)
+
+    await expect(
+      repository.updateMeetingSpeaker(meeting.id, written.speakers[0].id, {
+        participantId: eve.id,
+      })
+    ).rejects.toThrow("Participant not found")
+    await expect(
+      repository.updateMeetingSpeaker(other.id, written.speakers[0].id, { displayName: "X" })
+    ).rejects.toThrow("Speaker not found")
+  })
+
+  it("merges speakers: repoints segments, sums stats, recomputes turns, keeps text/words", async () => {
+    const { repository, meeting, written, segments } = await seedDiarized()
+    const [speaker1, speaker2] = written.speakers
+
+    const merged = await repository.mergeMeetingSpeakers(meeting.id, speaker2.id, speaker1.id)
+    const stored = await repository.getMeeting(meeting.id)
+
+    expect(merged).toMatchObject({
+      id: speaker1.id,
+      talkTimeMs: 5_000,
+      wordCount: 6,
+      segmentCount: 3,
+    })
+    expect(stored?.speakers?.map((speaker) => speaker.id)).toEqual([speaker1.id])
+    expect(stored?.transcript?.map((segment) => segment.turnIndex)).toEqual([0, 0, 0])
+    expect(stored?.transcript?.map((segment) => [segment.text, segment.words])).toEqual(
+      segments.map((segment) => [segment.text, segment.words])
+    )
+  })
+
+  it("re-ASR resets confirmed mappings; legacy rewrites and Meet re-imports keep them", async () => {
+    const { repository, meeting, written, segments } = await seedDiarized()
+    const [speaker1] = written.speakers
+
+    await repository.updateMeetingSpeaker(meeting.id, speaker1.id, {
+      displayName: "Dana",
+      mappingStatus: "confirmed",
+    })
+
+    // Legacy path re-writes the same transcript read back from the meeting.
+    const readBack = (await repository.getMeeting(meeting.id))!.transcript!
+    await repository.replaceTranscriptSegments(meeting.id, readBack)
+    expect(
+      (await repository.listMeetingSpeakers(meeting.id)).find((s) => s.id === speaker1.id)
+    ).toMatchObject({ mappingStatus: "confirmed", displayName: "Dana" })
+
+    await repository.replaceTranscript(meeting.id, {
+      segments,
+      speakers: [{ label: "Speaker 1", talkTimeMs: 1, wordCount: 1, segmentCount: 1 }],
+    })
+    const afterReasr = await repository.listMeetingSpeakers(meeting.id)
+
+    expect(afterReasr.find((s) => s.label === "Speaker 1")).toMatchObject({
+      id: speaker1.id,
+      mappingStatus: "unmapped",
+      displayName: undefined,
+    })
+
+    const meetSegments = segments.map((segment) => ({
+      ...segment,
+      speaker: segment.speaker === "Speaker 1" ? "Dana Cohen" : "Ran Levi",
+      source: "meet",
+    }))
+    const meetStats = [
+      { label: "Dana Cohen", source: "meet", talkTimeMs: 1, wordCount: 1, segmentCount: 1 },
+      { label: "Ran Levi", source: "meet", talkTimeMs: 1, wordCount: 1, segmentCount: 1 },
+    ]
+    const imported = await repository.replaceTranscript(meeting.id, {
+      segments: meetSegments,
+      speakers: meetStats,
+    })
+    const danaSpeaker = imported.speakers.find((s) => s.label === "Dana Cohen")!
+
+    await repository.updateMeetingSpeaker(meeting.id, danaSpeaker.id, { mappingStatus: "confirmed" })
+    await repository.replaceTranscript(meeting.id, { segments: meetSegments, speakers: meetStats })
+
+    expect(
+      (await repository.listMeetingSpeakers(meeting.id)).find((s) => s.label === "Dana Cohen")
+    ).toMatchObject({ id: danaSpeaker.id, mappingStatus: "confirmed" })
+    // Labels without segments are gone.
+    expect(
+      (await repository.listMeetingSpeakers(meeting.id)).map((speaker) => speaker.label)
+    ).toEqual(["Dana Cohen", "Ran Levi"])
+  })
+
+  it("never lets suggestions overwrite confirmed or rejected speakers", async () => {
+    const { repository, meeting, written } = await seedDiarized()
+    const [speaker1, speaker2] = written.speakers
+    const suggestion = {
+      name: "Dana",
+      score: 0.8,
+      reasons: [],
+      computedAt: "2026-10-13T00:00:00.000Z",
+    }
+
+    await repository.updateMeetingSpeaker(meeting.id, speaker1.id, { mappingStatus: "rejected" })
+    const result = await repository.setSpeakerSuggestions(meeting.id, [
+      { speakerId: speaker1.id, suggestion, mappingStatus: "suggested" },
+      { speakerId: speaker2.id, suggestion, mappingStatus: "suggested" },
+    ])
+
+    expect(result.find((s) => s.id === speaker1.id)).toMatchObject({ mappingStatus: "rejected" })
+    expect(result.find((s) => s.id === speaker1.id)?.suggestion).toBeUndefined()
+    expect(result.find((s) => s.id === speaker2.id)).toMatchObject({
+      mappingStatus: "suggested",
+      suggestion,
+    })
+  })
+
+  it("records confirmed speakers as workspace profiles (email, then name; aliases; running mean)", async () => {
+    const { repository, meeting, written } = await seedDiarized()
+    const [speaker1, speaker2] = written.speakers
+
+    const first = await repository.recordConfirmedSpeaker({
+      meetingId: meeting.id,
+      speakerId: speaker1.id,
+      participant: { name: "Dana Cohen" },
+      aliases: ["דנה"],
+      embedding: [1, 0],
+      embeddingModel: "pyannote",
+    })
+    const second = await repository.recordConfirmedSpeaker({
+      meetingId: meeting.id,
+      speakerId: speaker2.id,
+      participant: { name: " dana  cohen" },
+      aliases: ["Dana", "דנה"],
+      embedding: [0, 1],
+      embeddingModel: "pyannote",
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(second).toMatchObject({
+      confirmedCount: 2,
+      aliases: ["דנה", "Dana"],
+      voiceEmbedding: [0.5, 0.5],
+      displayName: "dana cohen",
+    })
+    expect(await repository.listSpeakerProfiles()).toHaveLength(1)
+    expect(
+      (await repository.listMeetingSpeakers(meeting.id)).every(
+        (speaker) => speaker.profileId === first.id
+      )
+    ).toBe(true)
+
+    const byEmail = await repository.recordConfirmedSpeaker({
+      meetingId: meeting.id,
+      speakerId: speaker1.id,
+      participant: { name: "Dana Cohen", email: "DANA@example.com" },
+      aliases: [],
+    })
+
+    expect(byEmail.id).not.toBe(first.id)
+    expect(byEmail.email).toBe("dana@example.com")
+  })
+
+  it("keeps speakers and profiles inside the workspace scope", async () => {
+    const db = createInMemoryMeetingDatabase()
+    const wsA = createInMemoryMeetingRepository(db, { kind: "system", workspaceId: "ws_a" })
+    const wsB = createInMemoryMeetingRepository(db, { kind: "system", workspaceId: "ws_b" })
+    const meeting = await wsA.createMeeting({
+      title: "A",
+      source: "upload",
+      language: "en",
+      startedAt: "2026-10-01T09:00:00.000Z",
+    })
+    const { speakers } = await wsA.replaceTranscript(meeting.id, {
+      segments: [{ id: "s1", speaker: "Speaker 1", startMs: 0, endMs: 1, text: "hi" }],
+      speakers: [],
+    })
+
+    await wsA.recordConfirmedSpeaker({
+      meetingId: meeting.id,
+      speakerId: speakers[0].id,
+      participant: { name: "Dana" },
+      aliases: [],
+    })
+
+    await expect(wsB.listMeetingSpeakers(meeting.id)).rejects.toThrow("Meeting not found")
+    await expect(
+      wsB.updateMeetingSpeaker(meeting.id, speakers[0].id, { displayName: "x" })
+    ).rejects.toThrow("Meeting not found")
+    expect(await wsB.listSpeakerProfiles()).toEqual([])
+    expect(await wsA.listSpeakerProfiles()).toHaveLength(1)
   })
 })

@@ -1,5 +1,16 @@
 import { mergeActionItems } from "@/lib/meetings/action-item-merge"
 import type { MeetingStatus } from "@/lib/meetings/state"
+import {
+  legacySegmentsToTranscript,
+  planTranscriptReplacement,
+  type ExistingSpeakerRow,
+} from "@/lib/meetings/speakers/transcript-plan"
+import {
+  computeTurnIndexes,
+  normalizeProfileName,
+  runningMeanEmbedding,
+  unionAliases,
+} from "@/lib/meetings/speakers/stats"
 import type { TranscriptWord } from "@/lib/meetings/transcript-words"
 import { canViewMeeting } from "@/lib/meetings/visibility"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
@@ -95,6 +106,14 @@ export type MeetingSpeaker = {
   segmentCount: number
   firstStartMs?: number
   confirmedAt?: string
+  /** Voice embedding; only returned by `listMeetingSpeakers(…, {includeEmbeddings})`. */
+  embedding?: number[]
+  embeddingModel?: string
+}
+
+export type ListMeetingSpeakersOptions = {
+  /** Include diarization voice embeddings (voiceprint matching). */
+  includeEmbeddings?: boolean
 }
 
 /** Workspace memory of a confirmed speaker (`speaker_profiles`, M3). */
@@ -465,7 +484,10 @@ export type MeetingRepository = {
     meetingId: string,
     input: ReplaceTranscriptInput
   ) => Promise<{ segments: TranscriptSegment[]; speakers: MeetingSpeaker[] }>
-  listMeetingSpeakers: (meetingId: string) => Promise<MeetingSpeaker[]>
+  listMeetingSpeakers: (
+    meetingId: string,
+    options?: ListMeetingSpeakersOptions
+  ) => Promise<MeetingSpeaker[]>
   updateMeetingSpeaker: (
     meetingId: string,
     speakerId: string,
@@ -584,13 +606,25 @@ function normalize(value: string): string {
   return value.toLowerCase()
 }
 
-/** Placeholder for M3 repository methods that are not implemented yet. */
-export function notImplementedM3(method: string): never {
-  throw new Error(`${method}: not implemented (M3)`)
-}
-
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`
+}
+
+function publicProfile(profile: StoredSpeakerProfile): SpeakerProfile {
+  const result: SpeakerProfile = {
+    id: profile.id,
+    workspaceId: profile.workspaceId,
+    displayName: profile.displayName,
+    email: profile.email,
+    aliases: [...profile.aliases],
+    confirmedCount: profile.confirmedCount,
+  }
+
+  if (profile.voiceEmbedding) {
+    result.voiceEmbedding = [...profile.voiceEmbedding]
+    result.embeddingModel = profile.embeddingModel
+  }
+  return result
 }
 
 function normalizeListLimit(value?: number) {
@@ -730,6 +764,22 @@ export type InMemoryMeetingDatabase = {
   suggestedRuns: Map<string, SuggestedAgentRun>
   /** `${userId}\u0000${meetingId}` */
   favorites: Set<string>
+  /** Diarized speakers (M3), keyed by speaker id. */
+  speakers: Map<string, StoredSpeaker>
+  /** Workspace speaker memory (M3), keyed by profile id. */
+  speakerProfiles: Map<string, StoredSpeakerProfile>
+}
+
+/** A `speakers` row; `displayName` is the stored display name only. */
+export type StoredSpeaker = MeetingSpeaker & {
+  workspaceId: string
+  confirmedByUserId?: string
+}
+
+export type StoredSpeakerProfile = SpeakerProfile & {
+  embeddingSamples: number
+  lastMeetingId?: string
+  lastConfirmedAt?: string
 }
 
 export function createInMemoryMeetingDatabase(
@@ -748,6 +798,8 @@ export function createInMemoryMeetingDatabase(
     exportRecords: new Map(),
     suggestedRuns: new Map(),
     favorites: new Set(),
+    speakers: new Map(),
+    speakerProfiles: new Map(),
   }
 }
 
@@ -780,6 +832,8 @@ export function createInMemoryMeetingRepository(
     exportRecords,
     suggestedRuns,
     favorites,
+    speakers,
+    speakerProfiles,
   } = db
   const workspaceId = scope.workspaceId
   const favoriteUserId = scope.kind === "member" ? scope.userId : undefined
@@ -805,7 +859,12 @@ export function createInMemoryMeetingRepository(
           source: "calendar" as const,
         }))
       : [
-          ...new Set((meeting.transcript ?? []).map((segment) => segment.speaker)),
+          // Diarized (M3) segments never create participants for labels.
+          ...new Set(
+            (meeting.transcript ?? [])
+              .filter((segment) => !segment.speakerId)
+              .map((segment) => segment.speaker)
+          ),
         ].map((speaker) => ({
           name: speaker,
           role: "speaker" as const,
@@ -866,13 +925,154 @@ export function createInMemoryMeetingRepository(
     return [...meetings.values()].filter(isVisible)
   }
 
-  function hydrate(meeting: MeetingRecord): MeetingRecord {
+  function meetingSpeakerRows(meetingId: string): StoredSpeaker[] {
+    return [...speakers.values()]
+      .filter((speaker) => speaker.meetingId === meetingId)
+      .sort(
+        (a, b) =>
+          (a.firstStartMs ?? Number.MAX_SAFE_INTEGER) -
+            (b.firstStartMs ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label)
+      )
+  }
+
+  /** Public view of a speaker row: name = participant name ?? display name. */
+  function resolveSpeaker(row: StoredSpeaker, includeEmbeddings = false): MeetingSpeaker {
+    const participant = row.participantId ? participants.get(row.participantId) : undefined
+    const participantName =
+      participant && participant.meetingId === row.meetingId ? participant.name : undefined
+    const resolved: MeetingSpeaker = {
+      id: row.id,
+      meetingId: row.meetingId,
+      label: row.label,
+      displayName: participantName ?? row.displayName,
+      participantId: row.participantId,
+      profileId: row.profileId,
+      mappingStatus: row.mappingStatus,
+      suggestion: row.suggestion,
+      source: row.source,
+      talkTimeMs: row.talkTimeMs,
+      wordCount: row.wordCount,
+      segmentCount: row.segmentCount,
+      firstStartMs: row.firstStartMs,
+      confirmedAt: row.confirmedAt,
+    }
+
+    if (includeEmbeddings && row.embedding) {
+      resolved.embedding = row.embedding
+      resolved.embeddingModel = row.embeddingModel
+    }
+    return resolved
+  }
+
+  function existingSpeakerRows(meetingId: string): ExistingSpeakerRow[] {
+    return meetingSpeakerRows(meetingId).map((row) => ({
+      id: row.id,
+      label: row.label,
+      source: row.source,
+      mappingStatus: row.mappingStatus,
+      resolvedName: resolveSpeaker(row).displayName ?? row.label,
+    }))
+  }
+
+  function requireMeetingSpeaker(meetingId: string, speakerId: string): StoredSpeaker {
+    const row = speakers.get(speakerId)
+
+    if (!row || row.meetingId !== meetingId) {
+      throw new Error(`Speaker not found: ${speakerId}`)
+    }
+    return row
+  }
+
+  function requireMeetingParticipant(meetingId: string, participantId: string) {
+    const participant = participants.get(participantId)
+
+    if (!participant || participant.meetingId !== meetingId) {
+      throw new Error(`Participant not found: ${participantId}`)
+    }
+    return participant
+  }
+
+  function writeTranscript(
+    meeting: MeetingRecord,
+    input: ReplaceTranscriptInput,
+    preserveDiarizedMappings = false
+  ): { segments: TranscriptSegment[]; speakers: MeetingSpeaker[] } {
+    const plan = planTranscriptReplacement({
+      existing: existingSpeakerRows(meeting.id),
+      segments: input.segments,
+      speakers: input.speakers,
+      createId,
+      preserveDiarizedMappings,
+    })
+
+    for (const id of plan.deleteIds) speakers.delete(id)
+    for (const upsert of plan.upserts) {
+      const previous = upsert.isNew ? undefined : speakers.get(upsert.id)
+      const base: StoredSpeaker = previous ?? {
+        id: upsert.id,
+        meetingId: meeting.id,
+        label: upsert.label,
+        mappingStatus: "unmapped",
+        source: upsert.source,
+        talkTimeMs: 0,
+        wordCount: 0,
+        segmentCount: 0,
+        workspaceId: meetingWorkspaceId(meeting),
+      }
+      const next: StoredSpeaker = {
+        ...base,
+        workspaceId: meetingWorkspaceId(meeting),
+        source: upsert.source,
+        talkTimeMs: upsert.talkTimeMs,
+        wordCount: upsert.wordCount,
+        segmentCount: upsert.segmentCount,
+        firstStartMs: upsert.firstStartMs,
+        embedding: upsert.embedding ?? base.embedding,
+        embeddingModel: upsert.embedding ? upsert.embeddingModel : base.embeddingModel,
+      }
+
+      if (upsert.resetMapping) {
+        next.mappingStatus = "unmapped"
+        delete next.participantId
+        delete next.profileId
+        delete next.displayName
+        delete next.suggestion
+        delete next.confirmedAt
+        delete next.confirmedByUserId
+      }
+      speakers.set(upsert.id, next)
+    }
+
+    meetings.set(meeting.id, { ...meeting, transcript: plan.segments })
+
     return {
+      segments: plan.segments,
+      speakers: meetingSpeakerRows(meeting.id).map((row) => resolveSpeaker(row)),
+    }
+  }
+
+  function hydrate(meeting: MeetingRecord): MeetingRecord {
+    const speakerRows = meetingSpeakerRows(meeting.id)
+    const hydrated: MeetingRecord = {
       ...meeting,
       isFavorite: favoriteUserId
         ? favorites.has(favoriteKey(favoriteUserId, meeting.id))
         : false,
       participantDetails: ensureParticipants(meeting),
+    }
+
+    if (!speakerRows.length) return hydrated
+
+    const resolved = new Map(speakerRows.map((row) => [row.id, resolveSpeaker(row)]))
+
+    return {
+      ...hydrated,
+      speakers: [...resolved.values()],
+      transcript: meeting.transcript?.map((segment) => {
+        const speaker = segment.speakerId ? resolved.get(segment.speakerId) : undefined
+
+        return speaker ? { ...segment, speaker: speaker.displayName ?? speaker.label } : segment
+      }),
     }
   }
 
@@ -1072,36 +1272,199 @@ export function createInMemoryMeetingRepository(
     ): Promise<TranscriptSegment[]> {
       const meeting = requireVisibleMeeting(meetingId)
 
-      meetings.set(meetingId, { ...meeting, transcript: segments })
+      writeTranscript(
+        meeting,
+        legacySegmentsToTranscript(existingSpeakerRows(meetingId), segments),
+        true
+      )
       return segments
     },
 
-    async replaceTranscript() {
-      return notImplementedM3("replaceTranscript")
+    async replaceTranscript(meetingId, input) {
+      return writeTranscript(requireVisibleMeeting(meetingId), input)
     },
 
-    async listMeetingSpeakers() {
-      return notImplementedM3("listMeetingSpeakers")
+    async listMeetingSpeakers(meetingId, options = {}) {
+      requireVisibleMeeting(meetingId)
+
+      return meetingSpeakerRows(meetingId).map((row) =>
+        resolveSpeaker(row, options.includeEmbeddings)
+      )
     },
 
-    async updateMeetingSpeaker() {
-      return notImplementedM3("updateMeetingSpeaker")
+    async updateMeetingSpeaker(meetingId, speakerId, patch) {
+      requireVisibleMeeting(meetingId)
+
+      const row = requireMeetingSpeaker(meetingId, speakerId)
+
+      if (patch.participantId) requireMeetingParticipant(meetingId, patch.participantId)
+      if (patch.profileId) {
+        const profile = speakerProfiles.get(patch.profileId)
+
+        if (!profile || profile.workspaceId !== workspaceId) {
+          throw new Error(`Speaker profile not found: ${patch.profileId}`)
+        }
+      }
+
+      const next: StoredSpeaker = { ...row }
+
+      if (patch.displayName !== undefined) next.displayName = patch.displayName ?? undefined
+      if (patch.participantId !== undefined) next.participantId = patch.participantId ?? undefined
+      if (patch.profileId !== undefined) next.profileId = patch.profileId ?? undefined
+      if (patch.suggestion !== undefined) next.suggestion = patch.suggestion ?? undefined
+      if (patch.confirmedByUserId !== undefined) {
+        next.confirmedByUserId = patch.confirmedByUserId ?? undefined
+      }
+      if (patch.mappingStatus !== undefined) {
+        next.mappingStatus = patch.mappingStatus
+        next.confirmedAt =
+          patch.mappingStatus === "confirmed" ? new Date().toISOString() : undefined
+      }
+
+      speakers.set(speakerId, next)
+      return resolveSpeaker(next)
     },
 
-    async mergeMeetingSpeakers() {
-      return notImplementedM3("mergeMeetingSpeakers")
+    async mergeMeetingSpeakers(meetingId, sourceId, targetId) {
+      const meeting = requireVisibleMeeting(meetingId)
+
+      if (sourceId === targetId) throw new Error("Cannot merge a speaker into itself")
+
+      const source = requireMeetingSpeaker(meetingId, sourceId)
+      const target = requireMeetingSpeaker(meetingId, targetId)
+      // Only speaker ids and turn indexes change: text and words are untouched.
+      const repointed = (meeting.transcript ?? []).map((segment) =>
+        segment.speakerId === sourceId
+          ? { ...segment, speakerId: targetId, speaker: target.label }
+          : segment
+      )
+      const turns = computeTurnIndexes(
+        repointed,
+        (segment) => segment.speakerId ?? segment.speaker
+      )
+      const merged: StoredSpeaker = {
+        ...target,
+        talkTimeMs: target.talkTimeMs + source.talkTimeMs,
+        wordCount: target.wordCount + source.wordCount,
+        segmentCount: target.segmentCount + source.segmentCount,
+        firstStartMs:
+          target.firstStartMs === undefined
+            ? source.firstStartMs
+            : source.firstStartMs === undefined
+              ? target.firstStartMs
+              : Math.min(target.firstStartMs, source.firstStartMs),
+      }
+
+      meetings.set(meetingId, {
+        ...meeting,
+        transcript: repointed.map((segment, index) => ({ ...segment, turnIndex: turns[index] })),
+      })
+      speakers.delete(sourceId)
+      speakers.set(targetId, merged)
+      return resolveSpeaker(merged)
     },
 
-    async setSpeakerSuggestions() {
-      return notImplementedM3("setSpeakerSuggestions")
+    async setSpeakerSuggestions(meetingId, items) {
+      requireVisibleMeeting(meetingId)
+
+      for (const item of items) {
+        const row = speakers.get(item.speakerId)
+
+        // Confirmed / rejected mappings are never overwritten automatically.
+        if (
+          !row ||
+          row.meetingId !== meetingId ||
+          row.mappingStatus === "confirmed" ||
+          row.mappingStatus === "rejected"
+        ) {
+          continue
+        }
+        if (item.participantId) {
+          const participant = participants.get(item.participantId)
+
+          if (!participant || participant.meetingId !== meetingId) continue
+        }
+
+        const next: StoredSpeaker = {
+          ...row,
+          suggestion: item.suggestion ?? undefined,
+          mappingStatus: item.mappingStatus ?? row.mappingStatus,
+        }
+
+        if (item.participantId !== undefined) {
+          next.participantId = item.participantId ?? undefined
+        }
+        if (next.mappingStatus === "confirmed") next.confirmedAt = new Date().toISOString()
+        speakers.set(row.id, next)
+      }
+
+      return meetingSpeakerRows(meetingId).map((row) => resolveSpeaker(row))
     },
 
     async listSpeakerProfiles() {
-      return notImplementedM3("listSpeakerProfiles")
+      return [...speakerProfiles.values()]
+        .filter((profile) => profile.workspaceId === workspaceId)
+        .sort(
+          (a, b) =>
+            b.confirmedCount - a.confirmedCount || a.displayName.localeCompare(b.displayName)
+        )
+        .map(publicProfile)
     },
 
-    async recordConfirmedSpeaker() {
-      return notImplementedM3("recordConfirmedSpeaker")
+    async recordConfirmedSpeaker(input) {
+      requireVisibleMeeting(input.meetingId)
+
+      const speaker = requireMeetingSpeaker(input.meetingId, input.speakerId)
+      const name = input.participant.name.normalize("NFC").trim().replace(/\s+/gu, " ")
+      const email = input.participant.email?.trim().toLowerCase() || undefined
+      const existing = [...speakerProfiles.values()].find(
+        (profile) =>
+          profile.workspaceId === workspaceId &&
+          (email
+            ? profile.email?.toLowerCase() === email
+            : !profile.email &&
+              normalizeProfileName(profile.displayName) === normalizeProfileName(name))
+      )
+      const embedding = input.embedding ?? speaker.embedding
+      const embeddingModel = input.embedding ? input.embeddingModel : speaker.embeddingModel
+      const now = new Date().toISOString()
+      const profile: StoredSpeakerProfile = existing
+        ? {
+            ...existing,
+            displayName: name,
+            aliases: unionAliases(existing.aliases, input.aliases),
+            confirmedCount: existing.confirmedCount + 1,
+            lastMeetingId: input.meetingId,
+            lastConfirmedAt: now,
+          }
+        : {
+            id: createId("speaker_profile"),
+            workspaceId,
+            displayName: name,
+            email,
+            aliases: unionAliases(input.aliases),
+            confirmedCount: 1,
+            embeddingSamples: 0,
+            lastMeetingId: input.meetingId,
+            lastConfirmedAt: now,
+          }
+
+      if (embedding?.length) {
+        const previous = profile.voiceEmbedding
+        const sameModel =
+          previous !== undefined &&
+          (profile.embeddingModel ?? null) === (embeddingModel ?? null)
+
+        profile.voiceEmbedding = sameModel
+          ? runningMeanEmbedding(previous, profile.embeddingSamples, embedding)
+          : [...embedding]
+        profile.embeddingModel = embeddingModel
+        profile.embeddingSamples = sameModel ? profile.embeddingSamples + 1 : 1
+      }
+
+      speakerProfiles.set(profile.id, profile)
+      speakers.set(speaker.id, { ...speaker, profileId: profile.id })
+      return publicProfile(profile)
     },
 
     async upsertMeetingIntelligence(
@@ -1559,13 +1922,20 @@ export function createInMemoryMeetingRepository(
       const updatedParticipant = await this.updateMeetingParticipant(participantId, {
         speakerLabel,
       })
-      const updatedTranscript = (meeting.transcript ?? []).map((segment) =>
-        segment.speaker === speakerLabel
-          ? { ...segment, speaker: updatedParticipant.name }
-          : segment
+      const speaker = meetingSpeakerRows(meetingId).find(
+        (row) =>
+          row.label === speakerLabel || resolveSpeaker(row).displayName === speakerLabel
       )
 
-      meetings.set(meetingId, { ...meeting, transcript: updatedTranscript })
+      // The name reaches segments through the speaker → participant link;
+      // segment text and words are never rewritten.
+      if (speaker) {
+        await this.updateMeetingSpeaker(meetingId, speaker.id, {
+          participantId,
+          mappingStatus: "confirmed",
+        })
+      }
+
       return updatedParticipant
     },
 

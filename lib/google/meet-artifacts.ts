@@ -9,6 +9,7 @@ import { importDriveRecordings } from "@/lib/google/services"
 import { GOOGLE_WORKSPACE_SCOPES } from "@/lib/google/workspace"
 import { getDatabasePool } from "@/lib/db/client"
 import type { RepoScope, TranscriptSegment } from "@/lib/meetings/repository"
+import type { MeetTimelineEntry } from "@/lib/meetings/speakers/types"
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 
 type SyncStatus = "idle" | "running" | "completed" | "failed"
@@ -30,6 +31,20 @@ type MeetApiArtifact = {
   driveDestination?: { file?: string; exportUri?: string }
   docsDestination?: { document?: string; exportUri?: string }
   [key: string]: unknown
+}
+
+type MeetApiParticipant = {
+  name?: string
+  signedinUser?: { user?: string; displayName?: string }
+  anonymousUser?: { displayName?: string }
+  phoneUser?: { displayName?: string }
+}
+
+/** A conference participant's resource name and display name. */
+export type MeetParticipantName = {
+  /** `conferenceRecords/{record}/participants/{participant}` */
+  name: string
+  displayName: string
 }
 
 type MeetApiTranscriptEntry = {
@@ -93,6 +108,8 @@ export type MeetTranscriptArtifactImportResult = {
   transcriptSegments: TranscriptSegment[]
   importedEntries: number
   importedSmartNotes: number
+  /** Who spoke when per the Meet transcript (empty for smart notes only). */
+  meetTimeline: MeetTimelineEntry[]
 }
 
 export type MeetRecordingArtifactImportResult = {
@@ -196,9 +213,14 @@ function msFromBase(value: string | undefined, baseMs: number, fallbackMs: numbe
   return Math.max(0, time === undefined ? fallbackMs : time - baseMs)
 }
 
+/**
+ * Converts Meet transcript entries to segments (`source: "meet"`). Speakers
+ * are the participants' display names (`participantNames`, keyed by
+ * participant resource name) and fall back to the participant id.
+ */
 export function convertMeetTranscriptEntriesToSegments(
   entries: MeetApiTranscriptEntry[],
-  options: { baseTime?: string } = {}
+  options: { baseTime?: string; participantNames?: Record<string, string> } = {}
 ): TranscriptSegment[] {
   const baseDate = options.baseTime ? new Date(options.baseTime) : undefined
   const firstEntryDate = entries[0]?.startTime
@@ -222,14 +244,43 @@ export function convertMeetTranscriptEntriesToSegments(
 
       return {
         id: transcriptEntryId(entry.name, index),
-        speaker: participantLabel(entry.participant, index),
+        speaker:
+          (entry.participant && options.participantNames?.[entry.participant]?.trim()) ||
+          participantLabel(entry.participant, index),
         startMs,
         endMs,
         text: entry.text?.trim() ?? "",
         confidence: 0.95,
         language: languageFromCode(entry.languageCode),
+        source: "meet",
       }
     })
+}
+
+/** Display name of a Meet participant resource (signed-in, anonymous or phone). */
+export function meetParticipantDisplayName(participant: MeetApiParticipant): string | undefined {
+  const name =
+    participant.signedinUser?.displayName ??
+    participant.anonymousUser?.displayName ??
+    participant.phoneUser?.displayName
+
+  return name?.trim() || undefined
+}
+
+/** `{participant resource name: display name}` for convertMeetTranscriptEntriesToSegments. */
+export function meetParticipantNameMap(participants: readonly MeetParticipantName[]) {
+  return Object.fromEntries(
+    participants.map((participant) => [participant.name, participant.displayName])
+  )
+}
+
+/** Who spoke when, per the Meet transcript (speaker suggestion alignment). */
+export function buildMeetTimeline(segments: readonly TranscriptSegment[]): MeetTimelineEntry[] {
+  return segments.map((segment) => ({
+    name: segment.speaker,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+  }))
 }
 
 export function extractMeetSmartNotesDocumentId(value?: string) {
@@ -395,7 +446,8 @@ async function setMeetSyncState(
 async function fetchMeetJson<T>(
   token: string,
   path: string,
-  params?: Record<string, string | number | undefined>
+  params?: Record<string, string | number | undefined>,
+  fetchImpl: typeof fetch = fetch
 ) {
   const url = new URL(`${MEET_BASE_URL}/${path}`)
 
@@ -403,7 +455,7 @@ async function fetchMeetJson<T>(
     if (value !== undefined) url.searchParams.set(key, String(value))
   }
 
-  const response = await fetch(url, {
+  const response = await fetchImpl(url, {
     headers: { authorization: `Bearer ${token}` },
   })
   const body = (await response.json().catch(() => ({}))) as T & {
@@ -483,6 +535,67 @@ async function listTranscriptEntriesForArtifact(
   }
 
   return entries
+}
+
+/**
+ * Participants of a conference record with display names
+ * (`conferenceRecords.participants.list`, paginated). Transcript entries only
+ * carry participant ids; this resolves them to real names.
+ */
+export async function listMeetParticipants(
+  token: string,
+  conferenceRecordName: string,
+  fetchImpl: typeof fetch = fetch,
+  limit = Number(process.env.MEETSUM_MEET_PARTICIPANT_LIMIT ?? 500)
+): Promise<MeetParticipantName[]> {
+  const participants: MeetParticipantName[] = []
+  let pageToken: string | undefined
+  let fetched = 0
+
+  while (fetched < limit) {
+    const body = await fetchMeetJson<{
+      participants?: MeetApiParticipant[]
+      nextPageToken?: string
+    }>(
+      token,
+      `${conferenceRecordName}/participants`,
+      { pageSize: Math.min(100, limit - fetched), pageToken },
+      fetchImpl
+    )
+    const page = body.participants ?? []
+
+    fetched += page.length
+    for (const participant of page) {
+      const displayName = meetParticipantDisplayName(participant)
+
+      if (participant.name && displayName) {
+        participants.push({ name: participant.name, displayName })
+      }
+    }
+    pageToken = body.nextPageToken
+
+    if (!pageToken || !page.length) break
+  }
+
+  return participants
+}
+
+/** Best-effort participant names: an API failure falls back to ids. */
+async function participantNamesFor(
+  token: string,
+  conferenceRecordName: string,
+  cache: Map<string, Promise<Record<string, string>>>
+) {
+  let names = cache.get(conferenceRecordName)
+
+  if (!names) {
+    names = listMeetParticipants(token, conferenceRecordName)
+      .then(meetParticipantNameMap)
+      .catch(() => ({}))
+    cache.set(conferenceRecordName, names)
+  }
+
+  return names
 }
 
 async function findMeetCalendarMatch(options: {
@@ -896,6 +1009,7 @@ export async function listMeetingRecordingArtifactCandidates(options: {
     id: string
     artifactName: string
     driveFileId?: string
+    startTime?: string
   }>
 > {
   const values: unknown[] = [options.meetingId, options.workspaceId]
@@ -912,6 +1026,7 @@ export async function listMeetingRecordingArtifactCandidates(options: {
         ma.id,
         ma.artifact_name,
         ma.document_name,
+        ma.start_time,
         ma.raw #>> '{driveDestination,file}' as drive_destination_file
       from meet_artifacts ma
       join meet_conference_records mcr on mcr.id = ma.conference_record_id
@@ -929,11 +1044,13 @@ export async function listMeetingRecordingArtifactCandidates(options: {
       artifact_name: string
       document_name?: string | null
       drive_destination_file?: string | null
+      start_time?: string | Date | null
     }
 
     return {
       id: candidate.id,
       artifactName: candidate.artifact_name,
+      startTime: candidate.start_time ? new Date(candidate.start_time).toISOString() : undefined,
       driveFileId: extractMeetRecordingDriveFileId(
         candidate.drive_destination_file ?? candidate.document_name ?? undefined
       ),
@@ -1024,6 +1141,8 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
   const meetToken = await getMeetAccessToken(subject)
   let driveToken: string | undefined
   const transcriptSegments: TranscriptSegment[] = []
+  const meetTimeline: MeetTimelineEntry[] = []
+  const participantNameCache = new Map<string, Promise<Record<string, string>>>()
   let importedEntries = 0
   let importedSmartNotes = 0
 
@@ -1031,16 +1150,18 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
     const baseTime = candidate.conferenceStartTime ?? candidate.artifactStartTime
 
     if (candidate.artifactType === "transcript") {
-      const entries = await listTranscriptEntriesForArtifact(
-        meetToken,
-        candidate.artifactName
-      )
+      const [entries, participantNames] = await Promise.all([
+        listTranscriptEntriesForArtifact(meetToken, candidate.artifactName),
+        participantNamesFor(meetToken, candidate.conferenceRecordName, participantNameCache),
+      ])
       const segments = convertMeetTranscriptEntriesToSegments(entries, {
         baseTime,
+        participantNames,
       })
 
       importedEntries += segments.length
       transcriptSegments.push(...segments)
+      meetTimeline.push(...buildMeetTimeline(segments))
       continue
     }
 
@@ -1071,6 +1192,65 @@ export async function importMeetTranscriptArtifactsForMeeting(options: {
     transcriptSegments: transcriptSegments.sort((a, b) => a.startMs - b.startMs),
     importedEntries,
     importedSmartNotes,
+    meetTimeline: meetTimeline.sort((a, b) => a.startMs - b.startMs),
+  }
+}
+
+/**
+ * Meet transcript timeline of a meeting for speaker suggestions, relative to
+ * the recording start when a Meet recording exists (the ASR audio), else the
+ * conference start. Best-effort: undefined when disabled
+ * (MEETSUM_SPEAKER_SUGGEST_USE_MEET=false), unavailable or on any error.
+ */
+export async function loadMeetTimelineForMeeting(options: {
+  meetingId: string
+  workspaceId: string
+  subject: string
+  env?: NodeJS.ProcessEnv
+}): Promise<MeetTimelineEntry[] | undefined> {
+  const env = options.env ?? process.env
+
+  if (env.MEETSUM_SPEAKER_SUGGEST_USE_MEET === "false") return undefined
+
+  try {
+    const candidates = (
+      await listMeetingTranscriptArtifactCandidates({
+        meetingId: options.meetingId,
+        workspaceId: options.workspaceId,
+      })
+    ).filter((candidate) => candidate.artifactType === "transcript")
+
+    if (!candidates.length) return undefined
+
+    const recordings = await listMeetingRecordingArtifactCandidates({
+      meetingId: options.meetingId,
+      workspaceId: options.workspaceId,
+    }).catch(() => [])
+    const recordingStart = recordings.find((recording) => recording.startTime)?.startTime
+    const token = await getMeetAccessToken(options.subject)
+    const cache = new Map<string, Promise<Record<string, string>>>()
+    const timeline: MeetTimelineEntry[] = []
+
+    for (const candidate of candidates) {
+      const [entries, participantNames] = await Promise.all([
+        listTranscriptEntriesForArtifact(token, candidate.artifactName),
+        participantNamesFor(token, candidate.conferenceRecordName, cache),
+      ])
+
+      timeline.push(
+        ...buildMeetTimeline(
+          convertMeetTranscriptEntriesToSegments(entries, {
+            baseTime:
+              recordingStart ?? candidate.conferenceStartTime ?? candidate.artifactStartTime,
+            participantNames,
+          })
+        )
+      )
+    }
+
+    return timeline.length ? timeline.sort((a, b) => a.startMs - b.startMs) : undefined
+  } catch {
+    return undefined
   }
 }
 

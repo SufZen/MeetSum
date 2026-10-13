@@ -1,0 +1,18 @@
+{
+  "_synthetic": true,
+  "participants": [
+    {
+      "name": "conferenceRecords/rec-1/participants/p-dana",
+      "earliestStartTime": "2026-10-01T09:00:02Z",
+      "latestEndTime": "2026-10-01T09:30:00Z",
+      "signedinUser": { "user": "users/111", "displayName": "דנה כהן" }
+    },
+    {
+      "name": "conferenceRecords/rec-1/participants/p-ran",
+      "earliestStartTime": "2026-10-01T09:00:05Z",
+      "latestEndTime": "2026-10-01T09:30:00Z",
+      "signedinUser": { "user": "users/222", "displayName": "Ran Levi" }
+    }
+  ],
+  "nextPageToken": "page-2"
+}
