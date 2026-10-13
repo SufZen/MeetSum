@@ -592,3 +592,135 @@ describe.each(["outlook", "google"] as const)("dedupe parity: %s path", (path) =
     })
   })
 })
+
+/**
+ * M8 review fixes #7/#8: the Google path mirrors the Outlook dedupe tests,
+ * a duplicate whose canonical event is cancelled is promoted on its next
+ * sync (even with nothing new in the provider feed), and a concurrent first
+ * sync of both calendars creates exactly one meeting.
+ */
+describe("Google dedupe path and dedupe edge cases (review fixes)", () => {
+  const incrementalEmpty = {
+    cursor: { deltaLink: DELTA_1, windowStart: "2026-10-12T12:00:00.000Z", windowEnd: "2026-10-27T12:00:00.000Z", fullSyncAt: "2026-10-13T11:00:00.000Z" },
+    routes: [{ match: `GET ${DELTA_1}`, respond: json({ "@odata.deltaLink": DELTA_1, value: [] }) }],
+  }
+
+  function sharedGoogleEvent(uid: string, start: string, overrides: Record<string, unknown> = {}) {
+    return googleEvent({
+      id: `google-${uid}`,
+      iCalUID: uid,
+      start: { dateTime: `${start}Z` },
+      end: { dateTime: new Date(Date.parse(`${start}Z`) + 3_600_000).toISOString() },
+      conferenceData: { entryPoints: [{ entryPointType: "video", uri: TEAMS_REAL }] },
+      ...overrides,
+    })
+  }
+
+  async function liveProviders(uid: string) {
+    return rows<{ provider: string }>(
+      `select ce.provider from meetings m join calendar_events ce on ce.id = m.calendar_event_id
+        where ce.ical_uid = $1 and m.status = 'scheduled' order by ce.provider`,
+      [uid]
+    )
+  }
+
+  it("Google first, then Outlook (same workspace): the Outlook row reuses the meeting; a Google re-run keeps it canonical", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    holder.googleEvents = [sharedGoogleEvent("uid-g-first", "2026-10-25T09:00:00")]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+    expect(holder.googleBotSync).toHaveLength(1)
+
+    const h = harness({ routes: singlePage([graphInvite("uid-g-first", "2026-10-25T09:00:00")]) })
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats.deduped).toBe(1)
+    expect(h.botSync).toHaveLength(0)
+
+    await pollGoogle("ws_1", "dana@acme.co.il")
+    expect(holder.googleBotSync).toHaveLength(2)
+    expect(holder.googleBotSync.every((call) => call.calendarEventId.startsWith("gcal_"))).toBe(true)
+    expect(await meetingsForUid("uid-g-first")).toHaveLength(1)
+  })
+
+  it("a cancelled Google event cancels its own meeting", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    holder.googleEvents = [sharedGoogleEvent("uid-g-cancel", "2026-10-25T11:00:00")]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+    holder.googleEvents = [sharedGoogleEvent("uid-g-cancel", "2026-10-25T11:00:00", { status: "cancelled" })]
+    const stats = await pollGoogle("ws_1", "dana@acme.co.il")
+
+    expect(stats.cancelled).toBe(1)
+    expect(
+      await rows<{ status: string }>(
+        "select m.status from meetings m join calendar_events ce on ce.id = m.calendar_event_id where ce.google_event_id = $1",
+        ["google-uid-g-cancel"]
+      )
+    ).toEqual([{ status: "failed" }])
+  })
+
+  it("promotes the Google duplicate when the canonical Outlook event is cancelled (next Google sync, nothing new in the feed)", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    const uid = "uid-promote-google"
+    const start = "2026-10-25T13:00:00"
+
+    await runOutlookCalendarSync(harness({ routes: singlePage([graphInvite(uid, start)]) }).deps)
+    holder.googleEvents = [sharedGoogleEvent(uid, start)]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+    expect(holder.googleBotSync).toHaveLength(0)
+
+    // The canonical Outlook event is cancelled.
+    await runOutlookCalendarSync(harness({ routes: singlePage([graphInvite(uid, start, { isCancelled: true })]) }).deps)
+
+    // The next Google sync returns nothing new, yet the duplicate is re-evaluated.
+    holder.googleEvents = []
+    await pollGoogle("ws_1", "dana@acme.co.il")
+
+    expect(holder.googleBotSync.map((call) => call.subject)).toEqual(["dana@acme.co.il"])
+    expect(await liveProviders(uid)).toEqual([{ provider: "google" }])
+  })
+
+  it("promotes the Outlook duplicate when the canonical Google event is cancelled (next incremental Outlook sync)", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    const uid = "uid-promote-outlook"
+    const start = "2026-10-25T15:00:00"
+
+    holder.googleEvents = [sharedGoogleEvent(uid, start)]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+    expect((await runOutlookCalendarSync(harness({ routes: singlePage([graphInvite(uid, start)]) }).deps)).deduped).toBe(1)
+
+    holder.googleEvents = [sharedGoogleEvent(uid, start, { status: "cancelled" })]
+    await pollGoogle("ws_1", "dana@acme.co.il")
+
+    const h = harness(incrementalEmpty)
+    const stats = await runOutlookCalendarSync(h.deps)
+
+    expect(stats.meetings).toBe(1)
+    expect(h.botSync).toHaveLength(1)
+    expect(await liveProviders(uid)).toEqual([{ provider: "microsoft" }])
+
+    // Re-running neither creates it again nor re-counts anything.
+    const again = await runOutlookCalendarSync(harness(incrementalEmpty).deps)
+
+    expect(again.meetings).toBe(0)
+    expect(again.deduped).toBe(0)
+  })
+
+  it("a concurrent first sync of both calendars creates exactly one meeting", async (context) => {
+    if (!db) return context.skip("PGlite unavailable")
+
+    const uid = "uid-concurrent"
+    const start = "2026-10-26T09:00:00"
+
+    holder.googleEvents = [sharedGoogleEvent(uid, start)]
+    const h = harness({ routes: singlePage([graphInvite(uid, start)]) })
+
+    await Promise.all([pollGoogle("ws_1", "dana@acme.co.il"), runOutlookCalendarSync(h.deps)])
+
+    expect(await meetingsForUid(uid)).toHaveLength(1)
+    expect(holder.googleBotSync.length + h.botSync.length).toBe(1)
+  })
+})

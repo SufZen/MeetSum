@@ -23,7 +23,13 @@ import { createHash } from "node:crypto"
 
 import type { CalendarEventLike } from "@/lib/bot/types"
 import type { ProviderFetch } from "@/lib/integrations/core/types"
-import { type Queryable, findCanonicalMeetingId, ownMeetingId } from "@/lib/integrations/microsoft/calendar-dedupe"
+import {
+  type LockableQueryable,
+  findCanonicalMeetingId,
+  listDeferredDuplicateRows,
+  ownMeetingId,
+  withCalendarDedupeLock,
+} from "@/lib/integrations/microsoft/calendar-dedupe"
 import { type GraphEvent, type MappedOutlookEvent, mapGraphEventToCalendarEventLike } from "@/lib/integrations/microsoft/calendar-map"
 import { GRAPH_BASE, graphGet, isSyncStateLost } from "@/lib/integrations/microsoft/graph"
 
@@ -66,7 +72,7 @@ export type OutlookBotCancel = (input: {
 }) => Promise<unknown>
 
 export type OutlookSyncDeps = {
-  db: Queryable
+  db: LockableQueryable
   fetch: ProviderFetch
   getAccessToken(): Promise<string>
   workspaceId: string
@@ -192,7 +198,8 @@ async function upsertCalendarRow(deps: OutlookSyncDeps, mapped: MappedOutlookEve
       mapped.status,
       mapped.organizerEmail ?? null,
       JSON.stringify(mapped.event.attendees ?? []),
-      JSON.stringify({ ...mapped.event, iCalUID: mapped.iCalUID ?? null }),
+      // `meetsumPrivate`: the sensitivity, so a deferred duplicate can be promoted later.
+      JSON.stringify({ ...mapped.event, iCalUID: mapped.iCalUID ?? null, meetsumPrivate: mapped.isPrivate }),
     ]
   )
 
@@ -331,32 +338,50 @@ async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: Outlo
     return
   }
 
-  let meetingId = await ownMeetingId(deps.db, deps.workspaceId, calendarEventId)
+  await materializeOutlookRow(deps, mapped, calendarEventId, stats)
+}
 
-  if (!meetingId) {
-    const canonical = await findCanonicalMeetingId(deps.db, {
-      workspaceId: deps.workspaceId,
-      icalUid: mapped.iCalUID,
-      startsAt: mapped.startsAt,
-      calendarEventId,
-      organizerEmail: mapped.organizerEmail,
-      event: mapped.event,
-      owner: { userId: deps.userId, email: deps.userEmail },
-    })
+/**
+ * The meeting for a non-cancelled Outlook row: its own, or a new one unless
+ * another calendar's row is canonical (then nothing). The canonical check
+ * and the insert run under the dedupe lock (first-sync concurrency).
+ */
+async function materializeOutlookRow(deps: OutlookSyncDeps, mapped: MappedOutlookEvent, calendarEventId: string, stats: OutlookSyncStats) {
+  const meetingId = await withCalendarDedupeLock(
+    deps.db,
+    { workspaceId: deps.workspaceId, icalUid: mapped.iCalUID, startsAt: mapped.startsAt },
+    async (db): Promise<string | undefined> => {
+      const locked = { ...deps, db }
+      let id = await ownMeetingId(db, deps.workspaceId, calendarEventId)
 
-    if (canonical) {
-      // Non-canonical: another calendar already owns this meeting and its bot session.
-      stats.deduped += 1
-      return
+      if (!id) {
+        const canonical = await findCanonicalMeetingId(db, {
+          workspaceId: deps.workspaceId,
+          icalUid: mapped.iCalUID,
+          startsAt: mapped.startsAt,
+          calendarEventId,
+          organizerEmail: mapped.organizerEmail,
+          event: mapped.event,
+          owner: { userId: deps.userId, email: deps.userEmail },
+        })
+
+        if (canonical) {
+          // Non-canonical: another calendar already owns this meeting and its bot session.
+          stats.deduped += 1
+          return undefined
+        }
+        if (!shouldCreateMeeting(mapped, deps)) {
+          stats.skipped += 1
+          return undefined
+        }
+        id = outlookMeetingId(calendarEventId)
+      }
+
+      return (await upsertMeeting(locked, mapped, calendarEventId, id)) ? id : undefined
     }
-    if (!shouldCreateMeeting(mapped, deps)) {
-      stats.skipped += 1
-      return
-    }
-    meetingId = outlookMeetingId(calendarEventId)
-  }
+  )
 
-  if (!(await upsertMeeting(deps, mapped, calendarEventId, meetingId))) return
+  if (!meetingId) return
   stats.meetings += 1
 
   if (deps.botEnabled) {
@@ -367,6 +392,50 @@ async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: Outlo
       meetingId,
       event: mapped.event,
     })
+  }
+}
+
+function isoOf(value: string | Date | null | undefined): string | undefined {
+  if (!value) return undefined
+
+  const date = value instanceof Date ? value : new Date(value)
+
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+/** Deferred duplicates of this connection whose canonical meeting is gone: promote them. */
+async function reevaluateDeferredRows(deps: OutlookSyncDeps, now: Date, stats: OutlookSyncStats) {
+  for (const row of await listDeferredDuplicateRows(deps.db, { workspaceId: deps.workspaceId, connectionId: deps.connectionId }, now)) {
+    const startsAt = isoOf(row.starts_at)
+
+    if (!startsAt || !row.external_event_id) continue
+
+    const raw = (row.raw ?? {}) as CalendarEventLike & { meetsumPrivate?: boolean }
+    const endsAt = isoOf(row.ends_at)
+    const mapped: MappedOutlookEvent = {
+      externalEventId: row.external_event_id,
+      ...(row.ical_uid ? { iCalUID: row.ical_uid } : {}),
+      title: row.title ?? "",
+      startsAt,
+      ...(endsAt ? { endsAt } : {}),
+      status: "confirmed",
+      ...(row.organizer_email ? { organizerEmail: row.organizer_email } : {}),
+      meetLink: row.meet_link,
+      // Rows written before the flag existed fail closed (private).
+      isPrivate: raw.meetsumPrivate !== false,
+      event: raw,
+    }
+
+    // Counts only promotions: a row that is still a duplicate is not
+    // re-counted as deduped/skipped on every sync.
+    const scratch = { ...stats, meetings: 0, deduped: 0, skipped: 0 }
+
+    try {
+      await materializeOutlookRow(deps, mapped, row.id, scratch)
+      stats.meetings += scratch.meetings
+    } catch {
+      stats.errors += 1
+    }
   }
 }
 
@@ -409,6 +478,8 @@ export async function runOutlookCalendarSync(deps: OutlookSyncDeps): Promise<Out
       stats.errors += 1
     }
   }
+
+  await reevaluateDeferredRows(deps, now, stats)
 
   const cursor: OutlookSyncCursor = {
     deltaLink: delta.deltaLink ?? deps.cursor.deltaLink,
