@@ -1,16 +1,26 @@
-import { NextResponse } from "next/server"
-
+import { readRequestCookie } from "@/lib/auth/session"
 import { withSession } from "@/lib/auth/authz"
+import { completeOAuth } from "@/lib/integrations/core/oauth"
+import { clearOAuthStateCookie, OAUTH_STATE_COOKIE } from "@/lib/integrations/core/oauth-state"
 
 /**
- * /api/integrations/[provider]/oauth/callback (M8, owner: Package A). OAuth callback: verifies the state, nonce cookie and provider, then exchanges the code.
- *
- * Step 0 stub: answers 501 behind its final guard (docs/parity/m8.md,
- * "Route to permission map").
+ * GET /api/integrations/[provider]/oauth/callback (M8 A1). `withSession`:
+ * membership and the required permission are re-checked for the state's
+ * workspace (never taken from the state). Every failure redirects with a
+ * fixed `integration_error` code; provider text is never reflected. The
+ * nonce cookie is always cleared.
  */
-function notImplemented() {
-  return NextResponse.json({ error: "not_implemented" }, { status: 501 })
-}
+export const GET = withSession<{ provider: string }>(async (request, session, route) => {
+  const { provider } = await route.params
+  const result = await completeOAuth({
+    provider,
+    session,
+    query: new URL(request.url).searchParams,
+    cookieNonce: readRequestCookie(request, OAUTH_STATE_COOKIE),
+  })
 
-/** `withSession`: membership and the required permission are re-checked for `state.ws` (never taken from the state). Failures redirect with a fixed `integration_error` code. */
-export const GET = withSession<{ provider: string }>(async () => notImplemented())
+  return new Response(null, {
+    status: 302,
+    headers: { location: result.location, "set-cookie": clearOAuthStateCookie(), "cache-control": "no-store" },
+  })
+})
