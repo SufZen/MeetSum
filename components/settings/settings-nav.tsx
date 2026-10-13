@@ -2,22 +2,21 @@
 
 /**
  * Settings navigation (M9 A4). Sections have stable ids; the selected one
- * lives in the URL (`?panel=settings&section=<id>`), so M8's
- * `?section=integrations` deep link keeps working and back/forward walk the
- * sections. Links are real `<a href>`s (modifier-click opens a tab); a plain
- * click updates the URL with `history.pushState`, which Next keeps in sync
- * with `useSearchParams` without a server round trip.
+ * lives in the URL (`?panel=settings&section=<id>`), read and written through
+ * the shell's `useShellUrl()` (D1), so M8's `?section=integrations` deep link
+ * keeps working and back/forward walk the sections. Links are real
+ * `<a href>`s (modifier-click opens a tab); a plain click navigates in-app.
  */
-import { useSearchParams } from "next/navigation"
-import type { MouseEvent } from "react"
-
 import { useI18n } from "@/components/i18n-provider"
+import { useShellUrl } from "@/hooks/use-shell-url"
+import { isPlainLeftClick } from "@/lib/client/shell-navigation"
 import {
   SETTINGS_SECTIONS,
   buildShellUrl,
   parseShellUrl,
   type SearchParamsInput,
   type SettingsSectionId,
+  type ShellState,
 } from "@/lib/client/shell-url"
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "recording"
@@ -40,29 +39,32 @@ export function settingsSectionFromUrl(input: SearchParamsInput | null | undefin
   return parseShellUrl(input).section ?? DEFAULT_SETTINGS_SECTION
 }
 
+/** Shell state of a section (the first section is the default, so it is omitted). */
+function sectionState(section: SettingsSectionId): Partial<ShellState> {
+  return { panel: "settings", section: section === DEFAULT_SETTINGS_SECTION ? null : section }
+}
+
 /** Href of a section, keeping every parameter the shell does not own. */
 export function settingsSectionHref(locale: string, section: SettingsSectionId, keep?: SearchParamsInput | null): string {
-  return buildShellUrl(locale, { panel: "settings", section: section === DEFAULT_SETTINGS_SECTION ? null : section }, keep)
+  return buildShellUrl(locale, sectionState(section), keep)
 }
 
-/** The selected Settings section, read from the URL. */
+/** The selected Settings section, read from the shell URL. */
 export function useSettingsSection(): SettingsSectionId {
-  return settingsSectionFromUrl(useSearchParams())
-}
+  const { locale } = useI18n()
 
-function isModifiedClick(event: MouseEvent<HTMLAnchorElement>) {
-  return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+  return useShellUrl(locale).state.section ?? DEFAULT_SETTINGS_SECTION
 }
 
 export function SettingsNav({ current }: { current: SettingsSectionId }) {
   const { t, locale } = useI18n()
-  const searchParams = useSearchParams()
+  const shell = useShellUrl(locale)
 
   return (
     <nav aria-label={t("settingsNavLabel")} className="ms-card p-2 text-sm">
       <ul className="grid content-start gap-1">
         {SETTINGS_SECTIONS.map((section) => {
-          const href = settingsSectionHref(locale, section, searchParams)
+          const href = shell.href(sectionState(section))
           const selected = section === current
 
           return (
@@ -71,9 +73,9 @@ export function SettingsNav({ current }: { current: SettingsSectionId }) {
                 href={href}
                 aria-current={selected ? "page" : undefined}
                 onClick={(event) => {
-                  if (isModifiedClick(event)) return
+                  if (!isPlainLeftClick(event)) return
                   event.preventDefault()
-                  if (!selected) window.history.pushState(null, "", href)
+                  if (!selected) shell.navigate(sectionState(section))
                 }}
                 className={
                   selected
