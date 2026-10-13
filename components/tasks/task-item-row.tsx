@@ -79,6 +79,8 @@ export type TaskItemRowProps = {
   /** Show the seekable source chip (inside a meeting player). */
   showSource?: boolean
   showComments?: boolean
+  /** False for viewers: read-only values, no check-off, title edit or editor. */
+  canEdit?: boolean
 }
 
 export function TaskItemRow({
@@ -96,6 +98,7 @@ export function TaskItemRow({
   meetingLink,
   showSource = true,
   showComments = true,
+  canEdit = true,
 }: TaskItemRowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [draftTitle, setDraftTitle] = useState(item.title)
@@ -144,6 +147,7 @@ export function TaskItemRow({
             className="mt-1"
           />
         ) : null}
+        {canEdit ? (
         <Checkbox
           checked={done}
           onCheckedChange={() => void run(() => onPatch({ status: done ? "open" : "done" }))}
@@ -151,8 +155,15 @@ export function TaskItemRow({
           className="mt-1 rounded-full"
           disabled={busy}
         />
+        ) : (
+          <span className="mt-1 text-xs text-fg-3">{done ? strings.tasksGroupDone : null}</span>
+        )}
         <div className="grid min-w-0 flex-1 gap-0.5">
-          {editingTitle ? (
+          {!canEdit ? (
+            <span dir="auto" className={cn("text-md leading-6 text-fg", done && "text-fg-3 line-through")}>
+              {item.title}
+            </span>
+          ) : editingTitle ? (
             <input
               autoFocus
               dir="auto"
@@ -222,6 +233,7 @@ export function TaskItemRow({
               anchor={item.sourceStartMs !== undefined ? { startMs: item.sourceStartMs } : undefined}
             />
           ) : null}
+          {canEdit ? (
           <Button
             type="button"
             size="icon-sm"
@@ -233,7 +245,8 @@ export function TaskItemRow({
           >
             <PencilIcon aria-hidden />
           </Button>
-          {onDelete ? (
+          ) : null}
+          {canEdit && onDelete ? (
             <Button
               type="button"
               size="icon-sm"
@@ -252,7 +265,7 @@ export function TaskItemRow({
           {item.sourceQuote}
         </blockquote>
       ) : null}
-      {expanded ? (
+      {canEdit && expanded ? (
         <div id={detailsId} className="grid gap-3 border-t border-line pt-2.5 sm:grid-cols-2">
           <div className="grid content-start gap-2">
             <div className="grid gap-1">

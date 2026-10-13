@@ -160,6 +160,7 @@ export function ActionItemEditor({
               speakers={speakers}
               members={members}
               today={today}
+              canEdit={canEdit}
               onPatch={canEdit ? (patch) => patchItem(item, patch) : async () => {}}
               onDelete={canEdit ? () => removeItem(item) : undefined}
             />

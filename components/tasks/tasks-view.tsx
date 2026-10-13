@@ -20,6 +20,7 @@ import type { ActionItemPatch } from "@/lib/meetings/repository"
 import { addDaysToDate, localDateIn } from "@/lib/tasks/due-date"
 import type { TaskListQuery, TaskMember, TaskRow } from "@/lib/tasks/types"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/components/workspace-context"
 
 export type TasksViewProps = {
   initialQuery?: Partial<TaskListQuery>
@@ -94,6 +95,8 @@ export function TasksView({
   members = [],
 }: TasksViewProps) {
   const strings = dictionary ?? getTasksMessages(locale)
+  // Viewers (no meeting:write) see read-only rows.
+  const canEditTasks = useWorkspace().can("meeting:write")
   const [chip, setChip] = useState<Chip>(chipFor(initialQuery))
   const [roomId, setRoomId] = useState(initialQuery?.roomId ?? "")
   const [ownerUserId, setOwnerUserId] = useState(initialQuery?.ownerUserId ?? "")
@@ -325,6 +328,7 @@ export function TasksView({
                     strings={strings}
                     members={members}
                     today={today}
+                    canEdit={canEditTasks}
                     onPatch={(patch) => patchTask(task, patch)}
                     selection={{
                       selected: selected.has(task.id),
