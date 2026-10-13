@@ -15,16 +15,31 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { SigmaMark } from "@/components/ui/sigma-mark"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SupportedLocale } from "@/lib/i18n/locales"
-import { m9ShellMessages } from "@/lib/i18n/m9/shell"
 
-type ShellKey = keyof typeof m9ShellMessages.en
+/**
+ * Hebrew defaults for the few keys used here, outside a provider. Inlined so
+ * every `[locale]` route does not ship both locales of the shell module
+ * (`tests/segment-states.test.ts` keeps them equal to `m9ShellMessages.he`).
+ */
+export const SEGMENT_FALLBACK_HE = {
+  shellLoading: "טוען…",
+  shellErrorTitle: "משהו השתבש",
+  shellErrorDigest: "מזהה שגיאה",
+  shellErrorRetry: "נסו שוב",
+  shellErrorBackToMeetings: "חזרה לפגישות",
+  shellNotFoundTitle: "הדף לא נמצא",
+  shellNotFoundDescription: "הדף אינו קיים או שהועבר.",
+  shellNotFoundAction: "חזרה לפגישות",
+} as const
+
+type ShellKey = keyof typeof SEGMENT_FALLBACK_HE
 
 /** Dictionary text, falling back to the Hebrew default outside a provider. */
 function useShellText(): { t: (key: ShellKey) => string; locale: SupportedLocale } {
   const i18n = useOptionalI18n()
 
   return {
-    t: (key) => i18n?.t(key) ?? m9ShellMessages.he[key],
+    t: (key) => i18n?.t(key) ?? SEGMENT_FALLBACK_HE[key],
     locale: i18n?.locale ?? "he",
   }
 }

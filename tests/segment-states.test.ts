@@ -9,7 +9,8 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { SegmentError, SegmentNotFound, mayShowErrorDetail } from "@/components/segment-states"
+import { SEGMENT_FALLBACK_HE, SegmentError, SegmentNotFound, mayShowErrorDetail } from "@/components/segment-states"
+import { m9ShellMessages } from "@/lib/i18n/m9/shell"
 
 const root = path.resolve(__dirname, "..")
 
@@ -37,6 +38,14 @@ describe("segment state files", () => {
       expect(source.startsWith('"use client"')).toBe(true)
       expect(source).toContain("<SegmentError")
       expect(source).not.toContain("error.message")
+    }
+  })
+})
+
+describe("segment fallback copy", () => {
+  it("matches the shell module's Hebrew values", () => {
+    for (const [key, value] of Object.entries(SEGMENT_FALLBACK_HE)) {
+      expect(m9ShellMessages.he[key as keyof typeof m9ShellMessages.he], key).toBe(value)
     }
   })
 })
