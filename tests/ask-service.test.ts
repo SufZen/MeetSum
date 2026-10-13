@@ -451,6 +451,81 @@ describe("API keys and limits", () => {
     await collect(askStream(key, { question: QUESTION, scope: { kind: "workspace" } }))
     expect((await collect(askStream(key, { question: QUESTION, scope: { kind: "workspace" } })))[0]).toMatchObject({ code: "daily_limit" })
   })
+
+  it("never lets parallel asks exceed the daily cap (no check-then-insert race)", async () => {
+    process.env.MEETSUM_ASK_DAILY_LIMIT_PER_USER = "3"
+    const stream = streaming(["תשובה [s1]."])
+
+    setAskDepsForTesting({ retrieve: retrieving([passage("m_w1")]), stream, settings: async () => ({}) })
+
+    const ctx = await member()
+    const runs = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        collect(askStream(ctx, { question: QUESTION, scope: { kind: "workspace" }, ...(index % 2 ? { persist: false } : {}) }))
+      )
+    )
+
+    expect(runs.filter((events) => doneOf(events)?.status === "complete")).toHaveLength(3)
+    expect(runs.filter((events) => events.some((event) => event.type === "error" && event.code === "daily_limit"))).toHaveLength(5)
+    expect(stream).toHaveBeenCalledTimes(3)
+  })
+
+  it("counts API-key and persist:false asks in the durable counter, reserved before the LLM call", async () => {
+    process.env.MEETSUM_ASK_DAILY_LIMIT_PER_USER = "2"
+    const reservations: { principalKey: string; workspaceId: string }[] = []
+    const durable = new Map<string, number>()
+    const usage = {
+      reserve: async (input: { workspaceId: string; principalKey: string; day: string; limit: number }) => {
+        reservations.push({ principalKey: input.principalKey, workspaceId: input.workspaceId })
+        const key = `${input.workspaceId}|${input.principalKey}|${input.day}`
+        const count = durable.get(key) ?? 0
+
+        if (count >= input.limit) return null
+        durable.set(key, count + 1)
+        return count + 1
+      },
+    }
+    const stream = streaming(["תשובה [s1]."])
+
+    setAskDepsForTesting({ retrieve: retrieving([passage("m_w1")]), stream, settings: async () => ({}), usage: () => usage })
+
+    const key = await createTestCtx({ database, principal: "api_key", role: "member" })
+    const ctx = await member()
+
+    await collect(askStream(key, { question: QUESTION, scope: { kind: "workspace" } }))
+    await collect(askStream(ctx, { question: QUESTION, scope: { kind: "workspace" }, persist: false }))
+    // A restart clears every in-process counter; the durable one still holds.
+    resetAskCountersForTesting()
+    await collect(askStream(key, { question: QUESTION, scope: { kind: "workspace" } }))
+    await collect(askStream(ctx, { question: QUESTION, scope: { kind: "workspace" }, persist: false }))
+
+    expect((await collect(askStream(key, { question: QUESTION, scope: { kind: "workspace" } })))[0]).toMatchObject({ code: "daily_limit" })
+    expect((await collect(askStream(ctx, { question: QUESTION, scope: { kind: "workspace" } })))[0]).toMatchObject({ code: "daily_limit" })
+    expect(stream).toHaveBeenCalledTimes(4)
+    expect(new Set(reservations.map((entry) => entry.principalKey))).toEqual(new Set([`api_key:${key.apiKey?.id}`, "user:user_me"]))
+    expect(reservations.every((entry) => entry.workspaceId === "ws_a")).toBe(true)
+  })
+
+  it("fails closed when the usage counter can't be written", async () => {
+    process.env.MEETSUM_ASK_DAILY_LIMIT_PER_USER = "5"
+    const stream = streaming(["תשובה [s1]."])
+
+    setAskDepsForTesting({
+      retrieve: retrieving([passage("m_w1")]),
+      stream,
+      settings: async () => ({}),
+      usage: () => ({
+        reserve: async () => {
+          throw new Error("connection refused")
+        },
+      }),
+    })
+
+    const events = await collect(askStream(await member(), { question: QUESTION, scope: { kind: "workspace" }, persist: false }))
+
+    expect(events).toEqual([expect.objectContaining({ type: "error", code: "internal" })])
+    expect(stream).not.toHaveBeenCalled()
+  })
 })
 
 describe("askOnce", () => {

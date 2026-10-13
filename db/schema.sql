@@ -1186,6 +1186,17 @@ create table if not exists chat_messages (
 create index if not exists idx_chat_messages_thread on chat_messages (thread_id, created_at);
 create index if not exists idx_chat_messages_ws_day on chat_messages (workspace_id, created_at) where role = 'user';
 
+-- M6 (026): durable AskMeetSum daily cap. Mirrors db/migrations/026_ask_usage.sql.
+create table if not exists ask_usage (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  principal_key text not null,
+  day date not null,
+  count integer not null default 0 check (count >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, principal_key, day)
+);
+create index if not exists idx_ask_usage_day on ask_usage (day);
+
 -- The workspace every pre-M2 row belongs to (018).
 insert into workspaces (id, name, slug) values ('ws_default', 'MeetSum', 'default')
   on conflict (id) do nothing;

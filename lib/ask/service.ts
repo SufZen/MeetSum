@@ -6,10 +6,13 @@
  *    bucket keyed `${workspaceId}:${userId|apiKeyCreatorId}` only (never a
  *    header, thread id, scope or question), failing closed when the limiter
  *    store errors. Routes additionally apply their per-IP `ask` limit.
- *    Then the daily cap (`MEETSUM_ASK_DAILY_LIMIT_PER_USER`; API keys and
- *    non-persisted asks are counted in memory per principal).
  * 2. Scope: meeting via the caller's scoped repository (invisible = 404),
  *    room via `listRooms()` (foreign = 404), or every visible meeting.
+ *    Then the daily cap (`MEETSUM_ASK_DAILY_LIMIT_PER_USER`): one slot is
+ *    reserved atomically in the durable `ask_usage` counter (lib/ask/usage)
+ *    before any LLM call, for every ask (persisted or not, user or API key;
+ *    a key counts against its creator), failing closed when the counter
+ *    can't be written.
  * 3. Persist the user message (user principals, `persist !== false`).
  * 4. `thread`, then the context (full transcript, or `retrievePassages` with
  *    the caller's own search context; passages of meetings the caller can't
@@ -41,6 +44,7 @@ import { createSentinelGate, isSentinelAnswer, shouldRefuseBeforeLlm, stripSenti
 import { stripUnsafeMarkdown } from "@/lib/ask/sanitize"
 import { createThreadStore, type MessageFinal, type ThreadStore } from "@/lib/ask/thread-store"
 import type { AskJsonResponse, AskRequest, AskScope, AskStreamEvent } from "@/lib/ask/types"
+import { getAskUsageCounter, resetMemoryAskUsageForTesting, usageDay, type AskUsageCounter } from "@/lib/ask/usage"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { searchContextFrom } from "@/lib/search/context"
 import { retrievePassages } from "@/lib/search/retrieve"
@@ -53,6 +57,7 @@ export type AskDeps = {
   stream: typeof streamText
   threadStore: (ctx: AuthContext) => ThreadStore | null
   settings: (workspaceId: string) => Promise<{ defaultLocale?: string; llmProviderPreference?: string }>
+  usage: () => AskUsageCounter
 }
 
 let depsOverride: Partial<AskDeps> | undefined
@@ -68,18 +73,29 @@ function deps(): AskDeps {
     stream: depsOverride?.stream ?? streamText,
     threadStore: depsOverride?.threadStore ?? createThreadStore,
     settings: depsOverride?.settings ?? getAppSettings,
+    usage: depsOverride?.usage ?? getAskUsageCounter,
   }
 }
 
-/* Daily cap for principals without persisted questions (API keys, persist:false). */
-const ephemeralCounts = new Map<string, { day: string; count: number }>()
-
+/** Clears the in-process usage mirror (the durable Postgres counter is untouched). */
 export function resetAskCountersForTesting() {
-  ephemeralCounts.clear()
+  resetMemoryAskUsageForTesting()
 }
 
-function principalKeyOf(ctx: AuthContext): string {
-  return `${ctx.workspace.id}|${ctx.principal === "user" ? `user:${ctx.user?.id}` : `key:${ctx.apiKey?.id}`}`
+type AskPrincipal = Pick<AuthContext, "principal" | "user" | "apiKey" | "workspace">
+
+/**
+ * The subject an ask counts against: the user, or for an API key the user
+ * who created it (a key without a creator is its own subject).
+ */
+function askSubject(ctx: AskPrincipal): string {
+  return ctx.principal === "user"
+    ? ctx.user?.id
+      ? `user:${ctx.user.id}`
+      : "user:unknown"
+    : ctx.apiKey?.createdByUserId
+      ? `user:${ctx.apiKey.createdByUserId}`
+      : `api_key:${ctx.apiKey?.id ?? "unknown"}`
 }
 
 /**
@@ -87,37 +103,14 @@ function principalKeyOf(ctx: AuthContext): string {
  * (an API key counts against the user who created it; a key without a
  * creator gets its own bucket).
  */
-export function askRateLimitKey(ctx: Pick<AuthContext, "principal" | "user" | "apiKey" | "workspace">): string {
-  const subject =
-    ctx.principal === "user"
-      ? ctx.user?.id
-        ? `user:${ctx.user.id}`
-        : "user:unknown"
-      : ctx.apiKey?.createdByUserId
-        ? `user:${ctx.apiKey.createdByUserId}`
-        : `api_key:${ctx.apiKey?.id ?? "unknown"}`
-
-  return `ask:${ctx.workspace.id}:${subject}`
+export function askRateLimitKey(ctx: AskPrincipal): string {
+  return `ask:${ctx.workspace.id}:${askSubject(ctx)}`
 }
 
 /** Consumes one `ask` slot; false when blocked (or when the store fails). */
 function consumeAskRateLimit(ctx: AuthContext): boolean {
   if (process.env.MEETSUM_RATE_LIMIT === "false") return true
   return checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask).allowed
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function ephemeralCount(key: string): number {
-  const entry = ephemeralCounts.get(key)
-
-  return entry && entry.day === today() ? entry.count : 0
-}
-
-function bumpEphemeral(key: string) {
-  ephemeralCounts.set(key, { day: today(), count: ephemeralCount(key) + 1 })
 }
 
 async function loadSettings(workspaceId: string) {
@@ -211,13 +204,12 @@ export async function* askStream(
   req: AskRequest,
   signal?: AbortSignal
 ): AsyncGenerator<AskStreamEvent> {
-  const { retrieve, stream, threadStore } = deps()
+  const { retrieve, stream, threadStore, usage: usageCounter } = deps()
   const config = getAskConfig()
   const question = req.question.trim()
   const settings = await loadSettings(ctx.workspace.id)
   const language = resolveAskLanguage(question, { override: req.language, workspaceDefault: settings.defaultLocale })
   const store = req.persist === false ? null : threadStore(ctx)
-  const counterKey = principalKeyOf(ctx)
   let finalize: Finalizer = async () => {}
 
   try {
@@ -227,20 +219,34 @@ export async function* askStream(
       return
     }
 
-    // Daily cap.
-    const used = (store ? await store.countUserQuestionsToday() : 0) + ephemeralCount(counterKey)
-
-    if (config.dailyLimitPerUser > 0 && used >= config.dailyLimitPerUser) {
-      yield errorEvent("daily_limit", language)
-      return
-    }
-
     // 2. Scope.
     const scope = await checkAskScope(ctx, req.scope)
 
     if (!scope.ok) {
       yield errorEvent("not_found", language)
       return
+    }
+
+    // Daily cap: reserve one slot atomically before any LLM call; fail closed.
+    if (config.dailyLimitPerUser > 0) {
+      let reserved: number | null
+
+      try {
+        reserved = await usageCounter().reserve({
+          workspaceId: ctx.workspace.id,
+          principalKey: askSubject(ctx),
+          day: usageDay(),
+          limit: config.dailyLimitPerUser,
+        })
+      } catch (error) {
+        logFailure("usage", error)
+        yield errorEvent("internal", language)
+        return
+      }
+      if (reserved === null) {
+        yield errorEvent("daily_limit", language)
+        return
+      }
     }
 
     // 3. Thread and user message.
@@ -281,8 +287,6 @@ export async function* askStream(
           logFailure("finalize", error)
         }
       }
-    } else {
-      bumpEphemeral(counterKey)
     }
 
     yield { type: "thread", threadId, userMessageId, assistantMessageId }
