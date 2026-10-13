@@ -12,6 +12,7 @@ import {
   ZapIcon,
   ChevronDownIcon,
   LogOutIcon,
+  SearchIcon,
   ShieldCheckIcon,
 } from "lucide-react"
 
@@ -131,6 +132,14 @@ export function MainSidebar({
             </Button>
           )
         })}
+        {/* M6: global Search & Ask is its own page. */}
+        <Link
+          href={`/${locale}/search`}
+          className="inline-flex h-9 min-w-fit items-center justify-start gap-1.5 rounded-md px-3 text-base font-medium text-sidebar-foreground transition-colors duration-(--dur-1) hover:bg-surface-3 hover:text-sidebar-accent-foreground focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent lg:min-w-0"
+        >
+          <SearchIcon aria-hidden className="size-4" />
+          {dictionary.navSearchAsk}
+        </Link>
         {/* M5: the cross-meeting Tasks view is its own page. */}
         <Link
           href={`/${locale}/tasks`}
