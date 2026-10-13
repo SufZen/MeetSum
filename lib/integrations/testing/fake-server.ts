@@ -55,7 +55,8 @@ function redactValue(key: string, value: unknown): unknown {
 export function redactFakeRequest(request: FakeProviderRequest): FakeProviderRequest {
   return {
     method: request.method,
-    // HubSpot's token-info and revoke endpoints carry the token in the path.
+    // Defense in depth: legacy token-in-path endpoints (HubSpot v1 token info
+    // and revoke) never reach the log with the token.
     path: request.path.replace(/(\/(?:access|refresh)-tokens\/)[^/?#]+/gi, "$1***"),
     query: redactValue("", request.query) as Record<string, string>,
     headers: Object.fromEntries(

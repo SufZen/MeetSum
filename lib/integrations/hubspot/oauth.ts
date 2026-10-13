@@ -94,17 +94,44 @@ async function postToken(deps: HubspotOAuthDeps, form: Record<string, string>): 
   }
 }
 
-type AccessTokenInfo = { hub_id?: number | string; hub_domain?: string; scopes?: string[] }
+type AccessTokenInfo = { active?: boolean; hub_id?: number | string; hub_domain?: string; scopes?: string[] }
 
-/** `GET /oauth/v1/access-tokens/{token}`: hub id/domain and granted scopes. */
-export async function hubspotTokenInfo(fetch: ProviderFetch, accessToken: string): Promise<AccessTokenInfo> {
-  const response = await fetch("hubspot", `${HUBSPOT_API}/oauth/v1/access-tokens/${encodeURIComponent(accessToken)}`, {
-    method: "GET",
-    headers: { accept: "application/json" },
+/**
+ * Token introspection: hub id/domain and granted scopes.
+ *
+ * VERIFY against current HubSpot docs before the first live run. Checked
+ * 2026-10-13: `POST /oauth/v3/token/introspect`, form-urlencoded
+ * `client_id`, `client_secret`, `token`, `token_type_hint` (the versioned
+ * reference also lists `/oauth/2026-03/token/introspect`); the response has
+ * `hub_id` and `scopes` (required) and `hub_domain` (optional). It replaces
+ * the legacy `GET /oauth/v1/access-tokens/{token}`, which put the access
+ * token in the URL path (proxy and access logs). No account-info fallback is
+ * needed: `hub_id` and `scopes` are required fields of the response and the
+ * label falls back to `HubSpot <hub_id>` without `hub_domain`.
+ */
+export async function hubspotTokenInfo(
+  fetch: ProviderFetch,
+  accessToken: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<AccessTokenInfo> {
+  const config = requireEnv(env)
+  const response = await fetch("hubspot", `${HUBSPOT_API}/oauth/v3/token/introspect`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      token: accessToken,
+      token_type_hint: "access_token",
+    }).toString(),
   })
 
   if (!response.ok) throw await hubspotError(response)
-  return (await response.json()) as AccessTokenInfo
+
+  const info = (await response.json()) as AccessTokenInfo
+
+  if (info.active === false) throw new ProviderError("auth", "hubspot token inactive")
+  return info
 }
 
 export async function exchangeHubspotCode(
@@ -113,7 +140,7 @@ export async function exchangeHubspotCode(
   deps: HubspotOAuthDeps
 ): Promise<OAuthExchangeResult> {
   const tokens = await postToken(deps, { grant_type: "authorization_code", code, redirect_uri: params.redirectUri })
-  const info = await hubspotTokenInfo(deps.fetch, tokens.accessToken)
+  const info = await hubspotTokenInfo(deps.fetch, tokens.accessToken, deps.env ?? process.env)
   const hubId = info.hub_id === undefined ? "" : String(info.hub_id)
 
   if (!/^\d+$/.test(hubId)) throw new ProviderError("invalid", "hubspot token info without hub id")
@@ -130,12 +157,29 @@ export async function refreshHubspotToken(refreshToken: string, deps: HubspotOAu
   return postToken(deps, { grant_type: "refresh_token", refresh_token: refreshToken })
 }
 
-/** Best-effort revoke: `DELETE /oauth/v1/refresh-tokens/{token}`; a 404 is already revoked. */
+/**
+ * Best-effort revoke of the refresh token; a 404 is already revoked.
+ *
+ * VERIFY against current HubSpot docs before the first live run. Checked
+ * 2026-10-13: `POST /oauth/v3/token/revoke`, form-urlencoded `client_id`,
+ * `client_secret`, `token`, `token_type_hint` (the versioned reference also
+ * lists `/oauth/2026-03/token/revoke`). It replaces the legacy
+ * `DELETE /oauth/v1/refresh-tokens/{token}`, which put the refresh token in
+ * the URL path.
+ */
 export async function revokeHubspotToken(tokens: TokenSet, deps: HubspotOAuthDeps): Promise<void> {
   if (!tokens.refreshToken) return
 
-  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/v1/refresh-tokens/${encodeURIComponent(tokens.refreshToken)}`, {
-    method: "DELETE",
+  const config = requireEnv(deps.env ?? process.env)
+  const response = await deps.fetch("hubspot", `${HUBSPOT_API}/oauth/v3/token/revoke`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      token: tokens.refreshToken,
+      token_type_hint: "refresh_token",
+    }).toString(),
   })
 
   if (!response.ok && response.status !== 404) throw await hubspotError(response)

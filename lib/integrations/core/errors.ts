@@ -13,7 +13,8 @@
  *  2. **Logs** go through `integrationLog`, which runs every value through
  *     `redactIntegrationError`: the M7 bot redactor (query strings, Bearer
  *     and key=value secrets, long base64/hex blobs) plus Slack `xox*`/`xapp`
- *     tokens, Notion `secret_*`/`ntn_*` tokens, OAuth `code`s and email
+ *     tokens, Notion `secret_*`/`ntn_*` tokens, token-in-path segments
+ *     (`/access-tokens/{t}`, `/refresh-tokens/{t}`), OAuth `code`s and email
  *     addresses, capped at 500 characters. `cause` is never read.
  *
  * ProviderErrors raised by Package A carry fixed messages (no provider
@@ -82,6 +83,9 @@ export function redactIntegrationError(input: unknown): string {
       // Slack tokens (xoxb-, xoxp-, xoxe-, xapp-…), Notion secrets.
       .replace(/\bx(?:ox[a-z]|app)-[A-Za-z0-9-]+/gi, "[redacted]")
       .replace(/\b(?:secret|ntn)_[A-Za-z0-9]+/g, "[redacted]")
+      // Token-in-path endpoints (HubSpot's legacy `/oauth/v1/access-tokens/{t}`
+      // and `/oauth/v1/refresh-tokens/{t}`): the path segment is the secret.
+      .replace(/(\/(?:access|refresh)-tokens\/)[^/?#\s"']+/gi, "$1[redacted]")
       // OAuth codes and verifiers (`code=…`, `"code":"…"`).
       .replace(/(["']?)\b(code|code_verifier|state)\b\1(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&"'}\]]+)/gi, "$1$2$1$3[redacted]")
       .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]")

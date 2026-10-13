@@ -61,18 +61,19 @@ export const hubspotFakeHandlers: FakeProviderHandlers = {
     },
   }),
   "GET /crm/v3/owners": () => ({ body: { results: [] } }),
+  // Token introspection and revoke (tokens in the form body, never the path).
+  "POST /oauth/v3/token/introspect": () => ({
+    body: { active: true, hub_id: 4242, hub_domain: "fake-portal.hubspot.example", scopes: ["oauth", "crm.objects.contacts.read"] },
+  }),
+  "POST /oauth/v3/token/revoke": () => ({ status: 204 }),
 }
 
 /**
- * Fake routes whose path carries an id (PATCH engagement, token info,
- * revoke, association batches). A's fake server is expected to fall back to
+ * Fake routes whose path carries an id (PATCH engagement, association
+ * batches). A's fake server is expected to fall back to
  * prefix matching for these keys.
  */
 export const hubspotFakePrefixHandlers: FakeProviderHandlers = {
-  "GET /oauth/v1/access-tokens/": () => ({
-    body: { hub_id: 4242, hub_domain: "fake-portal.hubspot.example", scopes: ["oauth", "crm.objects.contacts.read"] },
-  }),
-  "DELETE /oauth/v1/refresh-tokens/": () => ({ status: 204 }),
   "PATCH /crm/v3/objects/meetings/": () => ({ body: { id: "patched" } }),
   "PATCH /crm/v3/objects/notes/": () => ({ body: { id: "patched" } }),
   "POST /crm/v4/associations/": () => ({ body: { status: "COMPLETE", results: [] } }),

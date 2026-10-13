@@ -356,7 +356,7 @@ export const hubspotProvider: IntegrationProvider = {
     revoke: (tokens) => revokeHubspotToken(tokens, runtime),
   },
   async test(ctx) {
-    await hubspotTokenInfo(ctx.fetch, await ctx.getAccessToken())
+    await hubspotTokenInfo(ctx.fetch, await ctx.getAccessToken(), runtime.env)
   },
   pickers: {
     async deals(ctx, query) {

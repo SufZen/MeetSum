@@ -52,6 +52,17 @@ describe("integration error safety", () => {
     expect(text.length).toBeLessThanOrEqual(500)
   })
 
+  it("redacts HubSpot token paths (legacy token-in-URL endpoints) from log text", () => {
+    const text = redactIntegrationError(
+      "GET https://api.hubapi.com/oauth/v1/access-tokens/CJSP5qf1KhICAQEYs-gDIIGOBii1hQIyGQAf3xBKmlwHjX7OIpuIFEavB2-qYAGQsF4 and DELETE /oauth/v1/refresh-tokens/de2a6e1d-81ef-4c1b-9a4d-5a3e6b1c0f11"
+    )
+
+    expect(text).not.toContain("CJSP5qf1")
+    expect(text).not.toContain("de2a6e1d")
+    expect(text).toContain("/oauth/v1/access-tokens/[redacted]")
+    expect(text).toContain("/oauth/v1/refresh-tokens/[redacted]")
+  })
+
   it("stores only typed fields for a provider error built from a leaky response", async () => {
     setProviderTransportForTesting(async () => new Response(BODY, { status: 401 }))
 

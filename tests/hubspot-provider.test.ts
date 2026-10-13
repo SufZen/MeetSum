@@ -14,6 +14,7 @@ import {
   HUBSPOT_SCOPES,
   exchangeHubspotCode,
   hubspotAuthorizeUrl,
+  hubspotTokenInfo,
   refreshHubspotToken,
   revokeHubspotToken,
 } from "@/lib/integrations/hubspot/oauth"
@@ -200,7 +201,7 @@ describe("hubspot oauth", () => {
   it("exchanges the code and labels the account by hub id/domain", async () => {
     const { fetch, calls } = createFakeFetch([
       { match: `POST ${API}/oauth/v1/token`, respond: json(fixture("hubspot/token.json")) },
-      { match: `GET ${API}/oauth/v1/access-tokens/`, respond: json(fixture("hubspot/access-token-info.json")) },
+      { match: `POST ${API}/oauth/v3/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
     ])
     const result = await exchangeHubspotCode("code-1", { redirectUri: "https://app/cb" }, { fetch, env: ENV, now: NOW })
 
@@ -210,6 +211,23 @@ describe("hubspot oauth", () => {
     expect(result.scopes).toContain("crm.objects.owners.read")
     expect(calls[0]?.body).toMatchObject({ grant_type: "authorization_code", code: "code-1", client_id: "hs-client" })
     expect(calls.every((call) => call.provider === "hubspot")).toBe(true)
+    // Token info is a form POST: the access token travels in the body, never in a URL.
+    expect(calls[1]?.body).toMatchObject({
+      client_id: "hs-client",
+      token: "fixture-hs-access-token-AAA",
+      token_type_hint: "access_token",
+    })
+    expect(calls.map((call) => call.url).join(" ")).not.toContain("fixture-hs-access-token-AAA")
+  })
+
+  it("tests a connection by introspecting the token in a form body", async () => {
+    const { fetch, calls } = createFakeFetch([
+      { match: `POST ${API}/oauth/v3/token/introspect`, respond: json(fixture("hubspot/access-token-info.json")) },
+    ])
+
+    await expect(hubspotTokenInfo(fetch, "tok-secret-123", ENV)).resolves.toMatchObject({ hub_id: 24242424 })
+    expect(calls[0]?.url).toBe(`${API}/oauth/v3/token/introspect`)
+    expect(calls[0]?.body).toMatchObject({ token: "tok-secret-123" })
   })
 
   it("expired token → refresh; a dead refresh token → auth (needs_reauth)", async () => {
@@ -225,11 +243,12 @@ describe("hubspot oauth", () => {
     expect((error as Error).message).not.toContain("unknown refresh token")
   })
 
-  it("revokes the refresh token, tolerating 404", async () => {
-    const { fetch, calls } = createFakeFetch([{ match: `DELETE ${API}/oauth/v1/refresh-tokens/`, respond: json(undefined, 404) }])
+  it("revokes the refresh token with a form POST (never in the URL), tolerating 404", async () => {
+    const { fetch, calls } = createFakeFetch([{ match: `POST ${API}/oauth/v3/token/revoke`, respond: json(undefined, 404) }])
 
     await revokeHubspotToken({ accessToken: "a", refreshToken: "fixture-hs-refresh-token-RRR", scopes: [] }, { fetch, env: ENV })
-    expect(calls[0]?.url).toBe(`${API}/oauth/v1/refresh-tokens/fixture-hs-refresh-token-RRR`)
+    expect(calls[0]?.url).toBe(`${API}/oauth/v3/token/revoke`)
+    expect(calls[0]?.body).toMatchObject({ token: "fixture-hs-refresh-token-RRR", token_type_hint: "refresh_token", client_id: "hs-client" })
   })
 })
 
