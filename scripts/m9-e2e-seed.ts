@@ -429,6 +429,7 @@ export async function seedM9E2E(db: Queryable, options: { secret: string; now?: 
     ["meeting_failed", W1, { meetingId: `${PREFIX}m_mixed`, jobId: `${PREFIX}job` }, `${PREFIX}m_mixed`, null, "mf:seed7"],
     ["bot_blocked", W1, { meetingId: hebrew, sessionId: `${PREFIX}bot` }, hebrew, null, "bb:seed8"],
     ["meeting_processed", W1, { meetingId: privateId, transcriptVersion: 1 }, privateId, null, "mp:seed9"],
+    ["share_attempts", W1, { meetingId: hebrew, shareId: `${PREFIX}share_seed`, failures: 50 }, hebrew, null, "sa:seed10"],
   ]
 
   for (const [index, [kind, workspaceId, payload, meetingId, actor, dedupe]] of notifications.entries()) {

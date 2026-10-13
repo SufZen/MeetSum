@@ -437,6 +437,6 @@ export const m9ContentOpsMessages = {
     opsStatusConfigGeminiKeyMissing: "Gemini Developer API: ‏{env} לא הוגדר",
     opsStatusConfigLocalWhisperUrlMissing: "נבחר Whisper מקומי, אבל {env} לא הוגדר",
     opsStatusConfigAsrNone: "לא הוגדר ספק תמלול. יש להגדיר אחד מאלה: {env}",
-    opsStatusConfigAsrInlineAudio: "{env} לא הוגדר, ולכן RunPod ו־\u2060Modal מקבלים אודיו מוטמע (עד כ־38 דקות)",
+    opsStatusConfigAsrInlineAudio: "{env} לא הוגדר, ולכן RunPod ו־\u2060Modal מקבלים אודיו מוטמע (עד כ־⁠38 דקות)",
   },
 }
