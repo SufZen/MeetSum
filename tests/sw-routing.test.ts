@@ -1,14 +1,16 @@
 /**
  * M9 D4: the service worker caches only hashed static assets, the offline
  * page and icons. The routing table runs directly and the fetch handler runs
- * inside the generated script against a fake CacheStorage.
+ * inside the generated script against a fake CacheStorage
+ * (tests/helpers/sw-fakes.ts; the private-data session replay is
+ * tests/sw-private-data.test.ts).
  */
 import { describe, expect, it } from "vitest"
 
 import { SW_PRECACHE, classifyRequest, isCacheableResponse } from "@/lib/pwa/sw-routes"
 import { buildServiceWorkerSource, swCacheName } from "@/lib/pwa/sw-source"
 
-const ORIGIN = "https://meetsum.example"
+import { ORIGIN, bootWorker, okJs } from "./helpers/sw-fakes"
 
 function classify(path: string, init: { method?: string; mode?: string; auth?: boolean; origin?: string } = {}) {
   return classifyRequest(
@@ -95,110 +97,6 @@ describe("isCacheableResponse", () => {
   })
 })
 
-/* ---------------------------------------------------------------- */
-/* The generated script, run against fakes.                          */
-/* ---------------------------------------------------------------- */
-
-class FakeCache {
-  entries = new Map<string, Response>()
-  async match(request: Request | string) {
-    const key = typeof request === "string" ? new URL(request, ORIGIN).href : request.url
-    const hit = this.entries.get(key)
-
-    return hit ? hit.clone() : undefined
-  }
-  async put(request: Request | string, response: Response) {
-    this.entries.set(typeof request === "string" ? new URL(request, ORIGIN).href : request.url, response)
-  }
-  async addAll(paths: string[]) {
-    for (const path of paths) this.entries.set(new URL(path, ORIGIN).href, new Response(`precached ${path}`))
-  }
-}
-
-class FakeCacheStorage {
-  stores = new Map<string, FakeCache>()
-  async open(name: string) {
-    if (!this.stores.has(name)) this.stores.set(name, new FakeCache())
-    return this.stores.get(name) as FakeCache
-  }
-  async keys() {
-    return [...this.stores.keys()]
-  }
-  async delete(name: string) {
-    return this.stores.delete(name)
-  }
-  async match(request: Request | string) {
-    for (const cache of this.stores.values()) {
-      const hit = await cache.match(request)
-
-      if (hit) return hit
-    }
-    return undefined
-  }
-  /** Every URL stored in any cache. */
-  allUrls() {
-    return [...this.stores.values()].flatMap((cache) => [...cache.entries.keys()].map((url) => new URL(url).pathname))
-  }
-}
-
-type Listener = (event: Record<string, unknown>) => void
-
-function bootWorker(network: (request: Request) => Promise<Response>) {
-  const listeners = new Map<string, Listener>()
-  const caches = new FakeCacheStorage()
-  const posted: unknown[] = []
-  let skipped = false
-  const self = {
-    caches,
-    fetch: network,
-    location: { origin: ORIGIN },
-    clients: {
-      claim: async () => undefined,
-      matchAll: async () => [{ postMessage: (message: unknown) => posted.push(message) }],
-    },
-    skipWaiting: () => {
-      skipped = true
-    },
-    addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
-  }
-
-  new Function("self", buildServiceWorkerSource("build-1"))(self)
-
-  async function dispatch(type: string, extra: Record<string, unknown> = {}) {
-    const pending: Promise<unknown>[] = []
-    let responded: Promise<Response> | undefined
-
-    listeners.get(type)?.({
-      ...extra,
-      waitUntil: (promise: Promise<unknown>) => pending.push(promise),
-      respondWith: (promise: Promise<Response>) => {
-        responded = promise
-      },
-    })
-    await Promise.all(pending)
-
-    return responded ? await responded : undefined
-  }
-
-  return {
-    caches,
-    posted,
-    skipped: () => skipped,
-    install: () => dispatch("install"),
-    activate: () => dispatch("activate"),
-    message: (data: unknown) => dispatch("message", { data }),
-    sync: (tag: string) => dispatch("sync", { tag }),
-    fetch: (path: string, init: RequestInit & { mode?: RequestMode } = {}) => {
-      const request = new Request(new URL(path, ORIGIN), { ...init, mode: init.mode === "navigate" ? undefined : init.mode })
-
-      if (init.mode === "navigate") Object.defineProperty(request, "mode", { value: "navigate" })
-
-      return dispatch("fetch", { request })
-    },
-  }
-}
-
-const okJs = () => new Response("js", { headers: { "content-type": "application/javascript" } })
 
 describe("generated service worker", () => {
   it("names its cache after the build and sanitizes the version", () => {
@@ -208,57 +106,8 @@ describe("generated service worker", () => {
     expect(buildServiceWorkerSource("b1")).toContain('const CACHE = "meetsum-b1"')
   })
 
-  it("precaches only the offline page and icons, and never stores private responses", async () => {
-    const network = async (request: Request) => {
-      const path = new URL(request.url).pathname
-
-      if (path.startsWith("/_next/static/")) return okJs()
-      if (path === "/api/meetings" || path === "/api/notifications") {
-        return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": "s=1" } })
-      }
-      if (path.startsWith("/share/")) return new Response("<html>", { headers: { "content-type": "text/html" } })
-      if (path === "/he") return new Response("<html>private</html>", { headers: { "content-type": "text/html" } })
-
-      return new Response("x", { headers: { "cache-control": "no-store" } })
-    }
-    const worker = bootWorker(network)
-
-    await worker.install()
-    await worker.activate()
-
-    // Not intercepted at all: the browser fetches them, nothing is stored.
-    expect(await worker.fetch("/api/meetings")).toBeUndefined()
-    expect(await worker.fetch("/api/notifications")).toBeUndefined()
-    expect(await worker.fetch("/share/tok_1", { mode: "navigate" })).toBeUndefined()
-    expect(await worker.fetch("/api/meetings", { method: "POST", body: "{}" })).toBeUndefined()
-
-    // Navigations go to the network and are never stored.
-    const page = await worker.fetch("/he?meeting=m_1", { mode: "navigate" })
-
-    expect(await page?.text()).toContain("private")
-
-    // Static assets are cached.
-    await worker.fetch("/_next/static/chunks/app.js")
-
-    const urls = worker.caches.allUrls().sort()
-
-    expect(urls).toEqual(["/_next/static/chunks/app.js", ...SW_PRECACHE].sort())
-    expect([...worker.caches.stores.keys()]).toEqual(["meetsum-build-1"])
-  })
-
-  it("does not cache a static response that is private, non-2xx or sets a cookie", async () => {
-    const responses = [
-      new Response("a", { status: 404 }),
-      new Response("b", { headers: { "set-cookie": "s=1" } }),
-      new Response("c", { headers: { "cache-control": "private" } }),
-      new Response("d", { headers: { "cache-control": "no-store" } }),
-    ]
-    const worker = bootWorker(async () => responses.shift() as Response)
-
-    for (let index = 0; index < 4; index += 1) await worker.fetch(`/_next/static/chunks/${index}.js`)
-
-    expect(worker.caches.allUrls()).toEqual([])
-  })
+  // Private-data storage (API, share, HTML, Set-Cookie, private/no-store,
+  // logout) is covered end to end in tests/sw-private-data.test.ts.
 
   it("serves offline.html when a navigation fails, and cache-first for static hits", async () => {
     let online = true
