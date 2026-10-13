@@ -309,15 +309,15 @@ export function MeetingWorkspace({
         <div className="mt-3 flex flex-wrap justify-center gap-2">
           <Button onClick={onSyncGoogle}>
             <CalendarSyncIcon data-icon="inline-start" />
-            Sync Google Workspace
+            {dictionary.mtgEmptySyncGoogle}
           </Button>
           <Button variant="outline" onClick={onOpenUpload}>
             <UploadIcon data-icon="inline-start" />
-            Upload or import recording
+            {dictionary.mtgEmptyUpload}
           </Button>
           <Button variant="ghost" onClick={onCheckSetup}>
             <SettingsIcon data-icon="inline-start" />
-            Check setup
+            {dictionary.mtgEmptyCheckSetup}
           </Button>
         </div>
       </div>

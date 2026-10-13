@@ -5,9 +5,11 @@
  * playhead is highlighted. A chapter whose start doesn't resolve to a real
  * segment gets no seek control (no citation, no claim).
  */
+import { useI18n } from "@/components/i18n-provider"
 import { useMeetingPlayer } from "@/components/player/meeting-player-provider"
 import { TimecodeChip } from "@/components/ui/meeting-atoms"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatTimecode } from "@/lib/i18n/format"
 import type { Chapter } from "@/lib/intelligence"
 import { usePlayer } from "@/lib/player/contract"
 import { cn } from "@/lib/utils"
@@ -32,6 +34,8 @@ export function ChapterList({
   dir: "rtl" | "ltr"
   dictionary: Dictionary
 }) {
+  const { text } = useI18n()
+  const lang = dir === "rtl" ? "he" : "en"
   const player = useMeetingPlayer()
   const { seek, currentMs } = usePlayer()
   const current = player.available ? currentChapterIndex(chapters, currentMs) : -1
@@ -57,25 +61,25 @@ export function ChapterList({
                   type="button"
                   onClick={() => seek(resolved.startMs, { segmentId: resolved.segmentId })}
                   className="shrink-0 rounded-xs focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent"
-                  aria-label={`${chapter.title} ${Math.floor(resolved.startMs / 1000)}s`}
+                  aria-label={`${chapter.title} · ${formatTimecode(resolved.startMs)}`}
                 >
                   <TimecodeChip seconds={resolved.startMs / 1000} />
                 </button>
               ) : null}
-              <span dir={dir} className="min-w-0 font-medium text-fg">
-                {chapter.title}
+              <span dir={dir} lang={lang} className="min-w-0 font-medium text-fg">
+                {text(chapter.title, lang)}
               </span>
               {active ? <span className="ms-auto shrink-0 text-xs text-brand-text">{t.intelNowPlaying}</span> : null}
             </div>
             {chapter.summary ? (
-              <p dir={dir} className="text-sm leading-6 text-fg-2">
-                {chapter.summary}
+              <p dir={dir} lang={lang} className="text-sm leading-6 text-fg-2">
+                {text(chapter.summary, lang)}
               </p>
             ) : null}
             {chapter.bullets.length ? (
               <ul dir={dir} className="list-disc ps-5 text-sm leading-6 text-fg-2">
                 {chapter.bullets.map((bullet) => (
-                  <li key={bullet}>{bullet}</li>
+                  <li key={bullet}>{text(bullet, lang)}</li>
                 ))}
               </ul>
             ) : null}

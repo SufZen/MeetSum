@@ -12,10 +12,10 @@ import type { Dictionary } from "@/lib/i18n/dictionaries"
 
 /** Keys are shown as printed on a US keyboard; matching uses physical codes. */
 const ROWS: { keys: string[][]; label: keyof Dictionary }[] = [
-  { keys: [["Space"], ["K"]], label: "shortcutsPlayPause" },
+  { keys: [["Space"], ["K"]], label: "shortcutsPlayPause" }, // i18n-allow: keycap name as printed
   { keys: [["J"], ["L"]], label: "shortcutsSkip10" },
   { keys: [["←"], ["→"]], label: "shortcutsSkip5" },
-  { keys: [["Shift", "<"], ["Shift", ">"]], label: "shortcutsSpeed" },
+  { keys: [["Shift", "<"], ["Shift", ">"]], label: "shortcutsSpeed" }, // i18n-allow: keycap name as printed
   { keys: [["0"], ["9"]], label: "shortcutsPercent" },
   { keys: [["F"]], label: "shortcutsFollow" },
   { keys: [["/"]], label: "shortcutsSearch" },

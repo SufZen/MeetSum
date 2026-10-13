@@ -18,7 +18,6 @@ import { ScissorsIcon, XIcon } from "lucide-react"
 import { ClipCreateDialog } from "@/components/clips/clip-create-dialog"
 import {
   commentCount,
-  formatMessage,
   reactionsFor,
   threadsFor,
   useCollabStrings,
@@ -26,6 +25,7 @@ import {
 } from "@/components/comments/collab-client"
 import { CommentAnchor } from "@/components/comments/comment-anchor"
 import { ReactionBar } from "@/components/comments/reaction-bar"
+import { useI18n } from "@/components/i18n-provider"
 import { directionForLanguage } from "@/components/speaker-display"
 import { TranscriptView } from "@/components/transcript/transcript-view"
 import { Button } from "@/components/ui/button"
@@ -144,6 +144,7 @@ function CollaborativeTranscript({
   ...props
 }: TranscriptViewProps & { meetingId: string; chapters?: readonly Chapter[]; canCreateClips: boolean }) {
   const { t } = useCollabStrings(props.locale)
+  const { plural } = useI18n()
   const comments = useMeetingComments(meetingId)
   const headings = useHeadings(chapters, props.segments)
   const dir = directionForLanguage(props.meetingLanguage)
@@ -175,7 +176,7 @@ function CollaborativeTranscript({
         aria-label={t.clipsCreate}
         className="flex flex-wrap items-center gap-2 rounded-lg border border-brand bg-brand-soft-2 px-3 py-2 text-sm"
       >
-        <span>{formatMessage(t.clipsSelectionCount, { count: range.segmentIds.length })}</span>
+        <span>{plural("mtgClipsSelection", range.segmentIds.length)}</span>
         <Button size="sm" variant="secondary" onClick={() => setDialogOpen(true)}>
           <ScissorsIcon />
           {t.clipsCreate}

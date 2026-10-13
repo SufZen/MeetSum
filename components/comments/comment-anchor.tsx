@@ -13,13 +13,13 @@ import { CommentComposer } from "@/components/comments/comment-composer"
 import {
   collabApi,
   commentCount,
-  formatMessage,
   refreshComments,
   threadsFor,
   useCollabStrings,
   useMeetingComments,
 } from "@/components/comments/collab-client"
 import { CommentThreadView } from "@/components/comments/comment-thread"
+import { useI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import type { CommentAnchor as CommentAnchorPosition, CommentTargetType } from "@/lib/comments/types"
@@ -38,6 +38,7 @@ export type CommentAnchorProps = {
 
 export function CommentAnchor({ meetingId, targetType, targetId, count, className }: CommentAnchorProps) {
   const { t } = useCollabStrings()
+  const { plural } = useI18n()
   const state = useMeetingComments(meetingId)
   const [open, setOpen] = useState(false)
   const threads = threadsFor(state.snapshot, targetType, targetId)
@@ -45,7 +46,7 @@ export function CommentAnchor({ meetingId, targetType, targetId, count, classNam
 
   if (state.status === "error" && state.error?.code === "user_required") return null
 
-  const label = total ? formatMessage(t.commentsCount, { count: total }) : t.commentsAdd
+  const label = total ? plural("mtgCommentsCount", total) : t.commentsAdd
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -89,6 +90,7 @@ export function CommentAnchor({ meetingId, targetType, targetId, count, classNam
               await refreshComments(meetingId)
             } catch {
               toast.error(t.commentsFailed)
+              // i18n-allow: internal signal so the composer keeps the draft; never shown
               throw new Error("comment failed")
             }
           }}

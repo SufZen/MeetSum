@@ -20,6 +20,7 @@ import { CitedMark, SpeakerAvatar } from "@/components/ui/meeting-atoms"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWorkspace } from "@/components/workspace-context"
+import { apiErrorMessage } from "@/lib/i18n/api-errors"
 import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 
@@ -83,11 +84,14 @@ export function SpeakerMappingPanel({
         const body = await readJson(response)
 
         if (cancelled) return
-        if (!response.ok) throw new Error(String(body.error ?? t.speakersLoadFailed))
+        if (!response.ok) {
+          setLoadError(apiErrorMessage(body, t, t.speakersLoadFailed))
+          return
+        }
         setData(body as unknown as SpeakersPayload)
         setLoadError(null)
-      } catch (error) {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : t.speakersLoadFailed)
+      } catch {
+        if (!cancelled) setLoadError(t.speakersLoadFailed)
       }
     }
 
@@ -96,7 +100,7 @@ export function SpeakerMappingPanel({
     return () => {
       cancelled = true
     }
-  }, [meetingId, reloadKey, t.speakersLoadFailed])
+  }, [meetingId, reloadKey, t])
 
   const run = useCallback(
     async (key: string, request: () => Promise<Response>, success: (body: Record<string, unknown>) => string) => {
@@ -106,21 +110,26 @@ export function SpeakerMappingPanel({
         const response = await request()
         const body = await readJson(response)
 
-        if (!response.ok) throw new Error(String(body.error ?? t.speakersActionFailed))
+        if (!response.ok) {
+          const message = apiErrorMessage(body, t, t.speakersActionFailed)
+
+          toast.error(t.speakersActionFailed, {
+            description: message === t.speakersActionFailed ? undefined : message,
+          })
+          return false
+        }
         toast.success(success(body))
         setReloadKey((value) => value + 1)
         onChanged?.()
         return true
-      } catch (error) {
-        toast.error(t.speakersActionFailed, {
-          description: error instanceof Error ? error.message : undefined,
-        })
+      } catch {
+        toast.error(t.speakersActionFailed)
         return false
       } finally {
         setBusy(null)
       }
     },
-    [onChanged, t.speakersActionFailed]
+    [onChanged, t]
   )
 
   const patchSpeaker = (speakerId: string, body: Record<string, unknown>) =>
