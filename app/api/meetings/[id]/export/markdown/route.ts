@@ -28,7 +28,7 @@ export const POST = withAuthz<{ id: string }>(
     return new NextResponse(renderMeetingMarkdown(meeting, { locale }), {
       headers: {
         "content-type": "text/markdown; charset=utf-8",
-        "content-disposition": contentDispositionAttachment(meeting.title, "md"),
+        "content-disposition": contentDispositionAttachment(meeting.title, "md", { date: meeting.startedAt, id: meeting.id }),
         ...rateLimit.headers,
       },
     })

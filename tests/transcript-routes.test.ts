@@ -285,6 +285,32 @@ describe("PATCH /api/meetings/:id/transcript/segments/:segmentId", () => {
     })
   })
 
+  it("undoes a whole-turn reassignment atomically and returns every segment (M9 B5)", async () => {
+    const db = await useCtx()
+    const speaker1 = [...db.speakers.values()].find(
+      (speaker) => speaker.meetingId === "m_a" && speaker.label === "Speaker 1"
+    )!
+
+    await patch("m_a", "s2", { revision: 0, speakerId: speaker1.id, scope: "turn" })
+
+    const response = await undo("m_a", "s3", { revision: 1 })
+    const body = (await response.json()) as SegmentMutationResponse
+    const after = (await (await transcript("m_a")).json()) as TranscriptResponse
+    const speaker2 = after.speakers.find((speaker) => speaker.label === "Speaker 2")!
+
+    expect(response.status).toBe(200)
+    expect(body.segments?.map((segment) => segment.id)).toEqual(["s2", "s3"])
+    expect(after.segments.map((segment) => [segment.id, segment.speakerId])).toEqual([
+      ["s1", speaker1.id],
+      ["s2", speaker2.id],
+      ["s3", speaker2.id],
+      ["s4", speaker1.id],
+    ])
+    expect(recordAuditLog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "meeting.transcript.reverted", metadata: expect.objectContaining({ segmentCount: 2 }) })
+    )
+  })
+
   it("creates a confirmed manual speaker for newSpeakerName", async () => {
     await useCtx()
 
@@ -318,7 +344,7 @@ describe("POST .../undo and GET .../revisions", () => {
     expect(recordAuditLog).toHaveBeenLastCalledWith(
       expect.objectContaining({
         action: "meeting.transcript.reverted",
-        metadata: { segmentId: "s1", revision: 2 },
+        metadata: { segmentId: "s1", revision: 2, segmentCount: 1 },
       })
     )
 

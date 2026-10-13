@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { renderMeetingMarkdown, renderMeetingPdf, renderMeetingDocx } from "@/lib/meetings/export"
 import type { MeetingRecord } from "@/lib/meetings/repository"
+import { parsePdf } from "@/tests/helpers/pdf-text"
 
 const completedMeeting = {
   id: "export-test-001",
@@ -87,27 +88,22 @@ describe("markdown export", () => {
 })
 
 describe("pdf export", () => {
-  it("produces a valid PDF buffer", () => {
-    const pdf = renderMeetingPdf(completedMeeting)
+  it("produces a valid PDF 1.7 buffer", async () => {
+    const pdf = await renderMeetingPdf(completedMeeting, { locale: "en", timeZone: "UTC" })
 
     expect(pdf).toBeInstanceOf(Buffer)
     expect(pdf.length).toBeGreaterThan(100)
-    // PDF magic bytes
-    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-")
+    expect(pdf.subarray(0, 8).toString("latin1")).toBe("%PDF-1.7")
   })
 
-  it("contains meeting title in the PDF", () => {
-    const pdf = renderMeetingPdf(completedMeeting)
-    const text = pdf.toString("latin1")
+  it("contains the meeting title, sections and transcript as extractable text", async () => {
+    const pdf = parsePdf(await renderMeetingPdf(completedMeeting, { locale: "en", timeZone: "UTC" }))
+    const lines = pdf.pages.flatMap((page) => page.lines)
 
-    expect(text).toContain("Export Smoke Test Meeting")
-  })
-
-  it("contains provider metadata in the PDF", () => {
-    const pdf = renderMeetingPdf(completedMeeting)
-    const text = pdf.toString("latin1")
-
-    expect(text).toContain("gemini")
+    expect(lines).toContain("Export Smoke Test Meeting")
+    expect(lines).toContain("Decisions")
+    expect(lines.join("\n")).toContain("Ship v2.0 by August 15")
+    expect(lines.join("\n")).toContain("Alice: Let's discuss the Q3 roadmap.")
   })
 })
 

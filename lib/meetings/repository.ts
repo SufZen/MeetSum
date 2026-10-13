@@ -245,6 +245,12 @@ export type TranscriptRevision = {
   createdByUserId?: string
   createdAt: string
   revertedAt?: string
+  /**
+   * One id per PATCH (M9 B5): every revision a single edit wrote shares it,
+   * so undo reverts a whole-turn speaker change atomically. Absent on
+   * revisions written before 030 (each is its own group).
+   */
+  editGroupId?: string
 }
 
 /** Full transcript of one meeting with its speakers (M4). */
@@ -273,6 +279,11 @@ export type SegmentPatch = {
 
 export type SegmentMutationResult = {
   segment: TranscriptSegment
+  /**
+   * Every segment the mutation changed, `segment` included (M9 B5: a turn
+   * reassignment or its undo changes several).
+   */
+  segments?: TranscriptSegment[]
   /** Present when speakers changed (reassignment, new speaker, stats). */
   speakers?: MeetingSpeaker[]
   version: number
@@ -826,7 +837,11 @@ export type MeetingRepository = {
     segmentId: string,
     patch: SegmentPatch
   ) => Promise<SegmentMutationResult>
-  /** Restores the latest non-reverted revision of a segment (M4). */
+  /**
+   * Undoes the latest non-reverted edit of a segment (M4) as a whole: every
+   * revision of its edit group (M9 B5) is restored in one step, or none is —
+   * TranscriptConflictError when any segment of the group was edited since.
+   */
   undoTranscriptSegment: (
     meetingId: string,
     segmentId: string,
@@ -946,6 +961,12 @@ export type MeetingRepository = {
     meetingId: string,
     patch: { revoked?: boolean; regenerate?: boolean; includedSections?: string[] }
   ) => Promise<MeetingShare>
+  /**
+   * Sets (scrypt-hashed) or clears a meeting-scope share's password (M9 B4).
+   * Changing or clearing it invalidates outstanding share-access cookies,
+   * whose MAC covers the stored hash.
+   */
+  updateMeetingSharePassword: (shareId: string, password: string | null) => Promise<MeetingShare>
   getShareByToken: (
     token: string
   ) => Promise<{ share: MeetingShare; meeting: MeetingRecord } | undefined>
@@ -1540,7 +1561,8 @@ export function createInMemoryMeetingRepository(
   function storeRevision(
     meetingId: string,
     segment: TranscriptSegment,
-    actorUserId: string | undefined
+    actorUserId: string | undefined,
+    editGroupId: string
   ) {
     const revision: StoredTranscriptRevision = {
       id: createId("rev"),
@@ -1554,6 +1576,7 @@ export function createInMemoryMeetingRepository(
       source: segment.source ?? "asr",
       createdByUserId: actorUserId,
       createdAt: new Date().toISOString(),
+      editGroupId,
     }
 
     transcriptRevisions.set(revision.id, revision)
@@ -1598,12 +1621,14 @@ export function createInMemoryMeetingRepository(
     transcript: readonly TranscriptSegment[],
     segmentId: string,
     speakerChanged: boolean,
-    version: number
+    version: number,
+    changedIds: ReadonlySet<string> = new Set([segmentId])
   ): SegmentMutationResult {
     const segment = transcript.find((candidate) => candidate.id === segmentId) as TranscriptSegment
 
     return {
       segment: resolveSegment(segment),
+      segments: transcript.filter((candidate) => changedIds.has(candidate.id)).map((candidate) => resolveSegment(candidate)),
       ...(speakerChanged
         ? { speakers: meetingSpeakerRows(meetingId).map((row) => resolveSpeaker(row)) }
         : {}),
@@ -2174,10 +2199,11 @@ export function createInMemoryMeetingRepository(
       }
 
       const now = new Date().toISOString()
+      const editGroupId = createId("edit")
       let next = transcript.map((segment) => {
         if (!changedIds.has(segment.id)) return segment
 
-        storeRevision(meetingId, segment, patch.actorUserId)
+        storeRevision(meetingId, segment, patch.actorUserId, editGroupId)
 
         const updated: TranscriptSegment = {
           ...segment,
@@ -2215,7 +2241,8 @@ export function createInMemoryMeetingRepository(
         next,
         segmentId,
         speakerChanged,
-        bumpTranscriptVersion(meetingId)
+        bumpTranscriptVersion(meetingId),
+        changedIds
       )
     },
 
@@ -2225,18 +2252,44 @@ export function createInMemoryMeetingRepository(
         segmentId,
         options.expectedRevision
       )
-      const revision = segmentRevisions(meetingId, segmentId).find((item) => !item.revertedAt)
+      const latest = segmentRevisions(meetingId, segmentId).find((item) => !item.revertedAt)
 
-      if (!revision) throw new NothingToUndoError(segmentId)
+      if (!latest) throw new NothingToUndoError(segmentId)
 
-      const candidate = revision.speakerId ? speakers.get(revision.speakerId) : undefined
-      // A speaker merged away since keeps the segment on its current speaker.
-      const restoredSpeaker = candidate?.meetingId === meetingId ? candidate : undefined
-      const speakerChanged = Boolean(restoredSpeaker) && restoredSpeaker?.id !== current.speakerId
+      // The whole edit group (M9 B5); a pre-030 revision is a group of one.
+      const group = latest.editGroupId
+        ? [...transcriptRevisions.values()].filter(
+            (item) =>
+              item.workspaceId === workspaceId &&
+              item.meetingId === meetingId &&
+              item.editGroupId === latest.editGroupId &&
+              !item.revertedAt
+          )
+        : [latest]
+      const bySegment = new Map(transcript.map((segment) => [segment.id, segment]))
+
+      // All or nothing: every segment of the group must still be in the state
+      // the edit left (no newer, un-reverted revision), else 409 for the group.
+      for (const revision of group) {
+        const segment = bySegment.get(revision.segmentId)
+
+        if (!segment) throw new TranscriptConflictError(resolveSegment(current))
+        if (segmentRevisions(meetingId, revision.segmentId).find((item) => !item.revertedAt)?.id !== revision.id) {
+          throw new TranscriptConflictError(resolveSegment(segment))
+        }
+      }
+
+      const restoreBySegment = new Map(group.map((revision) => [revision.segmentId, revision]))
       const now = new Date().toISOString()
+      let speakerChanged = false
       let next = transcript.map((segment) => {
-        if (segment.id !== segmentId) return segment
+        const revision = restoreBySegment.get(segment.id)
 
+        if (!revision) return segment
+
+        const candidate = revision.speakerId ? speakers.get(revision.speakerId) : undefined
+        // A speaker merged away since keeps the segment on its current speaker.
+        const restoredSpeaker = candidate?.meetingId === meetingId ? candidate : undefined
         const restored: TranscriptSegment = {
           ...segment,
           text: revision.text,
@@ -2248,6 +2301,7 @@ export function createInMemoryMeetingRepository(
         if (revision.words) restored.words = revision.words.map((word) => ({ ...word }))
         else delete restored.words
         if (restoredSpeaker) {
+          if (restoredSpeaker.id !== segment.speakerId) speakerChanged = true
           restored.speakerId = restoredSpeaker.id
           restored.speaker = restoredSpeaker.label
         }
@@ -2260,14 +2314,15 @@ export function createInMemoryMeetingRepository(
       }
 
       meetings.set(meetingId, { ...meeting, transcript: next })
-      transcriptRevisions.set(revision.id, { ...revision, revertedAt: now })
+      for (const revision of group) transcriptRevisions.set(revision.id, { ...revision, revertedAt: now })
 
       return mutationResult(
         meetingId,
         next,
         segmentId,
         speakerChanged,
-        bumpTranscriptVersion(meetingId)
+        bumpTranscriptVersion(meetingId),
+        new Set(restoreBySegment.keys())
       )
     },
 
@@ -2821,7 +2876,7 @@ export function createInMemoryMeetingRepository(
 
       const now = new Date().toISOString()
       const passwordHash = input.password
-        ? (await import("@/lib/auth/api-keys")).createApiKeyHash(input.password)
+        ? await (await import("@/lib/sharing/share-password")).hashSharePassword(input.password)
         : undefined
       const share: MeetingShare = {
         id: createId("share"),
@@ -2902,6 +2957,22 @@ export function createInMemoryMeetingRepository(
       }
 
       shares.set(existing.id, updated)
+      return updated
+    },
+
+    async updateMeetingSharePassword(shareId, password): Promise<MeetingShare> {
+      const existing = shares.get(shareId)
+
+      if (!existing || !isMeetingScopeShare(existing)) throw new Error(`Share not found: ${shareId}`)
+
+      requireVisibleMeeting(existing.meetingId)
+
+      const passwordHash = password
+        ? await (await import("@/lib/sharing/share-password")).hashSharePassword(password)
+        : undefined
+      const updated: MeetingShare = { ...existing, passwordHash, updatedAt: new Date().toISOString() }
+
+      shares.set(shareId, updated)
       return updated
     },
 

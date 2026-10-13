@@ -8,14 +8,15 @@
  *
  * Props come only from `buildSharePayload` (lib/sharing/share-payload.ts):
  * no internal meeting/segment/speaker/asset ids and no participant details
- * are serialized to the browser.
+ * are serialized to the browser. The viewer-locale dictionary comes from the
+ * server page (M9: client code never imports the runtime `dictionaries`).
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { LazyMeetingPlayer, LazyTranscriptView } from "@/components/player/lazy"
 import { MeetingPlayerProvider } from "@/components/player/meeting-player-provider"
 import { useSpeakerDirectory } from "@/components/player/speaker-directory"
-import { dictionaries } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { MeetingMediaSummary } from "@/lib/media/playback-select"
 import type { MeetingParticipant, MeetingSpeaker } from "@/lib/meetings/repository"
 import type { TranscriptSegmentWire } from "@/lib/meetings/transcript-wire"
@@ -27,6 +28,7 @@ const NO_PARTICIPANTS: readonly MeetingParticipant[] = []
 export function SharedMeetingPlayer({
   token,
   locale,
+  dictionary,
   language,
   media,
   segments,
@@ -35,7 +37,9 @@ export function SharedMeetingPlayer({
   showTranscript,
 }: {
   token: string
+  /** The viewer's chrome locale (labels); the transcript keeps `language`. */
   locale: "he" | "en"
+  dictionary: Dictionary
   language?: string
   /** Present only when the share includes the `media` section. */
   media?: MeetingMediaSummary
@@ -44,7 +48,7 @@ export function SharedMeetingPlayer({
   durationMs?: number
   showTranscript: boolean
 }) {
-  const t = dictionaries[locale]
+  const t = dictionary
   const [initialMs, setInitialMs] = useState<number | undefined>()
   const directory = useSpeakerDirectory(speakers, NO_PARTICIPANTS, t.speakersGenericLabel)
   const speakerName = useCallback(

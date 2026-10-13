@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 
 import { renderMeetingMarkdown, renderMeetingPdf } from "@/lib/meetings/export"
 import type { MeetingRecord } from "@/lib/meetings/repository"
+import { parsePdf } from "@/tests/helpers/pdf-text"
 
 function makeMeeting(overrides: Partial<MeetingRecord> = {}): MeetingRecord {
   return {
@@ -156,35 +157,14 @@ describe("renderMeetingMarkdown", () => {
 })
 
 describe("renderMeetingPdf", () => {
-  it("includes provider metadata in PDF output", () => {
-    const pdf = renderMeetingPdf(
-      makeMeeting({
-        aiRuns: [
-          {
-            id: "run_1",
-            meetingId: "meet_test",
-            provider: "gemini",
-            task: "audio.transcribe",
-            model: "gemini-3.5-flash",
-            status: "completed",
-            latencyMs: 3200,
-            confidence: 0.9,
-            metadata: {},
-            startedAt: "2026-05-27T09:05:00Z",
-            completedAt: "2026-05-27T09:05:03Z",
-          },
-        ],
-      })
-    )
-    const text = pdf.toString("utf8")
+  it("renders a parseable PDF 1.7 (provider metadata stays in the Markdown export)", async () => {
+    const pdf = parsePdf(await renderMeetingPdf(makeMeeting({}), { locale: "en", timeZone: "UTC" }))
 
-    expect(text).toContain("%PDF-1.4")
-    expect(text).toContain("Processing Metadata")
-    expect(text).toContain("gemini-3.5-flash")
-    expect(text).toContain("Processed by MeetSum")
+    expect(pdf.header).toBe("%PDF-1.7")
+    expect(pdf.pages.length).toBeGreaterThan(0)
   })
 
-  it("generates multi-page PDFs for long content", () => {
+  it("generates multi-page PDFs for long content", async () => {
     const longTranscript = Array.from({ length: 120 }, (_, i) => ({
       id: `seg_${i}`,
       speaker: "Speaker",
@@ -192,13 +172,12 @@ describe("renderMeetingPdf", () => {
       endMs: (i + 1) * 5000,
       text: `Line of transcript content number ${i + 1}`,
     }))
-    const pdf = renderMeetingPdf(makeMeeting({ transcript: longTranscript }))
-    const text = pdf.toString("utf8")
+    const pdf = parsePdf(await renderMeetingPdf(makeMeeting({ transcript: longTranscript }), { locale: "en", timeZone: "UTC" }))
+    const text = pdf.pages.flatMap((page) => page.lines).join("\n")
 
-    expect(text).toContain("%PDF-1.4")
-    // Multi-page: should have /Count > 1
-    expect(text).toMatch(/\/Count [2-9]/)
-    expect(text).toContain("%%EOF")
+    expect(pdf.pages.length).toBeGreaterThan(1)
+    expect(text).toContain("Line of transcript content number 120")
+    expect(text).toContain(`Page ${pdf.pages.length} of ${pdf.pages.length}`)
   })
 })
 

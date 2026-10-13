@@ -20,6 +20,8 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/package-lock.json ./package-lock.json
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
+# Vendored IBM Plex TTFs for the PDF export (lib/pdf/fonts.ts); next build does not trace them.
+COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/bin ./bin
 COPY --from=builder /app/db ./db
 COPY --from=builder /app/lib ./lib

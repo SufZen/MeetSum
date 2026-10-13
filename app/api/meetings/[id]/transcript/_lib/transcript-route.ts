@@ -46,6 +46,7 @@ export function segmentNotFound() {
 export function mutationResponse(result: SegmentMutationResult): SegmentMutationResponse {
   return {
     segment: toTranscriptSegmentWire(result.segment),
+    ...(result.segments ? { segments: result.segments.map(toTranscriptSegmentWire) } : {}),
     ...(result.speakers ? { speakers: result.speakers } : {}),
     version: result.version,
   }

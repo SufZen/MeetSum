@@ -13,7 +13,10 @@ vi.mock("@/app/share/[token]/load-share", () => ({
   loadShare: mocks.loadShare,
 }))
 vi.mock("@/lib/sharing/share-payload", () => ({ loadSharePageData: mocks.loadSharePageData }))
-vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }))
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => undefined }),
+  headers: async () => new Headers(),
+}))
 vi.mock("@/lib/auth/session", () => ({ getSessionSecret: () => "secret" }))
 vi.mock("@/components/share/shared-meeting-player", () => ({ SharedMeetingPlayer: () => null }))
 

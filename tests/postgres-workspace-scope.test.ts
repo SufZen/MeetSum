@@ -33,6 +33,8 @@ const scopes: Record<RepoScope["kind"], RepoScope> = {
 const UNIVERSAL_ROW = {
   id: "meet_1",
   meeting_id: "meet_1",
+  // Revision rows (M9 B5 undo groups) point at the locked segment below.
+  segment_id: "seg_1",
   title: "Sync",
   source: "upload",
   language: "en",
@@ -84,8 +86,8 @@ function recordingClient(override?: Responder) {
       if (/^(begin|commit|rollback)$/.test(normalized)) return { rows: [] }
       if (/^select count\(\*\)/.test(normalized)) return { rows: [{ total: 1 }] }
       if (/^select m\./.test(normalized)) return { rows: [UNIVERSAL_ROW] }
-      // M4: the (locked) segment of a transcript edit / undo.
-      if (/^select ts\.id, ts\.speaker_id\b.* where ts\.id = \$1/.test(normalized)) {
+      // M4: the (locked) segment of a transcript edit / undo; M9 B5: the undo group's segments.
+      if (/^select ts\.id, ts\.speaker_id\b.* where (ts\.id = \$1|ts\.meeting_id = \$1 and ts\.id = any)/.test(normalized)) {
         return {
           rows: [{ ...UNIVERSAL_ROW, id: "seg_1", text: "hi", start_ms: 0, end_ms: 1000, revision: 0 }],
         }
@@ -261,6 +263,7 @@ const invocations: Record<
   createMeetingShare: (repo) => repo.createMeetingShare({ meetingId: "meet_1" }),
   updateMeetingShare: (repo) =>
     repo.updateMeetingShare("meet_1", { includedSections: ["summary"] }),
+  updateMeetingSharePassword: (repo) => repo.updateMeetingSharePassword("share_1", null),
   getShareByToken: (repo) => repo.getShareByToken("tok_1"),
   updateMeetingVisibility: (repo) =>
     repo.updateMeetingVisibility("meet_1", "workspace"),

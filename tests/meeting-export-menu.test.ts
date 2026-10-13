@@ -133,7 +133,7 @@ describe("downloadExport", () => {
 
     await expect(downloadExport({ id: "m_1", title: "ignored" }, "docx", { fetchImpl, locale: "he" })).resolves.toBe(true)
     expect(fetchImpl).toHaveBeenCalledWith("/api/meetings/m_1/export/docx?locale=he", { method: "POST" })
-    expect(anchor.download).toBe("סיכום פגישה: Q4.docx")
+    expect(anchor.download).toBe("סיכום פגישה- Q4.docx")
     expect(anchor.click).toHaveBeenCalled()
     expect(toastMock.success).toHaveBeenCalledWith("קובץ Word‏ (DOCX) ירד")
   })
