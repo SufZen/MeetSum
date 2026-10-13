@@ -2,7 +2,9 @@ import { redirect } from "next/navigation"
 
 import { AppShell } from "@/components/app-shell"
 import { NoWorkspaceState } from "@/components/no-workspace-state"
-import { getServerAuthState } from "@/lib/auth/authz"
+import { can, canManageMeeting, getServerAuthState } from "@/lib/auth/authz"
+import { resolveShellDeepLink } from "@/lib/client/shell-deep-link"
+import { parseShellUrl } from "@/lib/client/shell-url"
 import { getDictionary } from "@/lib/i18n/dictionaries"
 import { DEFAULT_LOCALE, isSupportedLocale, type SupportedLocale } from "@/lib/i18n/locales"
 import { shouldRedirectToOnboarding } from "@/lib/onboarding/redirect"
@@ -10,10 +12,12 @@ import { selectRecentRooms } from "@/lib/rooms"
 
 export default async function Page({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { locale } = await params
+  const [{ locale }, query] = await Promise.all([params, searchParams])
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
     : DEFAULT_LOCALE
@@ -43,12 +47,27 @@ export default async function Page({
     redirect(`/${supportedLocale}/onboarding`)
   }
   // Lightweight inbox rows; the selected meeting's detail and transcript are
-  // fetched client-side.
+  // fetched client-side, except a deep-linked meeting outside the first page,
+  // which is read here through the visibility-scoped repository (M9 D1).
+  const shell = parseShellUrl(query)
   const [meetingPage, rooms] = await Promise.all([
     ctx.meetings.listMeetingsPage({ limit: 5 }),
     ctx.meetings.listRooms().catch(() => []),
   ])
   const meetings = meetingPage.meetings
+  const deepLink = await resolveShellDeepLink(shell, meetings, (id) =>
+    ctx.meetings.getMeeting(id, { includeTranscript: false })
+  )
+  const initialDetail =
+    deepLink.kind === "fetched"
+      ? {
+          meeting: deepLink.meeting,
+          permissions: {
+            canWrite: can(ctx.role, "meeting:write"),
+            canManage: canManageMeeting(ctx, deepLink.meeting),
+          },
+        }
+      : undefined
 
   return (
     <AppShell
@@ -56,7 +75,11 @@ export default async function Page({
       locale={supportedLocale}
       meetings={meetings}
       rooms={selectRecentRooms(rooms)}
+      workspaceId={ctx.workspace.id}
+      initialDetail={initialDetail}
+      unavailableMeetingId={deepLink.kind === "unavailable" ? deepLink.meetingId : undefined}
       user={{
+        id: user.id,
         email: user.email,
         ...(user.name ? { name: user.name } : {}),
         ...(user.picture ? { picture: user.picture } : {}),
