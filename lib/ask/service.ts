@@ -51,6 +51,9 @@ import { retrievePassages } from "@/lib/search/retrieve"
 import type { RetrievedPassage } from "@/lib/search/types"
 import { checkRateLimit, RATE_LIMIT_PRESETS } from "@/lib/rate-limit"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ask" })
 
 export type AskDeps = {
   retrieve: typeof retrievePassages
@@ -208,7 +211,7 @@ function refusedDone(language: AskLanguage, dropped = 0): Extract<AskStreamEvent
 
 function logFailure(stage: string, error: unknown) {
   // Error name/kind only: messages can carry prompt or transcript fragments.
-  console.error(`AskMeetSum ${stage} failed:`, describeLlmFailure(error))
+  log.error({ error: describeLlmFailure(error) }, `AskMeetSum ${stage} failed:`)
 }
 
 export async function* askStream(

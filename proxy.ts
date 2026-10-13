@@ -8,6 +8,7 @@ import {
   resolveLocalePreference,
   type SupportedLocale,
 } from "@/lib/i18n/locales"
+import { REQUEST_ID_HEADER, resolveRequestId } from "@/lib/log/request-id"
 
 /**
  * Locale routing (M9 A1, docs/parity/m9.md "Locales"). Every locale-less page
@@ -51,13 +52,28 @@ export function routeLocale(
   return { kind: "redirect", pathname: `/${locale}${pathname === "/" ? "" : pathname}`, status: 307 }
 }
 
+/**
+ * M10 B1: every request gets an `x-request-id` (a valid incoming one is kept,
+ * see lib/log/request-id.ts). It is forwarded to the route on the request
+ * headers, where `withAuthz`/`withPublicRoute` put it in the log context, and
+ * echoed on the response.
+ */
 export function proxy(request: NextRequest) {
+  const requestId = resolveRequestId(request.headers.get(REQUEST_ID_HEADER))
   const decision = routeLocale(request.nextUrl.pathname, {
     cookie: request.cookies.get(LOCALE_COOKIE)?.value,
     acceptLanguage: request.headers.get("accept-language"),
   })
 
-  if (decision.kind === "pass") return NextResponse.next()
+  if (decision.kind === "pass") {
+    const headers = new Headers(request.headers)
+
+    headers.set(REQUEST_ID_HEADER, requestId)
+    const response = NextResponse.next({ request: { headers } })
+
+    response.headers.set(REQUEST_ID_HEADER, requestId)
+    return response
+  }
 
   const url = request.nextUrl.clone()
 
@@ -65,9 +81,11 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.redirect(url, decision.status)
 
   response.headers.set("Vary", VARY)
+  response.headers.set(REQUEST_ID_HEADER, requestId)
   return response
 }
 
+// Pages and API routes (request ids); static assets and files are skipped.
 export const config = {
-  matcher: ["/((?!_next|api|.*\\..*).*)"],
+  matcher: ["/((?!_next/|.*\\..*).*)"],
 }

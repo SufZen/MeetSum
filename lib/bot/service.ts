@@ -38,6 +38,9 @@ import type { MeetingRecord } from "@/lib/meetings/repository"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { getAppSettings } from "@/lib/settings/app-settings"
 import { getBotRules, updateBotRules } from "@/lib/settings/bot-rules"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "bot" })
 
 /**
  * Bot route logic (M7 B7). Routes stay thin `withAuthz` adapters; this
@@ -254,7 +257,7 @@ async function safeDispatchNow(session: BotSessionRecord): Promise<BotSessionRec
     return { ...session, ...dispatched, passcodeEnc: session.passcodeEnc }
   } catch (error) {
     // The session stays `scheduled` with dispatch_at <= now: reconcile retries.
-    console.error("[bot] dispatchNow failed", redactBotError(error))
+    log.error({ error: redactBotError(error) }, "[bot] dispatchNow failed")
     return session
   }
 }
@@ -492,7 +495,7 @@ export async function sendBotToMeeting(
 
   if (later) {
     await scheduleDispatch(session).catch((error: unknown) => {
-      console.error("[bot] scheduleDispatch failed", redactBotError(error))
+      log.error({ error: redactBotError(error) }, "[bot] scheduleDispatch failed")
     })
     await audit(ctx, "bot.scheduled", session, { origin: session.origin, dispatchAt })
   } else {
@@ -546,7 +549,7 @@ export async function stopMeetingBot(ctx: Ctx, meetingId: string): Promise<Respo
       await getBotProvider().stopBot(session.platform, session.nativeMeetingId)
     } catch (error) {
       if (!(error instanceof VexaError && error.kind === "not_found")) {
-        console.error("[bot] stopBot failed", redactBotError(error))
+        log.error({ error: redactBotError(error) }, "[bot] stopBot failed")
         return botError("bot_provider_unavailable", 502)
       }
     }
@@ -630,7 +633,7 @@ export async function getBotStatusResponse(): Promise<Response> {
     base.vexaVersion = health.version ?? base.vexaVersion
     base.webhookConfigured = Boolean(webhook?.url) && Boolean(config.vexa.webhookSecret)
   } catch (error) {
-    console.warn("[bot] status check failed", redactBotError(error))
+    log.warn({ error: redactBotError(error) }, "[bot] status check failed")
   }
 
   return NextResponse.json(base)
@@ -681,7 +684,7 @@ export async function updateBotSettingsResponse(request: Request, ctx: Ctx): Pro
     { workspaceId: ctx.workspace.id, resyncRules: true },
     { jobId: `bot.reconcile:rules:${ctx.workspace.id}:${Date.now()}` }
   ).catch((error: unknown) => {
-    console.error("[bot] rules resync enqueue failed", redactBotError(error))
+    log.error({ error: redactBotError(error) }, "[bot] rules resync enqueue failed")
   })
 
   await recordAuditLog({

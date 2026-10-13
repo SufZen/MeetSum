@@ -8,6 +8,9 @@
 import { insertAiRun } from "@/lib/ai/llm/runs"
 import type { EmbeddingProviderId } from "@/lib/ai/embeddings/types"
 import { formatEmbeddingKey, type EmbeddingKey } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ai.embeddings" })
 
 export type EmbeddingRunInput = {
   workspaceId: string
@@ -49,7 +52,7 @@ export async function recordEmbeddingRun(run: EmbeddingRunInput): Promise<string
       error: run.error,
     })
   } catch (error) {
-    console.warn("[search] embedding run not recorded", error instanceof Error ? error.name : "unknown")
+    log.warn({ errorName: error instanceof Error ? error.name : "unknown" }, "[search] embedding run not recorded")
     return undefined
   }
 }

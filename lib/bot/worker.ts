@@ -8,6 +8,10 @@ import { BOT_QUEUE_NAME, type BotJobName, type BotJobPayloads, closeBotQueue, ge
 import { runBotReconcile } from "@/lib/bot/reconcile"
 import { botLog, redactBotError } from "@/lib/bot/redact"
 import { runBotRetention } from "@/lib/bot/retention"
+import { getLogger } from "@/lib/log"
+import { runInJobLogContext } from "@/lib/log/job-context"
+
+const log = getLogger({ component: "bot" })
 
 /**
  * The bot BullMQ worker (M7 A7), started from worker/index.ts next to the
@@ -108,7 +112,7 @@ export function startBotWorker(): BotWorkerHandle | undefined {
   if (!isBotEnabled()) return undefined
 
   const config = getBotConfig()
-  const worker = new Worker(BOT_QUEUE_NAME, (job) => processBotJob(job), {
+  const worker = new Worker(BOT_QUEUE_NAME, (job) => runInJobLogContext(BOT_QUEUE_NAME, job, processBotJob), {
     connection: { url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379" },
     concurrency: config.workerConcurrency,
     // Finalize streams a whole recording into storage.
@@ -123,9 +127,9 @@ export function startBotWorker(): BotWorkerHandle | undefined {
   })
 
   void upsertBotSchedulers(getBotQueue(), config).catch((error: unknown) => {
-    console.error(`[bot] scheduler setup failed: ${redactBotError(error)}`)
+    log.error(`[bot] scheduler setup failed: ${redactBotError(error)}`)
   })
-  console.log("[bot] meetsum-bot worker started")
+  log.info("[bot] meetsum-bot worker started")
 
   return {
     async close() {

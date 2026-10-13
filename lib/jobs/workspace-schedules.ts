@@ -5,6 +5,14 @@ import type {
   WorkspaceScopedJobPayload,
 } from "@/lib/jobs/queue"
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants"
+import { getLogger } from "@/lib/log"
+
+const logger = getLogger({ component: "jobs" })
+/** `ScheduleDeps.log` default: console-shaped calls forwarded to the logger. */
+const scheduleLog: Pick<Console, "error" | "warn"> = {
+  error: (message: string, error?: unknown) => logger.error({ err: error }, message),
+  warn: (message: string, error?: unknown) => logger.warn({ err: error }, message),
+}
 
 /**
  * Per-workspace schedules for the worker (M2): every tick re-reads the live
@@ -79,7 +87,7 @@ export async function enqueueWorkspaceGooglePolls(
   deps: ScheduleDeps = {}
 ): Promise<number> {
   const enqueue = deps.enqueue ?? defaultEnqueue
-  const log = deps.log ?? console
+  const log = deps.log ?? scheduleLog
   const workspaces = await listGoogleSyncWorkspaces(deps)
   let queued = 0
 
@@ -104,7 +112,7 @@ export async function enqueueWorkspaceRetention(
   deps: ScheduleDeps = {}
 ): Promise<number> {
   const enqueue = deps.enqueue ?? defaultEnqueue
-  const log = deps.log ?? console
+  const log = deps.log ?? scheduleLog
   const db = deps.db ?? (await defaultDb())
   const result = await db.query(
     `select id from workspaces where deleted_at is null order by created_at asc`

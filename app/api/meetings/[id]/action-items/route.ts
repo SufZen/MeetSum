@@ -17,6 +17,9 @@ import {
   notifyAssignment,
   validationMessage,
 } from "@/lib/tasks/api"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "meetings/action-items" })
 
 /** GET /api/meetings/:id/action-items — the meeting's action items. */
 export const GET = withAuthz<{ id: string }>(
@@ -69,7 +72,7 @@ export const POST = withAuthz<{ id: string }>(
       })
     } catch (error) {
       if (isNotFoundError(error)) return meetingNotFound()
-      console.error("[action-items] create failed", error instanceof Error ? error.name : "error")
+      log.error({ errorName: error instanceof Error ? error.name : "error" }, "[action-items] create failed")
       return jsonError("Failed to create action item", 500)
     }
 

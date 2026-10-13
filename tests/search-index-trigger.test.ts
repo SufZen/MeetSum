@@ -5,16 +5,20 @@ const mocks = vi.hoisted(() => ({ enqueue: vi.fn() }))
 vi.mock("@/lib/jobs/queue", () => ({ enqueueMeetSumJob: mocks.enqueue }))
 
 import { meetingIndexJobId, requestMeetingReindex } from "@/lib/search/index-trigger"
+import { captureLogs, restoreLogs, type CapturedLogs } from "@/tests/helpers/capture-logs"
+
+let logs: CapturedLogs
 
 describe("requestMeetingReindex (M6 Step 0)", () => {
   beforeEach(() => {
     mocks.enqueue.mockReset().mockResolvedValue({ id: "job_1" })
-    vi.spyOn(console, "warn").mockImplementation(() => {})
+    logs = captureLogs()
   })
 
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.restoreAllMocks()
+    restoreLogs()
   })
 
   it("is a no-op with in-memory storage (no persisted index)", async () => {
@@ -51,7 +55,9 @@ describe("requestMeetingReindex (M6 Step 0)", () => {
     await requestMeetingReindex({ workspaceId: "ws_1", meetingId: "m_1", reason: "renamed", db: { query } })
 
     expect(Date.now() - started).toBeLessThan(1_000)
-    expect(console.warn).toHaveBeenCalledWith("[search] reindex enqueue failed", "renamed", "TimeoutError")
+    expect(logs.at("warn")).toEqual([
+      expect.objectContaining({ msg: "[search] reindex enqueue failed", reason: "renamed", error: "TimeoutError" }),
+    ])
   })
 
   it("never throws: database and queue failures are logged", async () => {
@@ -62,7 +68,7 @@ describe("requestMeetingReindex (M6 Step 0)", () => {
       requestMeetingReindex({ workspaceId: "ws_1", meetingId: "m_1", reason: "tags", db: { query } })
     ).resolves.toBeUndefined()
     expect(mocks.enqueue).toHaveBeenCalledTimes(1)
-    expect(console.warn).toHaveBeenCalledTimes(2)
+    expect(logs.at("warn")).toHaveLength(2)
   })
 
   it("uses BullMQ-safe job ids (no colon)", () => {

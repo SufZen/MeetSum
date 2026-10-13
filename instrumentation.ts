@@ -1,3 +1,7 @@
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "boot" })
+
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { assertRuntimeEnvironment } = await import("@/lib/ops/environment")
@@ -12,12 +16,12 @@ export async function register() {
     try {
       integrations = await import("@/lib/integrations/core/http")
     } catch {
-      console.warn("[integrations] boot check unavailable: the integrations module failed to load")
+      log.warn("[integrations] boot check unavailable: the integrations module failed to load")
     }
 
     if (integrations) {
       for (const warning of integrations.assertIntegrationsBootConfig()) {
-        console.warn(`[integrations] ${warning}`)
+        log.warn(`[integrations] ${warning}`)
       }
     }
 

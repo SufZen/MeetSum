@@ -15,6 +15,9 @@ import {
   type LlmTask,
   type LlmUsage,
 } from "@/lib/ai/llm/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ai.llm" })
 
 export type AiRunInsert = {
   id?: string
@@ -90,7 +93,7 @@ export async function insertAiRun(row: AiRunInsert): Promise<string> {
     )
   } catch (error) {
     // ai_runs is observability; losing a row must not fail the pipeline.
-    console.warn("Failed to record ai_run", error)
+    log.warn({ err: error }, "Failed to record ai_run")
   }
 
   return id

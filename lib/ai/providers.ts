@@ -24,6 +24,9 @@ import {
   type IntelligencePipelineOptions,
   type IntelligenceRunMetadata,
 } from "@/lib/intelligence/pipeline"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ai.providers" })
 
 export { TranscriptionUnavailableError }
 
@@ -661,7 +664,7 @@ export class GeminiAudioTranscriptionProvider implements TranscriptionProvider {
 
       return segments.length ? segments : this.fallback.transcribe(meeting)
     } catch (error) {
-      console.error("Gemini audio transcription failed", error)
+      log.error({ err: error }, "Gemini audio transcription failed")
       throw error
     } finally {
       if (typeof tempDir === "string") {

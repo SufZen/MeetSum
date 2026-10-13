@@ -19,6 +19,9 @@
  */
 import type { Queryable } from "@/lib/db/client"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "search" })
 
 export type ReindexReason =
   | "transcript"
@@ -121,13 +124,13 @@ export async function requestMeetingReindex({
       [meetingId, workspaceId]
     )
   } catch (error) {
-    console.warn("[search] reindex mark failed", reason, describeFailure(error))
+    log.warn({ reason, error: describeFailure(error) }, "[search] reindex mark failed")
   }
 
   try {
     // Bounded: on a timeout the sweeper catches up (search_requested_at is set).
     await withTimeout(enqueueMeetingIndexJob({ workspaceId, meetingId, reason }, { delay: indexDebounceMs() }), indexEnqueueTimeoutMs())
   } catch (error) {
-    console.warn("[search] reindex enqueue failed", reason, describeFailure(error))
+    log.warn({ reason, error: describeFailure(error) }, "[search] reindex enqueue failed")
   }
 }

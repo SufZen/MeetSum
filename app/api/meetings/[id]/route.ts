@@ -10,6 +10,9 @@ import { withoutWords } from "@/lib/meetings/transcript-wire"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { requestMeetingReindex } from "@/lib/search/index-trigger"
 import { deleteMeetingObjects } from "@/lib/storage/object-storage"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "meetings" })
 
 const MEETING_TITLE_MAX_CHARS = 200
 
@@ -131,7 +134,7 @@ export const DELETE = withAuthz<{ id: string }>(
 
         failedKeys = result.failed.map((failure) => failure.key)
       } catch (error) {
-        console.error("[meetings] object delete failed; queueing storage.delete", error)
+        log.error({ err: error }, "[meetings] object delete failed; queueing storage.delete")
         failedKeys = [...deleted.storageKeys]
       }
     }
@@ -143,7 +146,7 @@ export const DELETE = withAuthz<{ id: string }>(
           keys: failedKeys,
         })
       } catch (error) {
-        console.error("[meetings] unable to queue storage.delete", error)
+        log.error({ err: error }, "[meetings] unable to queue storage.delete")
       }
     }
 

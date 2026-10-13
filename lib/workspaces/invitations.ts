@@ -6,6 +6,9 @@ import {
 } from "@/lib/email/templates/invitation"
 import { WorkspaceStoreError, type WorkspaceStore } from "@/lib/workspaces/store"
 import type { Invitation, Membership, Workspace, WorkspaceUser } from "@/lib/workspaces/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "workspaces" })
 
 /**
  * M9 (Package C): accepts a pending invitation by id for the signed-in user,
@@ -120,11 +123,11 @@ export async function deliverInvitation(input: {
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 500)
 
-    console.error("[invitations] email delivery failed", {
+    log.error({
       invitationId: input.invitation.id,
       provider: sender.provider,
       error: message,
-    })
+    }, "[invitations] email delivery failed")
     await input.store
       .recordInvitationSend(input.invitation.id, { error: message })
       .catch(() => {})

@@ -11,6 +11,9 @@ import { withAuthz } from "@/lib/auth/authz"
 import { recordAuditLog } from "@/lib/audit"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { roleRank } from "@/lib/workspaces/constants"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "admin/api-keys" })
 
 /**
  * GET /api/admin/api-keys — API keys of the active workspace (masked).
@@ -25,7 +28,7 @@ export const GET = withAuthz("api_keys:manage", async (request, ctx) => {
 
     return NextResponse.json({ keys }, { headers: rateLimit.headers })
   } catch (error) {
-    console.error("[api-keys] list failed", error)
+    log.error({ err: error }, "[api-keys] list failed")
     return jsonError("Failed to list API keys", 500)
   }
 })
@@ -97,7 +100,7 @@ export const POST = withAuthz("api_keys:manage", async (request, ctx) => {
       { status: 201, headers: rateLimit.headers }
     )
   } catch (error) {
-    console.error("[api-keys] create failed", error)
+    log.error({ err: error }, "[api-keys] create failed")
     return jsonError("Failed to create API key", 500)
   }
 })

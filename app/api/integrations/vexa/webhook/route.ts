@@ -3,6 +3,9 @@ import { NextResponse } from "next/server"
 import { withPublicRoute } from "@/lib/auth/authz"
 import { redactBotError } from "@/lib/bot/redact"
 import { processVexaWebhook, readBodyCapped, VEXA_WEBHOOK_MAX_BYTES } from "@/lib/bot/webhook-handler"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "integrations/vexa" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -31,7 +34,7 @@ async function handleVexaWebhook(request: Request) {
 
     return NextResponse.json(result.body, { status: result.status })
   } catch (error) {
-    console.error("[bot] vexa webhook failed", redactBotError(error))
+    log.error({ error: redactBotError(error) }, "[bot] vexa webhook failed")
 
     return NextResponse.json({ error: "webhook_failed" }, { status: 500 })
   }

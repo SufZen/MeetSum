@@ -24,6 +24,7 @@ import {
   type LlmRoute,
 } from "@/lib/ai/llm/router"
 import { recordLlmRun } from "@/lib/ai/llm/runs"
+import { getLogger } from "@/lib/log"
 import type {
   LlmProvider,
   LlmResult,
@@ -75,7 +76,7 @@ let freeTierWarned = false
 function warnFreeTierOnce() {
   if (freeTierWarned) return
   freeTierWarned = true
-  console.warn(GEMINI_FREE_TIER_WARNING)
+  getLogger({ component: "ai.llm" }).warn(GEMINI_FREE_TIER_WARNING)
 }
 
 async function workspacePreference(workspaceId: string): Promise<LlmPreference> {

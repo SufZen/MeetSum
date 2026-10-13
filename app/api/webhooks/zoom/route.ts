@@ -14,6 +14,9 @@ import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "webhooks/zoom" })
 
 export const runtime = "nodejs"
 
@@ -139,7 +142,7 @@ async function handleZoomWebhook(request: Request) {
       await repository.discardMeeting(meetingId).catch(() => false)
     }
 
-    console.error("[zoom] webhook processing failed", error)
+    log.error({ err: error }, "[zoom] webhook processing failed")
 
     return jsonError("Failed to process Zoom event", 500)
   }

@@ -75,6 +75,10 @@ import {
 import type { MeetSumJobName, MeetSumJobPayload } from "@/lib/jobs/queue"
 import { PRIVATE_PAYLOAD_KEYS } from "@/lib/platform/event-schemas"
 import { notifyMeetingFailed, notifyMeetingProcessed } from "@/lib/notifications/notify"
+import { getLogger } from "@/lib/log"
+import { runInJobLogContext } from "@/lib/log/job-context"
+
+const log = getLogger({ component: "jobs" })
 
 export type MeetSumJob = Job<MeetSumJobPayload, unknown, MeetSumJobName>
 
@@ -456,7 +460,7 @@ async function applyAutoTitle(scope: JobScope, meeting: MeetingRecord, title: st
     if (title === meeting.title) return
     await scope.repo.applyAiTitle(meeting.id, title)
   } catch (error) {
-    console.warn("AI title not applied", errorMessage(error))
+    log.warn({ error: errorMessage(error) }, "AI title not applied")
   }
 }
 
@@ -465,7 +469,7 @@ async function enqueueMeetingAnalyze(scope: JobScope, meetingId: string) {
   try {
     await enqueueMeetSumJob("meeting.analyze", { meetingId, workspaceId: scope.workspaceId })
   } catch (error) {
-    console.warn("meeting.analyze enqueue failed", errorMessage(error))
+    log.warn({ error: errorMessage(error) }, "meeting.analyze enqueue failed")
   }
 }
 
@@ -737,7 +741,7 @@ async function refreshSuggestionsSafely(
   try {
     return await refreshSpeakerSuggestions(scope.repo, meetingId, options)
   } catch (error) {
-    console.warn("Speaker suggestion refresh failed", error)
+    log.warn({ err: error }, "Speaker suggestion refresh failed")
     return 0
   }
 }
@@ -758,7 +762,7 @@ async function enqueueMediaPrepare(scope: JobScope, meetingId: string, asset: Me
       assetId: asset.id,
     })
   } catch (error) {
-    console.warn("media.prepare enqueue failed", errorMessage(error))
+    log.warn({ error: errorMessage(error) }, "media.prepare enqueue failed")
   }
 }
 
@@ -1340,7 +1344,7 @@ async function processWebhookJob(job: MeetSumJob) {
 
   // Legacy payloads without a workspace are dropped (fail closed).
   if (!workspaceId) {
-    console.warn("[webhooks] webhook.deliver job without a workspace dropped")
+    log.warn("[webhooks] webhook.deliver job without a workspace dropped")
     return { queued: 0, delivered: 0, failed: 0, skipped: true }
   }
 
@@ -1492,7 +1496,7 @@ const MEETING_PROCESSING_JOBS: ReadonlySet<MeetSumJobName> = new Set([
 export function createMeetSumWorker() {
   return new Worker<MeetSumJobPayload, unknown, MeetSumJobName>(
     "meetsum",
-    processJob,
+    (job) => runInJobLogContext("meetsum", job, processJob),
     {
       connection: {
         url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",

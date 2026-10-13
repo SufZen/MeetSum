@@ -26,6 +26,9 @@ import {
   type AsrResult,
   type AsrRouterResult,
 } from "./types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ai.asr" })
 
 export type AsrRouterOptions = {
   env?: AsrEnv
@@ -251,9 +254,7 @@ export async function transcribeWithRouter(req: AsrRequest, opts: AsrRouterOptio
       const safeMessage = redactAsrErrorMessage(asrError.message)
       attempts.push({ provider: provider.id, ok: false, kind: asrError.kind, error: safeMessage, elapsedMs })
       await breaker.recordFailure(provider.id, asrError)
-      console.error(
-        `[asr] ${provider.id} failed after ${elapsedMs}ms (${asrError.kind}, retryable=${asrError.retryable}): ${safeMessage}`
-      )
+      log.error(`[asr] ${provider.id} failed after ${elapsedMs}ms (${asrError.kind}, retryable=${asrError.retryable}): ${safeMessage}`)
 
       if (asrError.kind === "bad_input") {
         throw new AsrChainError(`ASR input rejected by ${provider.id}: ${safeMessage}`, attempts, false)

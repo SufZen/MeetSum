@@ -17,6 +17,9 @@ import { getUserPreferences } from "@/lib/users/preferences"
 import { isBootstrapEmail } from "@/lib/workspaces/bootstrap"
 import { getWorkspaceStore } from "@/lib/workspaces/store"
 import { normalizeEmail } from "@/lib/workspaces/tokens"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "auth/google" })
 
 function splitState(stored: string | undefined): [string, string | undefined] {
   const value = stored ?? ""
@@ -141,7 +144,7 @@ export const GET = withPublicRoute("Google OAuth redirect target", async (reques
 
     return response
   } catch (error) {
-    console.error("[auth] Google callback failed", error)
+    log.error({ err: error }, "[auth] Google callback failed")
     return redirectWithError(loginUrl, "unauthorized")
   }
 })

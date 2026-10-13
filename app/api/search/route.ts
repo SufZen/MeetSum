@@ -7,6 +7,9 @@ import { InvalidCursorError } from "@/lib/search/cursor"
 import { SearchUnavailableError } from "@/lib/search/errors"
 import { SearchRequestError, parseSearchParams } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "search" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -45,7 +48,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
     if (error instanceof SearchUnavailableError) {
       return NextResponse.json({ error: "Search unavailable" }, { status: 503, headers: rateLimit.headers })
     }
-    console.error("[search] failed:", error instanceof Error ? error.name : "unknown")
+    log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "[search] failed:")
 
     return NextResponse.json({ error: "Search failed" }, { status: 500, headers: rateLimit.headers })
   }

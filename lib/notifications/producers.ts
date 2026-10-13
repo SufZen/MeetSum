@@ -14,6 +14,9 @@ import type { CollabBackend } from "@/lib/clips/db"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import { canViewMeeting } from "@/lib/meetings/visibility"
 import { enqueueNotification } from "@/lib/notifications/enqueue"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "notifications" })
 
 export type ProducerMember = { userId: string; email: string }
 
@@ -123,7 +126,7 @@ async function quietly(task: () => Promise<void>): Promise<void> {
   try {
     await task()
   } catch (error) {
-    console.warn("[notifications] producer failed", error instanceof Error ? error.name : "error")
+    log.warn({ errorName: error instanceof Error ? error.name : "error" }, "[notifications] producer failed")
   }
 }
 

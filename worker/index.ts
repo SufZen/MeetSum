@@ -15,6 +15,9 @@ import {
 import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 import { warmSearchCapabilities } from "@/lib/search/capabilities"
 import { enqueueIndexSweeps, indexSweepEveryMs } from "@/lib/search/index-sweep"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "worker" })
 
 assertRuntimeEnvironment()
 
@@ -26,11 +29,11 @@ const integrationsWorker = startIntegrationWorker()
 const scheduledTimers: NodeJS.Timeout[] = []
 
 worker.on("completed", (job) => {
-  console.log(`MeetSum job completed: ${job.name} ${job.id}`)
+  log.info(`MeetSum job completed: ${job.name} ${job.id}`)
 })
 
 worker.on("failed", (job, error) => {
-  console.error(`MeetSum job failed: ${job?.name} ${job?.id}`, error)
+  log.error({ err: error }, `MeetSum job failed: ${job?.name} ${job?.id}`)
 })
 
 process.on("SIGTERM", async () => {
@@ -67,7 +70,7 @@ function scheduleGoogleSync() {
     scheduledTimers.push(
       setInterval(() => {
         void enqueueWorkspaceGooglePolls(schedule.name, schedule.job.payload).catch(
-          (error) => console.error(`Scheduled ${schedule.label} failed`, error)
+          (error) => log.error({ err: error }, `Scheduled ${schedule.label} failed`)
         )
       }, schedule.job.minutes * 60 * 1000)
     )
@@ -80,7 +83,7 @@ function scheduleTeamsSubscriptionRenewal() {
   const { minutes } = getCaptureScheduleConfig().teamsSubscriptionRenew
   const enqueueRenewal = () =>
     void enqueueMeetSumJob("teams.subscription.renew", { scheduled: true }).catch(
-      (error) => console.error("Scheduled Teams subscription renewal failed", error)
+      (error) => log.error({ err: error }, "Scheduled Teams subscription renewal failed")
     )
 
   enqueueRenewal()
@@ -96,7 +99,7 @@ function scheduleMediaRetention() {
   scheduledTimers.push(
     setInterval(() => {
       void enqueueWorkspaceRetention().catch((error) =>
-        console.error("Scheduled media retention failed", error)
+        log.error({ err: error }, "Scheduled media retention failed")
       )
     }, config.hours * 60 * 60 * 1000)
   )
@@ -112,7 +115,7 @@ function scheduleSearchIndexSweep() {
 
   void warmSearchCapabilities()
   const enqueueSweeps = () =>
-    void enqueueIndexSweeps().catch((error) => console.error("Scheduled search index sweep failed", error))
+    void enqueueIndexSweeps().catch((error) => log.error({ err: error }, "Scheduled search index sweep failed"))
 
   enqueueSweeps()
   scheduledTimers.push(setInterval(enqueueSweeps, indexSweepEveryMs()))
@@ -122,4 +125,4 @@ scheduleGoogleSync()
 scheduleTeamsSubscriptionRenewal()
 scheduleMediaRetention()
 scheduleSearchIndexSweep()
-console.log("MeetSum worker started")
+log.info("MeetSum worker started")

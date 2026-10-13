@@ -9,6 +9,9 @@ import { SearchUnavailableError } from "@/lib/search/errors"
 import { MAX_QUERY_CHARS } from "@/lib/search/filters"
 import { searchMeetingIds } from "@/lib/search/service"
 import type { SearchFilters } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "meetings/search" })
 
 /**
  * GET /api/meetings/search — Search meetings by title, participant, or tag.
@@ -114,7 +117,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
     )
   } catch (error) {
     if (error instanceof SearchUnavailableError) return jsonError("Search unavailable", 503)
-    console.error("[meetings/search] failed:", error instanceof Error ? error.name : "unknown")
+    log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "[meetings/search] failed:")
 
     return jsonError("Search failed", 500)
   }

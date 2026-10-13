@@ -18,6 +18,9 @@ import { toClipWire, type CreateClipInput } from "@/lib/clips/types"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { emitPlatformEvent } from "@/lib/platform/emit"
 import { rateLimitRequest, type RateLimitConfig } from "@/lib/rate-limit"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "meetings/clips" })
 
 const CLIP_CREATE_LIMIT: RateLimitConfig = { maxRequests: 20, windowMs: 3_600_000 }
 
@@ -100,7 +103,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       })
     } catch (error) {
       // The clip stays `pending` and is still playable in-app via the meeting player.
-      console.error("clip.render enqueue failed", (error as Error)?.name ?? error)
+      log.error({ errorName: (error as Error)?.name ?? error }, "clip.render enqueue failed")
     }
 
     await recordAuditLog({
