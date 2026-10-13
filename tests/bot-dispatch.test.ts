@@ -143,6 +143,46 @@ describe("runDispatch", () => {
     expect(provider.requestBot).not.toHaveBeenCalled()
   })
 
+  it("a meeting_request whose meeting started an hour ago still dispatches (window runs from the request)", async () => {
+    vi.setSystemTime(new Date("2026-10-14T10:00:00.000Z"))
+
+    const { store, provider, deps } = setup()
+    const session = await store.create(
+      sessionInput({
+        origin: "meeting_request",
+        calendarEventId: null,
+        scheduledStart: "2026-10-14T09:00:00.000Z",
+        scheduledEnd: null,
+        dispatchAt: "2026-10-14T10:00:00.000Z",
+      })
+    )
+    const result = await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)
+
+    expect(result).toMatchObject({ outcome: "requested", session: { status: "requested", vexaMeetingId: "4242" } })
+    expect(provider.requestBot).toHaveBeenCalledTimes(1)
+  })
+
+  it("a manual request ignores a past calendar end; it expires late-join minutes after the request", async () => {
+    vi.setSystemTime(new Date("2026-10-14T10:30:00.000Z"))
+
+    const { store, deps } = setup()
+    const session = await store.create(
+      sessionInput({ origin: "manual", calendarEventId: null, dispatchAt: "2026-10-14T10:30:00.000Z" })
+    )
+
+    expect((await runDispatch({ sessionId: session.id, rev: 0, workspaceId: "ws_a" }, deps)).outcome).toBe("requested")
+
+    const late = await store.create(
+      sessionInput({ origin: "manual", calendarEventId: null, nativeMeetingId: "qqq-qqqq-qqq" })
+    )
+
+    vi.setSystemTime(new Date("2026-10-14T11:01:00.000Z"))
+    expect((await runDispatch({ sessionId: late.id, rev: 0, workspaceId: "ws_a" }, deps)).session).toMatchObject({
+      status: "cancelled",
+      statusReason: "missed_window",
+    })
+  })
+
   it("re-delays 60 s when capacity is reached", async () => {
     const { store, provider, queue, deps } = setup({ env: { MEETSUM_BOT_MAX_CONCURRENT: "1" } })
 

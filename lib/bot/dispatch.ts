@@ -98,11 +98,26 @@ export type DispatchOutcome =
 
 export type DispatchResult = { outcome: DispatchOutcome; session?: BotSessionRecord }
 
+/**
+ * The latest moment this session may still dispatch. Only `calendar_rule`
+ * sessions get the calendar late-join window (start + max, capped at the
+ * event end). A user's explicit request (manual / meeting_request) runs from
+ * when it was made (`requested_at`, else `created_at`) or the meeting start
+ * when that is later, and ignores the calendar end.
+ */
 function windowEnd(session: BotSessionRecord, config: BotConfig): number {
-  const start = Date.parse(session.scheduledStart ?? session.createdAt)
-  const end = session.scheduledEnd ? Date.parse(session.scheduledEnd) : undefined
+  if (session.origin === "calendar_rule") {
+    const start = Date.parse(session.scheduledStart ?? session.createdAt)
+    const end = session.scheduledEnd ? Date.parse(session.scheduledEnd) : undefined
 
-  return joinWindowEnd(start, Number.isFinite(end) ? end : undefined, config.lateJoinMaxMinutes)
+    return joinWindowEnd(start, Number.isFinite(end) ? end : undefined, config.lateJoinMaxMinutes)
+  }
+
+  const requested = Date.parse(session.requestedAt ?? session.createdAt)
+  const start = session.scheduledStart ? Date.parse(session.scheduledStart) : Number.NaN
+  const anchor = Number.isFinite(start) ? Math.max(start, requested) : requested
+
+  return joinWindowEnd(anchor, undefined, config.lateJoinMaxMinutes)
 }
 
 export async function scheduleDispatch(
@@ -341,7 +356,9 @@ export async function runDispatch(
   const requested =
     (await d.store.update(
       session.id,
-      { attempts: session.attempts + 1, requestedAt: at.toISOString() },
+      // The first request time is kept: it anchors a user request's window
+      // across capacity re-delays.
+      { attempts: session.attempts + 1, requestedAt: session.requestedAt ?? at.toISOString() },
       { workspaceId: session.workspaceId }
     )) ?? session
 
