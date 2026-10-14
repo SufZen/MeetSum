@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 const migration = readFileSync("db/migrations/021_player_transcript_ux.sql", "utf8")
-const schema = readFileSync("db/schema.sql", "utf8")
 
 describe("migration 021 (static)", () => {
   it("adds media kind / derived / duration / peaks / prepare columns", () => {
@@ -43,12 +42,5 @@ describe("migration 021 (static)", () => {
     )
     expect(migration).toContain("case when r.tbl = 'ai_runs' then 'set null' else 'cascade' end")
     expect(migration).toMatch(/summary_sections add constraint %I foreign key \(summary_id\) references summaries\(id\) on delete cascade/)
-  })
-
-  it("is mirrored in db/schema.sql", () => {
-    expect(schema).toContain("create table if not exists transcript_segment_revisions")
-    expect(schema).toContain("transcript_version integer not null default 0")
-    expect(schema).toContain("on transcript_segment_revisions(segment_id, revision desc)")
-    expect(schema).toMatch(/media_assets_kind_check|kind in \('original', ?'playback'\)/)
   })
 })

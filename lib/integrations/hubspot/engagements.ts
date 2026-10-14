@@ -1,11 +1,12 @@
 /**
  * HubSpot meetings/notes and tasks (docs/parity/m8.md, B3 steps 2–3).
  *
- * Association type ids (HUBSPOT_DEFINED). Checked 2026-10-13 against the
- * CRM associations v4 guide ("Meeting/Note/Task to object" tables):
+ * Association type ids (HUBSPOT_DEFINED). Verified 2026-10-14 (M10 R2)
+ * against https://developers.hubspot.com/docs/api-reference/crm-associations-v4/guide:
  * meeting→contact 200, meeting→deal 212, note→contact 202, note→deal 214,
- * task→contact 204, task→deal 216. VERIFY against current docs and recorded
- * fixtures before the first live run.
+ * task→contact 204, task→deal 216 (pinned by tests/hubspot-docs-verified.test.ts).
+ * The v4 associations API goes unsupported on 2027-03-30 and `/crm/v3/objects`
+ * after September 2027 (AUDIT follow-up: move to the 2026-09 date paths).
  */
 import type { HubspotClient } from "@/lib/integrations/hubspot/client"
 import { dueEndOfDayIso, type MeetingRecap, type MeetingRecapActionItem } from "@/lib/integrations/recap"
@@ -132,10 +133,12 @@ export function taskProperties(
     hs_task_body: body,
     hs_timestamp: due,
     hs_task_status: "NOT_STARTED",
-    hs_task_priority: item.priority ? PRIORITY[item.priority] : "NONE",
     hs_task_type: "TODO",
   }
 
+  // HubSpot documents LOW, MEDIUM and HIGH only (verified 2026-10-14), so
+  // no priority means the property is omitted, not "NONE".
+  if (item.priority) properties.hs_task_priority = PRIORITY[item.priority]
   if (ownerId) properties.hubspot_owner_id = ownerId
   return properties
 }
@@ -162,7 +165,13 @@ export async function createTaskBatch(
   })
   const results = response?.results ?? []
   const byItem = new Map<string, string>()
-  const traced = results.every((result) => result.objectWriteTraceId)
+  const traced = results.length > 0 && results.every((result) => result.objectWriteTraceId)
+
+  // HubSpot does not document that results echo objectWriteTraceId
+  // (2026-10-14). Without the echo, index mapping is only safe when every
+  // input got a result; otherwise map nothing and let the marker search
+  // find the created tasks on retry.
+  if (!traced && results.length !== inputs.length) return byItem
 
   results.forEach((result, index) => {
     const actionItemId = traced ? result.objectWriteTraceId : inputs[index]?.actionItemId

@@ -23,7 +23,7 @@ export const hubspotFakeHandlers: FakeProviderHandlers = {
     target.searchParams.set("state", request.query.state ?? "")
     return { redirect: target.toString() }
   },
-  "POST /oauth/v1/token": () => ({
+  "POST /oauth/2026-03/token": () => ({
     body: {
       token_type: "bearer",
       expires_in: 1800,
@@ -66,10 +66,10 @@ export const hubspotFakeHandlers: FakeProviderHandlers = {
   }),
   "GET /crm/v3/owners": () => ({ body: { results: [] } }),
   // Token introspection and revoke (tokens in the form body, never the path).
-  "POST /oauth/v3/token/introspect": () => ({
+  "POST /oauth/2026-03/token/introspect": () => ({
     body: { active: true, hub_id: 4242, hub_domain: "fake-portal.hubspot.example", scopes: ["oauth", "crm.objects.contacts.read"] },
   }),
-  "POST /oauth/v3/token/revoke": () => ({ status: 204 }),
+  "POST /oauth/2026-03/token/revoke": () => ({ status: 204 }),
 }
 
 /**

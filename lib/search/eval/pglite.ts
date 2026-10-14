@@ -1,8 +1,9 @@
 /**
  * PGlite harness for the eval's `pglite` engine and the PGlite search test
- * (docs/parity/m6.md, B8): applies `db/schema.sql` plus migration 025 with
- * pg_trgm (no pgvector in this PGlite build, so the 025 vector block is a
- * NOTICE) and seeds meetings plus their chunks. Real Postgres semantics for
+ * (docs/parity/m6.md, B8): applies every file in `db/migrations` in order
+ * with pg_trgm (no pgvector in this PGlite build, so the 025 vector block is a
+ * NOTICE) and seeds meetings plus their chunks. (Since M10 `db/schema.sql` is
+ * a generated pg_dump, so the migrations are the portable source.) Real Postgres semantics for
  * the scoped SQL legs, without a server. Dev/test only.
  */
 import { createHash } from "node:crypto"
@@ -10,6 +11,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 
 import type { Queryable } from "@/lib/db/client"
+import { listMigrationFiles } from "@/lib/db/migrations"
 import type { MeetingRecord } from "@/lib/meetings/repository"
 import type { ChunkDraft } from "@/lib/search/types"
 
@@ -41,8 +43,9 @@ export async function createPgliteSearchDb(root = process.cwd()): Promise<Pglite
     return null
   }
 
-  await db.exec(readFileSync(path.join(root, "db", "schema.sql"), "utf8"))
-  await db.exec(readFileSync(path.join(root, "db", "migrations", "025_search_ask.sql"), "utf8"))
+  for (const migration of listMigrationFiles(path.join(root, "db", "migrations"))) {
+    await db.exec(migration.sql)
+  }
 
   const trigrams = (await db.query("select coalesce(array_length(show_trgm('תקציב'), 1), 0) as n")).rows[0] as { n: number }
   const query = (text: string, values?: unknown[]) => db.query(text, values)

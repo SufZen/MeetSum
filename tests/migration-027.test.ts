@@ -47,12 +47,6 @@ describe("migration 027 (static)", () => {
     expect(sql).toContain("unique (connection_id, meeting_id, object_kind, destination_key, action_item_id)")
     expect(sql).toContain("on integration_rules(workspace_id) where provider = 'email'")
   })
-
-  it("is mirrored in db/schema.sql", () => {
-    const schema = flat(readFileSync("db/schema.sql", "utf8"))
-
-    expect(schema).toContain(flat(SQL))
-  })
 })
 
 type PGliteLike = {

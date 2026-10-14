@@ -60,12 +60,6 @@ describe("migration 030 (static)", () => {
       "update workspace_settings set value = '\"he\"'::jsonb where key = 'defaultlocale' and value #>> '{}' in ('pt','es','it')"
     )
   })
-
-  it("is mirrored in db/schema.sql", () => {
-    const schema = flat(readFileSync("db/schema.sql", "utf8"))
-
-    expect(schema).toContain(sql.trim())
-  })
 })
 
 type PGliteLike = {

@@ -1,5 +1,7 @@
 # MeetSum Bootstrap Status
 
+> **Archived (M10, 2026-10-14).** Historical document, kept for context only; it no longer describes the current product. Current docs: [docs/README.md](../README.md).
+
 Last updated: 2026-04-23
 
 ## GitHub

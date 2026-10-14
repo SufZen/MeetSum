@@ -1,5 +1,7 @@
 # MeetSum V0.1.0 Completion Roadmap
 
+> **Archived (M10, 2026-10-14).** Historical document, kept for context only; it no longer describes the current product. Current docs: [docs/README.md](../README.md).
+
 ## Status Snapshot
 
 Last audited: 2026-05-28.
