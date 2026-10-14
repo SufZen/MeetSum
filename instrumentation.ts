@@ -35,6 +35,16 @@ export async function register() {
       }
     }
 
+    // v0.7.1: ASR configuration warnings (deprecated selector, no fallback
+    // provider). Only logged, never blocks boot.
+    try {
+      const { getAsrBootWarnings } = await import("@/lib/ai/asr/router")
+
+      for (const warning of getAsrBootWarnings()) log.warn(`[asr] ${warning}`)
+    } catch {
+      log.warn("[asr] boot check unavailable: the ASR module failed to load")
+    }
+
     // M6: detect pgvector / Hebrew trigram support once at boot and log the
     // search mode. Never blocks startup; failures degrade to lexical search.
     void import("@/lib/search/capabilities")

@@ -111,12 +111,8 @@ describe("resolveAsrChain", () => {
       "local-whisper-chunked",
       "gemini-legacy",
     ])
-    expect(resolveAsrChain("he", { MEETSUM_TRANSCRIPTION_PROVIDER: "auto" })).toEqual([
-      "runpod-ivrit",
-      "modal-worker",
-      "soniox",
-      "local-whisper-chunked",
-    ])
+    // v0.6.0 semantics: `auto` = local Whisper, then Gemini (see asr-legacy-auto.test.ts).
+    expect(resolveAsrChain("he", { MEETSUM_TRANSCRIPTION_PROVIDER: "auto" })).toEqual(["local-whisper-chunked", "gemini-legacy"])
   })
 })
 

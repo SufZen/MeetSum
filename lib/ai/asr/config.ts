@@ -74,9 +74,14 @@ function parseChain(value: string): AsrProviderId[] {
  * Configured provider order for a meeting language (before filtering out
  * unconfigured providers). `MEETSUM_ASR_CHAIN` / `MEETSUM_ASR_CHAIN_NON_HE`
  * win; otherwise the deprecated `MEETSUM_TRANSCRIPTION_PROVIDER` is mapped
- * (`local-whisper` → local only, `gemini` → defaults + Gemini). Gemini is
- * only kept when `MEETSUM_ASR_ALLOW_GEMINI=true` or the legacy mode asks
- * for it.
+ * with its v0.6.0 meaning:
+ *
+ * - `local-whisper` → local Whisper only;
+ * - `auto` → local Whisper, then Gemini (the v0.6.0 "local first, Gemini
+ *   fallback"; Gemini drops out later when no key or Vertex is configured);
+ * - `gemini` → the default chain plus Gemini.
+ *
+ * Otherwise Gemini is only kept when `MEETSUM_ASR_ALLOW_GEMINI=true`.
  */
 export function resolveAsrChain(language: string | undefined, env: AsrEnv): AsrProviderId[] {
   const hebrew = isHebrewLanguage(language)
@@ -89,6 +94,9 @@ export function resolveAsrChain(language: string | undefined, env: AsrEnv): AsrP
     chain = parseChain(explicit)
   } else if (legacy === "local-whisper") {
     chain = ["local-whisper-chunked"]
+  } else if (legacy === "auto") {
+    chain = ["local-whisper-chunked"]
+    allowGemini = true
   } else {
     chain = [...(hebrew ? DEFAULT_ASR_CHAIN : DEFAULT_ASR_CHAIN_NON_HE)]
 
@@ -99,4 +107,9 @@ export function resolveAsrChain(language: string | undefined, env: AsrEnv): AsrP
   if (!allowGemini) chain = chain.filter((id) => id !== "gemini-legacy")
 
   return chain
+}
+
+/** The deprecated selector, when set (`MEETSUM_ASR_CHAIN` replaces it). */
+export function legacyTranscriptionProvider(env: AsrEnv): string | undefined {
+  return envText(env, "MEETSUM_TRANSCRIPTION_PROVIDER")?.toLowerCase()
 }

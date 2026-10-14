@@ -2,6 +2,7 @@ export * from "./types"
 export { TranscriptionUnavailableError } from "./errors"
 export {
   createDefaultAsrProviders,
+  getAsrBootWarnings,
   getAsrChainConfig,
   getAsrRouterStatus,
   getEffectiveAsrChain,

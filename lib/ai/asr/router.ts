@@ -7,7 +7,7 @@ import {
   type BreakerStore,
   type CircuitBreaker,
 } from "./breaker"
-import { DEFAULT_ASR_CHAIN, DEFAULT_ASR_CHAIN_NON_HE, envText, resolveAsrChain, type AsrEnv } from "./config"
+import { DEFAULT_ASR_CHAIN, DEFAULT_ASR_CHAIN_NON_HE, envText, legacyTranscriptionProvider, resolveAsrChain, type AsrEnv } from "./config"
 import { redactAsrErrorMessage, toAsrError, TranscriptionUnavailableError } from "./errors"
 import type { FetchFn } from "./http"
 import { createGeminiLegacyProvider } from "./providers/gemini-legacy"
@@ -141,6 +141,45 @@ export function getEffectiveAsrChain(language: string, options: AsrRouterOptions
   const providers = options.providers ?? createDefaultAsrProviders({ env, fetch: options.fetch, deps: options.providerDeps })
 
   return resolveProviders(resolveAsrChain(language, env), providers, env).map((provider) => provider.id)
+}
+
+/**
+ * Configuration warnings logged once at boot by the app and the worker
+ * (v0.7.1). Names variables and provider ids only, never values.
+ *
+ * - `MEETSUM_TRANSCRIPTION_PROVIDER` is deprecated: while `MEETSUM_ASR_CHAIN`
+ *   is unset it still selects the chain (v0.6.0 meaning), otherwise it is
+ *   ignored.
+ * - A Hebrew chain with one (or no) configured provider has no fallback: an
+ *   outage of that provider fails every Hebrew transcription.
+ */
+export function getAsrBootWarnings(env: AsrEnv = process.env): string[] {
+  const warnings: string[] = []
+  const legacy = legacyTranscriptionProvider(env)
+
+  if (legacy) {
+    warnings.push(
+      envText(env, "MEETSUM_ASR_CHAIN")
+        ? "MEETSUM_TRANSCRIPTION_PROVIDER is deprecated and ignored because MEETSUM_ASR_CHAIN is set; remove it."
+        : `MEETSUM_TRANSCRIPTION_PROVIDER=${legacy} is deprecated; it still selects the ASR chain (v0.6.0 meaning). ` +
+            (legacy === "auto"
+              ? "Replace it with MEETSUM_ASR_CHAIN=local-whisper-chunked and MEETSUM_ASR_ALLOW_GEMINI=true (docs/runbooks/free-tier-asr.md)."
+              : "Replace it with MEETSUM_ASR_CHAIN (and MEETSUM_ASR_ALLOW_GEMINI=true to keep Gemini) (docs/env-matrix.md).")
+    )
+  }
+
+  const chain = getAsrChainConfig(env).chain
+
+  if (chain.length === 0) {
+    warnings.push("The Hebrew ASR chain has no configured provider: Hebrew transcription will fail (docs/runbooks/free-tier-asr.md).")
+  } else if (chain.length === 1) {
+    warnings.push(
+      `The Hebrew ASR chain has only one configured provider (${chain[0]}): there is no fallback when it is down. ` +
+        "Add a provider to MEETSUM_ASR_CHAIN, or MEETSUM_ASR_ALLOW_GEMINI=true with a Gemini key (docs/runbooks/free-tier-asr.md)."
+    )
+  }
+
+  return warnings
 }
 
 /** Empty transcripts of audio longer than this fall through to the next provider. */

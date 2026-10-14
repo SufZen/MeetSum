@@ -1,3 +1,4 @@
+import { getAsrBootWarnings } from "@/lib/ai/asr/router"
 import { startBotWorker } from "@/lib/bot/worker"
 import { startIntegrationWorker } from "@/lib/integrations/core/worker"
 import { isTeamsSubscriptionConfigured } from "@/lib/capture/teams-subscriptions"
@@ -21,6 +22,10 @@ import { createLagMonitor, startWorkerHealthServer } from "@/lib/worker-health/s
 const log = getLogger({ component: "worker" })
 
 assertRuntimeEnvironment()
+
+// v0.7.1: the worker runs transcription, so it repeats the app's ASR boot
+// warnings (deprecated MEETSUM_TRANSCRIPTION_PROVIDER, single-provider chain).
+for (const warning of getAsrBootWarnings()) log.warn(`[asr] ${warning}`)
 
 // M10 B2: optional Sentry/GlitchTip; without SENTRY_DSN the module (and
 // @sentry/node) is never imported.
