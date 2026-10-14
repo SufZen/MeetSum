@@ -12,7 +12,7 @@ import { getIntegrationStore } from "@/lib/integrations/core/store"
  * attempts and keeps the idempotency key.
  */
 export const POST = withAuthz<{ id: string }>("integrations:manage", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

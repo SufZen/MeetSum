@@ -12,7 +12,7 @@ import { getIntegrationStore } from "@/lib/integrations/core/store"
  * and audits `integration.connection.tested`. Answers a fixed result code.
  */
 export const POST = withAuthz<{ id: string }>("integrations:connect", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

@@ -12,7 +12,7 @@ import { isInvitationTokenShape } from "@/lib/workspaces/tokens"
 export const GET = withPublicRoute<{ token: string }>(
   "Invitation preview for the token holder before sign-in",
   async (request, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.publicAccess)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.publicAccess)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

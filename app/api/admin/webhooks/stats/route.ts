@@ -12,7 +12,7 @@ import {
  * GET /api/admin/webhooks/stats — Webhook health of the active workspace.
  */
 export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

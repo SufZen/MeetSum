@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
  * `status`/`grounded`). A foreign room is a 404. Not persisted.
  */
 export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ctx, { params }) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.ask)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.ask)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

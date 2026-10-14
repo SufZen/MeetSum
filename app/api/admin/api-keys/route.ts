@@ -19,7 +19,7 @@ const log = getLogger({ component: "admin/api-keys" })
  * GET /api/admin/api-keys — API keys of the active workspace (masked).
  */
 export const GET = withAuthz("api_keys:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
@@ -39,7 +39,7 @@ export const GET = withAuthz("api_keys:manage", async (request, ctx) => {
  * Returns the raw key ONCE. It cannot be retrieved again.
  */
 export const POST = withAuthz("api_keys:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

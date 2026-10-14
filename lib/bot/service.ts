@@ -50,7 +50,7 @@ const log = getLogger({ component: "bot" })
  * carry `BotSessionSummary` only: never a passcode or a raw meeting URL.
  */
 
-export const JOIN_RATE_LIMIT = { maxRequests: 5, windowMs: 60_000 } as const
+export const JOIN_RATE_LIMIT = { name: "bot-join", maxRequests: 5, windowMs: 60_000 } as const
 const ATTACH_WINDOW_MS = 2 * 3_600_000
 const RECENT_TERMINAL_MS = 24 * 3_600_000
 const MAX_INPUT_CHARS = 8_000
@@ -272,7 +272,7 @@ export async function joinBotNow(request: Request, ctx: Ctx): Promise<Response> 
   const userKey = ctx.user?.id ?? ctx.apiKey?.id ?? "anonymous"
 
   if (process.env.MEETSUM_RATE_LIMIT !== "false") {
-    const limited = checkRateLimit(`bot-join:user:${userKey}`, JOIN_RATE_LIMIT)
+    const limited = await checkRateLimit(`bot-join:user:${userKey}`, JOIN_RATE_LIMIT)
 
     if (!limited.allowed) {
       return rateLimited(Math.ceil((limited.resetMs - Date.now()) / 1000))

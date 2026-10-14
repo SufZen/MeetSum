@@ -16,7 +16,7 @@ export const GET = withAuthz("integrations:manage", async (_request, ctx) => {
 })
 
 export const POST = withAuthz("integrations:manage", async (request, ctx) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

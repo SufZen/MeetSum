@@ -111,9 +111,9 @@ export function askRateLimitKey(ctx: AskPrincipal): string {
 }
 
 /** Consumes one `ask` slot; false when blocked (or when the store fails). */
-function consumeAskRateLimit(ctx: AuthContext): boolean {
+async function consumeAskRateLimit(ctx: AuthContext): Promise<boolean> {
   if (process.env.MEETSUM_RATE_LIMIT === "false") return true
-  return checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask).allowed
+  return (await checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask)).allowed
 }
 
 async function loadSettings(workspaceId: string) {
@@ -238,7 +238,7 @@ export async function* askStream(
 
   try {
     // 1. Per-minute limit (one bucket per principal, every entry point), then the daily cap.
-    if (!consumeAskRateLimit(ctx)) {
+    if (!(await consumeAskRateLimit(ctx))) {
       yield errorEvent("rate_limited", language)
       return
     }

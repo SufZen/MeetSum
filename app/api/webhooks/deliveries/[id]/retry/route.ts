@@ -9,18 +9,18 @@ import {
   WebhookNotFoundError,
 } from "@/lib/webhooks/management"
 
-const WEBHOOK_RETRY_LIMIT = { maxRequests: 3, windowMs: 60_000 }
+const WEBHOOK_RETRY_LIMIT = { name: "webhook-retry", maxRequests: 3, windowMs: 60_000 }
 
 export const POST = withAuthz<{ id: string }>(
   "webhooks:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
     const { id } = await params
     // Per-delivery throttle on top of the admin preset.
-    const perDelivery = rateLimitRequest(
+    const perDelivery = await rateLimitRequest(
       request,
       WEBHOOK_RETRY_LIMIT,
       `webhook-retry:${id}`

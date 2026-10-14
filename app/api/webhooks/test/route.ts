@@ -18,7 +18,7 @@ import {
  * production headers and both signatures.
  */
 export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.webhookTest)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.webhookTest)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

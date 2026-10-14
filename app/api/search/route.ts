@@ -29,7 +29,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
 
   if (!limitKey) return searchRateLimitUnavailable()
 
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

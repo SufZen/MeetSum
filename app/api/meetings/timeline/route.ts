@@ -14,7 +14,7 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
  *   groupBy — "day" | "week" | "month" (default: "day")
  */
 export const GET = withAuthz("meeting:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

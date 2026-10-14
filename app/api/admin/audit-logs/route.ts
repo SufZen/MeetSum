@@ -21,7 +21,7 @@ function param(url: URL, name: string, max = 200): string | undefined {
  * Response: { logs, nextCursor }.
  */
 export const GET = withAuthz("audit:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

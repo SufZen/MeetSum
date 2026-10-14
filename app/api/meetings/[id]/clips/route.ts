@@ -22,7 +22,7 @@ import { getLogger } from "@/lib/log"
 
 const log = getLogger({ component: "meetings/clips" })
 
-const CLIP_CREATE_LIMIT: RateLimitConfig = { maxRequests: 20, windowMs: 3_600_000 }
+const CLIP_CREATE_LIMIT: RateLimitConfig = { name: "clips-create", maxRequests: 20, windowMs: 3_600_000 }
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -84,7 +84,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   if (!input) return jsonError("Provide {startMs, endMs} or {segmentIds}", 400)
 
   // 20 clip creations per user (or API key) per hour, per instance.
-  const limited = rateLimitRequest(
+  const limited = await rateLimitRequest(
     request,
     CLIP_CREATE_LIMIT,
     `clips_create:${ctx.workspace.id}:${principalKey(ctx)}`

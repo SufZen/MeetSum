@@ -11,7 +11,7 @@ export const GET = withAuthz("workspace:read", async (_request, ctx) =>
 )
 
 export const PATCH = withAuthz("settings:write", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

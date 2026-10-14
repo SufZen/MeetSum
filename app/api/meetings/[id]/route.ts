@@ -58,7 +58,7 @@ export const GET = withAuthz<{ id: string }>(
 export const PATCH = withAuthz<{ id: string }>(
   "meeting:write",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
@@ -105,7 +105,7 @@ export const PATCH = withAuthz<{ id: string }>(
 export const DELETE = withAuthz<{ id: string }>(
   "meeting:read",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
