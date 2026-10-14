@@ -175,25 +175,22 @@ Provider secrets are still controlled by production environment variables. For
 example, selecting Vertex AI as a preference does not switch production until the
 Vertex service-account credential path is configured and smoke-tested.
 
-## Current Limitations
+## Known limitations (M10)
 
-- Meet transcript, smart-notes, and direct recording artifact import are available for linked artifacts.
-- Gmail-aware prep and follow-up are not first-priority until Calendar and Drive paths are reliable.
-- DOCX and Notion exports are prepared but not active.
-- Vertex AI is not the active production provider yet.
-- A visible meeting bot and packaged desktop-recorder release polish are deferred until consent, code-signing, and installer requirements are proven. The local desktop companion and desktop imports are available through the repo, UI, and API.
+These are deliberate, documented trade-offs (see `docs/parity/AUDIT.md`, "Follow-ups").
 
-## V0.6.0 Release Readiness
+- **Calendar dedupe across Google and Outlook (R4).** When the same meeting is on both calendars, MeetSum keeps one canonical event and skips the duplicate. Two cases are not handled automatically: if the canonical event is cancelled while the duplicate stays, the duplicate remains skipped; and recurring meetings that appear on both calendars are not deduplicated per occurrence. Workaround: open the meeting and use **Join now** (or schedule the bot manually) for the occurrence you need.
+- **Slack recap duplicate window (R5).** If MeetSum posts a recap to Slack (`chat.postMessage` succeeds) but saving the delivery record fails right after, a retry can post the recap a second time. MeetSum does not request Slack's channel-history scope, so it cannot check for its own earlier post. This is rare and accepted; delete the extra message in Slack if it happens.
+- **Live features need outside accounts.** The meeting bot and the live transcript need a Vexa host and a Google Workspace bot account; integrations need their own apps (Slack, Microsoft Entra, Notion, HubSpot). They are tested offline with fake providers until those exist.
+- **Speaker names with free ASR.** Groq and local Whisper do not diarize, so every word is "Speaker 1" until a diarizing provider (RunPod, Modal or Soniox) is configured.
+- **Lexical search without pgvector.** Without the pgvector image and an embedding provider, search is full-text plus trigram only (`mode: lexical`), which misses paraphrases.
 
-MeetSum v0.6.0 is ready for the active VPS update when:
+## מגבלות ידועות (M10)
 
-- A real Google/Drive/imported meeting becomes transcript, summary, decisions, action items, tags, and quotes.
-- A desktop recorder upload can create a `desktop_recorder` meeting and enter the normal worker pipeline.
-- Public read-only meeting sharing works.
-- Participants and speakers can be viewed and corrected.
-- Drive import progress is clear.
-- Memory search and Ask work across indexed meetings.
-- Rooms/context linking works.
-- PDF and Markdown exports work.
-- Workspace status clearly explains Google/Meet/Drive readiness.
-- Hebrew and mixed-language meetings remain first-class.
+אלה פשרות מכוונות ומתועדות (ראו `docs/parity/AUDIT.md`, "Follow-ups").
+
+- **כפילויות בין יומן Google ליומן Outlook (R4).** כשאותה פגישה מופיעה בשני היומנים, MeetSum שומרת אירוע אחד ומדלגת על הכפיל. שני מקרים לא מטופלים אוטומטית: אם האירוע הראשי מבוטל והכפיל נשאר, הכפיל נשאר מדולג; ופגישות חוזרות שמופיעות בשני היומנים לא מאוחדות לפי מופע. פתרון עוקף: לפתוח את הפגישה ולבחור **הצטרפות עכשיו** (או לתזמן את הבוט ידנית) למופע הרלוונטי.
+- **חלון כפילות בסיכום ל-Slack (R5).** אם הסיכום נשלח ל-Slack בהצלחה אבל שמירת רישום המסירה נכשלת מיד אחר כך, ניסיון חוזר עלול לשלוח את הסיכום פעם נוספת. MeetSum לא מבקשת הרשאה לקריאת היסטוריית ערוצים, ולכן אינה יכולה לבדוק אם כבר שלחה. זה נדיר ומקובל; אפשר למחוק את ההודעה הכפולה ב-Slack.
+- **תכונות חיות דורשות חשבונות חיצוניים.** בוט הפגישות והתמלול החי דורשים שרת Vexa וחשבון בוט ב-Google Workspace; האינטגרציות דורשות אפליקציה משלהן (Slack, Microsoft Entra, Notion, HubSpot). עד אז הן נבדקות במצב לא מקוון מול ספקים מדומים.
+- **שמות דוברים עם תמלול חינמי.** Groq ו-Whisper מקומי לא מפרידים בין דוברים, ולכן כל המילים משויכות ל"דובר 1" עד שמוגדר ספק עם הפרדת דוברים (RunPod, Modal או Soniox).
+- **חיפוש לקסיקלי בלי pgvector.** בלי pgvector וספק הטמעות, החיפוש הוא טקסט מלא וטריגרמות בלבד (`mode: lexical`), ולכן ניסוחים שונים לאותו רעיון עלולים להתפספס.
