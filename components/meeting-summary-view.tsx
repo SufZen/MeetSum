@@ -481,7 +481,7 @@ export function MeetingSummaryView({
                 </div>
               ) : null}
               {intelligence?.topics?.length ? (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
+                <div role="group" className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
                   {intelligence.topics.map((topic) => (
                     <span key={topic} dir={dir} className="rounded-sm bg-surface-3 px-2 py-0.5 text-xs text-fg-2">
                       {text(topic, summaryLanguage)}

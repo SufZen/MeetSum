@@ -296,7 +296,7 @@ export function TasksView({
           </Button>
         </div>
       ) : state === "loading" && !tasks.length ? (
-        <div className="grid gap-2" aria-busy="true" aria-label={strings.tasksLoading}>
+        <div role="status" className="grid gap-2" aria-busy="true" aria-label={strings.tasksLoading}>
           {[0, 1, 2].map((index) => (
             <Skeleton key={index} className="h-16 w-full rounded-lg" />
           ))}
