@@ -18,7 +18,7 @@
  * The password is never printed; pg_dump receives the URL via --dbname.
  */
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -99,9 +99,11 @@ try {
     if (!diff) {
       console.log("db:schema:check: db/schema.sql matches a fresh pg_dump")
     } else {
-      const outDir = mkdtempSync(path.join(tmpdir(), "meetsum-schema-"))
-      const outFile = path.join(outDir, "schema.sql")
+      // SCHEMA_CHECK_OUT names where the fresh dump goes (CI uploads it as an
+      // artifact); otherwise a temp directory.
+      const outFile = process.env.SCHEMA_CHECK_OUT?.trim() || path.join(mkdtempSync(path.join(tmpdir(), "meetsum-schema-")), "schema.sql")
 
+      mkdirSync(path.dirname(outFile), { recursive: true })
       writeFileSync(outFile, dump)
       const diffLines = diff.split("\n").length
 
@@ -117,7 +119,9 @@ try {
         console.log("----- END db/schema.sql -----")
       }
       console.error(`db:schema:check: db/schema.sql is stale. The fresh dump is at ${outFile}; run \`npm run db:schema:generate\` against a pgvector pg17 database and commit it.`)
-      process.exit(1)
+      // exitCode, not process.exit(): stdout to a pipe is asynchronous, and
+      // exiting here would cut the dump printed above short.
+      process.exitCode = 1
     }
   }
 } catch (error) {
@@ -125,5 +129,5 @@ try {
   const message = (error instanceof Error ? error.message : String(error)).replace(/(\/\/[^:/@\s]+:)[^@\s]*@/g, "$1***@")
 
   console.error(`db:schema:${command}: ${message}`)
-  process.exit(1)
+  process.exitCode = 1
 }

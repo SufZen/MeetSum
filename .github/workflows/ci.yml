@@ -129,6 +129,17 @@ jobs:
         run: npm run db:schema:check
         env:
           PG_DUMP_CMD: docker exec ${{ job.services.postgres.id }} pg_dump
+          SCHEMA_CHECK_OUT: ${{ runner.temp }}/schema-fresh/schema.sql
+
+      # On drift, the fresh dump is downloadable instead of copied from the log.
+      - name: Upload the fresh db/schema.sql
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: schema-fresh
+          path: ${{ runner.temp }}/schema-fresh/schema.sql
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Apply migrations on plain Postgres (no pgvector)
         run: npm run db:migrate
