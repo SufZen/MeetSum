@@ -61,17 +61,24 @@ The `Guard` line of each section is the permission the route wrapper checks (wit
 ### `GET /api/health`
 Guard: public · API key: not needed
 
-Health report for the reverse proxy and uptime checks; always 200. Body: `{ app, version, uptimeSeconds, timestamp, warnings?, services: { database, redis, storage, ai? } }`. `database` is pinged (`ok`/`degraded`); `redis` and `storage` only report `configured`/`not_configured`; `warnings` lists runtime environment problems (fatal ones prefixed `FATAL:`).
+Health report kept for compatibility (shape unchanged since M1); new probes should use `/api/health/live` and `/api/health/ready`. Always 200. Body: `{ app, version, uptimeSeconds, timestamp, warnings?, services: { database, redis, storage, ai? } }`. `version` is read from `package.json` at build time (never `npm_package_version`). `database` is pinged, `redis` gets a real `PING` and `storage` an S3 `HeadBucket`; each reports `ok`, `degraded` (failed or timed out) or `not_configured`. `warnings` lists runtime environment problems (fatal ones prefixed `FATAL:`). `health` rate limit.
 
 ### `GET /api/health/live`
 Guard: public · API key: not needed
 
-Liveness only: `{ "status": "ok" }` with `cache-control: no-store`. Never calls a dependency.
+Liveness only: `{ "status": "ok" }` with `cache-control: no-store`. Never calls a dependency, so a slow database or Redis never gets a healthy process restarted. `health` rate limit.
 
 ### `GET /api/health/ready`
 Guard: public · API key: not needed
 
-**Stub.** Always answers `501 { "status": "not_implemented" }`. The planned readiness checks (database, Redis, storage, migrations with 200/503) are not implemented yet.
+Readiness for compose healthchecks, the deploy wait and uptime monitors. Answers `200 { "status": "ok", checks }` when no check fails, else `503 { "status": "fail", checks }`, with `cache-control: no-store`. `checks` is `{ database, redis, storage, migrations }`, each `"ok"`, `"fail"` or `"skip"`:
+
+- `database`: `select 1` (2 s timeout);
+- `redis`: `PING` (1 s);
+- `storage`: S3 `HeadBucket` on the configured bucket (2 s);
+- `migrations`: the highest applied `schema_migrations` version is at least the highest file in `db/migrations` (a database behind the code fails).
+
+An unconfigured dependency is `skip` outside production and `fail` in production. The checks run in parallel and the result is reused for 1 s, so a probe storm does not multiply dependency calls. The body never carries error text, hosts, versions or tenant data. `health` rate limit.
 
 ## Auth & session
 
@@ -935,10 +942,17 @@ Waveform peaks of a shared recording behind the same gate as the media route; cl
 
 ## Rate limits
 
-Limits are in-memory sliding windows, per app instance (with N instances the effective budget is up to N times higher). A store failure denies the request. `MEETSUM_RATE_LIMIT=false` disables all of them.
+Limits are sliding windows. The backend is `MEETSUM_RATE_LIMIT_BACKEND=memory|redis`; the default is `redis` when `REDIS_URL` is set, else `memory`.
+
+- **Redis** (production): one atomic Lua script per check over a sorted set keyed `rl:<preset>:<sha256(key)>`, so the budget is shared by every app instance. The limiter uses its own Redis connection with a 500 ms timeout.
+- **Fail-closed policy.** When Redis is down or slow, the cost and abuse presets **deny** the request (429): `ask`, `search`, `exports`, share password checks, OAuth start (`integrationsOAuth`) and the on-demand LLM budget. Every other preset falls back to the per-instance memory limiter. The outage is logged at most once a minute.
+- **Memory** (no Redis, development and tests): per app instance, so with N instances the effective budget is up to N times higher. A memory store failure denies the request.
+- The `health` preset is always the per-instance memory limiter, so a probe never waits on Redis.
+- `MEETSUM_RATE_LIMIT=false` disables all of them.
 
 | Preset | Limit | Key | Applies to |
 |---|---|---|---|
+| `health` | 120/min | client IP (memory only) | `/api/health`, `/api/health/live`, `/api/health/ready` |
 | `api` | 120/min | client IP | `PATCH`/`DELETE /api/meetings/:id`, speakers, timeline, transcript edits and undo, ASR glossary, analytics overview, notifications list |
 | `search` | 60/min | workspace + user (or key) | `/api/search`, `/api/search/facets`, `/api/meetings/search`, `/api/memory/search` |
 | `ask` | 20/min | client IP (plus a per-principal limit in the Ask service) | `/api/ask`, `/api/meetings/:id/ask`, `/api/memory/ask`, `/api/rooms/:id/ask` |
