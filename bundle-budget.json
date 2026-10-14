@@ -1,5 +1,5 @@
 {
-  "description": "M9 first-load JS budgets, KB gzipped (level 9), polyfills included; see scripts/bundle-size.mjs. budgetKb is the M9 target (enforced with --strict); baselineKb is the ratchet (fails above baselineKb + maxGrowthKb).",
+  "description": "First-load JS budgets, KB gzipped (level 9), polyfills included; see scripts/bundle-size.mjs. budgetKb is the M10 target, enforced with --strict (M10 C: /[locale] 300, share 220, tasks and search at least 5% under their M9 baselines); baselineKb is the ratchet (fails above baselineKb + maxGrowthKb) and only goes down: re-measure with --write-baseline after the M10 build.",
   "maxGrowthKb": 5,
   "routes": {
     "/[locale]": {
@@ -22,9 +22,11 @@
       "baselineKb": 223
     },
     "/[locale]/tasks": {
+      "budgetKb": 297.1,
       "baselineKb": 312.7
     },
     "/[locale]/search": {
+      "budgetKb": 291,
       "baselineKb": 306.3
     },
     "/[locale]/rooms/[id]": {
@@ -37,5 +39,5 @@
       "baselineKb": 218.6
     }
   },
-  "newRoutes": "Baselines re-measured at the M9 Integration step (merged A-D tree): analytics and onboarding landed; login/tasks/search/invite/unsubscribe were raised to the measured values (shared [locale] chrome grew in A-D)."
+  "newRoutes": "Baselines re-measured at the M9 Integration step (merged A-D tree): analytics and onboarding landed; login/tasks/search/invite/unsubscribe were raised to the measured values (shared [locale] chrome grew in A-D). M10 C adds tasks/search budgets (M9 baseline x 0.95)."
 }
