@@ -203,9 +203,12 @@ test("6. ⌘K search for תקציב finds the meeting", async ({ page, context }
 
         const input = page.getByRole("combobox", { name: "חיפוש ושאלות" })
 
-        await input.waitFor({ timeout: 10_000 })
+        // A shortcut pressed before hydration is lost: a palette that did not
+        // open is another poll round, not a thrown error that ends the poll.
+        // (isVisible() does not wait, so the results are awaited explicitly.)
+        if (!(await input.waitFor({ timeout: 5_000 }).then(() => true, () => false))) return false
         await input.fill("תקציב")
-        return page.getByRole("option").filter({ hasText: title }).first().isVisible({ timeout: 5_000 }).catch(() => false)
+        return page.getByRole("option").filter({ hasText: title }).first().waitFor({ timeout: 5_000 }).then(() => true, () => false)
       },
       { timeout: 90_000, intervals: [2_000, 5_000] }
     )
