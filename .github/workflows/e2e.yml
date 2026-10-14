@@ -135,6 +135,12 @@ jobs:
       - name: Migrate and seed (${{ matrix.seed }})
         run: |
           bash scripts/e2e/with-env.sh npm run db:migrate
+          # m6 runs hybrid on this pgvector image (E2E_EXPECT_LEXICAL unset):
+          # migration 025 indexes only the default embedding key, so the HNSW
+          # index of the e2e key (hash-test:256) is installed before the seed.
+          if [ "${{ matrix.suite }}" = "m6" ]; then
+            bash scripts/e2e/with-env.sh npm run search:vector-setup
+          fi
           bash scripts/e2e/with-env.sh npm run "${{ matrix.seed }}"
 
       - name: Start the fake providers and fake ASR
