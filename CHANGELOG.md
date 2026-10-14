@@ -2,6 +2,29 @@
 
 All notable changes to MeetSum are documented in this file.
 
+## [0.7.1] — unreleased (deploy safety for the first production upgrade)
+
+Fixes found while preparing the first production upgrade from v0.6.0 (`6f9dd96`) to v0.7.x. The procedure is `docs/runbooks/upgrade-0.6-to-0.7.md`.
+
+### Fixed
+- **A deploy could recreate Postgres on a different image (data safety).** `scripts/deploy-vps.sh` ran `run --rm migrate` without `--no-deps`; a `--dry-run` against production showed the musl-created Postgres volume about to be recreated on the glibc `pgvector/pgvector` image, with no collation refresh. Migrate now runs with `--no-deps` after a postgres health check, and `up -d --no-deps app worker` is the only `up` a deploy or rollback ever runs. A deploy never creates, recreates or pulls postgres, redis or minio.
+- **Infra image drift is refused.** After the pull, `scripts/infra-drift.sh` compares, for each running postgres/redis/minio container, the image ID that the release's configured reference resolves to with the container's image ID (bytes, not reference strings). On a difference the deploy stops and resets the checkout, unless `--allow-infra-change` is passed. The flag only acknowledges the drift; infra is still not recreated.
+- **ASR silently lost the Gemini fallback.** v0.7.0 mapped the legacy `MEETSUM_TRANSCRIPTION_PROVIDER=auto` to the default chain without Gemini. While `MEETSUM_ASR_CHAIN` is unset, `auto` again means local Whisper, then Gemini when a Gemini key or Vertex is configured (the v0.6.0 meaning).
+- **`backup-full.sh` skipped MinIO when the host had no `mc`** (production has none). Both full backup and restore now run `mc` inside a throwaway container of the minio service (`docker compose run --rm --no-deps --pull never`) and exit non-zero when the MinIO part fails.
+- A failed image build during a deploy moves the checkout back to the previous commit.
+
+### Added
+- **Maintenance mode** for non-backward-compatible releases: `--maintenance`, or automatic when a migration marked `-- meetsum:breaking` is not yet in `schema_migrations` (`scripts/breaking-migrations.sh`). The sequence is stop app + worker, write-freeze backup, migrate, switch, readiness. Migration 019 (workspace scoping) is marked. A migration that fails before the breaking one restarts the stopped release; after a breaking migration there is no automatic rollback.
+- **Explicit infra overrides:** `docker-compose.pgvector.yml` and `docker-compose.minio-source.yml`, plus a host-local, git-ignored `docker-compose.local.yml` that the deploy, rollback and backup scripts add with `-f` whenever it exists.
+- **ASR boot warnings** (app and worker): a deprecation warning for `MEETSUM_TRANSCRIPTION_PROVIDER`, and a warning when the Hebrew chain has only one configured provider.
+- `docs/runbooks/upgrade-0.6-to-0.7.md`: save the old images, pin the running infra, write freeze, verification, the 0-users bootstrap, and rollback to v0.6.0.
+- The "Lemonade + Gemini fallback" recipe (`MEETSUM_ASR_CHAIN=local-whisper-chunked` + `MEETSUM_ASR_ALLOW_GEMINI=true`) in `.env.example`, `docs/env-matrix.md` and `docs/runbooks/free-tier-asr.md`, with the `GEMINI_TIER` privacy note.
+
+### Changed
+- `docker-compose.prod.yml` pins the infra images production runs: `postgres:17.9-alpine` and `redis:7.4.8-alpine` by digest (resolved from the Docker Hub registry API on 2026-10-14), and `minio/minio:RELEASE.2025-09-07T16-13-09Z` **by tag only**. `minio/minio` no longer resolves on Docker Hub, so its digest cannot be verified and the reference works only where the image is cached; fresh hosts use `docker-compose.minio-source.yml`. The pgvector image and the source-built MinIO moved out of the production file into the overrides above.
+- `.env.example` no longer sets the deprecated `MEETSUM_TRANSCRIPTION_PROVIDER`.
+- `docs/runbooks/deploy.md`: new "Infra images" and "App port (Tailscale)" sections. The app has published `127.0.0.1:3005` only since v0.7, so direct Tailscale access to `:3005` ends with the upgrade.
+
 ## [0.7.0] — unreleased (Fireflies parity programme, M0–M10)
 
 `package.json` (and so `/api/health` and the log `version` field) moved to 0.7.0 at the M10 Integration step. Per-milestone detail is in `docs/parity/m0.md`–`m10.md` and in `docs/parity/STATUS.md`; the scored, evidence-backed feature comparison is in `docs/parity/AUDIT.md`.
