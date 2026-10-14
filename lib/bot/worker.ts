@@ -18,7 +18,7 @@ const log = getLogger({ component: "bot" })
  * main worker. Returns undefined when the bot feature is disabled.
  */
 
-export type BotWorkerHandle = { close(): Promise<void> }
+export type BotWorkerHandle = { close(): Promise<void>; isRunning(): boolean }
 
 export type BotJobHandlers = {
   "bot.dispatch": (payload: BotJobPayloads["bot.dispatch"]) => Promise<unknown>
@@ -132,6 +132,7 @@ export function startBotWorker(): BotWorkerHandle | undefined {
   log.info("[bot] meetsum-bot worker started")
 
   return {
+    isRunning: () => worker.isRunning(),
     async close() {
       await worker.close()
       await closeBotQueue()

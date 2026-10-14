@@ -16,10 +16,20 @@ import { assertRuntimeEnvironment } from "@/lib/ops/environment"
 import { warmSearchCapabilities } from "@/lib/search/capabilities"
 import { enqueueIndexSweeps, indexSweepEveryMs } from "@/lib/search/index-sweep"
 import { getLogger } from "@/lib/log"
+import { createLagMonitor, startWorkerHealthServer } from "@/lib/worker-health/server"
 
 const log = getLogger({ component: "worker" })
 
 assertRuntimeEnvironment()
+
+// M10 B2: optional Sentry/GlitchTip; without SENTRY_DSN the module (and
+// @sentry/node) is never imported.
+const sentry = process.env.SENTRY_DSN?.trim()
+  ? import("@/lib/observability/sentry").then(async (module) => {
+      await module.initSentry("worker")
+      return module
+    })
+  : undefined
 
 const worker = createMeetSumWorker()
 // M7: separate `meetsum-bot` queue worker; undefined when MEETSUM_BOT_ENABLED is off.
@@ -29,24 +39,41 @@ const integrationsWorker = startIntegrationWorker()
 const scheduledTimers: NodeJS.Timeout[] = []
 
 worker.on("completed", (job) => {
-  log.info(`MeetSum job completed: ${job.name} ${job.id}`)
+  log.info({ jobId: job.id, jobName: job.name, queue: "meetsum" }, "MeetSum job completed")
 })
 
 worker.on("failed", (job, error) => {
-  log.error({ err: error }, `MeetSum job failed: ${job?.name} ${job?.id}`)
+  log.error({ err: error, jobId: job?.id, jobName: job?.name, queue: "meetsum" }, "MeetSum job failed")
+  void sentry?.then((module) => module.captureError(error, { queue: "meetsum", jobName: job?.name ?? "unknown" }))
 })
 
-process.on("SIGTERM", async () => {
-  scheduledTimers.forEach((timer) => clearInterval(timer))
-  await Promise.all([worker.close(), botWorker?.close(), integrationsWorker?.close()])
-  process.exit(0)
+// M10 B3: /live and /ready on MEETSUM_WORKER_HEALTH_PORT (never published).
+const lagMonitor = createLagMonitor()
+const healthServer = startWorkerHealthServer({
+  workers: () => [worker, botWorker, integrationsWorker],
+  pingRedis: async () => (await worker.client).ping(),
+  eventLoopLagMs: () => lagMonitor.lagMs(),
 })
 
-process.on("SIGINT", async () => {
+let shuttingDown = false
+
+/** SIGTERM/SIGINT: stop schedules, drain the workers, close the health server. */
+async function shutdown(signal: string) {
+  if (shuttingDown) return
+  shuttingDown = true
+  log.info({ signal }, "MeetSum worker draining")
   scheduledTimers.forEach((timer) => clearInterval(timer))
+  lagMonitor.stop()
   await Promise.all([worker.close(), botWorker?.close(), integrationsWorker?.close()])
+  const server = await healthServer
+
+  await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()))
+  await sentry?.then((module) => module.flushSentry(2_000)).catch(() => undefined)
   process.exit(0)
-})
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"))
+process.on("SIGINT", () => void shutdown("SIGINT"))
 
 /**
  * Google polls run per workspace: each tick enqueues one job for every live

@@ -34,7 +34,7 @@ import { runInJobLogContext } from "@/lib/log/job-context"
 
 const log = getLogger({ component: "integrations" })
 
-export type IntegrationWorkerHandle = { close(): Promise<void> }
+export type IntegrationWorkerHandle = { close(): Promise<void>; isRunning(): boolean }
 
 type AnyJob = Pick<Job, "name" | "data" | "attemptsMade" | "opts">
 
@@ -219,6 +219,7 @@ export function startIntegrationWorker(): IntegrationWorkerHandle | undefined {
   log.info("[integrations] meetsum-integrations worker started")
 
   return {
+    isRunning: () => worker.isRunning(),
     async close() {
       await worker.close()
       await closeIntegrationQueue()
