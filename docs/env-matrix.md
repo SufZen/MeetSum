@@ -432,6 +432,7 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `MEETSUM_RATE_LIMIT_BACKEND` | app | optional |  | no | M10 | Rate-limit store: memory\|redis. Default: redis when REDIS_URL is set, else memory. On a Redis outage the cost/abuse presets (share verify, ask, LLM on-demand, auth, exports, search) fail closed; the rest fall back to memory. |
 | `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS` | app | optional |  | yes | M10 | Token-key rotation: comma-separated previous GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY values, tried for decryption only (encryption always uses the current key). Re-encrypt with: npx tsx scripts/reencrypt-tokens.ts (dry run unless --apply). |
 | `PG_DUMP_CMD` | scripts | CI |  | no | M10 | Dev/CI only: pg_dump command for npm run db:schema:generate\|check, e.g. "docker exec <postgres container> pg_dump" so the client matches server 17. |
+| `SCHEMA_CHECK_OUT` | scripts | optional |  | no | M10 | Dev/CI only: where db:schema:check writes the fresh dump on drift (CI uploads it as an artifact); default: a new temp directory. |
 | `MEETSUM_IMAGE_TAG` | compose/infra | optional | `local` | no | M10 | docker compose: the image tag app, worker and migrate share (one build per deploy). |
 
 ## docker compose infrastructure
