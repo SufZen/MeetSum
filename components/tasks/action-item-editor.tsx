@@ -39,7 +39,7 @@ export type ActionItemEditorProps = {
   /** ISO datetime; anchor for relative due phrases. */
   meetingStartedAt: string
   onChanged?: (items: ActionItem[]) => void
-  /** UI locale for the strings (`he` → Hebrew). A dictionary wins. */
+  /** Kept for callers; since M10 C the strings come from `dictionary` or the route's I18nProvider. */
   locale?: string
   /** Any object carrying the task strings (e.g. the app `Dictionary`). */
   dictionary?: TasksMessages
@@ -69,7 +69,6 @@ export function ActionItemEditor({
   members,
   meetingStartedAt,
   onChanged,
-  locale,
   dictionary,
   canEdit = true,
 }: ActionItemEditorProps) {
