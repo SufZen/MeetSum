@@ -535,8 +535,23 @@ test.describe.serial("M8 integrations with fake providers", () => {
     expect(Math.abs(Date.now() / 1000 - Number(t))).toBeLessThan(300)
     expect(createHmac("sha256", state.secret!).update(`${t}.${raw}`).digest("hex")).toBe(v1)
 
-    await page.getByRole("tab", { name: he.integrationsLogTabWebhooks }).click()
-    await expect(page.locator("[data-webhook-delivery-id]").first()).toBeVisible({ timeout: 30_000 })
+    // A test-fire is sent inline and never written to webhook_deliveries
+    // (lib/webhooks/management.ts sendWebhookTest), so on a fresh database the
+    // log is empty here; it only passed locally on leftover rows. A real event
+    // (the completion events of the Hebrew meeting) gives the new
+    // subscription its delivery row.
+    completeMeeting(env.E2E_M8_HEBREW_MEETING_ID)
+    await expect
+      .poll(
+        async () => {
+          await openIntegrations(page, "he")
+          await page.getByRole("tab", { name: he.integrationsLogTabWebhooks }).click()
+
+          return page.locator("[data-webhook-delivery-id]").count()
+        },
+        { timeout: 60_000, intervals: [1_000, 3_000] }
+      )
+      .toBeGreaterThan(0)
   })
 
   test("10. a private meeting is skipped until its owner opts in", async ({ page, context, baseURL }) => {
