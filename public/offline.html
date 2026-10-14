@@ -33,7 +33,10 @@
   (function () {
     var en = { lang: "en", dir: "ltr", title: "You’re offline", doc: "MeetSum · Offline",
       body: "Recordings already in progress are saved on this device and upload when the connection is back.", retry: "Try again" };
-    var language = (navigator.language || "he").toLowerCase();
+    // The UI language the user chose (the client-readable meetsum_locale
+    // cookie) wins over the browser's language, as on every other page.
+    var chosen = /(?:^|;\s*)meetsum_locale=(he|en)(?:;|$)/.exec(document.cookie || "");
+    var language = (chosen ? chosen[1] : navigator.language || "he").toLowerCase();
     if (language.indexOf("he") !== 0 && language.indexOf("iw") !== 0) {
       document.documentElement.lang = en.lang;
       document.documentElement.dir = en.dir;
