@@ -1,0 +1,16 @@
+name: meetsum
+
+# Explicit infra switch: Postgres 17 on the pgvector image (Debian, glibc),
+# for vector search (M6). NOT part of a normal deploy. Use it only while
+# following docs/runbooks/postgres-17-pgvector.md, which rebuilds or reindexes
+# the musl-created data before this image serves it:
+#
+#   docker compose --env-file .env.local -f docker-compose.prod.yml -f docker-compose.pgvector.yml up -d --no-deps postgres
+#
+# Afterwards make it permanent for scripts/deploy-vps.sh by putting the same
+# `postgres.image` line in the host's docker-compose.local.yml (the deploy
+# refuses when the running image differs from the configured one).
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21

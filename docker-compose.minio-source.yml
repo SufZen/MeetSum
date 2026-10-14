@@ -1,0 +1,19 @@
+name: meetsum
+
+# Explicit infra switch: MinIO built from the official source
+# (deploy/minio/Dockerfile: pinned release tags, commits and base digests;
+# R16). The way to get MinIO on a fresh host, where minio/minio can no longer
+# be pulled. On an existing host it replaces the cached minio/minio image;
+# follow docs/runbooks/deploy.md "Images" (backup first, same /data volume):
+#
+#   docker compose --env-file .env.local -f docker-compose.prod.yml -f docker-compose.minio-source.yml build minio
+#   docker compose --env-file .env.local -f docker-compose.prod.yml -f docker-compose.minio-source.yml up -d --no-deps minio
+#
+# Afterwards make it permanent for scripts/deploy-vps.sh by putting the same
+# `minio.image` line in the host's docker-compose.local.yml.
+
+services:
+  minio:
+    build:
+      context: ./deploy/minio
+    image: meetsum-minio:RELEASE.2025-10-15T17-29-55Z

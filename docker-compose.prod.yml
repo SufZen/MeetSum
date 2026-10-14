@@ -6,7 +6,16 @@ name: meetsum
 #   one `next build`. scripts/deploy-vps.sh sets MEETSUM_IMAGE_TAG to the git
 #   SHA and keeps meetsum:current / meetsum:previous for rollback.
 # - Every third-party image is pinned by tag AND digest (resolved 2026-10-14;
-#   tests/image-pins.test.ts, Dependabot proposes bumps).
+#   tests/image-pins.test.ts, Dependabot proposes bumps). The one exception is
+#   minio (see its comment).
+# - Infra (postgres, redis, minio) is pinned to what production runs since
+#   v0.6.0. Switching infra is always explicit, never a side effect of an app
+#   deploy: the runbooks add docker-compose.pgvector.yml or
+#   docker-compose.minio-source.yml, and scripts/deploy-vps.sh only ever runs
+#   `up -d --no-deps app worker` and refuses when a running infra container's
+#   image ID differs from the configured one (scripts/infra-drift.sh).
+# - A host-local, git-ignored docker-compose.local.yml is added with -f by the
+#   deploy and rollback scripts whenever it exists (docs/runbooks/deploy.md).
 # - Logs rotate (json-file, 10 MB x 5 per container).
 
 x-logging: &default-logging
@@ -101,7 +110,12 @@ services:
       start_period: 60s
 
   postgres:
-    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    # What production runs: Postgres 17.9 on Alpine (musl; the data volume was
+    # created by postgres:17-alpine). Moving to pgvector (Debian, glibc) needs a
+    # collation refresh or a dump/restore: add docker-compose.pgvector.yml and
+    # follow docs/runbooks/postgres-17-pgvector.md. Never switch it by editing
+    # this line during an app deploy.
+    image: postgres:17.9-alpine@sha256:c7526c0f6c3f30260a563d7bcf8ad778effac59a44f8ffa86678c35418338609
     hostname: meetsum-postgres
     restart: unless-stopped
     logging: *default-logging
@@ -122,7 +136,12 @@ services:
       retries: 10
 
   redis:
-    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    # Production runs Redis 7.4.8 (from redis:7-alpine, AOF on); same minor
+    # release here. A rebuilt tag can still have a different image ID than the
+    # running container: scripts/infra-drift.sh compares IDs, and
+    # docs/runbooks/upgrade-0.6-to-0.7.md shows how to pin the exact running
+    # image in docker-compose.local.yml instead.
+    image: redis:7.4.8-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
     restart: unless-stopped
     logging: *default-logging
     command: ["redis-server", "--appendonly", "yes"]
@@ -139,15 +158,17 @@ services:
       retries: 10
 
   minio:
-    # MinIO stopped publishing community images (R16). MeetSum builds its own
-    # from the official minio/minio and minio/mc source at the last release
-    # tags (deploy/minio/Dockerfile: pinned tags, commits and base digests).
-    # Same /data layout and mc healthcheck as before. Built on first
-    # `docker compose up` or with `docker compose build minio`; see
-    # docs/runbooks/deploy.md "Images" (a Garage/SeaweedFS move is a future option).
-    build:
-      context: ./deploy/minio
-    image: meetsum-minio:RELEASE.2025-10-15T17-29-55Z
+    # What production runs: the image `minio/minio:latest` resolved to when it
+    # was pulled, RELEASE.2025-09-07T16-13-09Z. Pinned by TAG ONLY: MinIO stopped
+    # publishing community images (R16) and minio/minio no longer resolves on
+    # Docker Hub, so its digest cannot be verified from the registry (checked
+    # 2026-10-14). This line only works on a host that already has the image
+    # cached (the production VPS; tag it once, see
+    # docs/runbooks/upgrade-0.6-to-0.7.md). A fresh host cannot pull it: use
+    # the source-built image there with
+    #   -f docker-compose.prod.yml -f docker-compose.minio-source.yml
+    # (deploy/minio/Dockerfile; docs/runbooks/deploy.md "Images").
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     restart: unless-stopped
     logging: *default-logging

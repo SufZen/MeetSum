@@ -1,13 +1,16 @@
 # Runbook: move Postgres 17 (alpine) to pgvector/pgvector (Debian)
 
-Production compose pins `pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adf…` (Debian bookworm, glibc). A volume first created by `postgres:17-alpine` (musl) can't simply be reused: text indexes are ordered by the C library's collation, and musl and glibc order strings differently. Hebrew search also needs a UTF-8 ctype for `pg_trgm` (M6). This runbook moves a database across safely. Spec: `docs/parity/m10.md` ("Runbooks").
+Production compose (`docker-compose.prod.yml`) pins what production runs: `postgres:17.9-alpine@sha256:c7526c0f…` (Alpine, musl). The pgvector image, `pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adf…` (Debian bookworm, glibc), lives only in the explicit override `docker-compose.pgvector.yml`, and this runbook is the only way it reaches production: `scripts/deploy-vps.sh` never recreates postgres and refuses to deploy while the running postgres image differs from the configured one (`scripts/infra-drift.sh`). A volume first created by `postgres:17-alpine` (musl) can't simply be reused: text indexes are ordered by the C library's collation, and musl and glibc order strings differently. Hebrew search also needs a UTF-8 ctype for `pg_trgm` (M6). This runbook moves a database across safely. Spec: `docs/parity/m10.md` ("Runbooks").
 
 Do it in a maintenance window. It needs `docker`, about twice the database size in free disk, and the MeetSum checkout at `/opt/meetsum`.
 
 ```bash
 cd /opt/meetsum
 COMPOSE="docker compose --env-file .env.local -f docker-compose.prod.yml"
+PGV="$COMPOSE -f docker-compose.pgvector.yml"     # only for the steps that switch the image
 ```
+
+Every `up` below names `postgres` with `--no-deps`, so nothing else is recreated.
 
 ## 1. Inventory
 
@@ -60,23 +63,24 @@ volumes:
     external: true
     name: meetsum_postgres-data-pg17deb
 YAML
-$COMPOSE -f /tmp/pg-new-volume.yml up -d postgres
-$COMPOSE -f /tmp/pg-new-volume.yml exec -T postgres sh -c 'until pg_isready -U "$POSTGRES_USER"; do sleep 1; done'
-$COMPOSE -f /tmp/pg-new-volume.yml exec -T postgres psql -U meetings -d postgres -f - < backups/postgres/globals-<UTC>.sql   # roles; "already exists" errors are fine
-$COMPOSE -f /tmp/pg-new-volume.yml exec -T postgres pg_restore -U meetings -d meetings --no-owner --no-privileges \
+$PGV pull postgres
+$PGV -f /tmp/pg-new-volume.yml up -d --no-deps postgres
+$PGV -f /tmp/pg-new-volume.yml exec -T postgres sh -c 'until pg_isready -U "$POSTGRES_USER"; do sleep 1; done'
+$PGV -f /tmp/pg-new-volume.yml exec -T postgres psql -U meetings -d postgres -f - < backups/postgres/globals-<UTC>.sql   # roles; "already exists" errors are fine
+$PGV -f /tmp/pg-new-volume.yml exec -T postgres pg_restore -U meetings -d meetings --no-owner --no-privileges \
   < backups/postgres/meetsum-postgres-<UTC>.dump
 ```
 
 `--locale=C.UTF-8` keeps byte-order sorting with a UTF-8 ctype (what M6 needs). `en_US.UTF-8` also works if you need locale-aware `ORDER BY` of text.
 
-To make the new volume permanent, change the `postgres-data` volume in a local compose override (or rename volumes: `docker volume` has no rename, so either keep the override or copy the data back into a recreated `meetsum_postgres-data`). Keep the old volume until step 6 passes.
+To make the new volume permanent, copy the `/tmp/pg-new-volume.yml` content (volume and `POSTGRES_INITDB_ARGS`) into the host's `docker-compose.local.yml` (step 5). `docker volume` has no rename, so either keep that override or copy the data back into a recreated `meetsum_postgres-data`. Keep the old volume until step 6 passes.
 
 ## 4. Option B (in place): new image on the old volume
 
 Faster for large databases, but every text index must be rebuilt.
 
 ```bash
-$COMPOSE pull postgres && $COMPOSE up -d postgres      # the pinned pgvector image on the alpine-created volume
+$PGV pull postgres && $PGV up -d --no-deps postgres      # the pinned pgvector image on the alpine-created volume
 for db in meetings postgres template1; do
   $COMPOSE exec -T postgres psql -U meetings -d "$db" -c "REINDEX DATABASE $db;"
   $COMPOSE exec -T postgres psql -U meetings -d "$db" -c "ALTER DATABASE $db REFRESH COLLATION VERSION;"
@@ -98,10 +102,25 @@ SQL
 
 Any error means an index is still ordered the old way: `REINDEX INDEX <name>;` and run the check again. A remaining warning "database … has a collation version mismatch" means a database was missed in the loop.
 
-## 5. Search setup
+## 5. Make it permanent, then search setup
+
+Put the pgvector image (and, for Option A, the new volume) in the host-local override, so the deploy and rollback scripts use it from now on:
 
 ```bash
-$COMPOSE up -d app worker
+cat > docker-compose.local.yml <<'YAML'
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+YAML
+# Option A only: also append the volumes / POSTGRES_INITDB_ARGS from /tmp/pg-new-volume.yml.
+COMPOSE="$COMPOSE -f docker-compose.local.yml"
+./scripts/infra-drift.sh --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml   # expect "postgres: running image matches"
+```
+
+(If `docker-compose.local.yml` already exists, merge the `postgres` entry into it instead of overwriting it.)
+
+```bash
+$COMPOSE start app worker
 $COMPOSE exec -T app npm run search:vector-setup
 $COMPOSE exec -T app npm run search:backfill
 $COMPOSE logs app | grep '"msg":"\[search\] capabilities'     # expect mode=hybrid (needs an embedding key) or mode=lexical with trgm=hebrew
@@ -117,7 +136,7 @@ $COMPOSE logs app | grep '"msg":"\[search\] capabilities'     # expect mode=hybr
 
 ## 7. Rollback
 
-Stop the stack, put the old image (`postgres:17-alpine`) back on the **old volume** (Option A left it untouched; for Option B restore the volume snapshot from step 2 into a fresh volume first), start it, and start app and worker. Then `./scripts/rollback-vps.sh` if the code moved too.
+Stop app and worker, remove the `postgres` entry from `docker-compose.local.yml`, and put the old image (`postgres:17.9-alpine`, what `docker-compose.prod.yml` pins: `$COMPOSE up -d --no-deps postgres`) back on the **old volume** (Option A left it untouched; for Option B restore the volume snapshot from step 2 into a fresh volume first), start it, and start app and worker. Then `./scripts/rollback-vps.sh` if the code moved too.
 
 ## Rehearsal transcript
 
@@ -128,7 +147,7 @@ The spec asks for a rehearsal on a local volume created by `postgres:17-alpine`,
 ```bash
 docker volume create pg17-rehearsal
 docker run -d --name pg17-alpine -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_USER=meetings -e POSTGRES_DB=meetings \
-  -v pg17-rehearsal:/var/lib/postgresql/data postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  -v pg17-rehearsal:/var/lib/postgresql/data postgres:17.9-alpine@sha256:c7526c0f6c3f30260a563d7bcf8ad778effac59a44f8ffa86678c35418338609
 # apply MeetSum's migrations and a little Hebrew data:
 DATABASE_URL=postgres://meetings:rehearsal@127.0.0.1:<port>/meetings npm run db:migrate   # publish a port with -p for this
 # then follow Option B against that volume with the pgvector image, and Option A with a second volume,
