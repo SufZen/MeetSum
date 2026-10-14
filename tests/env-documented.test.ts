@@ -22,21 +22,8 @@ import {
 
 const root = path.resolve(__dirname, "..")
 
-/** Pre-M10 reads the orchestrator still has to add to `.env.example` (sorted). */
-const PENDING_ENV_EXAMPLE = [
-  "GOOGLE_CLIENT_ID",
-  "GOOGLE_CLIENT_SECRET",
-  "MEETSUM_ASR_BREAKER_STORE",
-  "MEETSUM_BUILD_ID",
-  "MEETSUM_CAPTURE_WORKSPACE_ID",
-  "MEETSUM_EVAL_CANDIDATES",
-  "MEETSUM_FAKE_PROVIDERS_PORT",
-  "MEETSUM_MEET_PARTICIPANT_LIMIT",
-  "MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS",
-  "MEETSUM_RETENTION_ENFORCE",
-  "MEETSUM_RETENTION_INTERVAL_HOURS",
-  "MEETSUM_SHARE_VERIFY_CONCURRENCY",
-]
+/** Reads still missing from `.env.example` (sorted). Empty since the M10 integration step. */
+const PENDING_ENV_EXAMPLE: string[] = []
 
 describe("env documentation", () => {
   it("parses .env.example sections, defaults, commented entries and notes", () => {

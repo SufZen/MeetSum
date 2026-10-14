@@ -83,6 +83,8 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | app | dev |  | yes |  |  |
 | `GOOGLE_OAUTH_REDIRECT_URI` | app | dev | `http://127.0.0.1:3000/api/auth/google/callback` | no |  |  |
 | `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY` | app | dev | `(example only)` | yes |  |  |
+| `GOOGLE_CLIENT_ID` | app | optional |  | no |  | Google Docs export OAuth client; falls back to GOOGLE_OAUTH_CLIENT_ID/SECRET when unset. |
+| `GOOGLE_CLIENT_SECRET` | app | optional |  | yes |  |  |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | app | optional |  | no |  | Optional domain-wide delegation fallback (when service-account keys are allowed). GOOGLE_WORKSPACE_SERVICE_ACCOUNT is a legacy alias for GOOGLE_SERVICE_ACCOUNT_EMAIL. |
 | `GOOGLE_WORKSPACE_SERVICE_ACCOUNT` | app, scripts | optional |  | no |  |  |
 | `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | app | dev |  | yes |  |  |
@@ -132,6 +134,7 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `GOOGLE_GEMINI_AUDIO_PRICE_PER_MTOK` | app | optional |  | no | M3 |  |
 | `MEETSUM_ASR_BREAKER_THRESHOLD` | app | dev | `3` | no | M3 | Circuit breaker: consecutive retryable failures before a provider is skipped, and for how long (auth/config errors open it for 1 h). |
 | `MEETSUM_ASR_BREAKER_COOLDOWN_MS` | app | dev | `600000` | no | M3 |  |
+| `MEETSUM_ASR_BREAKER_STORE` | app | optional |  | no | M3 | Breaker state store: shared in Redis when REDIS_URL is set; "memory" keeps it per process. |
 | `MEETSUM_ASR_HOTWORDS_MAX_CHARS` | app | dev | `600` | no | M3 | Glossary hotwords sent to the ASR model (Latin terms first). |
 | `MEETSUM_ASR_USE_INITIAL_PROMPT` | app | dev | `false` | no | M3 |  |
 | `RUNPOD_API_KEY` | app | dev |  | yes | M3 | RunPod serverless (ivrit-ai worker by default; `meetsum` = our asr-worker image). |
@@ -269,6 +272,9 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `MEETSUM_WORKER_STALLED_INTERVAL_MS` | worker | dev | `60000` | no |  |  |
 | `MEETSUM_WORKER_MAX_STALLED_COUNT` | worker | dev | `2` | no |  |  |
 | `MEETSUM_JOB_ATTEMPTS` | worker | dev | `3` | no |  | BullMQ attempts per pipeline job (exponential backoff from 3s). Permanent failures (missing meeting/recording, no ASR provider) are never retried. |
+| `MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS` | app, worker | optional | `5000` | no |  | Timeout for one BullMQ enqueue from the app or worker (default 5000 ms). |
+| `MEETSUM_RETENTION_ENFORCE` | worker | optional | `false` | no |  | Opt-in daily audioRetentionDays enforcement (media.retention) and its interval. |
+| `MEETSUM_RETENTION_INTERVAL_HOURS` | worker | optional | `24` | no |  |  |
 
 ## Player & transcript (M4)
 
@@ -349,6 +355,8 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `TEAMS_SUBSCRIPTION_EXPIRATION_MINUTES` | app | dev | `4200` | no |  |  |
 | `TEAMS_SUBSCRIPTION_RENEW_BEFORE_MINUTES` | app | dev | `720` | no |  |  |
 | `MEETSUM_TEAMS_SUBSCRIPTION_RENEW_MINUTES` | worker | dev | `360` | no |  | How often the worker checks/renews Teams subscriptions (default 360). |
+| `MEETSUM_CAPTURE_WORKSPACE_ID` | app | optional |  | no |  | Workspace that owns platform-captured recordings (Zoom/Teams webhooks); default: the default workspace. |
+| `MEETSUM_MEET_PARTICIPANT_LIMIT` | app | optional | `500` | no |  | Max Google Meet participants read per conference record (default 500). |
 
 ## Automation and business systems
 
@@ -393,6 +401,7 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `MEETSUM_EMAIL_RECAP_MAX_RECIPIENTS` | app | dev | `50` | no | M8 | Email recap (uses the M2 sender: MEETSUM_EMAIL_* / SMTP_*). Off unless a workspace admin creates the recap rule; members only by default. |
 | `MEETSUM_EMAIL_RECAP_MAX_PER_HOUR` | app | dev | `200` | no | M8 | Recap emails per workspace per rolling hour. |
 | `MEETSUM_INTEGRATIONS_FAKE_BASE_URL` | app | optional |  | no | M8 | Dev/e2e only: loopback fake provider server (npm run integrations:fake), e.g. http://127.0.0.1:4010. Refused in production (the boot check throws). |
+| `MEETSUM_FAKE_PROVIDERS_PORT` | e2e | e2e | `4010` | no | M8 | Port of the fake provider server (npm run integrations:fake; default 4010). |
 | `E2E_EMAIL_CAPTURE_FILE` | app | e2e |  | no | M8 | Dev/e2e only: the log email sender appends JSON lines here (no-op in production). |
 
 ## i18n, PWA, notifications, onboarding (M9)
@@ -401,8 +410,10 @@ or committed. Notes are the comment above the variable in `.env.example`.
 |---|---|---|---|---|---|---|
 | `MEETSUM_DEFAULT_LOCALE` | app | dev | `he` | no | M9 | UI locale for requests without a URL prefix, cookie, user preference or a matching Accept-Language: he or en (pt/es/it were removed in M9). |
 | `MEETSUM_PDF_MAX_SEGMENTS` | app | dev | `5000` | no | M9 | (MEETSUM_DEFAULT_TIMEZONE above is the last fallback zone.) Hebrew PDF export: transcript segments rendered before a "shortened" note. |
+| `MEETSUM_SHARE_VERIFY_CONCURRENCY` | app | optional | `4` | no | M9 | Concurrent share-password verifications per process (scrypt, CPU bound; default 4). |
 | `MEETSUM_PDF_FONT_DIR` | app | optional |  | no | M9 | Directory with the IBM Plex TTF files for the PDF (default: the vendored fonts). |
 | `NEXT_PUBLIC_MEETSUM_PWA` | compose/infra | dev | `true` | no | M9 | Service worker registration (production builds only); "false" disables it. |
+| `MEETSUM_BUILD_ID` | app | optional |  | no | M9 | Service-worker cache version; default: the Next build id (.next/BUILD_ID), else "dev". |
 | `NEXT_PUBLIC_MEETSUM_OFFLINE_QUEUE_MAX_MB` | app | dev | `2048` | no | M9 | Offline recorder: refuse to start when less than this many MB of storage remain. |
 | `MEETSUM_NOTIFICATIONS_RETENTION_DAYS` | app | dev | `90` | no | M9 | Read notifications older than this are deleted by the media-retention run. |
 | `MEETSUM_ONBOARDING_ENABLED` | app | dev | `true` | no | M9 | Onboarding wizard redirect and inbox checklist; "false" turns both off. |
@@ -419,8 +430,8 @@ or committed. Notes are the comment above the variable in `.env.example`.
 | `MEETSUM_WORKER_HEALTH_PORT` | worker | dev | `3101` | no | M10 | Worker health server (/live, /ready). Never published in compose. |
 | `MEETSUM_WORKER_HEALTH_HOST` | worker | optional | `0.0.0.0` | no | M10 |  |
 | `MEETSUM_RATE_LIMIT_BACKEND` | app | optional |  | no | M10 | Rate-limit store: memory\|redis. Default: redis when REDIS_URL is set, else memory. On a Redis outage the cost/abuse presets (share verify, ask, LLM on-demand, auth, exports, search) fail closed; the rest fall back to memory. |
-| `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS` | compose/infra | optional |  | yes | M10 | Token-key rotation: comma-separated previous GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY values, tried for decryption only (encryption always uses the current key). Re-encrypt with: npx tsx scripts/reencrypt-tokens.ts (dry run unless --apply). |
-| `PG_DUMP_CMD` | compose/infra | CI |  | no | M10 | Dev/CI only: pg_dump command for npm run db:schema:generate\|check, e.g. "docker exec <postgres container> pg_dump" so the client matches server 17. |
+| `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS` | app | optional |  | yes | M10 | Token-key rotation: comma-separated previous GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY values, tried for decryption only (encryption always uses the current key). Re-encrypt with: npx tsx scripts/reencrypt-tokens.ts (dry run unless --apply). |
+| `PG_DUMP_CMD` | scripts | CI |  | no | M10 | Dev/CI only: pg_dump command for npm run db:schema:generate\|check, e.g. "docker exec <postgres container> pg_dump" so the client matches server 17. |
 | `MEETSUM_IMAGE_TAG` | compose/infra | optional | `local` | no | M10 | docker compose: the image tag app, worker and migrate share (one build per deploy). |
 
 ## docker compose infrastructure
@@ -446,21 +457,5 @@ or committed. Notes are the comment above the variable in `.env.example`.
 |---|---|---|---|---|---|---|
 | `MEETSUM_ASR_EVAL_MANIFEST` | app | optional |  | no |  | npm run asr:evaluate — manifest path (default .secrets/asr-eval/manifest.json) and comma-separated providers (local-whisper,gemini; default: all configured). |
 | `MEETSUM_ASR_EVAL_PROVIDERS` | app | optional |  | no |  |  |
+| `MEETSUM_EVAL_CANDIDATES` | app | optional |  | no |  | npm run llm:evaluate — comma-separated candidate models (default: Gemini, plus Claude with ANTHROPIC_API_KEY). |
 | `GCLOUD_BIN` | scripts | optional |  | no |  | scripts/test-google-delegation.mjs — path to the gcloud binary. |
-
-## Read by code, not in .env.example
-
-| Variable | Used by | Required in | Default | Secret | Milestone | Notes |
-|---|---|---|---|---|---|---|
-| `MEETSUM_ASR_BREAKER_STORE` | app | optional |  | no |  |  |
-| `MEETSUM_EVAL_CANDIDATES` | app | optional |  | no |  |  |
-| `MEETSUM_CAPTURE_WORKSPACE_ID` | app | optional |  | no |  |  |
-| `MEETSUM_MEET_PARTICIPANT_LIMIT` | app | optional |  | no |  |  |
-| `MEETSUM_QUEUE_ENQUEUE_TIMEOUT_MS` | app, worker | optional |  | no |  |  |
-| `GOOGLE_CLIENT_ID` | app | optional |  | no |  |  |
-| `GOOGLE_CLIENT_SECRET` | app | optional |  | yes |  |  |
-| `MEETSUM_RETENTION_ENFORCE` | worker | optional |  | no |  |  |
-| `MEETSUM_RETENTION_INTERVAL_HOURS` | worker | optional |  | no |  |  |
-| `MEETSUM_BUILD_ID` | app | optional |  | no |  |  |
-| `MEETSUM_SHARE_VERIFY_CONCURRENCY` | app | optional |  | no |  |  |
-| `MEETSUM_FAKE_PROVIDERS_PORT` | e2e | e2e |  | no |  |  |
