@@ -49,6 +49,9 @@ const meeting = {
   retention: "audio",
   startedAt: "2026-10-12T10:00:00.000Z",
   participants: [],
+  // M10 R11: a meeting without a visibility is private (fail closed) and
+  // needs its owner's opt-in to leave; this suite tests workspace scoping.
+  visibility: "workspace",
 }
 
 beforeEach(() => {
