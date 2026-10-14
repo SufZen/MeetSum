@@ -68,7 +68,7 @@ services:
       start_period: 60s
 
   postgres:
-    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    image: pgvector/pgvector:0.8.7-pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     logging: *default-logging
     environment:
       POSTGRES_DB: meetings
