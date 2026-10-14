@@ -132,6 +132,8 @@ test.describe("17.10 onboarding", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: he.onboardingTitle })).toBeVisible()
     await expect(page.locator("[data-icon=directional]").first()).toBeAttached()
+    // M10: under `next dev` a click before hydration is lost; wait for the client.
+    await page.waitForLoadState("networkidle")
     await page.getByRole("button", { name: he.onboardingSkip, exact: true }).click()
     await expect(page.locator("#onboarding-step-heading")).toBeFocused()
 

@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test"
+import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test"
 
 import { loadSuiteEnv } from "../../scripts/e2e/env-file"
 import { assertLocal } from "../../scripts/e2e/local-guard"
@@ -65,6 +65,17 @@ export async function waitForCompleted(request: APIRequestContext, meetingId: st
       { timeout: timeoutMs, intervals: [1_000, 2_000, 3_000] }
     )
     .toBe("completed")
+}
+
+/**
+ * Clicks `target` until `opened` is visible: under `next dev` a click that
+ * lands before hydration is lost (seen in the local m6/m9 runs).
+ */
+export async function clickUntilVisible(target: Locator, opened: Locator, timeout = 30_000): Promise<void> {
+  await expect(async () => {
+    if (!(await opened.isVisible())) await target.click()
+    await expect(opened).toBeVisible({ timeout: 3_000 })
+  }).toPass({ timeout })
 }
 
 /** `aria-valuenow` of the player scrubber (whole seconds). */

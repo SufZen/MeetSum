@@ -92,6 +92,19 @@ async function playerSeconds(page: Page): Promise<number> {
   return Number(await page.getByRole("slider").first().getAttribute("aria-valuenow"))
 }
 
+/**
+ * Selects a meeting tab. Under `next dev` a click before hydration is lost,
+ * so it clicks until the tab reports itself selected (M10 A5).
+ */
+async function openTab(page: Page, name: string) {
+  const tab = page.getByRole("tab", { name, exact: true })
+
+  await expect(async () => {
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
+}
+
 async function ask(panel: Locator, question: string) {
   const box = panel.getByRole("textbox")
 
@@ -166,7 +179,7 @@ test.describe("M6 search", () => {
     await expect.poll(() => playerSeconds(page), { timeout: 10_000 }).toBeGreaterThanOrEqual(t - 2)
     expect(Math.abs((await playerSeconds(page)) - t)).toBeLessThanOrEqual(2)
 
-    await page.getByRole("tab", { name: "תמלול", exact: true }).click()
+    await openTab(page, "תמלול")
     await expect(page.locator('[data-segment-id][aria-current="true"]')).toBeVisible()
   })
 })
@@ -176,11 +189,11 @@ test.describe("M6 Ask", () => {
     test.skip(!env.E2E_BUDGET_MEETING_ID, "E2E_BUDGET_MEETING_ID not set")
     await signIn(context, baseURL, "w1Owner")
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
-    await page.getByRole("tab", { name: "שאלה", exact: true }).click()
+    await openTab(page, "שאלה")
 
     const panel = page.getByRole("region", { name: HE_ASK_REGION })
 
-    await expect(panel.locator('[data-ask-scope="meeting"]')).toBeVisible()
+    await expect(panel.locator('[data-ask-scope="meeting"]')).toBeVisible({ timeout: 30_000 }) // the Ask panel is lazy (slow on a cold next dev)
     await ask(panel, "מה הוחלט לגבי התקציב?")
 
     const turn = lastTurn(panel)
@@ -206,7 +219,7 @@ test.describe("M6 Ask", () => {
     test.skip(!env.E2E_BUDGET_MEETING_ID, "E2E_BUDGET_MEETING_ID not set")
     await signIn(context, baseURL, "w1Owner")
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
-    await page.getByRole("tab", { name: "שאלה", exact: true }).click()
+    await openTab(page, "שאלה")
 
     const panel = page.getByRole("region", { name: HE_ASK_REGION })
 
@@ -225,7 +238,7 @@ test.describe("M6 Ask", () => {
 
     const panel = page.getByRole("region", { name: "Ask MeetSum" })
 
-    await expect(panel.locator('[data-ask-scope="workspace"]')).toBeVisible()
+    await expect(panel.locator('[data-ask-scope="workspace"]')).toBeVisible({ timeout: 30_000 })
     await ask(panel, "What did we decide about the budget?")
 
     const turn = lastTurn(panel)
@@ -258,11 +271,15 @@ test.describe("M6 Ask", () => {
 
     // Meeting thread from steps 4–5: reload it and check the chips survive.
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
-    await page.getByRole("tab", { name: "שאלה", exact: true }).click()
+    await openTab(page, "שאלה")
     panel = page.getByRole("region", { name: HE_ASK_REGION })
     await panel.getByRole("button", { name: "שיחות", exact: true }).click()
 
-    await panel.getByRole("navigation", { name: "שיחות" }).locator("li > button").first().click()
+    // Steps 4 and 5 each open a thread; the newest is step 5's refusal (no
+    // chips), so pick step 4's budget thread by its title.
+    const threads = panel.getByRole("navigation", { name: "שיחות" }).locator("li > button")
+
+    await threads.filter({ hasText: "התקציב" }).first().click()
     await expect(panel.locator('li[data-ask-status="complete"] [data-citation]').first()).toBeVisible({ timeout: 10_000 })
 
     // Stop mid-stream on a third question.
@@ -315,11 +332,14 @@ test("9. /en/search is LTR with English strings", async ({ page, context, baseUR
 test("palette: Ctrl/Cmd+K opens search-as-you-type and jumps to a meeting", async ({ page, context, baseURL }) => {
   await signIn(context, baseURL, "w1Owner")
   await page.goto("/he/search")
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k")
 
   const dialog = page.getByRole("dialog")
 
-  await expect(dialog).toBeVisible()
+  // The shortcut listener attaches on hydration (late under `next dev`): retry the key.
+  await expect(async () => {
+    await page.keyboard.press("ControlOrMeta+k")
+    await expect(dialog).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
   await dialog.getByRole("combobox").fill(BUDGET_TERM)
   await expect(dialog.getByRole("option").first()).toBeVisible()
   await expect(dialog.getByRole("option", { name: /שאלה על/ })).toBeVisible()

@@ -78,7 +78,12 @@ function seededMeetings(): MeetingRecord[] {
   ]
   w2.transcript = [...w2.transcript!, { ...w2.transcript![0], id: "e2e_w2_s99", startMs: 99_000, endMs: 105_000, text: `גם כאן ${E2E_COLLIDING_TERM}` }]
 
-  return [...shared, privateMeeting, w2]
+  // The corpus dates are fixed (early 2026); the spec's "last 90 days" date
+  // filter needs recent meetings, so they are re-dated to the last few days.
+  return [...shared, privateMeeting, w2].map((meeting, index) => ({
+    ...meeting,
+    startedAt: new Date(Date.now() - (index + 1) * 86_400_000).toISOString(),
+  }))
 }
 
 async function main() {

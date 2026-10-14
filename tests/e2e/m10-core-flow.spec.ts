@@ -24,6 +24,7 @@ import { expect, test, type Page } from "@playwright/test"
 
 import {
   assertLocalBaseUrl,
+  clickUntilVisible,
   MEDIA_FILE,
   meetingStatus,
   ORIGIN,
@@ -66,11 +67,9 @@ test("1. upload he-en-30s.wav through the upload drawer; the meeting shows as pr
 
   const created = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/meetings" && response.request().method() === "POST")
 
-  await page.getByRole("button", { name: "העלאה", exact: true }).click()
-
   const drawer = page.getByRole("dialog", { name: "העלאת מדיה של פגישה" })
 
-  await expect(drawer).toBeVisible()
+  await clickUntilVisible(page.getByRole("button", { name: "העלאה", exact: true }), drawer)
   await scanA11y(page, "upload-drawer")
 
   const uploaded = page.waitForResponse((response) => /\/api\/meetings\/[^/]+\/upload$/.test(new URL(response.url()).pathname) && response.request().method() === "POST")
@@ -219,9 +218,10 @@ test("7. a share link opens in a fresh context: RTL, transcript, media range req
   test.skip(!meetingId, "needs step 1")
   await signIn(context, "owner")
   await openMeeting(page)
-  await page.getByRole("button", { name: "שיתוף", exact: true }).click()
-
   const dialog = page.getByRole("dialog", { name: "שיתוף הפגישה" })
+
+  await clickUntilVisible(page.getByRole("button", { name: "שיתוף", exact: true }), dialog)
+
   const link = dialog.getByLabel("קישור לשיתוף")
 
   await expect(link).toHaveValue(/\/share\//, { timeout: 30_000 })
@@ -268,8 +268,10 @@ test("8. visibility: the member sees it, then not once private; W2 never does", 
 
   await signIn(context, "owner")
   await openMeeting(page)
-  await page.getByRole("button", { name: /^נראות:/ }).click()
-  await page.getByRole("menuitemradio", { name: "פרטית" }).click()
+  const privateItem = page.getByRole("menuitemradio", { name: "פרטית" })
+
+  await clickUntilVisible(page.getByRole("button", { name: /^נראות:/ }), privateItem)
+  await privateItem.click()
 
   const confirm = page.getByRole("button", { name: "שינוי נראות" })
 

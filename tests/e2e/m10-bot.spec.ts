@@ -15,7 +15,7 @@ import { expect, test, type Page } from "@playwright/test"
 
 import { postSimulatedWebhook, simulationArgs, simulationBody } from "../../scripts/bot-simulate"
 
-import { assertLocalBaseUrl, BASE_URL, scanA11y, shot, signIn, waitForCompleted } from "./m10-env"
+import { assertLocalBaseUrl, BASE_URL, clickUntilVisible, scanA11y, shot, signIn, waitForCompleted } from "./m10-env"
 
 const FAKE_VEXA = `http://127.0.0.1:${process.env.E2E_FAKE_VEXA_PORT || "18056"}`
 const NATIVE_ID = "abc-defg-hij"
@@ -50,14 +50,12 @@ test("bot: join now, status walk, finalize into a transcript, replay and signatu
 
   // 1. Join now with a Meet link.
   await page.goto("/he")
-  await page.getByRole("button", { name: "שליחת בוט לפגישה" }).first().click()
 
   const menuItem = page.getByRole("menuitem", { name: "שליחת בוט לפגישה" })
-
-  if (await menuItem.isVisible({ timeout: 3_000 }).catch(() => false)) await menuItem.click()
-
   const dialog = page.getByRole("dialog", { name: "שליחת הבוט לפגישה" })
 
+  await clickUntilVisible(page.getByRole("button", { name: "שליחת בוט לפגישה" }).first(), menuItem.or(dialog))
+  if (await menuItem.isVisible()) await menuItem.click()
   await expect(dialog).toBeVisible()
   await dialog.getByLabel("קישור לפגישה או טקסט ההזמנה").fill(`https://meet.google.com/${NATIVE_ID}`)
   await scanA11y(page, "bot-join-dialog")
