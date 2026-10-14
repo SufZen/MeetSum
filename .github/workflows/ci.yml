@@ -21,9 +21,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Keep in sync with the Dockerfile base image (node:24-alpine).
           node-version: 24
@@ -38,10 +38,10 @@ jobs:
       - name: Lint
         run: npm run lint -- --max-warnings=0
 
-      # M9 ratchet: no design-system rule may rise above design-system/baseline.json
-      # (the Integration step switches this to --strict).
+      # M10: strict. Any violation or stale allowLines entry fails
+      # (design-system/baseline.json is gone; the count is 0).
       - name: Design-system guardrails
-        run: npm run ds:check
+        run: node design-system/check.mjs --strict
 
       - name: Run tests
         run: npm test
@@ -56,9 +56,10 @@ jobs:
           # default old-space cap.
           NODE_OPTIONS: --max-old-space-size=4096
 
-      # M9 ratchet: first-load JS per route against bundle-budget.json.
+      # M10: strict. Fails above a route budgetKb or above baselineKb + maxGrowthKb
+      # (bundle-budget.json; polyfills counted).
       - name: Bundle budget
-        run: npm run bundle:check
+        run: node scripts/bundle-size.mjs --budget bundle-budget.json --strict
 
   # M10 (docs/parity/m10.md, "Schema (D)"): migrations apply on a real
   # Postgres, re-run as a no-op, install on plain Postgres without pgvector,
@@ -104,9 +105,9 @@ jobs:
       DATABASE_URL: postgresql://meetings:meetings@127.0.0.1:5432/schema_check
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
