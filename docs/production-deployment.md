@@ -15,7 +15,7 @@ Stateful services are separate from replaceable app code:
 
 Database migrations run separately via `docker-compose.migrate.yml` before deploying new app code.
 
-CI/CD may rebuild and replace `app`, `worker`, and `migrate` without deleting Postgres, Redis, or MinIO data.
+`app`, `worker` and `migrate` share one image (`meetsum:${MEETSUM_IMAGE_TAG}`, built once from the `Dockerfile` by the `app` service). CI/CD may rebuild and replace them without deleting Postgres, Redis, or MinIO data. Deploys go through `scripts/deploy-vps.sh` only: see [runbooks/deploy.md](runbooks/deploy.md).
 
 ## Compose
 
@@ -169,7 +169,12 @@ The manifest should reference local audio files and reference transcripts under
 
 ## Health
 
-`GET /api/health` returns app version, uptime, and status for database, Redis, and storage configuration without exposing secrets.
+- `GET /api/health/live`: liveness, no dependency calls.
+- `GET /api/health/ready`: readiness (database, Redis, storage, migrations), 200 or 503 with `ok`/`fail`/`skip` per check. The compose `app` healthcheck and the deploy script use it.
+- The worker serves `/live` and `/ready` on `MEETSUM_WORKER_HEALTH_PORT` (default 3101) inside its container (never published); the compose `worker` healthcheck uses `/ready`.
+- `GET /api/health` keeps its old shape (version, uptime, database/Redis/storage status) with real Redis and storage checks.
+
+Details, log fields, request ids and Sentry: [runbooks/observability.md](runbooks/observability.md).
 
 Operational UI status comes from:
 
@@ -180,28 +185,29 @@ Operational UI status comes from:
 
 ## Deploy Flow
 
-For release `v0.6.0`, deployment must include database migration
-`014_desktop_capture_metadata.sql` before restarting the app and worker. This
-adds desktop capture metadata to `media_assets` and is required by the desktop
-recorder ingestion path.
+Since M10 there is one deploy path, `scripts/deploy-vps.sh` (the GitHub
+workflow only calls it). It takes a deploy lock, checks the env file and disk,
+takes a Postgres backup (and stops if that fails), pulls, builds **one** image,
+runs the migrations with the new image **before** switching app and worker,
+waits up to 120 s for `/api/health/ready` and the worker's `/ready`, and rolls
+code and image back automatically if they don't become ready. The database is
+never rolled back automatically.
 
 ```bash
 cd /opt/meetsum
-./scripts/backup-postgres.sh
-git pull --ff-only
-docker compose -f docker-compose.prod.yml --env-file .env.local build app worker
-# Run migrations separately (workaround for Tailscale DNS interference)
-docker exec meetsum-app-1 npm run db:migrate 2>/dev/null || true
-docker compose -f docker-compose.prod.yml --env-file .env.local up -d app worker
+./scripts/deploy-vps.sh --dry-run   # the plan
+./scripts/deploy-vps.sh             # deploy origin/main
+./scripts/rollback-vps.sh           # manual rollback to the previous image
 ```
 
-**Important:** Always use `-f docker-compose.prod.yml` explicitly. The default `docker-compose.yml` is for local development and includes a `migrate` service that fails in production due to Tailscale DNS interference.
+The full procedure, the expand/contract migration rule, the manual database
+restore and the image pins are in [runbooks/deploy.md](runbooks/deploy.md).
 
-The helper `scripts/deploy-vps.sh` performs the same flow.
+**Important:** Always use `-f docker-compose.prod.yml` explicitly. The default `docker-compose.yml` is for local development.
 
-After deploying v0.6.0, verify:
+After a deploy, verify:
 
-- `curl -fsS https://meetsum.realization.co.il/api/health`
+- `curl -fsS https://meetsum.realization.co.il/api/health/ready`
 - `/api/desktop-capture/ingest` appears in the built Next route output.
 - The worker is running and can process `media.ingest` and `meeting.summarize`.
 - A desktop recorder API key is available through `MEETSUM_API_KEYS`,

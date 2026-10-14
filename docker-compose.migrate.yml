@@ -20,6 +20,13 @@ services:
       - /opt/meetsum/secrets:/opt/meetsum/secrets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Same resolvers as app/worker: Docker's embedded DNS first (service
+    # names), then public IPv4 resolvers, because the host's upstream is
+    # IPv6/Tailscale-only (the old "Tailscale DNS interference" workaround).
+    dns:
+      - 127.0.0.11
+      - 185.12.64.2
+      - 1.1.1.1
     depends_on:
       postgres:
         condition: service_healthy
