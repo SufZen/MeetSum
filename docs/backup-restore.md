@@ -15,7 +15,7 @@ Creates a timestamped directory under `./backups/` containing:
 - `minio/` — complete mirror of all MinIO buckets
 - `manifest.json` — backup metadata with checksums
 
-The MinIO server image is built from the official source (`deploy/minio/Dockerfile`, see [runbooks/deploy.md](runbooks/deploy.md#images)) and keeps the same `/data` layout as the previous images, so these backups restore into it unchanged. The mirror needs an `mc` on the host. If object storage later moves to Garage or SeaweedFS, restore the `minio/` mirror into the new server's bucket with `mc mirror` the same way.
+The mirror is object-level (`mc mirror`), so it restores into any MinIO image: production's cached `minio/minio` release or the source-built one (`docker-compose.minio-source.yml`, see [runbooks/deploy.md](runbooks/deploy.md#images)). Since v0.7.1 neither script needs an `mc` on the host: both run `mc` in a throwaway container of the `minio` service (`docker compose run --rm --no-deps --pull never`, the backup directory bind-mounted at `/backup`), so the minio image must be on the host and the service running. A MinIO failure exits non-zero (the backup writes no manifest); MinIO is never skipped silently. If object storage later moves to Garage or SeaweedFS, restore the `minio/` mirror into the new server's bucket with `mc mirror` the same way.
 
 Override the backup location:
 
