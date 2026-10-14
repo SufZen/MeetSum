@@ -238,7 +238,10 @@ export function MeetingInboxPanel({
       </div>
 
       <div className="ms-scrollbar ms-no-x min-h-0 overflow-y-auto bg-surface-2 p-2.5 lg:max-h-none">
-        <div className={loading ? "grid gap-2 opacity-60" : "grid gap-2"}>
+        {/* A refetch keeps the rows at full strength: dimming them dropped the
+            secondary text below 4.5:1 (axe color-contrast). aria-busy carries
+            the loading state; the pager buttons are disabled meanwhile. */}
+        <div className="grid gap-2" aria-busy={loading || undefined}>
           {!loading && meetings.length === 0 && (
             <>
               <OnboardingChecklistCard locale={locale} />
