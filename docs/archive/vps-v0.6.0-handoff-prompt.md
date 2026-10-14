@@ -1,5 +1,7 @@
 # VPS v0.6.0 Deployment Handoff Prompt
 
+> **Archived (M10, 2026-10-14).** Historical document, kept for context only; it no longer describes the current product. Current docs: [docs/README.md](../README.md).
+
 Use this prompt in the next session to update the active MeetSum VPS deployment at `https://meetsum.realization.co.il/`.
 
 ```text

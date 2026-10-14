@@ -1,5 +1,7 @@
 # Antigravity Handoff
 
+> **Archived (M10, 2026-10-14).** Historical document, kept for context only; it no longer describes the current product. Current docs: [docs/README.md](../README.md).
+
 Date: May 18, 2026.
 
 ## v0.6.0 Addendum — July 6, 2026
