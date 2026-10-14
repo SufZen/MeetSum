@@ -1,20 +1,19 @@
 "use client"
 
-import type { ChangeEvent } from "react"
+import { lazy, Suspense, useEffect, useState, type ChangeEvent } from "react"
 import { LaptopIcon, MicIcon, UploadIcon } from "lucide-react"
 
 import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
-import { MeetingRecorder } from "@/components/meeting-recorder"
 import { Button } from "@/components/ui/button"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
+
+// M10 C bundle diet: the sheet (dialog primitives, floating focus manager,
+// the recorder UI) is its own chunk. It loads on hover/focus of a trigger, on
+// first open, and otherwise once the browser is idle, so the recorder sheet
+// still opens after the connection drops (the SW keeps the hashed chunk).
+const loadSheet = () => import("@/components/media-ingestion-sheet")
+const MediaIngestionSheet = lazy(() => loadSheet().then((mod) => ({ default: mod.MediaIngestionSheet })))
+const preloadSheet = () => void loadSheet().catch(() => undefined)
 
 export function MediaIngestionDrawer({
   dictionary,
@@ -39,6 +38,26 @@ export function MediaIngestionDrawer({
   /** Meeting the browser recording belongs to, for the dock's "Open meeting". */
   meetingId?: string | null
 }) {
+  const [innerOpen, setInnerOpen] = useState(false)
+  const isOpen = open ?? innerOpen
+  // Mounted on first open and kept (close animation, recorder state).
+  const [mounted, setMounted] = useState(false)
+
+  if (isOpen && !mounted) setMounted(true)
+
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((callback: () => void) => window.setTimeout(callback, 2000))
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout
+    const id = idle(preloadSheet)
+
+    return () => cancel(id)
+  }, [])
+
+  function setOpen(next: boolean) {
+    if (open === undefined) setInnerOpen(next)
+    onOpenChange?.(next)
+  }
+
   const triggerLabel =
     mode === "record"
       ? dictionary.recordOnComputer
@@ -47,84 +66,39 @@ export function MediaIngestionDrawer({
         : dictionary.upload
   const TriggerIcon =
     mode === "record" ? MicIcon : mode === "desktop" ? LaptopIcon : UploadIcon
-  const title =
-    mode === "record"
-      ? dictionary.recordOnComputer
-      : mode === "desktop"
-        ? dictionary.opsIngestDesktopTitle
-        : dictionary.opsIngestUploadTitle
-  const description =
-    mode === "record"
-      ? dictionary.opsIngestRecordDescription
-      : mode === "desktop"
-        ? dictionary.opsIngestDesktopDescription
-        : dictionary.opsIngestUploadDescription
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <>
       {/* One primary action per view (Cadence §7): upload stays primary,
           recording uses the live `record` treatment, desktop import is secondary. */}
-      <SheetTrigger
-        render={
-          <Button
-            className="h-9"
-            disabled={pending}
-            variant={mode === "record" ? "record" : mode === "desktop" ? "secondary" : "default"}
-          />
-        }
+      <Button
+        className="h-9"
+        disabled={pending}
+        variant={mode === "record" ? "record" : mode === "desktop" ? "secondary" : "default"}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onPointerEnter={preloadSheet}
+        onFocus={preloadSheet}
+        onClick={() => setOpen(true)}
       >
         <TriggerIcon data-icon="inline-start" />
         {triggerLabel}
-      </SheetTrigger>
-      <SheetContent className="w-full sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription>{description}</SheetDescription>
-        </SheetHeader>
-        <div className="grid gap-4 p-4">
-          {pending && (
-            <div className="rounded-md border border-ring bg-brand-soft p-3 text-sm text-foreground">
-              {dictionary.opsIngestPending}
-            </div>
-          )}
-          {(mode === "upload" || mode === "desktop") && (
-            <label className="grid min-h-36 cursor-pointer place-items-center rounded-md border border-dashed bg-muted/40 p-6 text-center text-sm text-muted-foreground">
-              <TriggerIcon aria-hidden="true" className="mb-2 size-6 text-primary" />
-              <span className="font-medium text-foreground">
-                {mode === "desktop"
-                  ? dictionary.opsIngestChooseDesktop
-                  : dictionary.opsIngestChooseMedia}
-              </span>
-              <span>
-                {mode === "desktop"
-                  ? dictionary.opsIngestDesktopHint
-                  : dictionary.opsIngestUploadHint}
-              </span>
-              <input
-                type="file"
-                className="hidden"
-                accept="audio/*,video/*"
-                onChange={onFileChange}
-              />
-            </label>
-          )}
-          {mode === "record" ? (
-            <MeetingRecorder
-              onRecordingReady={onRecordingReady}
-              recorder={recorder}
-              meetingId={meetingId}
-              labels={{
-                ready: dictionary.recorderReady,
-                record: dictionary.record,
-                stop: dictionary.stop,
-                recording: dictionary.recording,
-                blocked: dictionary.recorderBlocked,
-                unsupported: dictionary.recorderUnsupported,
-              }}
-            />
-          ) : null}
-        </div>
-      </SheetContent>
-    </Sheet>
+      </Button>
+      {mounted ? (
+        <Suspense fallback={null}>
+          <MediaIngestionSheet
+            dictionary={dictionary}
+            pending={pending}
+            mode={mode}
+            open={isOpen}
+            onOpenChange={setOpen}
+            onFileChange={onFileChange}
+            onRecordingReady={onRecordingReady}
+            recorder={recorder}
+            meetingId={meetingId}
+          />
+        </Suspense>
+      ) : null}
+    </>
   )
 }
