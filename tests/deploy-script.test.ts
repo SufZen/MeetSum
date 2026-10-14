@@ -103,12 +103,17 @@ describe("deploy script", () => {
     }
   })
 
-  it.runIf(hasSh)("preflight checks postgres health and infra image drift (by image ID) before anything else", () => {
+  it.runIf(hasSh)("checks postgres health in preflight, and infra image drift (by image ID) on the pulled configuration before the build", () => {
     const output = dryRun("scripts/deploy-vps.sh", [], { DEPLOY_SHA: SHA })
-    const [preflight, drift, backup] = order(output, ["STEP preflight", "scripts/infra-drift.sh", "STEP backup"])
+    const [preflight, health, pull, drift, build] = order(output, [
+      "STEP preflight",
+      "require postgres healthy",
+      "STEP pull",
+      "scripts/infra-drift.sh",
+      "STEP build",
+    ])
 
-    expect(preflight).toBeLessThan(drift)
-    expect(drift).toBeLessThan(backup)
+    expect([preflight, health, pull, drift, build]).toEqual([preflight, health, pull, drift, build].sort((a, b) => a - b))
     expect(output).toContain("refuse unless --allow-infra-change")
     expect(output).not.toContain("--allow-infra-change: infra drift is reported")
     expect(dryRun("scripts/deploy-vps.sh", ["--allow-infra-change"], { DEPLOY_SHA: SHA })).toContain(

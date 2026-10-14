@@ -18,8 +18,9 @@
 #                         (docs/runbooks/deploy.md "Infra images").
 #
 # Steps: deploy lock (flock) -> preflight (env file, compose config, disk,
-# postgres healthy, infra image drift) -> backup (hard fail) -> git pull ->
-# ONE image build (meetsum:<sha>) -> breaking-migration check -> [maintenance:
+# postgres healthy) -> backup (hard fail) -> git pull -> infra image drift
+# check against the NEW compose files (refusal resets the checkout) -> ONE
+# image build (meetsum:<sha>) -> breaking-migration check -> [maintenance:
 # stop app + worker -> backup again] -> migrations with the new image
 # (`run --rm --no-deps migrate`) BEFORE the switch -> `up -d --no-deps app
 # worker` -> readiness wait (120 s) -> on failure an automatic rollback of code
@@ -201,10 +202,6 @@ preflight() {
     printf '  + docker compose %s config -q\n' "$MIGRATE_ARGS"
     printf '  + df: at least %s KB free\n' "$MIN_FREE_KB"
     require_postgres_healthy
-    printf '  + scripts/infra-drift.sh --env-file %s %s (exit 3 = drift; refuse unless --allow-infra-change)\n' "$ENV_FILE" "$COMPOSE_ARGS"
-    if [ "$ALLOW_INFRA_CHANGE" -eq 1 ]; then
-      printf '  + --allow-infra-change: infra drift is reported but does not stop the deploy (infra is still never recreated)\n'
-    fi
     return 0
   fi
   if [ ! -f "$ENV_FILE" ]; then
@@ -219,18 +216,35 @@ preflight() {
     exit 1
   fi
   require_postgres_healthy || exit 1
+}
+
+# Runs after the pull, so it judges the compose files of the release being
+# deployed. Refuses (and moves the checkout back) when a running infra
+# container's image ID differs from what that configuration resolves to,
+# unless --allow-infra-change. Never recreates anything either way.
+check_infra_drift() {
+  step "infra image check (new configuration)"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  + scripts/infra-drift.sh --env-file %s %s (exit 3 = drift; refuse unless --allow-infra-change)\n' "$ENV_FILE" "$COMPOSE_ARGS"
+    if [ "$ALLOW_INFRA_CHANGE" -eq 1 ]; then
+      printf '  + --allow-infra-change: infra drift is reported but does not stop the deploy (infra is still never recreated)\n'
+    fi
+    return 0
+  fi
   drift_status=0
   # shellcheck disable=SC2086
   sh "$SCRIPT_DIR/infra-drift.sh" --env-file "$ENV_FILE" $COMPOSE_ARGS || drift_status=$?
-  if [ "$drift_status" -ne 0 ]; then
-    if [ "$drift_status" -eq 3 ] && [ "$ALLOW_INFRA_CHANGE" -eq 1 ]; then
-      log "infra image drift acknowledged (--allow-infra-change); continuing. The deploy does not recreate infra containers."
-    else
-      log "refusing to deploy: the configuration would change the image of a running infra container (above)."
-      log "Switch infra explicitly (docs/runbooks/deploy.md \"Infra images\"), pin the running image in $LOCAL_COMPOSE_FILE, or pass --allow-infra-change."
-      exit 1
-    fi
+  if [ "$drift_status" -eq 0 ]; then
+    return 0
   fi
+  if [ "$drift_status" -eq 3 ] && [ "$ALLOW_INFRA_CHANGE" -eq 1 ]; then
+    log "infra image drift acknowledged (--allow-infra-change); continuing. The deploy does not recreate infra containers."
+    return 0
+  fi
+  log "refusing to deploy: this release's configuration would change the image of a running infra container (above)."
+  log "Switch infra explicitly (docs/runbooks/deploy.md \"Infra images\"), pin the running image in $LOCAL_COMPOSE_FILE, or pass --allow-infra-change."
+  run git reset --keep "$PREV_SHA"
+  exit 1
 }
 
 # Sets MAINTENANCE=1 when a migration marked `-- meetsum:breaking` is not yet
@@ -382,9 +396,16 @@ fi
 NEW_TAG="$(short_sha "$NEW_SHA")"
 log "deploying $NEW_SHA over $PREV_SHA"
 
+check_infra_drift
+
 step "build $IMAGE_REPO:$NEW_TAG"
-# One `next build`: worker and migrate reuse the app image.
-compose_tag "$NEW_TAG" "$NEW_SHA" build app
+# One `next build`: worker and migrate reuse the app image. The old release
+# keeps serving; a failed build only moves the checkout back.
+if ! compose_tag "$NEW_TAG" "$NEW_SHA" build app; then
+  log "build failed; nothing was switched"
+  run git reset --keep "$PREV_SHA"
+  exit 1
+fi
 
 # Pending breaking migrations (file names), "unknown", or empty.
 BREAKING=""

@@ -118,21 +118,38 @@ describe.runIf(hasSh)("deploy-vps.sh flow (stubbed docker/git/flock)", { timeout
     expect(calls.some((call) => / stop app worker$/.test(call))).toBe(true)
   })
 
-  it("refuses to deploy on infra image drift, before the backup, unless --allow-infra-change", () => {
+  it("refuses on infra image drift of the pulled configuration (checkout reset, nothing built) unless --allow-infra-change", () => {
     const drift = host(versions(1, 32), [{ match: `image inspect --format {{.Id}} ${PG_REF}`, stdout: "sha256:pgvector-glibc" }])
     const refused = deploy(drift)
 
     expect(refused.status).toBe(1)
     expect(refused.output).toContain("postgres: DRIFT")
     expect(refused.output).toContain("refusing to deploy")
-    expect(refused.calls).not.toContain("BACKUP")
     expect(refused.calls.some((call) => / build app$/.test(call))).toBe(false)
+    expect(refused.calls.some((call) => / run --rm /.test(call))).toBe(false)
+    // Judged after the pull, then the checkout goes back.
+    const merge = refused.calls.findIndex((call) => call.startsWith("git merge"))
+    const check = refused.calls.findIndex((call) => call.includes("config --images postgres"))
+    const reset = refused.calls.findIndex((call) => call === `git reset --keep ${OLD_SHA}`)
+
+    expect(merge).toBeGreaterThanOrEqual(0)
+    expect(merge).toBeLessThan(check)
+    expect(check).toBeLessThan(reset)
 
     const allowed = deploy(drift, ["--allow-infra-change"])
 
     expect(allowed.status, allowed.output).toBe(0)
     expect(allowed.output).toContain("drift acknowledged")
     for (const call of allowed.calls) expect(call).not.toMatch(/\b(up|pull|create)\b.*\bpostgres\b/)
+  })
+
+  it("a failed build moves the checkout back and stops nothing", () => {
+    const { status, output, calls, at } = deploy(host(versions(1, 14), [{ match: " build app", exit: 1 }]))
+
+    expect(status).toBe(1)
+    expect(output).toContain("build failed; nothing was switched")
+    expect(at(new RegExp(`^git reset --keep ${OLD_SHA}$`))).toBeGreaterThan(at(/ build app$/))
+    expect(calls.some((call) => / (stop|up|run) /.test(call))).toBe(false)
   })
 
   it("refuses when postgres is not healthy (and never starts it)", () => {
