@@ -419,9 +419,13 @@ if [ "$MAINTENANCE" -eq 1 ]; then
   step "backup (write freeze; the restore point for this release)"
   if [ "$DRY_RUN" -eq 1 ]; then
     run ./scripts/backup-postgres.sh
-  else
-    FREEZE_BACKUP="$(./scripts/backup-postgres.sh)"
+  elif FREEZE_BACKUP="$(./scripts/backup-postgres.sh)"; then
     log "write-freeze backup: $FREEZE_BACKUP"
+  else
+    log "write-freeze backup failed; nothing was migrated. Restarting the previous app and worker"
+    run git reset --keep "$PREV_SHA"
+    compose start app worker
+    exit 1
   fi
 fi
 

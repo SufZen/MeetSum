@@ -39,7 +39,7 @@ function host(applied: string, extra: FakeDockerRule[] = []): FakeDockerRule[] {
   ]
 }
 
-function deploy(rules: FakeDockerRule[], args: string[] = []) {
+function deploy(rules: FakeDockerRule[], args: string[] = [], options: { failSecondBackup?: boolean } = {}) {
   const docker = createFakeDocker(rules)
   const bin = path.join(docker.dir, "bin")
   const appDir = mkdtempSync(path.join(tmpdir(), "meetsum-app-"))
@@ -54,7 +54,7 @@ function deploy(rules: FakeDockerRule[], args: string[] = []) {
   mkdirSync(path.join(appDir, "scripts"))
   writeFileSync(
     path.join(appDir, "scripts/backup-postgres.sh"),
-    `#!/bin/sh\nprintf 'BACKUP\\n' >> "$FAKE_DOCKER_LOG"\necho backups/postgres/meetsum-postgres-test.dump\n`,
+    `#!/bin/sh\n${options.failSecondBackup ? `if grep -q '^BACKUP$' "$FAKE_DOCKER_LOG"; then exit 1; fi\n` : ""}printf 'BACKUP\\n' >> "$FAKE_DOCKER_LOG"\necho backups/postgres/meetsum-postgres-test.dump\n`,
     { mode: 0o755 }
   )
   mkdirSync(path.join(appDir, "db/migrations"), { recursive: true })
@@ -141,6 +141,16 @@ describe.runIf(hasSh)("deploy-vps.sh flow (stubbed docker/git/flock)", { timeout
     expect(allowed.status, allowed.output).toBe(0)
     expect(allowed.output).toContain("drift acknowledged")
     for (const call of allowed.calls) expect(call).not.toMatch(/\b(up|pull|create)\b.*\bpostgres\b/)
+  })
+
+  it("a failed write-freeze backup restarts the previous release and migrates nothing", () => {
+    const { status, output, calls, at } = deploy(host(versions(1, 14)), [], { failSecondBackup: true })
+
+    expect(status).toBe(1)
+    expect(output).toContain("write-freeze backup failed")
+    expect(at(/ start app worker$/)).toBeGreaterThan(at(/ stop app worker$/))
+    expect(calls.some((call) => / run --rm /.test(call))).toBe(false)
+    expect(calls).toContain(`git reset --keep ${OLD_SHA}`)
   })
 
   it("a failed build moves the checkout back and stops nothing", () => {
