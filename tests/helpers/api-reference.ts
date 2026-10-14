@@ -79,13 +79,29 @@ export function describeGuard(guard: RouteGuard): { guard: string; apiKey: strin
 export const INDEX_BEGIN = "<!-- BEGIN GENERATED ROUTE INDEX (npm run api:reference) -->"
 export const INDEX_END = "<!-- END GENERATED ROUTE INDEX -->"
 
+/**
+ * Handlers that require `canManageMeeting` (the meeting owner, or admin and
+ * above; an API key needs `admin`) on top of their wrapper guard, on every
+ * call. Conditional checks (private meetings only, or one field) stay in the
+ * prose sections. tests/api-reference-complete.test.ts keeps this list in
+ * sync with the handlers.
+ */
+export const HANDLER_MANAGE_CHECKS: readonly string[] = [
+  "DELETE /api/meetings/:id",
+  "PATCH /api/meetings/:id/visibility",
+  "POST /api/meetings/:id/share",
+  "PATCH /api/meetings/:id/share",
+  "POST /api/clips/:id/share",
+]
+
 /** The generated route-index table (one row per method). */
 export function renderRouteIndex(entries: RouteEntry[] = routeInventory()): string {
   const rows = entries.flatMap((entry) =>
     entry.methods.map(({ method, guard }) => {
       const described = describeGuard(guard)
+      const manage = HANDLER_MANAGE_CHECKS.includes(`${method} ${entry.path}`) ? " + `canManageMeeting` in the handler" : ""
 
-      return `| \`${method}\` | \`${entry.path}\` | ${described.guard} | ${described.apiKey} |`
+      return `| \`${method}\` | \`${entry.path}\` | ${described.guard}${manage} | ${described.apiKey} |`
     })
   )
   const handlerCount = rows.length
@@ -93,7 +109,7 @@ export function renderRouteIndex(entries: RouteEntry[] = routeInventory()): stri
   return [
     INDEX_BEGIN,
     "",
-    `${entries.length} route files, ${handlerCount} handlers. Guard = the permission each handler checks (minimum workspace role); API key = the scope a Bearer key needs (\`read\` = viewer, \`write\` = member, \`admin\` = admin). Session-only routes refuse API keys.`,
+    `${entries.length} route files, ${handlerCount} handlers. Guard = the permission each handler checks (minimum workspace role); API key = the scope a Bearer key needs (\`read\` = viewer, \`write\` = member, \`admin\` = admin). Session-only routes refuse API keys. "+ \`canManageMeeting\` in the handler" means the handler also requires the meeting owner or an admin+ role (a key needs \`admin\`), else 403.`,
     "",
     "| Method | Path | Guard | API key |",
     "|---|---|---|---|",

@@ -789,7 +789,7 @@ PATCH `{ url?, enabled?, events?, rotateSecret?, payloadVersion? }`; with `rotat
 ### `GET /api/webhooks/deliveries`
 Guard: `webhooks:manage` (admin+) · API key: `admin`
 
-`{ deliveries }`. Query `subscriptionId`, `limit` (default 25). Statuses: `queued`, `active`, `retrying`, `sent`, `failed`, `cancelled`.
+`{ deliveries }`. Query `subscriptionId`, `limit` (default 25, max 100). Statuses: `queued`, `active`, `retrying`, `sent`, `failed`, `cancelled`. `admin` rate limit.
 
 ### `POST /api/webhooks/deliveries/:id/retry`
 Guard: `webhooks:manage` (admin+) · API key: `admin`
@@ -884,7 +884,7 @@ Operational metrics of the workspace for the admin dashboard (jobs, meetings, sy
 ### `GET /api/admin/webhooks/stats`
 Guard: `webhooks:manage` (admin+) · API key: `admin`
 
-Webhook health from the last 100 deliveries: subscription counts, 24 h totals and success rate, 7-day event breakdown, the 5 most recent failures.
+Webhook health from the last 100 deliveries: subscription counts, 24 h totals (`sent`, `failed`, and `pending` = still in flight: `queued`, `active` or `retrying`) and success rate, 7-day event breakdown, the 5 most recent failures.
 
 ### `GET /api/admin/search/status`
 Guard: `ops:read` (admin+) · API key: `admin`
@@ -1132,7 +1132,7 @@ v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.
 
 <!-- BEGIN GENERATED ROUTE INDEX (npm run api:reference) -->
 
-159 route files, 203 handlers. Guard = the permission each handler checks (minimum workspace role); API key = the scope a Bearer key needs (`read` = viewer, `write` = member, `admin` = admin). Session-only routes refuse API keys.
+159 route files, 203 handlers. Guard = the permission each handler checks (minimum workspace role); API key = the scope a Bearer key needs (`read` = viewer, `write` = member, `admin` = admin). Session-only routes refuse API keys. "+ `canManageMeeting` in the handler" means the handler also requires the meeting owner or an admin+ role (a key needs `admin`), else 403.
 
 | Method | Path | Guard | API key |
 |---|---|---|---|
@@ -1169,7 +1169,7 @@ v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.
 | `GET` | `/api/clips/:id` | `meeting:read` (viewer+) | `read` |
 | `PATCH` | `/api/clips/:id` | `meeting:write` (member+) | `write` |
 | `DELETE` | `/api/clips/:id` | `meeting:write` (member+) | `write` |
-| `POST` | `/api/clips/:id/share` | `meeting:read` (viewer+) | `read` |
+| `POST` | `/api/clips/:id/share` | `meeting:read` (viewer+) + `canManageMeeting` in the handler | `read` |
 | `PATCH` | `/api/comments/:id` | `comments:write` (viewer+) | `read` |
 | `DELETE` | `/api/comments/:id` | `comments:write` (viewer+) | `read` |
 | `GET` | `/api/contexts` | `workspace:read` (viewer+) | `read` |
@@ -1225,7 +1225,7 @@ v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.
 | `POST` | `/api/meetings` | `meeting:create` (member+) | `write` |
 | `GET` | `/api/meetings/:id` | `meeting:read` (viewer+) | `read` |
 | `PATCH` | `/api/meetings/:id` | `meeting:write` (member+) | `write` |
-| `DELETE` | `/api/meetings/:id` | `meeting:read` (viewer+) | `read` |
+| `DELETE` | `/api/meetings/:id` | `meeting:read` (viewer+) + `canManageMeeting` in the handler | `read` |
 | `GET` | `/api/meetings/:id/action-items` | `meeting:read` (viewer+) | `read` |
 | `POST` | `/api/meetings/:id/action-items` | `meeting:write` (member+) | `write` |
 | `POST` | `/api/meetings/:id/agents/suggest` | `meeting:write` (member+) | `write` |
@@ -1264,8 +1264,8 @@ v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.
 | `POST` | `/api/meetings/:id/prep` | `meeting:read` (viewer+) | `read` |
 | `POST` | `/api/meetings/:id/process` | `meeting:write` (member+) | `write` |
 | `POST` | `/api/meetings/:id/reprocess` | `meeting:write` (member+) | `write` |
-| `POST` | `/api/meetings/:id/share` | `meeting:read` (viewer+) | `read` |
-| `PATCH` | `/api/meetings/:id/share` | `meeting:write` (member+) | `write` |
+| `POST` | `/api/meetings/:id/share` | `meeting:read` (viewer+) + `canManageMeeting` in the handler | `read` |
+| `PATCH` | `/api/meetings/:id/share` | `meeting:write` (member+) + `canManageMeeting` in the handler | `write` |
 | `GET` | `/api/meetings/:id/speakers` | `meeting:read` (viewer+) | `read` |
 | `POST` | `/api/meetings/:id/speakers` | `meeting:write` (member+) | `write` |
 | `PATCH` | `/api/meetings/:id/speakers/:speakerId` | `meeting:write` (member+) | `write` |
@@ -1279,7 +1279,7 @@ v1 `data` is unchanged: `meeting.completed {meetingId, title, mode?}`, `summary.
 | `GET` | `/api/meetings/:id/transcript/segments/:segmentId/revisions` | `meeting:read` (viewer+) | `read` |
 | `POST` | `/api/meetings/:id/transcript/segments/:segmentId/undo` | `meeting:write` (member+) | `write` |
 | `POST` | `/api/meetings/:id/upload` | `meeting:create` (member+) | `write` |
-| `PATCH` | `/api/meetings/:id/visibility` | `meeting:read` (viewer+) | `read` |
+| `PATCH` | `/api/meetings/:id/visibility` | `meeting:read` (viewer+) + `canManageMeeting` in the handler | `read` |
 | `POST` | `/api/meetings/bot` | `meeting:create` (member+) | `write` |
 | `GET` | `/api/meetings/search` | `meeting:read` (viewer+) | `read` |
 | `GET` | `/api/meetings/timeline` | `meeting:read` (viewer+) | `read` |

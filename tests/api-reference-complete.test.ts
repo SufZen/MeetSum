@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import { routes } from "./helpers/api-routes"
-import { apiPath, documentedHeadings, renderRouteIndex, routeInventory, undocumentedHandlers, withRouteIndex } from "./helpers/api-reference"
+import { apiPath, documentedHeadings, HANDLER_MANAGE_CHECKS, renderRouteIndex, routeInventory, undocumentedHandlers, withRouteIndex } from "./helpers/api-reference"
 
 /**
  * M10 D3: docs/api-reference.md documents every app/api handler. Each one
@@ -38,6 +38,21 @@ describe("docs/api-reference.md", () => {
 
   it("guards are resolved for every handler", () => {
     expect(entries.flatMap((entry) => entry.methods.filter((method) => method.guard.kind === "unknown").map((method) => `${method.method} ${entry.path}`))).toEqual([])
+  })
+
+  it("annotates the handlers that always require canManageMeeting, and only real ones", () => {
+    for (const check of HANDLER_MANAGE_CHECKS) {
+      const [method, apiRoute] = check.split(" ")
+      const file = `app${apiRoute.replace(/:([A-Za-z]+)/g, "[$1]")}/route.ts`
+      const source = readFileSync(file, "utf8").replace(/\r\n/g, "\n")
+      const start = source.indexOf(`export const ${method} =`)
+      const handler = source.slice(start).split(/\nexport const /)[0]
+
+      expect(start, check).toBeGreaterThanOrEqual(0)
+      expect(handler, check).toMatch(/if \(!canManageMeeting\(ctx, /)
+      expect(doc, check).toContain(`| \`${method}\` | \`${apiRoute}\` |`)
+    }
+    expect(doc).toContain("+ `canManageMeeting` in the handler |")
   })
 
   it("maps dynamic segments to :params", () => {
