@@ -83,6 +83,13 @@ test.describe("production error pages", () => {
     const response = await page.goto("/he/this-page-does-not-exist")
 
     expect(response?.status()).toBe(404)
+    // Next 16.2 sends every notFound() response (dev and production alike) as
+    // its `<html id="__next_error__">` shell, without lang/dir; the client
+    // render from the RSC payload then mounts the [locale] layout, which sets
+    // them. So the check runs on the hydrated document (M10 integration;
+    // docs/parity/m10.md "Integration: 404 document").
+    await expect(page.locator("html")).toHaveAttribute("lang", "he")
+    await expect(page.locator("html")).not.toHaveAttribute("id", "__next_error__")
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl")
     expect(await page.locator("body").innerText()).not.toMatch(STACK_OR_MESSAGE)
   })

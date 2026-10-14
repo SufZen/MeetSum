@@ -56,7 +56,9 @@ const SURFACES: Surface[] = [
   { id: "admin", who: "owner", path: (l) => `/${l}?panel=admin` },
   { id: "share", who: null, path: () => `/share/${env.E2E_M9_SHARE_TOKEN ?? "missing"}`, mobile: true },
   { id: "share-password", who: null, path: () => `/share/${env.E2E_M9_PROTECTED_SHARE_TOKEN ?? "missing"}` },
-  { id: "404", who: "owner", path: (l) => `/${l}/this-page-does-not-exist` },
+  // A notFound() response is Next's `__next_error__` shell until the client
+  // render mounts the [locale] layout (lang/dir); axe runs after that.
+  { id: "404", who: "owner", path: (l) => `/${l}/this-page-does-not-exist`, ready: (page) => page.locator("html[lang][dir]").waitFor({ state: "attached" }) },
   { id: "error", who: "owner", path: (l) => `/${l}?__error=1` },
   { id: "offline", who: null, path: () => "/offline.html" },
 ]
