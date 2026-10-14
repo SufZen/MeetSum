@@ -170,11 +170,40 @@ async function meetingMenu(page: Page) {
   await page.getByRole("button", { name: he.meetingActions }).click()
 }
 
+/**
+ * Sends from the ⋯ menu and waits for *this* send's delivery to be sent. The
+ * "<provider>: sent" toast alone is not enough: a toast from the previous
+ * send can still be on screen, so the delivery id of this POST is polled.
+ */
 async function sendFromMeeting(page: Page, providerLabel: string) {
   await meetingMenu(page)
   await page.getByRole("menuitem", { name: he.exportSendTo || he.integrationsRuleDestination }).click()
+
+  const posted = page.waitForResponse(
+    (response) => /\/api\/meetings\/[^/]+\/integrations\/send$/.test(new URL(response.url()).pathname) && response.request().method() === "POST"
+  )
+
   await page.getByRole("menuitem", { name: new RegExp(providerLabel) }).click()
-  await expect(page.getByText(new RegExp(`${providerLabel}: ${he.integrationsStatusSent}`))).toBeVisible({ timeout: 30_000 })
+
+  const response = await posted
+
+  expect(response.ok(), `send ${providerLabel}`).toBe(true)
+  const { deliveryId } = (await response.json()) as { deliveryId: string }
+
+  await expect
+    .poll(
+      async () => {
+        const delivery = (await (await page.request.get(`/api/integrations/deliveries/${encodeURIComponent(deliveryId)}`)).json()) as {
+          delivery?: { status?: string }
+          status?: string
+        }
+
+        return delivery.delivery?.status ?? delivery.status
+      },
+      { timeout: 30_000 }
+    )
+    .toBe("sent")
+  await expect(page.getByText(new RegExp(`${providerLabel}: ${he.integrationsStatusSent}`)).last()).toBeVisible({ timeout: 30_000 })
 }
 
 async function deliveryRows(page: Page) {
