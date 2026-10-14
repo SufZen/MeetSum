@@ -12,7 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { z } from "zod"
 
 import { replayStructured, citedAliases, isStructuredReplayEnabled, presentedAliases } from "@/lib/ai/llm/structured-replay"
-import { LlmError, type LlmStructuredRequest } from "@/lib/ai/llm/types"
+import { isOffTopic, templateAnswer } from "@/lib/ai/llm/stream-replay"
+import { LlmError, type LlmStreamRequest, type LlmStructuredRequest } from "@/lib/ai/llm/types"
 import { BUILT_IN_TEMPLATES } from "@/lib/ai/templates/builtins"
 import { buildSummarySchema, titleTagsTypeSchema, validateSummaryOutput } from "@/lib/ai/templates/schema"
 import { formatTranscriptForPrompt } from "@/lib/intelligence/transcript-format"
@@ -115,6 +116,28 @@ describe("replay", () => {
       "s4",
     ])
     expect([...presentedAliases("[s1 00:00 A] x\n[s12 01:00 B] y")]).toEqual(["s1", "s12"])
+  })
+})
+
+describe("Ask stream template (M10): off-topic Hebrew questions are refused", () => {
+  const ask = (question: string): LlmStreamRequest => ({
+    task: "chat",
+    ctx: { workspaceId: "w1", promptVersion: "test" },
+    language: "he",
+    system: [{ text: "x" }],
+    messages: [
+      {
+        role: "user",
+        content: `<passages>\n<passage meeting="m" date="01.10.2026" kind="transcript">\n[s1 00:01 דנה] סיכמנו את התקציב של הרבעון\n[s2 00:05 רון] הצעדים הבאים: לשלוח הצעה\n</passage>\n</passages>\n\n<question>\n${question}\n</question>`,
+      },
+    ],
+  })
+
+  it("answers on-topic and non-Hebrew questions, refuses off-topic Hebrew ones", () => {
+    expect(isOffTopic(ask("מה הוחלט לגבי התקציב?"))).toBe(false)
+    expect(templateAnswer(ask("מי אחראי על הצעדים הבאים?"))).toContain("[s1]")
+    expect(isOffTopic(ask("What did we decide about the budget?"))).toBe(false)
+    expect(templateAnswer(ask("מה מזג האוויר על מאדים בשנה הבאה?"))).toBe("<<NO_ANSWER>>")
   })
 })
 
