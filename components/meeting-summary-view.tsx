@@ -8,6 +8,7 @@
  * real segments; edited items are the user's. Paragraph direction comes from
  * the meeting's primary language, never `auto`.
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import { useMemo, useState, type ReactNode } from "react"
 import {
   AlertTriangleIcon,
@@ -464,7 +465,7 @@ export function MeetingSummaryView({
                       : t.intelAiLabel
                 }
               >
-                <p lang={summaryLanguage ?? undefined} className="leading-7">{text(overview, summaryLanguage)}</p>
+                <p lang={bcp47Lang(summaryLanguage)} className="leading-7">{text(overview, summaryLanguage)}</p>
               </AiProvenance>
               {moments.length ? (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
@@ -581,7 +582,7 @@ export function MeetingSummaryView({
             <section key={section.key} className="mt-8">
               <SectionHeader title={section.title ? text(section.title, summaryLanguage) : section.key} />
               {section.text ? (
-                <p dir={dir} lang={summaryLanguage ?? undefined} className="mb-2 text-md leading-7 text-fg">
+                <p dir={dir} lang={bcp47Lang(summaryLanguage)} className="mb-2 text-md leading-7 text-fg">
                   {text(section.text, summaryLanguage)}
                 </p>
               ) : null}

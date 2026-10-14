@@ -8,6 +8,7 @@
  * and opens a peek with the speaker, time and quote, "Play from here" and
  * "Open in transcript".
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import { useState } from "react"
 import { PlayIcon, TextQuoteIcon } from "lucide-react"
 
@@ -79,7 +80,7 @@ export function PlayerCitation({
         {segment ? (
           <blockquote
             dir={quoteDir}
-            lang={segment.language}
+            lang={bcp47Lang(segment.language)}
             className="line-clamp-4 text-base text-fg"
           >
             {segment.text}

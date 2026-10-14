@@ -9,6 +9,7 @@
  *   the answer language's `dir`. Only chips that resolve are rendered.
  * - Refused, stopped and failed turns are neutral, never iris.
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import { Fragment, useMemo, useState, type ReactNode } from "react"
 import { CopyIcon, FlagIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -152,7 +153,7 @@ export function AskTurnView({
                 : formatMessage(t.askAnswerLabel, { count: shown.length })
             }
           >
-            <div lang={turn.language} className="grid gap-2">
+            <div lang={bcp47Lang(turn.language)} className="grid gap-2">
               {blocks.map((block, index) =>
                 block.type === "paragraph" ? (
                   <p key={index}>
