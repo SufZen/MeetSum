@@ -242,7 +242,11 @@ test.describe("M6 Ask", () => {
     const panel = page.getByRole("region", { name: "Ask MeetSum" })
 
     await expect(panel.locator('[data-ask-scope="workspace"]')).toBeVisible({ timeout: 30_000 })
-    await ask(panel, "What did we decide about the budget?")
+    // Grounded in the seed: m12 ("Sales pipeline review") is the only seeded
+    // meeting with English text. "budget" exists only in Hebrew (m01), and
+    // with no real embeddings (hash-test) nothing bridges the languages, so
+    // that question was refused by the pre-LLM gate (no passages).
+    await ask(panel, "What discount can we offer Initech?")
 
     const turn = lastTurn(panel)
 
