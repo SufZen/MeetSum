@@ -27,7 +27,7 @@ function notFound(headers: Record<string, string>): Response {
 }
 
 export const POST = withSession<{ id: string }>(async (request, session, { params }) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

@@ -13,7 +13,7 @@ import { oauthStateCookie } from "@/lib/integrations/core/oauth-state"
 export const GET = withAuthz<{ provider: string }>("integrations:connect", async (request, ctx, route) => {
   if (ctx.principal !== "user" || !ctx.user) return apiError("user_session_required", 403)
 
-  const limited = limitFor(request, ctx, "integrationsOAuth")
+  const limited = await limitFor(request, ctx, "integrationsOAuth")
 
   if (limited) return limited
 

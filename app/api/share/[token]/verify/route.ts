@@ -4,7 +4,7 @@ import { jsonError } from "@/lib/api/responses"
 import { ShareVerifyBusyError, verifySharePassword } from "@/lib/sharing/share-password"
 import { withPublicRoute } from "@/lib/auth/authz"
 import { getSessionSecret } from "@/lib/auth/session"
-import { extractRateLimitKey, rateLimitRequest } from "@/lib/rate-limit"
+import { extractRateLimitKey, RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 import { lookupPublicShare } from "@/lib/sharing/public-share"
 import {
   SHARE_ACCESS_COOKIE,
@@ -17,7 +17,7 @@ import { getShareVerifyThrottle } from "@/lib/meetings/store"
 import { notifyShareAttempts } from "@/lib/notifications/notify"
 
 /** Password attempts per IP per share token. */
-const SHARE_VERIFY_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 }
+const SHARE_VERIFY_RATE_LIMIT = RATE_LIMIT_PRESETS.shareVerify
 
 function cookieValue(request: Request, name: string): string | undefined {
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
@@ -76,7 +76,7 @@ export const POST = withPublicRoute<{ token: string }>(
   async (request, { params }) => {
     const { token } = await params
     const form = isFormSubmission(request)
-    const rateLimit = rateLimitRequest(
+    const rateLimit = await rateLimitRequest(
       request,
       SHARE_VERIFY_RATE_LIMIT,
       extractRateLimitKey(request, `share-verify:${token}`)

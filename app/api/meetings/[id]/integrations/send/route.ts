@@ -48,7 +48,7 @@ function defaultDestination(provider: string, config: Record<string, unknown>): 
 }
 
 export const POST = withAuthz<{ id: string }>("meeting:write", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsSend")
+  const limited = await limitFor(request, ctx, "integrationsSend")
 
   if (limited) return limited
 

@@ -12,6 +12,9 @@ import {
   notifyAssignment,
   validationMessage,
 } from "@/lib/tasks/api"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "tasks/bulk" })
 
 /**
  * POST /api/tasks/bulk — `{ ids (≤ 100), patch: { status | ownerUserId |
@@ -63,7 +66,7 @@ export const POST = withAuthz("meeting:write", async (request, ctx) => {
       // Only "not visible / does not exist" is a not-found; storage errors
       // surface as 500s.
       if (!isNotFoundError(error)) {
-        console.error("[tasks] bulk update failed", error instanceof Error ? error.name : "error")
+        log.error({ errorName: error instanceof Error ? error.name : "error" }, "[tasks] bulk update failed")
         return jsonError("Failed to update tasks", 500)
       }
       notFound.push(id)

@@ -17,8 +17,8 @@ function invalid() {
   return NextResponse.json({ error: "invalid_token" }, { status: 400 })
 }
 
-function limited(request: Request) {
-  return rateLimitRequest(request, RATE_LIMIT_PRESETS.publicAccess, `unsubscribe:${extractRateLimitKey(request)}`).blocked
+async function limited(request: Request) {
+  return (await rateLimitRequest(request, RATE_LIMIT_PRESETS.publicAccess, `unsubscribe:${extractRateLimitKey(request)}`)).blocked
 }
 
 export const GET = withPublicRoute("Signed email unsubscribe token", async (request) => {
@@ -28,7 +28,7 @@ export const GET = withPublicRoute("Signed email unsubscribe token", async (requ
 
   if (!payload || !token) return invalid()
 
-  const blocked = limited(request)
+  const blocked = await limited(request)
 
   if (blocked) return blocked
 
@@ -49,7 +49,7 @@ export const POST = withPublicRoute("Signed email unsubscribe token", async (req
 
   if (!payload) return invalid()
 
-  const blocked = limited(request)
+  const blocked = await limited(request)
 
   if (blocked) return blocked
 

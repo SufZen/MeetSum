@@ -23,8 +23,8 @@ export function limitFor(
   request: Request,
   ctx: Pick<AuthContext, "user" | "apiKey" | "workspace">,
   preset: "integrationsOAuth" | "integrationsWrite" | "integrationsSend"
-): Response | undefined {
-  return rateLimitRequest(request, RATE_LIMIT_PRESETS[preset], `${preset}:${principalKey(ctx)}`).blocked
+): Promise<Response | undefined> {
+  return rateLimitRequest(request, RATE_LIMIT_PRESETS[preset], `${preset}:${principalKey(ctx)}`).then((result) => result.blocked)
 }
 
 /** The acting user id (API keys act for their creator). */

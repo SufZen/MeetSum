@@ -36,6 +36,9 @@ import {
 import { meetingScopeSql } from "@/lib/meetings/visibility"
 import { getAppSettings, type AppSettings } from "@/lib/settings/app-settings"
 import { storeMeetingObject } from "@/lib/storage/object-storage"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "google" })
 
 export type { GoogleWorkspaceTarget } from "@/lib/google/identity"
 
@@ -1539,10 +1542,7 @@ export async function pollCalendar(target: GoogleWorkspaceTarget): Promise<SyncS
     } catch (persistError) {
       // Losing the sync cursor forces a full re-sync next run (events dedupe on
       // calendar_event_id, so no duplicate meetings — but log it loudly).
-      console.error(
-        "[pollCalendar] failed to persist sync cursor; next run will full-resync",
-        persistError
-      )
+      log.error({ err: persistError }, "[pollCalendar] failed to persist sync cursor; next run will full-resync")
       throw persistError
     }
     return stats

@@ -21,6 +21,9 @@ import { dataBlock } from "@/lib/ai/prompts/data-block"
 import type { Chapter } from "@/lib/intelligence"
 import { sha1Hex } from "@/lib/intelligence/normalize"
 import type { MeetingSpeaker, TranscriptSegment } from "@/lib/meetings/repository"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "analytics" })
 
 export const SENTIMENT_PROMPT_VERSION = "m5.sentiment.1"
 export const SENTIMENT_BATCH_SIZE = 40
@@ -237,7 +240,7 @@ export async function analyzeSentiment(
       failedTurns += batch.length
       if (error instanceof LlmError && error.kind === "config") notConfigured = error
       // Error kind only: provider/parse messages can carry model output.
-      console.warn(`[sentiment] batch failed for meeting ${input.meetingId}: ${describeLlmFailure(error)}`)
+      log.warn(`[sentiment] batch failed for meeting ${input.meetingId}: ${describeLlmFailure(error)}`)
     }
   }
 

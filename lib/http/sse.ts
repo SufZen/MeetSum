@@ -1,3 +1,7 @@
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "http" })
+
 /**
  * Server-sent events response (docs/parity/m6.md, C8; owner: Package C).
  *
@@ -74,7 +78,7 @@ export function sseResponse(
       } catch (error) {
         if (!finished && !opts.signal?.aborted) {
           // Name only: messages may contain prompt or transcript fragments.
-          console.error("SSE producer failed:", error instanceof Error ? error.name : "unknown error")
+          log.error({ errorName: error instanceof Error ? error.name : "unknown error" }, "SSE producer failed:")
           enqueue(sseFrame({ type: "error", code: "internal", message: "Internal error" } as { type: string }))
         }
       } finally {

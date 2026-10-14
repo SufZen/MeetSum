@@ -1,6 +1,23 @@
+# Local development stack. Third-party images are pinned by tag and digest
+# (resolved 2026-10-14; tests/image-pins.test.ts). app, worker and migrate share
+# one locally built image. The `migrate` service is the only migration path:
+# db/migrations is not mounted into docker-entrypoint-initdb.d, so a fresh
+# volume never runs raw migration files outside schema_migrations.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   app:
-    build: .
+    image: meetsum:${MEETSUM_IMAGE_TAG:-local}
+    build:
+      context: .
+      args:
+        MEETSUM_GIT_SHA: ${MEETSUM_GIT_SHA:-}
+    logging: *default-logging
     ports:
       - "${APP_PORT:-3000}:3000"
     env_file:
@@ -9,30 +26,50 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   migrate:
-    build: .
+    image: meetsum:${MEETSUM_IMAGE_TAG:-local}
     command: ["npm", "run", "db:migrate"]
+    logging: *default-logging
     env_file:
       - .env.local
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   worker:
-    build: .
+    image: meetsum:${MEETSUM_IMAGE_TAG:-local}
     command: ["npm", "run", "worker"]
+    logging: *default-logging
     env_file:
       - .env.local
     depends_on:
-      - postgres
-      - redis
-      - minio
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # Worker health server: container-internal only, never published.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${MEETSUM_WORKER_HEALTH_PORT:-3101}/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   postgres:
-    image: pgvector/pgvector:0.8.1-pg17
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    logging: *default-logging
     environment:
       POSTGRES_DB: meetings
       POSTGRES_USER: meetings
@@ -41,18 +78,31 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetings -d meetings"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    logging: *default-logging
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   minio:
-    image: minio/minio:latest
+    # Last upstream MinIO release rebuilt from MinIO's Dockerfile (the official
+    # community image is gone; see docker-compose.prod.yml and R16).
+    image: coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
     command: server /data --console-address ":9001"
+    logging: *default-logging
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-meetings}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-meetings-secret}
@@ -61,9 +111,15 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:2.43.4@sha256:c34ee9107a42b837e25cec0c8a927ab90a45b776aa2ccbf15e5b9cda466fad2c
+    logging: *default-logging
     ports:
       - "${N8N_PORT:-5678}:5678"
     environment:
@@ -74,9 +130,10 @@ services:
       - n8n-data:/home/node/.n8n
 
   faster-whisper:
-    image: fedirz/faster-whisper-server:latest-cpu
+    image: fedirz/faster-whisper-server:0.5.0-cpu@sha256:760e5e43d427dc6cfbbc4731934b908b7de9c7e6d5309c6a1f0c8c923a5b6030
     profiles:
       - local-asr
+    logging: *default-logging
     ports:
       - "${LOCAL_TRANSCRIPTION_PORT:-8000}:8000"
     volumes:

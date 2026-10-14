@@ -25,7 +25,7 @@ function errorResponse(error: unknown, fallback: string) {
 export const PATCH = withAuthz<{ id: string }>(
   "webhooks:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
@@ -72,7 +72,7 @@ export const PATCH = withAuthz<{ id: string }>(
 export const DELETE = withAuthz<{ id: string }>(
   "webhooks:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

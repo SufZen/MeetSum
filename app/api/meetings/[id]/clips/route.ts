@@ -18,8 +18,11 @@ import { toClipWire, type CreateClipInput } from "@/lib/clips/types"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { emitPlatformEvent } from "@/lib/platform/emit"
 import { rateLimitRequest, type RateLimitConfig } from "@/lib/rate-limit"
+import { getLogger } from "@/lib/log"
 
-const CLIP_CREATE_LIMIT: RateLimitConfig = { maxRequests: 20, windowMs: 3_600_000 }
+const log = getLogger({ component: "meetings/clips" })
+
+const CLIP_CREATE_LIMIT: RateLimitConfig = { name: "clips-create", maxRequests: 20, windowMs: 3_600_000 }
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -81,7 +84,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
   if (!input) return jsonError("Provide {startMs, endMs} or {segmentIds}", 400)
 
   // 20 clip creations per user (or API key) per hour, per instance.
-  const limited = rateLimitRequest(
+  const limited = await rateLimitRequest(
     request,
     CLIP_CREATE_LIMIT,
     `clips_create:${ctx.workspace.id}:${principalKey(ctx)}`
@@ -100,7 +103,7 @@ export const POST = withAuthz<{ id: string }>("meeting:write", async (request, c
       })
     } catch (error) {
       // The clip stays `pending` and is still playable in-app via the meeting player.
-      console.error("clip.render enqueue failed", (error as Error)?.name ?? error)
+      log.error({ errorName: (error as Error)?.name ?? error }, "clip.render enqueue failed")
     }
 
     await recordAuditLog({

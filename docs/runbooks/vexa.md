@@ -120,7 +120,11 @@ Useful commands: `docker compose -p vexa ps`, `docker compose -p vexa logs -f ga
 
 ## Known infrastructure note
 
-On 2026-10-13, `minio/mc` (and the production file's `minio/minio:latest`) could not be resolved from Docker Hub. `vexa-minio-init` therefore uses `bitnamilegacy/minio-client`, pinned by digest. The production MinIO image reference is outside M7 and should be pinned separately.
+On 2026-10-13, `minio/mc` (and the production file's `minio/minio:latest`) could not be resolved from Docker Hub. `vexa-minio-init` therefore uses `bitnamilegacy/minio-client`, pinned by digest. M10 pinned the MinIO server itself (`coollabsio/minio`, the last upstream release; see `deploy.md` → "Images").
+
+## Production layout: isolated host
+
+This page describes Vexa on the MeetSum VPS, which is fine for evaluation. For production, run Vexa on its own VM or rootless Docker host with no MeetSum secrets: [vexa-isolated-host.md](vexa-isolated-host.md) covers the topology, firewall, secrets inventory, the webhook secret flow, the socket-proxy validation (R3) and the staleness caveat (R15).
 
 ## Fallback plan: ScreenApp meeting-bot
 

@@ -64,7 +64,7 @@ export const POST = withAuthz("meeting:read", async (request, ctx) => {
 
   if (!store) return userRequired()
 
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.threads, `threads:${ctx.workspace.id}:${ctx.user?.id}`)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.threads, `threads:${ctx.workspace.id}:${ctx.user?.id}`)
 
   if (rateLimit.blocked) return rateLimit.blocked
   if ((await store.countActiveThreads()) >= maxActiveThreads()) {

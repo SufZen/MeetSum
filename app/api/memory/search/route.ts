@@ -10,6 +10,9 @@ import { SearchUnavailableError } from "@/lib/search/errors"
 import { MAX_QUERY_CHARS, TEXT_LANGUAGES } from "@/lib/search/filters"
 import { searchWorkspace } from "@/lib/search/service"
 import type { ChunkKind, SearchFilters, SearchHit, TextLanguage } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "memory/search" })
 
 /**
  * GET /api/memory/search — legacy memory search (`{results}`), deprecated in
@@ -47,7 +50,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
 
   if (!limitKey) return searchRateLimitUnavailable()
 
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.search, limitKey)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
@@ -134,7 +137,7 @@ export const GET = withAuthz("meeting:read", async (request, ctx) => {
     if (error instanceof SearchUnavailableError) {
       return NextResponse.json({ error: "Search unavailable" }, { status: 503, headers })
     }
-    console.error("[memory/search] failed:", error instanceof Error ? error.name : "unknown")
+    log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "[memory/search] failed:")
 
     return NextResponse.json({ error: "Search failed" }, { status: 500, headers })
   }

@@ -3,6 +3,9 @@ import { withPublicRoute } from "@/lib/auth/authz"
 import { lookupClipShare } from "@/lib/clips/store"
 import { serveMeetingPeaks } from "@/lib/media/proxy"
 import { authorizeShareMediaRequest } from "@/lib/sharing/share-media-access"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "share/media" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -23,7 +26,7 @@ export const GET = withPublicRoute<{ token: string }>(
 
       if (clip.kind !== "not_clip") return jsonError("Not found", 404)
     } catch (error) {
-      console.error("Clip share lookup failed", (error as Error)?.name ?? error)
+      log.error({ errorName: (error as Error)?.name ?? error }, "Clip share lookup failed")
       return jsonError("Not found", 404)
     }
 

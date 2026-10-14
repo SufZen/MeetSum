@@ -44,6 +44,8 @@ For quick pre-deploy backups:
 ./scripts/backup-postgres.sh
 ```
 
+`scripts/deploy-vps.sh` runs this before every deploy and stops when it fails. The script writes to a `.partial` file first and exits non-zero on a failed or empty dump, so a half-written file is never left behind as a "backup". The restore drill and the manual post-deploy restore are in [runbooks/deploy.md](runbooks/deploy.md).
+
 Restore a Postgres-only backup:
 
 ```bash

@@ -17,7 +17,7 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 export const POST = withAuthz<{ id: string }>(
   "meeting:write",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

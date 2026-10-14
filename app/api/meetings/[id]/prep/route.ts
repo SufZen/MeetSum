@@ -66,7 +66,7 @@ export const POST = withAuthz<{ id: string }>("meeting:read", async (request, ct
 
   const actorKey = principalKey(ctx)
   // Shared on-demand LLM budget (prep + follow-up), after authz and visibility.
-  const limited = limitLlmOnDemand({ workspaceId: ctx.workspace.id, actorKey, canWrite })
+  const limited = await limitLlmOnDemand({ workspaceId: ctx.workspace.id, actorKey, canWrite })
 
   if (limited) return limited
 

@@ -13,6 +13,9 @@ import {
   deleteMeetingObject,
   storeMeetingObjectStream,
 } from "@/lib/storage/object-storage"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "capture" })
 
 export type StoredUploadFile = {
   bucket: string
@@ -302,7 +305,7 @@ export function uploadErrorResponse(error: unknown, fallback: string) {
     return jsonError(error.message, error.status)
   }
 
-  console.error("[upload] ingestion failed", error)
+  log.error({ err: error }, "[upload] ingestion failed")
 
   // Never echo internal error text (hosts, endpoints, SQL) to the client.
   return jsonError(fallback, 500)

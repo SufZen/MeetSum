@@ -15,6 +15,9 @@ import {
 } from "@/lib/media/playback-select"
 import { mediaMaxRangeBytes, parseRange } from "@/lib/media/range"
 import type { ObjectRange } from "@/lib/storage/object-storage"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "media" })
 
 /**
  * Media proxy (M4 Package A). The browser never talks to object storage:
@@ -214,7 +217,7 @@ export async function createMediaResponse(options: {
         headers: { ...baseHeaders, "Content-Range": `bytes */${size}` },
       })
     }
-    console.error("Media proxy storage error", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Media proxy storage error")
     return errorJson("media_unavailable", 502)
   }
 
@@ -308,7 +311,7 @@ export async function serveMeetingPeaks(options: {
   } catch (error) {
     if (storageErrorKind(error) === "missing") return errorJson("no_peaks", 404)
     if (isAbort(error)) return new Response(null, { status: 499 })
-    console.error("Peaks proxy storage error", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Peaks proxy storage error")
     return errorJson("media_unavailable", 502)
   }
 }

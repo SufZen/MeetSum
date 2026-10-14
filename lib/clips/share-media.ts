@@ -11,6 +11,9 @@ import { clipAudioReady } from "@/lib/clips/share-payload"
 import { CLIP_CONTENT_TYPE, clipStorageKey } from "@/lib/clips/render"
 import type { MeetingClip } from "@/lib/clips/types"
 import { createMediaResponse, type MediaProxyDeps } from "@/lib/media/proxy"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "clips" })
 
 export type ClipMediaDeps = MediaProxyDeps & {
   head?: (key: string) => Promise<{ sizeBytes: number; contentType?: string } | undefined>
@@ -48,7 +51,7 @@ export async function serveClipMedia(options: {
   try {
     head = await (options.deps?.head ?? defaultHead)(clip.storageKey)
   } catch (error) {
-    console.error("Clip media head failed", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Clip media head failed")
     return NextResponse.json({ error: "media_unavailable" }, { status: 502 })
   }
 

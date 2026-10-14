@@ -16,7 +16,7 @@ import { getWorkspaceStore } from "@/lib/workspaces/store"
  * active. Gated by `MEETSUM_ALLOW_WORKSPACE_CREATION` (default false).
  */
 export const POST = withSession(async (request, session) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

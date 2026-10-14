@@ -4,6 +4,9 @@ import { serveClipMedia } from "@/lib/clips/share-media"
 import { lookupClipShare } from "@/lib/clips/store"
 import { serveMeetingMedia } from "@/lib/media/proxy"
 import { authorizeShareMediaRequest } from "@/lib/sharing/share-media-access"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "share/media" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,7 +21,7 @@ async function handle(request: Request, { params }: { params: Promise<{ token: s
   try {
     clip = await lookupClipShare(token)
   } catch (error) {
-    console.error("Clip share lookup failed", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Clip share lookup failed")
     return jsonError("Not found", 404)
   }
 

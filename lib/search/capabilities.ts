@@ -16,6 +16,12 @@ import { getActiveEmbeddingKey } from "@/lib/ai/embeddings"
 import type { Queryable } from "@/lib/db/client"
 import { isSupportedPgvectorVersion } from "@/lib/search/vector-ddl"
 import { formatEmbeddingKey, type EmbeddingKey, type SearchCapabilities } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+/** `warmSearchCapabilities` default sink: the server logger. */
+const capabilitiesLog: Pick<Console, "log"> = {
+  log: (message: string) => getLogger({ component: "search" }).info(message),
+}
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 
@@ -170,7 +176,7 @@ export function describeSearchCapabilities(caps: SearchCapabilities): string {
 }
 
 /** Detects and logs the capabilities once; never throws. */
-export async function warmSearchCapabilities(log: Pick<Console, "log"> = console): Promise<void> {
+export async function warmSearchCapabilities(log: Pick<Console, "log"> = capabilitiesLog): Promise<void> {
   try {
     log.log(describeSearchCapabilities(await getSearchCapabilities({ refresh: true })))
   } catch {

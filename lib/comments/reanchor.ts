@@ -9,6 +9,9 @@
 import { getCollabBackend, type CollabBackend } from "@/lib/clips/db"
 import { segmentForTime } from "@/lib/comments/targets"
 import type { TranscriptSegment } from "@/lib/meetings/repository"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "comments" })
 
 type AnchoredComment = {
   id: string
@@ -52,7 +55,7 @@ export async function reanchorMeetingComments(
   try {
     return await reanchor(meetingId, deps)
   } catch (error) {
-    console.error("Comment re-anchoring failed", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Comment re-anchoring failed")
     return { updated: 0 }
   }
 }

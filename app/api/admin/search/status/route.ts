@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
  * search runs lexical), the active embedding key and its coverage.
  */
 export const GET = withAuthz("ops:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

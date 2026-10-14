@@ -32,6 +32,10 @@ import type {
   WorkspaceRole,
   WorkspaceUser,
 } from "@/lib/workspaces/types"
+import { getLogger, withLogContext, type LogContext } from "@/lib/log"
+import { REQUEST_ID_HEADER, resolveRequestId, routeTemplate } from "@/lib/log/request-id"
+
+const log = getLogger({ component: "auth" })
 
 /** API key scopes: admin > write > read (each includes the next). */
 export type ApiKeyScope = "read" | "write" | "admin"
@@ -238,12 +242,25 @@ function forbiddenOrigin() {
 }
 
 function authUnavailable(error: unknown) {
-  console.error("[auth] authentication failed", error)
+  log.error({ err: error }, "[auth] authentication failed")
 
   return NextResponse.json(
     { error: "Authentication unavailable" },
     { status: 503 }
   )
+}
+
+/**
+ * M10 B1: the per-request log context (the proxy's request id, a route
+ * template without ids or tokens, the method). The wrappers add the
+ * principal and, once resolved, the workspace.
+ */
+function requestLogContext(request: Request): LogContext {
+  return {
+    reqId: resolveRequestId(request.headers?.get?.(REQUEST_ID_HEADER)),
+    route: typeof request.url === "string" ? routeTemplate(request.url) : undefined,
+    method: typeof request.method === "string" ? request.method : undefined,
+  }
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
@@ -333,7 +350,7 @@ async function resolveSessionUser(
     secret = getSessionSecret()
   } catch (error) {
     // Fail closed: a misconfigured secret never grants access.
-    console.error("[auth] session secret unavailable", error)
+    log.error({ err: error }, "[auth] session secret unavailable")
     return undefined
   }
 
@@ -486,14 +503,21 @@ export function withAuthz<P = Record<string, string>>(
   permission: Permission,
   handler: AuthzHandler<P>
 ): RouteHandler<P> {
-  return async (request, route) => {
-    const resolved = await authenticateRequest(request)
+  return async (request, route) =>
+    withLogContext(requestLogContext(request), async () => {
+      const resolved = await authenticateRequest(request)
 
-    if (!resolved.ok) return resolved.response
-    if (!can(resolved.value.role, permission)) return forbidden(permission)
+      if (!resolved.ok) return resolved.response
 
-    return handler(request, resolved.value, route)
-  }
+      const ctx = resolved.value
+      const principal = ctx.principal === "api_key" ? "api_key" : "session"
+
+      return withLogContext({ workspaceId: ctx.workspace.id, principal }, async () => {
+        if (!can(ctx.role, permission)) return forbidden(permission)
+
+        return handler(request, ctx, route)
+      })
+    })
 }
 
 /**
@@ -503,26 +527,27 @@ export function withAuthz<P = Record<string, string>>(
 export function withSession<P = Record<string, string>>(
   handler: SessionHandler<P>
 ): RouteHandler<P> {
-  return async (request, route) => {
-    if (hasAuthorizationHeader(request.headers)) return unauthorized()
+  return async (request, route) =>
+    withLogContext({ ...requestLogContext(request), principal: "session" }, async () => {
+      if (hasAuthorizationHeader(request.headers)) return unauthorized()
 
-    try {
-      const session = await resolveSession(request, getWorkspaceStore())
+      try {
+        const session = await resolveSession(request, getWorkspaceStore())
 
-      if (!session.ok) return session.response
+        if (!session.ok) return session.response
 
-      return handler(
-        request,
-        {
-          user: publicUser(session.value.user),
-          memberships: session.value.memberships,
-        },
-        route
-      )
-    } catch (error) {
-      return authUnavailable(error)
-    }
-  }
+        return handler(
+          request,
+          {
+            user: publicUser(session.value.user),
+            memberships: session.value.memberships,
+          },
+          route
+        )
+      } catch (error) {
+        return authUnavailable(error)
+      }
+    })
 }
 
 /**
@@ -540,7 +565,8 @@ export function withPublicRoute<P = Record<string, string>>(
     throw new Error("withPublicRoute requires a reason")
   }
 
-  return async (request, route) => handler(request, route)
+  return async (request, route) =>
+    withLogContext({ ...requestLogContext(request), principal: "public" }, async () => handler(request, route))
 }
 
 export type ServerAuthState =

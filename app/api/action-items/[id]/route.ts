@@ -18,6 +18,9 @@ import {
   toRepositoryPatch,
   validationMessage,
 } from "@/lib/tasks/api"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "action-items" })
 
 function notFound() {
   return jsonError("Action item not found", 404)
@@ -70,7 +73,7 @@ export const PATCH = withAuthz<{ id: string }>(
       actionItem = await ctx.meetings.updateActionItem(id, patch)
     } catch (error) {
       if (isNotFoundError(error)) return notFound()
-      console.error("[action-items] update failed", error instanceof Error ? error.name : "error")
+      log.error({ errorName: error instanceof Error ? error.name : "error" }, "[action-items] update failed")
       return jsonError("Failed to update action item", 500)
     }
 

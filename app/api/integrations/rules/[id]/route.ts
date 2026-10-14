@@ -10,7 +10,7 @@ import { getIntegrationStore } from "@/lib/integrations/core/store"
  * Editing another admin's rule resets `includePrivate` and stamps the editor.
  */
 export const PATCH = withAuthz<{ id: string }>("integrations:manage", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 
@@ -35,7 +35,7 @@ export const PATCH = withAuthz<{ id: string }>("integrations:manage", async (req
 })
 
 export const DELETE = withAuthz<{ id: string }>("integrations:manage", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

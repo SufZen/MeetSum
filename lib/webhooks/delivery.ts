@@ -30,6 +30,9 @@ import {
   guardedWebhookFetch,
   UnsafeWebhookUrlError,
 } from "@/lib/webhooks/url-guard"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "webhooks" })
 
 type WebhookSubscriptionRow = {
   id: string
@@ -177,9 +180,7 @@ export async function deliverWebhookEvent(options: {
   const workspaceId = options.workspaceId?.trim()
 
   if (!workspaceId) {
-    console.warn(
-      `[webhooks] ${options.eventName}: dropped, the event carries no workspace`
-    )
+    log.warn(`[webhooks] ${options.eventName}: dropped, the event carries no workspace`)
     return { queued: 0, delivered: 0, failed: 0, skipped: true }
   }
 
@@ -220,9 +221,7 @@ export async function deliverWebhookEvent(options: {
   const truncated = matching.length > fanOutLimit
 
   if (truncated) {
-    console.warn(
-      `[webhooks] ${options.eventName}: fan-out capped at ${fanOutLimit} subscriptions`
-    )
+    log.warn(`[webhooks] ${options.eventName}: fan-out capped at ${fanOutLimit} subscriptions`)
   }
 
   let queued = 0

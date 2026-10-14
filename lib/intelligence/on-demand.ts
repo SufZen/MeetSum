@@ -22,10 +22,10 @@ export type OnDemandKind = "prep_brief" | "follow_up_email"
 /** Who is asking: `user:<id>` or `api_key:<id>`. */
 export type OnDemandActor = { workspaceId: string; actorKey: string; canWrite: boolean }
 
-export function limitLlmOnDemand(actor: OnDemandActor): Response | undefined {
+export async function limitLlmOnDemand(actor: OnDemandActor): Promise<Response | undefined> {
   if (process.env.MEETSUM_RATE_LIMIT === "false") return undefined
 
-  const result = checkRateLimitWindows(
+  const result = await checkRateLimitWindows(
     `llm_on_demand:${actor.workspaceId}:${actor.actorKey}`,
     llmOnDemandWindows(actor.canWrite)
   )

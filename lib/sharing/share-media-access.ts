@@ -5,6 +5,9 @@ import {
   SHARE_ACCESS_COOKIE,
   verifyShareAccessCookie,
 } from "@/lib/sharing/share-access"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "sharing" })
 
 /**
  * Gate for the public share media routes (M4 Package A). Every failure is
@@ -49,7 +52,7 @@ export async function authorizeShareMediaRequest(
   try {
     result = await (deps.lookup ?? lookupPublicShareMedia)(token)
   } catch (error) {
-    console.error("Share media lookup failed", (error as Error)?.name ?? error)
+    log.error({ errorName: (error as Error)?.name ?? error }, "Share media lookup failed")
     return undefined
   }
 

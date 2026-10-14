@@ -3,6 +3,9 @@ import { redactBotError } from "@/lib/bot/redact"
 import type { BotSessionStore } from "@/lib/bot/store"
 import { isTerminalBotStatus, type BotStatus, type BotStatusReason } from "@/lib/bot/types"
 import type { BotProvider, VexaTranscriptSegment } from "@/lib/bot/vexa/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "bot" })
 
 /**
  * Live transcript fan-out (M7 B8, flag-gated). One shared in-process poller
@@ -167,7 +170,7 @@ export class LiveTranscriptHub {
 
       if (isTerminalBotStatus(session.status)) this.end(poller, statusEvent)
     } catch (error) {
-      console.warn("[bot] live transcript poll failed", redactBotError(error))
+      log.warn({ error: redactBotError(error) }, "[bot] live transcript poll failed")
     } finally {
       if (!replayTo) poller.busy = false
     }

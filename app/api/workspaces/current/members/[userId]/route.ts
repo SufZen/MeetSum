@@ -19,7 +19,7 @@ function forbidden(permission: string) {
 export const PATCH = withAuthz<{ userId: string }>(
   "members:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
@@ -72,7 +72,7 @@ export const PATCH = withAuthz<{ userId: string }>(
 export const DELETE = withAuthz<{ userId: string }>(
   "workspace:read",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
