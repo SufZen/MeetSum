@@ -278,8 +278,14 @@ test("8. visibility: the member sees it, then not once private; W2 never does", 
 
   const confirm = page.getByRole("button", { name: "שינוי נראות" })
 
-  if (await confirm.isVisible({ timeout: 3_000 }).catch(() => false)) await confirm.click()
-  await expect(page.getByText("הנראות עודכנה").first()).toBeVisible({ timeout: 15_000 })
+  const updated = page.getByText("הנראות עודכנה").first()
+
+  // Step 7's share link makes this a confirm ("revoke the public link?").
+  // isVisible() does not wait, so it missed the dialog that opens a beat
+  // later: wait for the dialog or the toast, whichever comes.
+  await expect(confirm.or(updated).first()).toBeVisible({ timeout: 15_000 })
+  if (await confirm.isVisible()) await confirm.click()
+  await expect(updated).toBeVisible({ timeout: 15_000 })
 
   await expect.poll(async () => (await meetingStatus(member.request, meetingId)).http, { timeout: 10_000 }).toBe(404)
   expect((await meetingStatus(w2.request, meetingId)).http).toBe(404)
