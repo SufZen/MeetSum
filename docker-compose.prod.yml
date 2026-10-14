@@ -139,13 +139,15 @@ services:
       retries: 10
 
   minio:
-    # MinIO stopped publishing community images (minio/minio is gone from
-    # Docker Hub; R16). This is coollabsio/minio, a rebuild of the last
-    # upstream release (RELEASE.2025-10-15T17-29-55Z) from MinIO's own
-    # Dockerfile (same /data layout, mc included). Follow-up: move to a
-    # maintained S3 server (Garage, SeaweedFS, versitygw); see
-    # docs/runbooks/deploy.md "Images".
-    image: coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
+    # MinIO stopped publishing community images (R16). MeetSum builds its own
+    # from the official minio/minio and minio/mc source at the last release
+    # tags (deploy/minio/Dockerfile: pinned tags, commits and base digests).
+    # Same /data layout and mc healthcheck as before. Built on first
+    # `docker compose up` or with `docker compose build minio`; see
+    # docs/runbooks/deploy.md "Images" (a Garage/SeaweedFS move is a future option).
+    build:
+      context: ./deploy/minio
+    image: meetsum-minio:RELEASE.2025-10-15T17-29-55Z
     command: server /data --console-address ":9001"
     restart: unless-stopped
     logging: *default-logging

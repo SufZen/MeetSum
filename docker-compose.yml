@@ -98,9 +98,11 @@ services:
       retries: 10
 
   minio:
-    # Last upstream MinIO release rebuilt from MinIO's Dockerfile (the official
-    # community image is gone; see docker-compose.prod.yml and R16).
-    image: coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
+    # MeetSum's own MinIO image, built from the official source
+    # (deploy/minio/Dockerfile; see docker-compose.prod.yml and R16).
+    build:
+      context: ./deploy/minio
+    image: meetsum-minio:RELEASE.2025-10-15T17-29-55Z
     command: server /data --console-address ":9001"
     logging: *default-logging
     environment:

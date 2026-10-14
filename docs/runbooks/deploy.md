@@ -115,18 +115,31 @@ The full backup (Postgres plus MinIO) is in `docs/backup-restore.md`.
 
 ## Images
 
-Every image is pinned by tag **and** digest in the compose files and the Dockerfile (`tests/image-pins.test.ts`). Digests were resolved on 2026-10-14 with the registry API. `.github/dependabot.yml` proposes weekly bumps for Docker images, compose files and GitHub Actions.
+Every third-party image is pinned by tag **and** digest in the compose files and the Dockerfiles (`tests/image-pins.test.ts`). The two images built here (`meetsum:<sha12>` and `meetsum-minio:<release>`) are allowed without a digest because their own base images are pinned. Digests were resolved on 2026-10-14 with the registry API. `.github/dependabot.yml` proposes weekly bumps for Docker images, compose files and GitHub Actions.
 
 | Service | Image |
 |---|---|
 | app, worker, migrate | `meetsum:<sha12>` built from the `Dockerfile` (`node:24.21.0-alpine@sha256:ebfe2f90…`) |
 | postgres | `pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adf…` (Debian; see `postgres-17-pgvector.md`) |
 | redis | `redis:7.4.11-alpine@sha256:858f009f…` |
-| minio | `coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c…` (see below) |
+| minio | `meetsum-minio:RELEASE.2025-10-15T17-29-55Z`, built from the official source by `deploy/minio/Dockerfile` (`golang:1.26.9-alpine@sha256:3082400e…` build stage, `alpine:3.22.6@sha256:5291449c…` runtime; see below) |
 | n8n (profile `automation`) | `n8nio/n8n:2.43.4@sha256:c34ee910…` (what `latest` pointed to on 2026-10-14) |
 | faster-whisper (profile `local-asr`) | `fedirz/faster-whisper-server:0.5.0-cpu@sha256:760e5e43…` (what `latest-cpu` pointed to) |
 
-**MinIO (R16).** MinIO stopped publishing community images, and `minio/minio` no longer resolves on Docker Hub (checked 2026-10-14; `quay.io/minio/minio` requires auth). The pin is `coollabsio/minio` (Coolify's rebuild of the last upstream release, `RELEASE.2025-10-15T17-29-55Z`, built from MinIO's own Dockerfile: UBI9 micro, `/data`, `mc` included, so the volume and healthcheck are unchanged). **Follow-up:** move to a maintained S3 server (Garage, SeaweedFS or versitygw, which Vexa already uses) or build MinIO from source in CI. Until then, Dependabot will not find newer tags; treat MinIO security fixes as a manual watch item.
+**MinIO (R16).** MinIO stopped publishing community images, and `minio/minio` no longer resolves on Docker Hub (checked 2026-10-14; `quay.io/minio/minio` requires auth). The user decision is to build our own image from the official source rather than trust a third-party rebuild. `deploy/minio/Dockerfile`:
+
+- clones `github.com/minio/minio` at `RELEASE.2025-10-15T17-29-55Z` (commit `9e49d5e7`) and `github.com/minio/mc` at `RELEASE.2025-08-13T08-35-41Z` (commit `7394ce0d`), the last official release tags on 2026-10-14 (GitHub API), and fails if a tag no longer points at the pinned commit;
+- builds both with upstream's flags (`CGO_ENABLED=0`, `-tags kqueue`, `-trimpath`, the version ldflags from `buildscripts/gen-ldflags.go`), no prebuilt binaries;
+- copies them onto a pinned Alpine runtime that runs as root with data in `/data`, like MinIO's own image. The existing `minio-data` volume, the `command` and the `mc ready local` healthcheck are unchanged. The AGPL `LICENSE` and `CREDITS` files are in `/licenses`.
+
+Operating it:
+
+- **First switch on an existing host** (from `coollabsio/minio`; the deploy script only recreates `app` and `worker`): back up first (`npm run backup:full`), then `docker compose -f docker-compose.prod.yml build minio` (a few minutes: it compiles Go) and `docker compose -f docker-compose.prod.yml up -d minio`. The volume is reused as is; check `/api/health/ready` reports `storage: ok`.
+- **Fresh host:** `docker compose up -d` builds the image the first time (the default pull policy builds a missing image that has a `build` section).
+- **Updating MinIO:** change the four `ARG`s (release tags and commits; verify with `git ls-remote --tags https://github.com/minio/minio <tag>`, and for an annotated tag use the commit on its `^{}` line), the `image:` tag in both compose files, and this table, then rebuild. If a newer Go toolchain ever fails to compile a release, the Dockerfile names the Go 1.24 digest MinIO itself built with.
+- Dependabot cannot see upstream source releases, so MinIO security fixes stay a **manual watch item** (the upstream repository now ships source only).
+- **Not verified locally:** the image was written without a Docker daemon on the integration machine. Build it once (`docker compose build minio`) before the first deploy that needs it.
+- **Future option:** move production object storage to Garage or SeaweedFS (the e2e workflow already runs SeaweedFS as its S3 server, and Vexa uses versitygw). Both speak the S3 API the app uses; the move is a data migration (`mc mirror` into the new bucket) plus `S3_ENDPOINT`/credential changes, not a code change.
 
 **n8n** moved from 1.x to 2.x upstream. If an existing n8n volume was created by 1.x, read the n8n 2.0 migration notes before starting the `automation` profile on this pin.
 

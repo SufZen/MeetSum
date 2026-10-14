@@ -323,7 +323,7 @@ The manifest format is `docs/parity/asr-eval-manifest.example.json`. Keep the cl
 | R11 | RealizeOS private-meeting policy | **done (D):** privacy gate at send time (`tests/realizeos-privacy.test.ts`) |
 | R12 | Finder vs normalizer | **done (D):** `tests/transcript-search-fold.test.ts` |
 | R13–R14 | Bundle, design system | package C |
-| R15–R16 | Vexa staleness note, MinIO pin | package B |
+| R15–R16 | Vexa staleness note, MinIO pin | package B; **MinIO (integration):** built from the official minio/minio and minio/mc source at the last release tags (`deploy/minio/Dockerfile`, tags + commits + base digests pinned, `tests/image-pins.test.ts`); not built locally (no Docker daemon) |
 
 ## Follow-ups
 
@@ -340,8 +340,9 @@ The manifest format is `docs/parity/asr-eval-manifest.example.json`. Keep the cl
 | Webex bot support | low | bot | AUDIT row |
 | Native mobile app or browser extension | low (PWA covers it) | product | AUDIT row |
 | Plain-Postgres dump diff (assert that the no-pgvector dump differs only by vector objects) | low | D or orchestrator | m10.md Schema |
-| `/api/admin/webhooks/stats` counts `pending`, but delivery statuses are `queued`/`retrying`/…, so the figure undercounts | low | orchestrator | API reference audit |
-| Guards weaker in the wrapper than in the handler (`DELETE /api/meetings/:id`, visibility, share and clip share use `meeting:read` + `canManageMeeting`): correct, but the route-coverage view understates the requirement | low | orchestrator | API reference audit |
+| ~~`/api/admin/webhooks/stats` counts `pending`~~ **done (integration):** `pending` = `queued`/`active`/`retrying` (`tests/m10-webhook-admin-routes.test.ts`); `GET /api/webhooks/deliveries` gained the `admin` rate limit | — | orchestrator | API reference audit |
+| ~~Guards weaker in the wrapper than in the handler~~ **done (integration):** the generated route index marks DELETE meeting, visibility, share (POST/PATCH) and clip share with "+ `canManageMeeting` in the handler", checked against the handlers by `tests/api-reference-complete.test.ts` | — | orchestrator | API reference audit |
 | OpenTelemetry export; client-side error capture | low | ops | m10.md non-goals |
-| MinIO replacement (Garage, SeaweedFS or any S3) | low | ops | R16 |
+| Build `meetsum-minio` once on a Docker host (`docker compose build minio`) and switch production from `coollabsio/minio` ([deploy.md → Images](../runbooks/deploy.md#images)); watch upstream MinIO source releases manually (Dependabot cannot) | medium (before the next MinIO restart) | ops | R16 |
+| MinIO replacement (Garage or SeaweedFS; e2e already runs SeaweedFS): a future option, a data migration plus `S3_ENDPOINT` change | low | ops | R16 |
 | Calendar dedupe edge cases (R4) and the Slack duplicate window (R5) | low (documented) | integrations | R4, R5 |
