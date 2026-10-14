@@ -80,7 +80,10 @@ export async function clickUntilVisible(target: Locator, opened: Locator, timeou
 
 /** `aria-valuenow` of the player scrubber (whole seconds). */
 export async function playerSeconds(page: Page): Promise<number> {
-  return Number(await page.getByRole("slider").first().getAttribute("aria-valuenow"))
+  // The player's scrubber (components/player/scrubber.tsx, an explicit
+  // role=slider with aria-valuenow), not the volume <input type=range> that
+  // precedes it at the inbox breakpoint and carries no aria-valuenow.
+  return Number(await page.locator('[role="slider"][aria-valuenow]').first().getAttribute("aria-valuenow"))
 }
 
 /** Seconds from a "… m:ss" label (citation chips, timecodes). */

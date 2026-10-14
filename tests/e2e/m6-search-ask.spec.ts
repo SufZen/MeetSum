@@ -89,7 +89,10 @@ function secondsFromLabel(label: string | null): number | undefined {
 }
 
 async function playerSeconds(page: Page): Promise<number> {
-  return Number(await page.getByRole("slider").first().getAttribute("aria-valuenow"))
+  // The player's scrubber (components/player/scrubber.tsx, an explicit
+  // role=slider with aria-valuenow), not the volume <input type=range> that
+  // precedes it at the inbox breakpoint and carries no aria-valuenow.
+  return Number(await page.locator('[role="slider"][aria-valuenow]').first().getAttribute("aria-valuenow"))
 }
 
 /**
