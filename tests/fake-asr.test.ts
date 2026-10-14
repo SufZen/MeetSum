@@ -46,7 +46,8 @@ describe("committed e2e fixtures", () => {
     const { wav, sha256, asrJson } = buildFixtures()
 
     expect(readFileSync(MEDIA_FILE).equals(wav)).toBe(true)
-    expect(readFileSync(path.join(ASR_DIR, `${sha256}.json`), "utf8")).toBe(asrJson)
+    // Windows checkouts (core.autocrlf) may turn the JSON into CRLF.
+    expect(readFileSync(path.join(ASR_DIR, `${sha256}.json`), "utf8").replace(/\r\n/g, "\n")).toBe(asrJson)
   })
 
   it("the WAV is 30 s of 16 kHz mono 16-bit PCM under 1 MB", () => {
@@ -63,7 +64,7 @@ describe("committed e2e fixtures", () => {
 
     expect(response.duration).toBe(30)
     expect(response.segments.length).toBeGreaterThanOrEqual(4)
-    expect(response.segments.some((segment) => /[֐-׿]/.test(segment.text))).toBe(true)
+    expect(response.segments.some((segment) => /\p{Script=Hebrew}/u.test(segment.text))).toBe(true)
     expect(response.segments.some((segment) => /^[\s\x20-\x7E]+$/.test(segment.text))).toBe(true)
     expect(response.segments.every((segment) => segment.words.length > 0)).toBe(true)
 
@@ -146,7 +147,7 @@ describe("the /asr route of the fake provider server", () => {
     expect((await fetch(`${server.url}/asr/v1/audio/transcriptions`, { method: "POST", body: form })).status).toBe(400)
   })
 
-  it("loads fixtures from MEETSUM_FAKE_ASR_FIXTURE_DIR-style dirs and rejects malformed ones", async () => {
+  it("rejects malformed fixtures", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "fake-asr-"))
 
     try {

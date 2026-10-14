@@ -79,7 +79,8 @@ function main() {
     const problems: string[] = []
 
     if (!existsSync(MEDIA_FILE) || !readFileSync(MEDIA_FILE).equals(wav)) problems.push(`${MEDIA_FILE} differs`)
-    if (!existsSync(asrFile) || readFileSync(asrFile, "utf8") !== asrJson) problems.push(`${asrFile} differs`)
+    // Windows checkouts (core.autocrlf) may turn the JSON into CRLF.
+    if (!existsSync(asrFile) || readFileSync(asrFile, "utf8").replace(/\r\n/g, "\n") !== asrJson) problems.push(`${asrFile} differs`)
     if (problems.length) {
       console.error(`e2e fixtures are stale (${problems.join("; ")}); run npm run e2e:fixtures`)
       process.exit(1)

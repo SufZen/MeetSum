@@ -33,22 +33,24 @@ async function main() {
 
   const port = Number(process.env.MEETSUM_FAKE_PROVIDERS_PORT ?? 4010)
   const handlers = allProviderFakeHandlers(listProviders())
-  let server: FakeProviderServer | undefined
+  const sink: { server?: FakeProviderServer } = {}
   const asr = createFakeAsr({
     log: (entry) => {
-      server?.record(entry)
+      sink.server?.record(entry)
       console.log(
         `[fake-asr] ${entry.method} ${entry.path}${entry.body ? ` -> ${entry.body.fixtureId ?? "no fixture"}${entry.body.matchedBy ? ` (${entry.body.matchedBy})` : ""}` : ""}`
       )
     },
   })
 
-  server = await createFakeProviderServer(handlers, { port, rawRoutes: [{ prefix: FAKE_ASR_PREFIX, handle: asr }] })
+  const server = await createFakeProviderServer(handlers, { port, rawRoutes: [{ prefix: FAKE_ASR_PREFIX, handle: asr }] })
+
+  sink.server = server
 
   console.log(`[fake-providers] listening on ${server.url} (${Object.keys(handlers).length} routes + fake ASR at ${FAKE_ASR_PREFIX})`)
 
   const stop = async () => {
-    await server?.close()
+    await server.close()
     process.exit(0)
   }
 

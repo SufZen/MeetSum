@@ -46,8 +46,10 @@ export type FakeRawRequest = {
 export type FakeAsrLogEntry = {
   method: string
   path: string
+  query: Record<string, string>
+  headers: Record<string, string>
   provider: "asr"
-  body?: { fileSha256?: string; fixtureId?: string; matchedBy?: "sha256" | "tones"; fields?: Record<string, string> }
+  body: undefined | { fileSha256?: string; fixtureId?: string; matchedBy?: "sha256" | "tones"; fields?: Record<string, string> }
 }
 
 export type FakeAsrOptions = {
@@ -114,7 +116,7 @@ export function wavPcm(bytes: Buffer): Buffer | undefined {
 export function ffmpegDecode(audio: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      process.env.FFMPEG_PATH || "ffmpeg",
+      "ffmpeg",
       ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", String(E2E_SAMPLE_RATE), "pipe:1"],
       { stdio: ["pipe", "pipe", "ignore"] }
     )
@@ -182,7 +184,7 @@ async function readForm(request: FakeRawRequest): Promise<FormData> {
 export function createFakeAsr(options: FakeAsrOptions = {}) {
   assertNotProduction()
 
-  const dir = options.fixtureDir ?? process.env.MEETSUM_FAKE_ASR_FIXTURE_DIR ?? DEFAULT_ASR_FIXTURE_DIR
+  const dir = options.fixtureDir ?? DEFAULT_ASR_FIXTURE_DIR
 
   return async function handle(request: FakeRawRequest): Promise<FakeProviderResponse> {
     assertNotProduction()
@@ -190,7 +192,7 @@ export function createFakeAsr(options: FakeAsrOptions = {}) {
     const route = request.path.slice(FAKE_ASR_PREFIX.length) || "/"
 
     if (request.method === "GET" && route === "/v1/models") {
-      options.log?.({ method: request.method, path: request.path, provider: "asr" })
+      options.log?.({ method: request.method, path: request.path, query: {}, headers: {}, provider: "asr", body: undefined })
       return { body: { object: "list", data: [{ id: FAKE_ASR_MODEL, object: "model", owned_by: "meetsum-e2e" }] } }
     }
 
@@ -224,6 +226,8 @@ export function createFakeAsr(options: FakeAsrOptions = {}) {
     options.log?.({
       method: request.method,
       path: request.path,
+      query: {},
+      headers: {},
       provider: "asr",
       body: { fileSha256, fields, ...(match ? { fixtureId: match.fixture.id, matchedBy: match.matchedBy } : {}) },
     })

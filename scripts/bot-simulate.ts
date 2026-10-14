@@ -21,9 +21,14 @@ import { signVexaWebhook } from "../lib/bot/webhook-verify"
  * serving a generated WAV recording, so with VEXA_API_URL pointed at it the
  * worker runs finalize end-to-end into media.ingest. Keep it running (Ctrl-C
  * to stop) while the worker finalizes.
+ *
+ * M10 (the core e2e job): `--serve-only` starts only the fake Vexa (no
+ * webhooks; tests/e2e/m10-bot.spec.ts posts them with `postSimulatedWebhook`)
+ * and `--wav <file>` serves that recording instead of the silent one, e.g.
+ * tests/fixtures/e2e/media/he-en-30s.wav, which the fake ASR recognizes.
  */
 
-type Args = {
+export type Args = {
   url: string
   vexaMeetingId: string
   platform: string
@@ -31,6 +36,10 @@ type Args = {
   delayMs: number
   fakeVexa: boolean
   port: number
+  /** Only serve the fake Vexa; post no webhooks (the e2e posts its own). */
+  serveOnly: boolean
+  /** Recording the fake Vexa serves (default: a 2 s silent WAV). */
+  wav?: string
 }
 
 const STEPS = [
@@ -54,8 +63,10 @@ function parseArgs(argv: string[]): Args {
     platform: value("platform") ?? "google_meet",
     nativeId: value("native-id") ?? "abc-defg-hij",
     delayMs: Number(value("delay") ?? 500),
-    fakeVexa: argv.includes("--fake-vexa"),
+    fakeVexa: argv.includes("--fake-vexa") || argv.includes("--serve-only"),
     port: Number(value("port") ?? 18056),
+    serveOnly: argv.includes("--serve-only"),
+    wav: value("wav"),
   }
 }
 
@@ -104,7 +115,9 @@ function json(response: ServerResponse, status: number, value: unknown) {
 }
 
 function startFakeVexa(args: Args) {
-  const wav = silentWav()
+  // The e2e serves tests/fixtures/e2e/media/he-en-30s.wav so the fake ASR knows it.
+  const wav = args.wav ? readFileSync(args.wav) : silentWav()
+  const stats = { botsRequested: 0, recordingFetches: 0 }
   const mediaFile = { id: "m1", type: "audio", format: "wav", content_type: "audio/wav", size_bytes: wav.length }
   const meeting = {
     id: args.vexaMeetingId,
@@ -132,7 +145,13 @@ function startFakeVexa(args: Args) {
 
     console.log(`[fake-vexa] ${route}`)
 
-    if (route === "POST /bots") return json(response, 201, { id: args.vexaMeetingId, status: "requested" })
+    // e2e inspection: how many bots were requested and how often the recording was fetched.
+    if (route === "GET /__fake/stats") return json(response, 200, stats)
+    if (route === "POST /bots") {
+      stats.botsRequested += 1
+      return json(response, 201, { id: args.vexaMeetingId, status: "requested" })
+    }
+    if (route === "GET /recordings/rec1/media/m1/raw") stats.recordingFetches += 1
     if (request.method === "DELETE") return json(response, 200, { status: "stopping", meeting_id: args.vexaMeetingId })
     if (route === "GET /bots/status") return json(response, 200, { running_bots: [], running: [], count: 0 })
     if (route === `GET /meetings/${args.vexaMeetingId}`) return json(response, 200, meeting)
@@ -156,8 +175,40 @@ function startFakeVexa(args: Args) {
   return server
 }
 
+export const SIMULATION_STEPS = STEPS
+
+/** Default simulation arguments (the e2e overrides ids per run). */
+export function simulationArgs(overrides: Partial<Args> = {}): Args {
+  return { ...parseArgs([]), ...overrides }
+}
+
+/**
+ * Posts one Vexa webhook body to the app, signed with `secret` (a wrong
+ * secret produces a bad signature on purpose in the e2e).
+ */
+export async function postSimulatedWebhook(baseUrl: string, secret: string, body: string): Promise<Response> {
+  const timestamp = String(Math.floor(Date.now() / 1000))
+
+  return fetch(`${baseUrl.replace(/\/+$/, "")}/api/integrations/vexa/webhook`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-webhook-timestamp": timestamp,
+      "x-webhook-signature": signVexaWebhook(secret, timestamp, body),
+    },
+    body,
+  })
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  const server = args.fakeVexa ? startFakeVexa(args) : undefined
+
+  if (args.serveOnly) {
+    console.log("[fake-vexa] serve-only: posting no webhooks; Ctrl-C to stop.")
+    return
+  }
+
   const secret = process.env.VEXA_WEBHOOK_SECRET
 
   if (!secret) {
@@ -165,22 +216,10 @@ async function main() {
     process.exit(1)
   }
 
-  const server = args.fakeVexa ? startFakeVexa(args) : undefined
   const runId = Date.now().toString(36)
-  const target = `${args.url}/api/integrations/vexa/webhook`
 
   for (const step of STEPS) {
-    const body = simulationBody(step, args, runId)
-    const timestamp = String(Math.floor(Date.now() / 1000))
-    const response = await fetch(target, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-webhook-timestamp": timestamp,
-        "x-webhook-signature": signVexaWebhook(secret, timestamp, body),
-      },
-      body,
-    })
+    const response = await postSimulatedWebhook(args.url, secret, simulationBody(step, args, runId))
 
     console.log(`${step.padEnd(28)} -> ${response.status} ${await response.text()}`)
     await new Promise((resolve) => setTimeout(resolve, args.delayMs))
