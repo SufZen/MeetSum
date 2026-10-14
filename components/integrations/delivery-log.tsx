@@ -236,7 +236,7 @@ function IntegrationDeliveries({
 
       <Sheet open={Boolean(detail)} onOpenChange={(open) => !open && setDetail(null)}>
         {detail ? (
-          <SheetContent side={locale === "he" ? "left" : "right"} dir={locale === "he" ? "rtl" : "ltr"} className="w-full sm:max-w-md" closeLabel={t.integrationsClose}>
+          <SheetContent side="end" dir={locale === "he" ? "rtl" : "ltr"} className="w-full sm:max-w-md" closeLabel={t.integrationsClose}>
             <SheetHeader>
               <SheetTitle>{t.integrationsLogDetails}</SheetTitle>
             </SheetHeader>

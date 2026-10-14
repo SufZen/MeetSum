@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button"
 import { CitationChip, formatTimecode } from "@/components/ui/meeting-atoms"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { directionForLanguage } from "@/components/speaker-display"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 
 export function PlayerCitation({

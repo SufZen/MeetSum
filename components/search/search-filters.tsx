@@ -22,7 +22,8 @@ import {
   type DatePreset,
   type SearchUrlState,
 } from "@/lib/client/search-url"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { meetingTypeLabel } from "@/lib/search/meeting-type-labels"
 import type { SearchFacets, TextLanguage } from "@/lib/search/types"
 import { cn } from "@/lib/utils"

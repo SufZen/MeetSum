@@ -237,6 +237,8 @@ Restyle `components/ui` per §6. Move `reference/meeting-atoms.tsx` into `compon
 **Phase 4 · Guardrails** (M9)
 Run `node design-system/check.mjs --strict` in CI as a ratchet: fail if the count rises, then drive it to 0. Add Playwright screenshots of every surface in he/en × light/dark. Retire `docs/design-system.md` v1.
 
+**M10 status.** The count is 0. `--strict` fails on any violation and on any stale allowlist entry. A rule's `allowLines` (`{ file, pattern, reason }`) allowlists hits whose source line matches `pattern`; each entry needs a one-line reason, and allowlisted hits are reported separately. There are two entries: the recharts attribute selectors in `components/ui/chart.tsx` (`[stroke='#ccc']`/`[stroke='#fff']` match recharts' own default attributes) and the root error page's four-key message module (`client-message-import`; `app/global-error.tsx` renders outside every provider). `client-message-import` replaces `dictionary-runtime-import`: a `"use client"` file never imports a message module (`dictionaries`, `*-messages`, `lib/i18n/m<N>/*`) at run time. It reads strings from `useI18n()` or the route's provider instead. Sheets and sidebars take `side="start" | "end"`; `left`/`right` remain as deprecated aliases with their old on-screen placement. Tooltip `left`/`right` map to `inline-start`/`inline-end`.
+
 ## 12. Open decisions for the owner
 
 - **Plex vs keeping Inter.** Plex is recommended for bilingual harmony. Keeping Inter + Noto Sans Hebrew is lower risk but leaves the mixed-script lines mismatched.

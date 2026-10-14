@@ -16,7 +16,8 @@ import {
 } from "@/components/bot/recorder-dock-state"
 import { Button } from "@/components/ui/button"
 import { LiveDot } from "@/components/ui/meeting-atoms"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 
 /**
  * Recorder dock (M7 C3, cadence.css "recorder dock"): fixed to the bottom on

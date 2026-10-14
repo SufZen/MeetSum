@@ -9,6 +9,7 @@ import { clipShareLocale } from "@/lib/clips/share-payload"
 import { fontVariables } from "@/lib/fonts"
 import { LOCALE_COOKIE, type SupportedLocale } from "@/lib/i18n/locales"
 import { m9ShareMessages } from "@/lib/i18n/m9/share"
+import { messagesFor, type Namespace } from "@/lib/i18n/namespaces"
 import { getShareTimeZone } from "@/lib/i18n/server"
 import { getShareDocumentLocale } from "@/lib/sharing/share-locale"
 import { resolveShareViewerLocale, shareLocaleDir } from "@/lib/sharing/share-viewer-locale"
@@ -66,8 +67,11 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
  * theme. `<html lang dir>` follow the **viewer** (M9 B7: cookie →
  * Accept-Language → meeting language → he; the page also honours `?lang=`);
  * content blocks keep the meeting or segment language. The provider gets
- * only the share messages (loading, error and not-found read them).
+ * only the `share` namespace (loading, error and not-found read it); the
+ * player island takes its strings as props from the page.
  */
+const SHARE_NAMESPACES: readonly Namespace[] = ["share"]
+
 export default async function ShareLayout({
   children,
   params,
@@ -87,7 +91,8 @@ export default async function ShareLayout({
             locale={locale}
             dir={dir}
             timeZone={timeZone}
-            messages={m9ShareMessages[locale]}
+            messages={messagesFor(locale, SHARE_NAMESPACES)}
+            namespaces={SHARE_NAMESPACES}
           >
             <ThemeProvider>{children}</ThemeProvider>
           </I18nProvider>

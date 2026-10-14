@@ -1,11 +1,11 @@
 {
-  "physical-direction": 10,
+  "physical-direction": 0,
   "raw-palette": 0,
-  "arbitrary-colour": 2,
+  "arbitrary-colour": 0,
   "arbitrary-size": 0,
-  "hex-literal": 5,
+  "hex-literal": 0,
   "locale-format": 0,
   "window-dialog": 0,
   "hand-built-modal": 0,
-  "dictionary-runtime-import": 0
+  "client-message-import": 0
 }

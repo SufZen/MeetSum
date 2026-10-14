@@ -16,7 +16,7 @@ import type { PlayerMarker } from "@/lib/player/citations"
 import { speakerColorVar } from "@/lib/player/speaker-colors"
 import type { SpeakerLane } from "@/lib/player/speaker-timeline"
 import { formatClock } from "@/lib/player/time-format"
-import { formatMessage } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 
 export type LaneSpeaker = { name: string; initials: string; color: SpeakerColor; unconfirmed?: boolean }

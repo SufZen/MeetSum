@@ -45,10 +45,6 @@ function targetLabel(t: CollabStrings, type: CommentTargetType): string {
   }
 }
 
-function documentDir(): "rtl" | "ltr" {
-  return typeof document !== "undefined" && document.documentElement.dir === "rtl" ? "rtl" : "ltr"
-}
-
 export function CommentsDrawer({ meetingId, open, onOpenChange }: CommentsDrawerProps) {
   const { t } = useCollabStrings()
   const state = useMeetingComments(meetingId)
@@ -91,7 +87,7 @@ export function CommentsDrawer({ meetingId, open, onOpenChange }: CommentsDrawer
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side={documentDir() === "rtl" ? "left" : "right"} className="w-full gap-0 sm:max-w-md">
+      <SheetContent side="end" className="w-full gap-0 sm:max-w-md">
         <SheetHeader className="border-b border-line">
           <SheetTitle>{t.commentsTitle}</SheetTitle>
           <ToggleGroup

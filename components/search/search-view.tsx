@@ -22,7 +22,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { AskScope } from "@/lib/ask/types"
 import { SEARCH_QUERY_MAX, parseSearchUrl, serializeSearchUrl, type SearchUrlState } from "@/lib/client/search-url"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 
 const DEBOUNCE_MS = 250
 

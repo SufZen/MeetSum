@@ -12,31 +12,30 @@ import {
   WorkflowIcon,
   ZapIcon,
   ChevronDownIcon,
-  LogOutIcon,
   SearchIcon,
   ShieldCheckIcon,
 } from "lucide-react"
 
 import Link from "next/link"
-import { useRef, useState, type MouseEvent } from "react"
+import { lazy, useRef, type MouseEvent } from "react"
 
 import { ADMIN_PANEL_PERMISSIONS } from "@/components/admin/permissions"
 import { useUploadQueue } from "@/components/pwa/upload-queue-provider"
 import { clearServiceWorkerCaches } from "@/components/pwa/service-worker-registrar"
-import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { Deferred } from "@/components/ui/deferred"
 import { SigmaMark } from "@/components/ui/sigma-mark"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { useWorkspace } from "@/components/workspace-context"
 import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { isPlainLeftClick } from "@/lib/client/shell-navigation"
 import { buildShellUrl } from "@/lib/client/shell-url"
+
+// M10 C: the account menu (menu + floating-ui + confirm dialog) loads on intent.
+const loadUserMenu = () => import("@/components/sidebar-user-menu")
+const SidebarUserMenu = lazy(() => loadUserMenu().then((mod) => ({ default: mod.SidebarUserMenu })))
+const USER_TRIGGER_CLASS =
+  "mt-4 flex w-full items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3 text-start hover:bg-sidebar-accent lg:mt-8"
 
 export type SidebarRoom = {
   id: string
@@ -93,18 +92,13 @@ export function MainSidebar({
 }) {
   const logoutFormRef = useRef<HTMLFormElement>(null)
   const uploads = useUploadQueue()
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const { can } = useWorkspace()
   const showAdmin = ADMIN_PANEL_PERMISSIONS.some((permission) => can(permission))
   const displayName = user?.name?.trim() || user?.email.split("@")[0] || ""
   const initial = (displayName || "?").slice(0, 1).toUpperCase()
-  // Logout: queued recordings belong to this user on this device; deleting
-  // them needs a confirmation, then the queue and the SW caches are cleared.
-  async function logOut(discardPending: boolean) {
-    if (!discardPending && (uploads?.snapshot?.pending ?? 0) > 0) {
-      setLogoutConfirmOpen(true)
-      return
-    }
+  // Logout: queued recordings belong to this user on this device; the menu
+  // asks before deleting them, then the queue and the SW caches are cleared.
+  async function logOut() {
     await uploads?.clearAll().catch(() => undefined)
     await clearServiceWorkerCaches()
     logoutFormRef.current?.requestSubmit()
@@ -130,6 +124,33 @@ export function MainSidebar({
     dictionary.navSettings,
     dictionary.navAdmin,
   ]
+
+  const userTrigger = user ? (
+    <>
+      {user.picture ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={user.picture}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="size-8 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <div className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-sm font-semibold text-white">
+          {initial}
+        </div>
+      )}
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">
+          <bdi>{displayName}</bdi>
+        </div>
+        <div className="truncate text-xs text-muted-foreground" dir="ltr">
+          <bdi>{user.email}</bdi>
+        </div>
+      </div>
+      <ChevronDownIcon aria-hidden="true" className="ms-auto size-4 shrink-0 text-muted-foreground" />
+    </>
+  ) : null
 
   return (
     <aside className="flex min-h-0 flex-col border-e border-line bg-canvas p-3 text-sidebar-foreground lg:sticky lg:top-0 lg:min-h-svh">
@@ -222,56 +243,25 @@ export function MainSidebar({
               method="post"
               className="hidden"
             />
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button
-                    type="button"
-                    className="mt-4 flex w-full items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-3 text-start hover:bg-sidebar-accent lg:mt-8"
-                  />
-                }
-              >
-                {user.picture ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.picture}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="size-8 shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-sm font-semibold text-white">
-                    {initial}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">
-                    <bdi>{displayName}</bdi>
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground" dir="ltr">
-                    <bdi>{user.email}</bdi>
-                  </div>
-                </div>
-                <ChevronDownIcon aria-hidden="true" className="ms-auto size-4 shrink-0 text-muted-foreground" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top">
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => void logOut(false)}
-                >
-                  <LogOutIcon aria-hidden="true" className="size-4" />
-                  {dictionary.logOut}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <ConfirmDialog
-              open={logoutConfirmOpen}
-              onOpenChange={setLogoutConfirmOpen}
-              title={dictionary.pwaLogoutPendingTitle}
-              description={dictionary.pwaLogoutPendingDescription}
-              confirmLabel={dictionary.pwaLogoutDiscard}
-              onConfirm={() => logOut(true)}
-            />
+            <Deferred
+              preload={loadUserMenu}
+              placeholder={(props) => (
+                <button type="button" className={USER_TRIGGER_CLASS} aria-busy={props ? undefined : true} {...props}>
+                  {userTrigger}
+                </button>
+              )}
+            >
+              {({ defaultOpen }) => (
+                <SidebarUserMenu
+                  dictionary={dictionary}
+                  triggerClassName={USER_TRIGGER_CLASS}
+                  triggerContent={userTrigger}
+                  defaultOpen={defaultOpen}
+                  pendingUploads={() => uploads?.snapshot?.pending ?? 0}
+                  onLogOut={logOut}
+                />
+              )}
+            </Deferred>
           </>
         ) : null}
       </div>

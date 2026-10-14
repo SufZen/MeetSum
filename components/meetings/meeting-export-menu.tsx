@@ -12,6 +12,7 @@ import { useParams } from "next/navigation"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -32,8 +33,8 @@ import {
   type SendTarget,
   type SendTargetProvider,
 } from "@/lib/client/download-export"
-import { getExportsMessages, type ExportsMessages } from "@/lib/i18n/m8/exports"
-import { formatMessage } from "@/lib/i18n/workspace-messages"
+import type { ExportsMessages } from "@/lib/i18n/m8/exports"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { MeetingVisibility } from "@/lib/meetings/repository"
 
 /**
@@ -104,8 +105,10 @@ export function MeetingExportMenu({
 }) {
   void language
   const params = useParams<{ locale?: string }>()
-  const uiLocale = locale ?? (params?.locale === "he" ? "he" : "en")
-  const t = getExportsMessages(uiLocale)
+  const i18n = useOptionalI18n()
+  const uiLocale = locale ?? i18n?.locale ?? (params?.locale === "he" ? "he" : "en")
+  // The route's I18nProvider carries the export keys (M10 C: no message module in client JS).
+  const t = (i18n?.messages ?? {}) as unknown as ExportsMessages
   const dir = uiLocale === "he" ? "rtl" : "ltr"
   const workspace = useWorkspace()
   const model = exportMenuModel({

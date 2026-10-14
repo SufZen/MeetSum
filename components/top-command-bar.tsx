@@ -1,10 +1,8 @@
 "use client"
 
-import { type ChangeEvent, useEffect, useState } from "react"
+import { type ChangeEvent, lazy, useEffect, useState } from "react"
 import {
-  BotIcon,
   ChevronDownIcon,
-  FolderSearchIcon,
   MoonIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -16,23 +14,24 @@ import type { BrowserRecorder } from "@/components/bot/use-browser-recorder"
 import { isPaletteShortcut, openCommandPalette } from "@/components/command-palette"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { MediaIngestionDrawer } from "@/components/media-ingestion-drawer"
-import { NotificationBell } from "@/components/notifications/notification-bell"
+import { NotificationBellHost } from "@/components/notifications/notification-bell-host"
 import { PendingUploadsIndicator } from "@/components/pwa/pending-uploads-indicator"
 import { Button } from "@/components/ui/button"
 import { CitedMark } from "@/components/ui/meeting-atoms"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Deferred } from "@/components/ui/deferred"
 import { Input } from "@/components/ui/input"
+import { SendBotTriggerContent, sendBotTriggerProps, syncTriggerProps } from "@/components/top-command-triggers"
 import { useWorkspace } from "@/components/workspace-context"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import type { SupportedLocale } from "@/lib/i18n/locales"
 import { fillMessage } from "@/lib/i18n/messages"
 
 export type SyncTarget = "calendar" | "gmail"
+
+// M10 C: the Sync and Send-bot menus (menu + floating-ui) load on intent.
+const loadMenus = () => import("@/components/top-command-menus")
+const SyncMenu = lazy(() => loadMenus().then((mod) => ({ default: mod.SyncMenu })))
+const SendBotMenu = lazy(() => loadMenus().then((mod) => ({ default: mod.SendBotMenu })))
 
 export type AiProviderStatus = {
   configured: boolean
@@ -135,6 +134,14 @@ export function TopCommandBar({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
+  const syncTrigger = (
+    <>
+      <RefreshCwIcon data-icon="inline-start" className="size-4" />
+      {syncing ? dictionary.syncing : dictionary.sync}
+      <ChevronDownIcon aria-hidden="true" className="size-4" />
+    </>
+  )
+
   return (
     <header className="sticky top-0 z-30 flex min-h-14 flex-col gap-2 border-b border-line bg-surface px-4 py-2 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
       <div className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-3 lg:max-w-96">
@@ -187,29 +194,23 @@ export function TopCommandBar({
               />
             ) : null}
             {sendBotVisible ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="record"
-                      size={recorderEnabled ? "icon" : "default"}
-                      className="h-9"
-                      aria-label={dictionary.botJoinMenu}
-                      title={dictionary.botJoinMenu}
-                    />
-                  }
-                >
-                  {recorderEnabled ? null : <BotIcon data-icon="inline-start" />}
-                  {recorderEnabled ? null : dictionary.botJoinMenu}
-                  <ChevronDownIcon aria-hidden="true" className="size-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={onSendBot}>
-                    <BotIcon aria-hidden="true" className="size-4" />
-                    {dictionary.botJoinMenu}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Deferred
+                preload={loadMenus}
+                placeholder={(props) => (
+                  <Button {...sendBotTriggerProps(dictionary, recorderEnabled)} aria-busy={props ? undefined : true} {...props}>
+                    <SendBotTriggerContent dictionary={dictionary} compact={recorderEnabled} />
+                  </Button>
+                )}
+              >
+                {({ defaultOpen }) => (
+                  <SendBotMenu
+                    dictionary={dictionary}
+                    compact={recorderEnabled}
+                    defaultOpen={defaultOpen}
+                    onSendBot={() => onSendBot?.()}
+                  />
+                )}
+              </Deferred>
             ) : null}
           </div>
         ) : null}
@@ -222,34 +223,25 @@ export function TopCommandBar({
           onFileChange={onDesktopFileChange}
           onRecordingReady={onRecordingReady}
         />
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="outline"
-                className="h-8 min-w-24 rounded-md border-line bg-surface text-brand-text hover:bg-brand-soft"
-                disabled={syncing}
-              />
-            }
-          >
-            <RefreshCwIcon data-icon="inline-start" className="size-4" />
-            {syncing ? dictionary.syncing : dictionary.sync}
-            <ChevronDownIcon aria-hidden="true" className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onSync("calendar")}>
-              <RefreshCwIcon aria-hidden="true" className="size-4" />
-              {dictionary.calendarSync}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onFindDriveRecordings}>
-              <FolderSearchIcon aria-hidden="true" className="size-4" />
-              {dictionary.findDriveRecordings}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onSync("gmail")}>
-              {dictionary.gmailContext}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Deferred
+          preload={loadMenus}
+          placeholder={(props) => (
+            <Button {...syncTriggerProps(syncing)} aria-busy={props ? undefined : true} {...props}>
+              {syncTrigger}
+            </Button>
+          )}
+        >
+          {({ defaultOpen }) => (
+            <SyncMenu
+              dictionary={dictionary}
+              trigger={syncTrigger}
+              syncing={syncing}
+              defaultOpen={defaultOpen}
+              onSync={onSync}
+              onFindDriveRecordings={onFindDriveRecordings}
+            />
+          )}
+        </Deferred>
 
         <Button
           variant="ghost"
@@ -262,7 +254,7 @@ export function TopCommandBar({
           <span className="sr-only">{dictionary.shellAiStatus}</span>
         </Button>
         <PendingUploadsIndicator />
-        <NotificationBell locale={locale} />
+        <NotificationBellHost locale={locale} />
         <LanguageSwitcher locale={locale} />
         <Button
           variant="ghost"

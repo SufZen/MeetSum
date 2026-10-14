@@ -4,10 +4,9 @@ import type { ReactNode } from "react"
 
 import { ClipShareView } from "@/components/clips/clip-share-view"
 import { ShareChromeControls, type ShareChromeLabels } from "@/components/share/share-chrome-controls"
-import { SharedMeetingPlayer } from "@/components/share/shared-meeting-player"
+import { SharedMeetingPlayer } from "@/components/share/shared-meeting-player-lazy"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { INPUT_CLASS, LABEL_CLASS } from "@/components/ui/input-class"
 import { getSessionSecret } from "@/lib/auth/session"
 import { buildClipSharePayload, clipShareLocale } from "@/lib/clips/share-payload"
 import { getDictionary, type Dictionary } from "@/lib/i18n/dictionaries"
@@ -152,8 +151,13 @@ export default async function PublicMeetingSharePage({
             <h1 className="mb-2 text-xl font-semibold">{t.sharePagePasswordTitle}</h1>
             <p className="mb-6 text-sm text-fg-3">{t.sharePagePasswordHint}</p>
             <form method="POST" action={`/api/share/${encodeURIComponent(token)}/verify`} className="grid gap-3">
-              <Label htmlFor="share-password">{t.sharePagePasswordLabel}</Label>
-              <Input
+              {/* Native controls: the gate ships no Field runtime (M10 C). */}
+              <label htmlFor="share-password" className={LABEL_CLASS}>
+                {t.sharePagePasswordLabel}
+              </label>
+              <input
+                className={INPUT_CLASS}
+                data-slot="input"
                 id="share-password"
                 type="password"
                 name="password"
