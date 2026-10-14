@@ -32,6 +32,8 @@ export type I18nValue = {
   timeZone: string
   /** The provider's messages (the full active-locale dictionary under `app/[locale]`). */
   messages: MessageSource
+  /** The namespaces `messages` holds (`lib/i18n/namespaces.ts`), or "all". */
+  namespaces: readonly string[] | "all"
   t: (key: string, values?: MessageValues) => string
   plural: (key: string, n: number, values?: MessageValues) => string
   fmt: {
@@ -46,7 +48,13 @@ export type I18nValue = {
   text: (s: string, lang?: string | null) => string
 }
 
-function buildValue(locale: SupportedLocale, dir: "rtl" | "ltr", timeZone: string, messages: MessageSource): I18nValue {
+function buildValue(
+  locale: SupportedLocale,
+  dir: "rtl" | "ltr",
+  timeZone: string,
+  messages: MessageSource,
+  namespaces: readonly string[] | "all"
+): I18nValue {
   const f: Fmt = { locale, timeZone }
 
   return {
@@ -54,6 +62,7 @@ function buildValue(locale: SupportedLocale, dir: "rtl" | "ltr", timeZone: strin
     dir,
     timeZone,
     messages,
+    namespaces,
     t: (key, values) => translate(messages, key, values),
     plural: (key, n, values) => pluralMessage(messages, locale, key, n, values),
     fmt: {
@@ -75,6 +84,7 @@ export function I18nProvider({
   dir,
   timeZone,
   messages,
+  namespaces = "all",
   children,
 }: {
   locale: SupportedLocale
@@ -82,9 +92,17 @@ export function I18nProvider({
   timeZone: string
   /** The active locale's dictionary (or the slice this subtree needs). */
   messages: MessageSource
+  /**
+   * The namespaces `messages` was built from (`messagesFor` in
+   * `lib/i18n/namespaces.ts`); omitted means the whole dictionary.
+   */
+  namespaces?: readonly string[] | "all"
   children: ReactNode
 }) {
-  const value = useMemo(() => buildValue(locale, dir, timeZone, messages), [locale, dir, timeZone, messages])
+  const value = useMemo(
+    () => buildValue(locale, dir, timeZone, messages, namespaces),
+    [locale, dir, timeZone, messages, namespaces]
+  )
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
@@ -109,6 +127,26 @@ export function useI18n(): I18nValue {
   const value = useContext(I18nContext)
 
   if (!value) throw new Error("useI18n must be used inside I18nProvider") // i18n-allow: developer error
+
+  return value
+}
+
+/**
+ * `useI18n()` for a component that needs `namespaces` (M10 C). A provider
+ * built without one of them is a wiring bug: it throws in development and is
+ * reported (`reportError`, no crash) in production, where the keys render as
+ * themselves.
+ */
+export function useI18nNamespaces(...namespaces: string[]): I18nValue {
+  const value = useI18n()
+  const missing = value.namespaces === "all" ? [] : namespaces.filter((ns) => !value.namespaces.includes(ns))
+
+  if (missing.length) {
+    const error = new Error(`I18nProvider is missing namespace(s): ${missing.join(", ")}`) // i18n-allow: developer error
+
+    if (process.env.NODE_ENV !== "production") throw error
+    globalThis.reportError?.(error)
+  }
 
   return value
 }

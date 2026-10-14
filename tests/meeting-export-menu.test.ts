@@ -1,4 +1,4 @@
-import { createElement } from "react"
+import { createElement, type ComponentProps } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -30,16 +30,16 @@ import { contentDispositionAttachment } from "@/lib/http/content-disposition"
 
 /** The menu reads its strings from the route's provider (M10 C), like under `app/[locale]`. */
 function menu(props: Parameters<typeof MeetingExportMenu>[0] & { locale: "he" | "en" }) {
-  return createElement(
-    I18nProvider,
-    {
-      locale: props.locale,
-      dir: props.locale === "he" ? "rtl" : "ltr",
-      timeZone: "UTC",
-      messages: getDictionary(props.locale),
-      children: createElement(MeetingExportMenu, props),
-    }
-  )
+  // `children` is passed as the third argument below.
+  const providerProps: ComponentProps<typeof I18nProvider> = {
+    locale: props.locale,
+    dir: props.locale === "he" ? "rtl" : "ltr",
+    timeZone: "UTC",
+    messages: getDictionary(props.locale),
+    children: null,
+  }
+
+  return createElement(I18nProvider, providerProps, createElement(MeetingExportMenu, props))
 }
 
 /**
