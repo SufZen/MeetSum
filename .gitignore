@@ -55,3 +55,6 @@ dev-server*.log
 next-env.d.ts
 desktop-recorder/dist/
 desktop-recorder/release/
+
+# Host-local compose override (scripts/deploy-vps.sh adds it with -f when present).
+/docker-compose.local.yml

@@ -114,7 +114,7 @@ or committed. Notes are the comment above the variable in `.env.example`.
 
 | Variable | Used by | Required in | Default | Secret | Milestone | Notes |
 |---|---|---|---|---|---|---|
-| `MEETSUM_TRANSCRIPTION_PROVIDER` | app | dev | `auto` | no |  | Deprecated (M3): mapped onto the ASR router chain below when set. |
+| `MEETSUM_TRANSCRIPTION_PROVIDER` | app | optional |  | no |  | Deprecated (M3; boot logs a warning): only read while MEETSUM_ASR_CHAIN is unset, with its v0.6.0 meaning: auto = local Whisper then Gemini (when a Gemini key or Vertex is configured), local-whisper = local only, gemini = default chain + Gemini. Replace it with MEETSUM_ASR_CHAIN (recipe below). |
 | `LOCAL_TRANSCRIPTION_URL` | app | dev |  | no |  |  |
 | `LOCAL_TRANSCRIPTION_MODEL` | app | dev | `ivrit-ai/whisper-large-v3-turbo-ct2` | no |  |  |
 | `LOCAL_TRANSCRIPTION_LANGUAGE` | app | dev | `he` | no |  |  |
@@ -128,9 +128,9 @@ or committed. Notes are the comment above the variable in `.env.example`.
 
 | Variable | Used by | Required in | Default | Secret | Milestone | Notes |
 |---|---|---|---|---|---|---|
-| `MEETSUM_ASR_CHAIN` | compose/infra | optional | `runpod-ivrit,modal-worker,soniox,local-whisper-chunked` | no | M3 | Provider order for Hebrew / mixed meetings, and for other languages. Providers without credentials are skipped. |
+| `MEETSUM_ASR_CHAIN` | app | optional | `runpod-ivrit,modal-worker,soniox,local-whisper-chunked` | no | M3 | Provider order for Hebrew / mixed meetings, and for other languages. Providers without credentials are skipped. |
 | `MEETSUM_ASR_CHAIN_NON_HE` | compose/infra | optional | `soniox,runpod-ivrit,modal-worker,local-whisper-chunked` | no | M3 |  |
-| `MEETSUM_ASR_ALLOW_GEMINI` | app | dev | `false` | no | M3 | Gemini audio stays out of the ASR chain unless opted in (LLM transcript, synthetic word timings). |
+| `MEETSUM_ASR_ALLOW_GEMINI` | app | dev | `false` | no | M3 | Gemini audio stays out of the ASR chain unless opted in (LLM transcript, synthetic word timings). Recipe "Lemonade + Gemini fallback" (the v0.6.0 `auto` behaviour, made explicit; docs/runbooks/free-tier-asr.md section 2d): set the chain to local-whisper-chunked, MEETSUM_ASR_ALLOW_GEMINI to true, LOCAL_TRANSCRIPTION_URL to the laptop's Lemonade server (Tailscale) and GOOGLE_GEMINI_API_KEY (or Vertex). Gemini then receives the meeting audio whenever the laptop is unreachable; with GEMINI_TIER=free Google may use it to improve its products, so use a paid key or Vertex for confidential meetings. Boot warns when the Hebrew chain has only one configured provider. |
 | `GOOGLE_GEMINI_AUDIO_PRICE_PER_MTOK` | app | optional |  | no | M3 |  |
 | `MEETSUM_ASR_BREAKER_THRESHOLD` | app | dev | `3` | no | M3 | Circuit breaker: consecutive retryable failures before a provider is skipped, and for how long (auth/config errors open it for 1 h). |
 | `MEETSUM_ASR_BREAKER_COOLDOWN_MS` | app | dev | `600000` | no | M3 |  |

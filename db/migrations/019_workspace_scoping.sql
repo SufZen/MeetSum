@@ -1,3 +1,9 @@
+-- meetsum:breaking workspace_id becomes NOT NULL and the tags unique key
+-- becomes per-workspace: a release older than 019 (v0.6.x) inserts meetings
+-- and tags without workspace_id and uses `on conflict (name)` on tags, so its
+-- writes fail once this runs. scripts/deploy-vps.sh
+-- therefore stops app + worker before migrating across it (maintenance mode;
+-- docs/runbooks/upgrade-0.6-to-0.7.md).
 alter table meetings
   add column if not exists workspace_id text references workspaces(id),
   add column if not exists owner_user_id text references users(id) on delete set null,

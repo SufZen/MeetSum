@@ -3,7 +3,15 @@
 set -eu
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+LOCAL_COMPOSE_FILE="${LOCAL_COMPOSE_FILE:-docker-compose.local.yml}"
 ENV_FILE="${ENV_FILE:-.env.local}"
+MINIO_BACKUP_URL="${MINIO_BACKUP_URL:-http://minio:9000}"
+
+# Same files as scripts/deploy-vps.sh: the host-local override when present.
+COMPOSE_ARGS="-f $COMPOSE_FILE"
+if [ -f "$LOCAL_COMPOSE_FILE" ]; then
+  COMPOSE_ARGS="$COMPOSE_ARGS -f $LOCAL_COMPOSE_FILE"
+fi
 
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <backup-directory> [--confirm-restore]"
@@ -73,7 +81,8 @@ if [ -f "$PG_FILE" ]; then
     echo "  ✓ Checksum verified"
   fi
 
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
+  # shellcheck disable=SC2086
+  docker compose --env-file "$ENV_FILE" $COMPOSE_ARGS exec -T postgres \
     pg_restore -U "${POSTGRES_USER:-meetings}" -d "${POSTGRES_DB:-meetings}" \
     --clean --if-exists --no-owner --no-privileges < "$PG_FILE"
 
@@ -86,16 +95,18 @@ fi
 MINIO_DIR="${BACKUP_DIR}/minio"
 if [ -d "$MINIO_DIR" ] && [ "$(ls -A "$MINIO_DIR" 2>/dev/null)" ]; then
   echo "[2/2] Restoring MinIO..."
-  MINIO_ALIAS="${MINIO_ALIAS:-meetsum}"
-
-  if command -v mc >/dev/null 2>&1; then
-    mc mirror --overwrite "$MINIO_DIR/" "${MINIO_ALIAS}/" 2>/dev/null || {
-      echo "  ⚠ MinIO restore failed — is mc configured with alias '${MINIO_ALIAS}'?"
-    }
-    echo "  ✓ MinIO restored"
-  else
-    echo "  ⚠ mc not found — skipping MinIO restore"
+  # Through a throwaway container of the minio service (its image ships
+  # `mc`; no `mc` on the host), the backup bind-mounted read-only. --no-deps
+  # and --pull never: nothing is started, recreated or pulled.
+  MINIO_DIR_ABS="$(cd "$MINIO_DIR" && pwd)"
+  # shellcheck disable=SC2016,SC2086
+  if ! docker compose --env-file "$ENV_FILE" $COMPOSE_ARGS run --rm --no-deps -T --pull never --entrypoint sh -v "${MINIO_DIR_ABS}:/backup:ro" minio -c \
+    'mc alias set meetsum-restore "$0" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null && mc mirror --overwrite --quiet /backup/ meetsum-restore/' \
+    "$MINIO_BACKUP_URL"; then
+    echo "  ERROR: MinIO restore failed (mc mirror in a throwaway minio container)" >&2
+    exit 1
   fi
+  echo "  ✓ MinIO restored"
 else
   echo "[2/2] Skipping MinIO (no minio/ data found)"
 fi

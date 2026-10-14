@@ -142,6 +142,45 @@ A sensible low-cost chain: `MEETSUM_ASR_CHAIN=modal-worker,soniox,local-whisper-
 (Modal first while the credit lasts, Soniox as a paid fallback, Groq or a
 local server last).
 
+### d. Lemonade on a laptop + Gemini fallback
+
+The v0.6.0 production setup: a Lemonade (or any OpenAI-compatible
+faster-whisper) server on a laptop, reached over Tailscale, with Gemini as
+the fallback while the laptop is asleep or offline. In v0.7 write it as an
+explicit chain:
+
+```dotenv
+MEETSUM_ASR_CHAIN=local-whisper-chunked
+MEETSUM_ASR_ALLOW_GEMINI=true
+LOCAL_TRANSCRIPTION_URL=http://<laptop-tailscale-name>:8000
+LOCAL_TRANSCRIPTION_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
+LOCAL_TRANSCRIPTION_SEND_HOTWORDS=true
+GOOGLE_GEMINI_API_KEY=...        # or Vertex AI (GOOGLE_GENAI_USE_VERTEXAI=true + project/location/credentials)
+GEMINI_TIER=paid                 # see the privacy note below
+```
+
+The resulting Hebrew chain is `local-whisper-chunked → gemini-legacy`.
+`MEETSUM_ASR_ALLOW_GEMINI=true` appends Gemini to whatever
+`MEETSUM_ASR_CHAIN` lists; without a Gemini key or Vertex it drops out again.
+
+- **Legacy `MEETSUM_TRANSCRIPTION_PROVIDER=auto`** still means exactly this
+  chain while `MEETSUM_ASR_CHAIN` is unset (v0.7.1 restored the v0.6.0
+  meaning; v0.7.0 had silently dropped Gemini). The app and the worker log a
+  deprecation warning at boot. Once `MEETSUM_ASR_CHAIN` is set the legacy
+  variable is ignored; remove it.
+- **Single-provider warning.** At boot the app and the worker warn when the
+  Hebrew chain has only one *configured* provider (for example
+  `MEETSUM_ASR_CHAIN=local-whisper-chunked` without the Gemini opt-in), because
+  every Hebrew transcription then fails while that provider is down.
+- **Privacy (`GEMINI_TIER`).** With this recipe the full meeting audio goes to
+  Gemini whenever the laptop is unreachable. On `GEMINI_TIER=free` Google may
+  use it to improve its products and humans may review it (health and ops
+  status show a warning). Keep a paid key or Vertex AI for confidential
+  meetings, or leave `MEETSUM_ASR_ALLOW_GEMINI=false` and accept failed
+  transcriptions (retry later) while the laptop is away.
+- Gemini is an LLM transcript: no word timings (`synthetic_word_timings`) and
+  guessed speakers. It is a fallback, not a replacement for ivrit-ai.
+
 ## 3. Free credits for benchmarking (not yet integrated)
 
 These vendors offer one-time signup credit that is enough to benchmark them
@@ -161,7 +200,9 @@ Meeting audio is sensitive. Before turning on a hosted tier:
 - **Gemini free tier**: Google may use free-tier Gemini API inputs and outputs
   to improve its products (paid tiers do not). Keep
   `MEETSUM_ASR_ALLOW_GEMINI=false` (the default) for real meetings, or use a
-  paid key or Vertex AI.
+  paid key or Vertex AI. This also applies to the legacy
+  `MEETSUM_TRANSCRIPTION_PROVIDER=auto`, which turns the Gemini fallback on
+  (section 2d).
 - **Groq**: enable **Zero Data Retention** in the Groq console's data controls
   so audio is not stored after processing. Check the current terms for the free tier.
 - **Modal / RunPod**: the audio is processed in your own container. Presigned

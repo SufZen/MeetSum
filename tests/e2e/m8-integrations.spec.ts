@@ -547,7 +547,17 @@ test.describe.serial("M8 integrations with fake providers", () => {
       .poll(
         async () => {
           await openIntegrations(page, "he")
+          // The list mounts on the tab click and fetches then: counting right
+          // after the click raced that fetch and read 0 rows (flaky on main).
+          const loaded = page.waitForResponse(
+            (response) => new URL(response.url()).pathname === "/api/webhooks/deliveries" && response.request().method() === "GET",
+            { timeout: 20_000 }
+          )
+
           await page.getByRole("tab", { name: he.integrationsLogTabWebhooks }).click()
+          await loaded
+          // React commits the rows right after the response.
+          await page.locator("[data-webhook-delivery-id]").first().waitFor({ timeout: 2_000 }).catch(() => undefined)
 
           return page.locator("[data-webhook-delivery-id]").count()
         },

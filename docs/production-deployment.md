@@ -6,7 +6,7 @@ Production target: `/opt/meetsum` on the VPS.
 
 Stateful services are separate from replaceable app code:
 
-- `app`: Next.js UI/API, internal port `3000`, host port `3005`.
+- `app`: Next.js UI/API, internal port `3000`, published on `127.0.0.1:3005` only (loopback since v0.7; public traffic goes through Traefik, see [runbooks/deploy.md](runbooks/deploy.md)).
 - `worker`: background/MCP process.
 - `postgres`: persistent named volume.
 - `redis`: persistent named volume.
@@ -19,17 +19,23 @@ Database migrations run separately via `docker-compose.migrate.yml` before deplo
 
 ## Compose
 
-Use:
+On an **existing** host, deploy only with `scripts/deploy-vps.sh` ([runbooks/deploy.md](runbooks/deploy.md)): it never recreates postgres, redis or minio. Don't run a plain `docker compose ... up -d` there; it would recreate any infra container whose configuration changed.
+
+On a **fresh** host, bring the whole stack up once. Use `--env-file .env.local` because Docker Compose interpolates service environment values before `env_file` is applied, and add `docker-compose.minio-source.yml`: the pinned `minio/minio` image no longer resolves on Docker Hub, so a fresh host builds MinIO from source instead:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.local -f docker-compose.prod.yml -f docker-compose.minio-source.yml up -d --build
 ```
 
-Use `--env-file .env.local` in production because Docker Compose interpolates service environment values before `env_file` is applied:
+Then make the MinIO choice permanent for the deploy script with a host-local `docker-compose.local.yml` (git-ignored; the deploy and rollback scripts add it with `-f` whenever it exists):
 
-```bash
-docker compose --env-file .env.local -f docker-compose.prod.yml up -d --build
+```yaml
+services:
+  minio:
+    image: meetsum-minio:RELEASE.2025-10-15T17-29-55Z
 ```
+
+Add the pgvector image the same way if you want vector search from day one (`docker-compose.pgvector.yml`; a fresh volume needs no collation migration).
 
 The production compose file includes Coolify/Traefik labels for:
 
@@ -113,7 +119,8 @@ For the temporary AI Studio Gemini key path, keep Gemini available as the
 fallback provider:
 
 ```env
-MEETSUM_TRANSCRIPTION_PROVIDER=auto
+MEETSUM_ASR_CHAIN=local-whisper-chunked
+MEETSUM_ASR_ALLOW_GEMINI=true
 GOOGLE_GENAI_USE_VERTEXAI=false
 GOOGLE_GEMINI_API_KEY=...
 ```
@@ -135,9 +142,12 @@ Because the app joins both the MeetSum network and Coolify's network, internal s
 
 ## Optional Local Hebrew ASR
 
-`auto` is the recommended first-user production mode: Hebrew and mixed-language
-meetings try local ivrit-ai ASR first, clearly non-Hebrew meetings use Gemini,
-and Gemini remains the fallback if local ASR fails. Run the optional
+Local ivrit-ai ASR first with Gemini as the fallback (what
+`MEETSUM_TRANSCRIPTION_PROVIDER=auto` meant in v0.6.0, and still means while
+`MEETSUM_ASR_CHAIN` is unset) is written explicitly as
+`MEETSUM_ASR_CHAIN=local-whisper-chunked` plus `MEETSUM_ASR_ALLOW_GEMINI=true`
+([runbooks/free-tier-asr.md](runbooks/free-tier-asr.md) section 2d, including
+the `GEMINI_TIER` privacy note). Run the optional
 faster-whisper service with:
 
 ```bash
@@ -147,7 +157,8 @@ docker compose --env-file .env.local -f docker-compose.prod.yml --profile local-
 Then set:
 
 ```env
-MEETSUM_TRANSCRIPTION_PROVIDER=auto
+MEETSUM_ASR_CHAIN=local-whisper-chunked
+MEETSUM_ASR_ALLOW_GEMINI=true
 LOCAL_TRANSCRIPTION_URL=http://faster-whisper:8000
 LOCAL_TRANSCRIPTION_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
 LOCAL_TRANSCRIPTION_LANGUAGE=he

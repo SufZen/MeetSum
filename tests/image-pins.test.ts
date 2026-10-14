@@ -6,6 +6,13 @@
  * `meetsum-<name>:<tag>` services with a `build` context whose Dockerfile
  * FROM lines are themselves pinned (M10: MinIO from the official source,
  * deploy/minio/Dockerfile).
+ *
+ * v0.7.1: docker-compose.prod.yml pins the infra images production runs
+ * (postgres 17 Alpine, redis 7.4.8, minio RELEASE.2025-09-07T16-13-09Z), and
+ * the pgvector and source-built MinIO images live only in the explicit
+ * overrides docker-compose.pgvector.yml / docker-compose.minio-source.yml. The
+ * production minio reference is the single tag-only exception: minio/minio no
+ * longer resolves on Docker Hub, so its digest cannot be verified.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -33,9 +40,13 @@ const root = path.resolve(__dirname, "..")
 const PINNED = /^[a-z0-9][\w./-]*:[\w.-]+@sha256:[0-9a-f]{64}$/
 const LOCAL_IMAGE = /^meetsum:\$\{MEETSUM_IMAGE_TAG:-[\w.-]+\}$/
 const LOCAL_BUILT_IMAGE = /^meetsum-[a-z0-9-]+:[\w.-]+$/
+/** Tag-only exception (no verifiable digest; see docker-compose.prod.yml). */
+const PROD_MINIO = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+const PGVECTOR = "pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21"
 
 const composeFiles = [
-  ...readdirSync(root).filter((name) => /^docker-compose.*\.ya?ml$/.test(name)),
+  // docker-compose.local.yml is host-local and git-ignored: never checked here.
+  ...readdirSync(root).filter((name) => /^docker-compose.*\.ya?ml$/.test(name) && name !== "docker-compose.local.yml"),
   ...readdirSync(path.join(root, "deploy/vexa"))
     .filter((name) => /\.ya?ml$/.test(name))
     .map((name) => `deploy/vexa/${name}`),
@@ -67,7 +78,16 @@ function services(file: string): Array<[string, Service]> {
 
 describe("image pins", () => {
   it("finds the compose files", () => {
-    expect(composeFiles).toEqual(expect.arrayContaining(["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.migrate.yml", "docker-compose.vexa.yml"]))
+    expect(composeFiles).toEqual(
+      expect.arrayContaining([
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        "docker-compose.migrate.yml",
+        "docker-compose.vexa.yml",
+        "docker-compose.pgvector.yml",
+        "docker-compose.minio-source.yml",
+      ])
+    )
   })
 
   it.each(composeFiles)("%s: every image is tag + digest (or MeetSum's local image)", (file) => {
@@ -81,6 +101,7 @@ describe("image pins", () => {
     for (const [name, service] of services(file)) {
       if (!service.image) continue
       if (LOCAL_IMAGE.test(service.image)) continue
+      if (file === "docker-compose.prod.yml" && name === "minio" && service.image === PROD_MINIO) continue
       if (LOCAL_BUILT_IMAGE.test(service.image)) {
         // Allowed only with a build whose base images are pinned.
         const dockerfile = dockerfileOf(service)
@@ -134,12 +155,38 @@ describe("image pins", () => {
     // Source builds only: no prebuilt binaries and no third-party MinIO image.
     expect(dockerfile).not.toMatch(/dl\.min\.io|coollabsio|minio\/minio:/)
 
-    for (const file of ["docker-compose.yml", "docker-compose.prod.yml"]) {
+    // Dev builds it; production gets it only through the explicit override.
+    for (const file of ["docker-compose.yml", "docker-compose.minio-source.yml"]) {
       const minio = Object.fromEntries(services(file)).minio
 
       expect(minio.image, file).toBe(`meetsum-minio:${release}`)
       expect(dockerfileOf(minio), file).toBe(path.normalize("deploy/minio/Dockerfile"))
     }
+  })
+
+  it("production pins the infra images it runs; pgvector and source MinIO are explicit overrides", () => {
+    const prod = Object.fromEntries(services("docker-compose.prod.yml"))
+
+    // Postgres 17 on Alpine (musl), like the volume production created: never the glibc pgvector image.
+    expect(prod.postgres.image).toMatch(/^postgres:17\.\d+-alpine@sha256:[0-9a-f]{64}$/)
+    expect(prod.redis.image).toMatch(/^redis:7\.4\.8-alpine@sha256:[0-9a-f]{64}$/)
+    expect(prod.minio.image).toBe(PROD_MINIO)
+    expect(prod.minio.build).toBeUndefined()
+    expect(readFileSync(path.join(root, "docker-compose.prod.yml"), "utf8")).not.toContain("pgvector/pgvector")
+
+    const pgvector = services("docker-compose.pgvector.yml")
+
+    expect(pgvector.map(([name]) => name)).toEqual(["postgres"])
+    expect(pgvector[0][1]).toEqual({ image: PGVECTOR })
+
+    const minioSource = services("docker-compose.minio-source.yml")
+
+    expect(minioSource.map(([name]) => name)).toEqual(["minio"])
+    expect(Object.keys(minioSource[0][1]).sort()).toEqual(["build", "image"])
+  })
+
+  it("the host-local override is git-ignored", () => {
+    expect(readFileSync(path.join(root, ".gitignore"), "utf8")).toMatch(/^\/docker-compose\.local\.yml$/m)
   })
 
   it("never publishes the worker health port and keeps the dev initdb mount out", () => {
