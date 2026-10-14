@@ -1,8 +1,18 @@
 name: meetsum
 
+# One-off migrations, merged with docker-compose.prod.yml so `migrate` can see
+# the postgres service:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.migrate.yml run --rm migrate
+#
+# It runs the same image as app and worker (meetsum:${MEETSUM_IMAGE_TAG});
+# scripts/deploy-vps.sh runs it with the NEW image before switching app and
+# worker over (migrations must stay backward-compatible with the previous
+# release: docs/runbooks/deploy.md "Expand/contract").
+
 services:
   migrate:
-    build: .
+    image: meetsum:${MEETSUM_IMAGE_TAG:-current}
     command: ["npm", "run", "db:migrate"]
     env_file:
       - .env.local

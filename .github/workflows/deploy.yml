@@ -1,7 +1,20 @@
 name: Deploy
 
+# M10 B5 (docs/runbooks/deploy.md): one deploy path. This workflow only runs
+# scripts/deploy-vps.sh on the VPS over SSH; the script does the lock, the
+# backup, one image build, migrations before the switch, the readiness wait
+# and the automatic rollback.
+#
+# Quality gate: the full CI workflow (Node 24: typecheck, lint, ds:check,
+# tests, build, bundle:check, schema). A deploy starts only after CI
+# succeeded for a push to main, and it deploys exactly that commit
+# (DEPLOY_SHA). Nothing runs unless the repository variable
+# DEPLOY_ENABLED is 'true' (it is unset: nothing is deployed).
+
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -9,66 +22,50 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  quality:
-    name: Quality gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-
   deploy:
     name: Deploy to VPS
-    needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    timeout-minutes: 30
+    environment: production
+    if: >-
+      github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'))
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Deploy via SSH (scripts/deploy-vps.sh)
+        # appleboy/ssh-action v1.2.2, pinned by commit SHA.
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 25m
+          envs: DEPLOY_SHA
           script: |
-            set -e
+            set -eu
             cd /opt/meetsum
-
-            echo "=== Pre-deploy backup ==="
-            ./scripts/backup-postgres.sh || echo "Backup skipped"
-
-            echo "=== Pulling latest ==="
-            git pull --ff-only origin main
-
-            echo "=== Building & deploying ==="
-            docker compose -f docker-compose.prod.yml --env-file .env.local \
-              up -d --build app worker
-
-            echo "=== Health check ==="
-            sleep 10
-            HEALTH=$(docker exec meetsum-app-1 wget -qO- http://localhost:3000/api/health 2>/dev/null || echo '{"status":"error"}')
-            echo "$HEALTH"
-
-            VERSION=$(echo "$HEALTH" | grep -o '"version":"[^"]*"' | head -1 || echo 'unknown')
-            echo "Deployed version: $VERSION"
+            DEPLOY_SHA="$DEPLOY_SHA" ./scripts/deploy-vps.sh
 
       - name: Post deploy status
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "Deployment ${{ job.status }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Triggered by: ${{ github.actor }}"
+          echo "Deployment $JOB_STATUS"
+          echo "Commit: $DEPLOYED_SHA"
+          echo "Triggered by: $ACTOR"
