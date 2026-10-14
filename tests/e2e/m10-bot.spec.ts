@@ -76,12 +76,15 @@ test("bot: join now, status walk, finalize into a transcript, replay and signatu
   // 2. The status walk, one signed webhook per step.
   await page.goto(`/he?meeting=${encodeURIComponent(meetingId)}`)
 
-  const walk: Array<[string, RegExp | undefined]> = [
+  // `null`: done. A completed session is not open, so the strip drops its
+  // step list and the meeting's own processing pill takes over (docs/parity/
+  // m7.md, bot-status-strip; tests/bot-ui-state.test.ts).
+  const walk: Array<[string, RegExp | null | undefined]> = [
     ["status-requested", undefined],
     ["status-joining", /מצטרף/],
     ["status-awaiting_admission", /ממתין לאישור/],
     ["status-active", /מקליט/],
-    ["completed", /בעיבוד|הושלם/],
+    ["completed", null],
   ]
 
   for (const [step, label] of walk) {
@@ -89,6 +92,7 @@ test("bot: join now, status walk, finalize into a transcript, replay and signatu
 
     expect(posted.status, `${step} webhook`).toBe(200)
     if (label) await expect(stepLabel(page)).toHaveText(label, { timeout: 30_000 })
+    if (label === null) await expect(stepLabel(page)).toHaveCount(0, { timeout: 30_000 })
     if (step === "status-active") await shot(page, "bot-recording")
   }
 
