@@ -1,0 +1,669 @@
+{
+  "task": "transcribe",
+  "language": "hebrew",
+  "duration": 30,
+  "text": "בוקר טוב לכולם, נתחיל בסקירת התקציב של Q4. Let's start with the marketing budget for the launch. הוחלט להגדיל את תקציב השיווק בעשרה אחוזים. דנה תשלח את התחזית המעודכנת עד יום חמישי. We still need sign-off from finance on the vendor contract. תודה רבה, נתראה בשבוע הבא.",
+  "segments": [
+    {
+      "id": 0,
+      "seek": 0,
+      "start": 0.5,
+      "end": 4,
+      "text": " בוקר טוב לכולם, נתחיל בסקירת התקציב של Q4.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "בוקר",
+          "start": 0.5,
+          "end": 0.888,
+          "probability": 0.97
+        },
+        {
+          "word": "טוב",
+          "start": 0.938,
+          "end": 1.325,
+          "probability": 0.97
+        },
+        {
+          "word": "לכולם,",
+          "start": 1.375,
+          "end": 1.763,
+          "probability": 0.97
+        },
+        {
+          "word": "נתחיל",
+          "start": 1.813,
+          "end": 2.2,
+          "probability": 0.97
+        },
+        {
+          "word": "בסקירת",
+          "start": 2.25,
+          "end": 2.638,
+          "probability": 0.97
+        },
+        {
+          "word": "התקציב",
+          "start": 2.688,
+          "end": 3.075,
+          "probability": 0.97
+        },
+        {
+          "word": "של",
+          "start": 3.125,
+          "end": 3.513,
+          "probability": 0.97
+        },
+        {
+          "word": "Q4.",
+          "start": 3.563,
+          "end": 3.95,
+          "probability": 0.97
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "seek": 0,
+      "start": 5.5,
+      "end": 9.5,
+      "text": " Let's start with the marketing budget for the launch.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "Let's",
+          "start": 5.5,
+          "end": 5.894,
+          "probability": 0.97
+        },
+        {
+          "word": "start",
+          "start": 5.944,
+          "end": 6.339,
+          "probability": 0.97
+        },
+        {
+          "word": "with",
+          "start": 6.389,
+          "end": 6.783,
+          "probability": 0.97
+        },
+        {
+          "word": "the",
+          "start": 6.833,
+          "end": 7.228,
+          "probability": 0.97
+        },
+        {
+          "word": "marketing",
+          "start": 7.278,
+          "end": 7.672,
+          "probability": 0.97
+        },
+        {
+          "word": "budget",
+          "start": 7.722,
+          "end": 8.117,
+          "probability": 0.97
+        },
+        {
+          "word": "for",
+          "start": 8.167,
+          "end": 8.561,
+          "probability": 0.97
+        },
+        {
+          "word": "the",
+          "start": 8.611,
+          "end": 9.006,
+          "probability": 0.97
+        },
+        {
+          "word": "launch.",
+          "start": 9.056,
+          "end": 9.45,
+          "probability": 0.97
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "seek": 0,
+      "start": 11,
+      "end": 15,
+      "text": " הוחלט להגדיל את תקציב השיווק בעשרה אחוזים.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "הוחלט",
+          "start": 11,
+          "end": 11.521,
+          "probability": 0.97
+        },
+        {
+          "word": "להגדיל",
+          "start": 11.571,
+          "end": 12.093,
+          "probability": 0.97
+        },
+        {
+          "word": "את",
+          "start": 12.143,
+          "end": 12.664,
+          "probability": 0.97
+        },
+        {
+          "word": "תקציב",
+          "start": 12.714,
+          "end": 13.236,
+          "probability": 0.97
+        },
+        {
+          "word": "השיווק",
+          "start": 13.286,
+          "end": 13.807,
+          "probability": 0.97
+        },
+        {
+          "word": "בעשרה",
+          "start": 13.857,
+          "end": 14.379,
+          "probability": 0.97
+        },
+        {
+          "word": "אחוזים.",
+          "start": 14.429,
+          "end": 14.95,
+          "probability": 0.97
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "seek": 0,
+      "start": 16.5,
+      "end": 20.5,
+      "text": " דנה תשלח את התחזית המעודכנת עד יום חמישי.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "דנה",
+          "start": 16.5,
+          "end": 16.95,
+          "probability": 0.97
+        },
+        {
+          "word": "תשלח",
+          "start": 17,
+          "end": 17.45,
+          "probability": 0.97
+        },
+        {
+          "word": "את",
+          "start": 17.5,
+          "end": 17.95,
+          "probability": 0.97
+        },
+        {
+          "word": "התחזית",
+          "start": 18,
+          "end": 18.45,
+          "probability": 0.97
+        },
+        {
+          "word": "המעודכנת",
+          "start": 18.5,
+          "end": 18.95,
+          "probability": 0.97
+        },
+        {
+          "word": "עד",
+          "start": 19,
+          "end": 19.45,
+          "probability": 0.97
+        },
+        {
+          "word": "יום",
+          "start": 19.5,
+          "end": 19.95,
+          "probability": 0.97
+        },
+        {
+          "word": "חמישי.",
+          "start": 20,
+          "end": 20.45,
+          "probability": 0.97
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "seek": 0,
+      "start": 22,
+      "end": 25.5,
+      "text": " We still need sign-off from finance on the vendor contract.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "We",
+          "start": 22,
+          "end": 22.3,
+          "probability": 0.97
+        },
+        {
+          "word": "still",
+          "start": 22.35,
+          "end": 22.65,
+          "probability": 0.97
+        },
+        {
+          "word": "need",
+          "start": 22.7,
+          "end": 23,
+          "probability": 0.97
+        },
+        {
+          "word": "sign-off",
+          "start": 23.05,
+          "end": 23.35,
+          "probability": 0.97
+        },
+        {
+          "word": "from",
+          "start": 23.4,
+          "end": 23.7,
+          "probability": 0.97
+        },
+        {
+          "word": "finance",
+          "start": 23.75,
+          "end": 24.05,
+          "probability": 0.97
+        },
+        {
+          "word": "on",
+          "start": 24.1,
+          "end": 24.4,
+          "probability": 0.97
+        },
+        {
+          "word": "the",
+          "start": 24.45,
+          "end": 24.75,
+          "probability": 0.97
+        },
+        {
+          "word": "vendor",
+          "start": 24.8,
+          "end": 25.1,
+          "probability": 0.97
+        },
+        {
+          "word": "contract.",
+          "start": 25.15,
+          "end": 25.45,
+          "probability": 0.97
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "seek": 0,
+      "start": 27,
+      "end": 29.5,
+      "text": " תודה רבה, נתראה בשבוע הבא.",
+      "avg_logprob": -0.12,
+      "words": [
+        {
+          "word": "תודה",
+          "start": 27,
+          "end": 27.45,
+          "probability": 0.97
+        },
+        {
+          "word": "רבה,",
+          "start": 27.5,
+          "end": 27.95,
+          "probability": 0.97
+        },
+        {
+          "word": "נתראה",
+          "start": 28,
+          "end": 28.45,
+          "probability": 0.97
+        },
+        {
+          "word": "בשבוע",
+          "start": 28.5,
+          "end": 28.95,
+          "probability": 0.97
+        },
+        {
+          "word": "הבא.",
+          "start": 29,
+          "end": 29.45,
+          "probability": 0.97
+        }
+      ]
+    }
+  ],
+  "words": [
+    {
+      "word": "בוקר",
+      "start": 0.5,
+      "end": 0.888,
+      "probability": 0.97
+    },
+    {
+      "word": "טוב",
+      "start": 0.938,
+      "end": 1.325,
+      "probability": 0.97
+    },
+    {
+      "word": "לכולם,",
+      "start": 1.375,
+      "end": 1.763,
+      "probability": 0.97
+    },
+    {
+      "word": "נתחיל",
+      "start": 1.813,
+      "end": 2.2,
+      "probability": 0.97
+    },
+    {
+      "word": "בסקירת",
+      "start": 2.25,
+      "end": 2.638,
+      "probability": 0.97
+    },
+    {
+      "word": "התקציב",
+      "start": 2.688,
+      "end": 3.075,
+      "probability": 0.97
+    },
+    {
+      "word": "של",
+      "start": 3.125,
+      "end": 3.513,
+      "probability": 0.97
+    },
+    {
+      "word": "Q4.",
+      "start": 3.563,
+      "end": 3.95,
+      "probability": 0.97
+    },
+    {
+      "word": "Let's",
+      "start": 5.5,
+      "end": 5.894,
+      "probability": 0.97
+    },
+    {
+      "word": "start",
+      "start": 5.944,
+      "end": 6.339,
+      "probability": 0.97
+    },
+    {
+      "word": "with",
+      "start": 6.389,
+      "end": 6.783,
+      "probability": 0.97
+    },
+    {
+      "word": "the",
+      "start": 6.833,
+      "end": 7.228,
+      "probability": 0.97
+    },
+    {
+      "word": "marketing",
+      "start": 7.278,
+      "end": 7.672,
+      "probability": 0.97
+    },
+    {
+      "word": "budget",
+      "start": 7.722,
+      "end": 8.117,
+      "probability": 0.97
+    },
+    {
+      "word": "for",
+      "start": 8.167,
+      "end": 8.561,
+      "probability": 0.97
+    },
+    {
+      "word": "the",
+      "start": 8.611,
+      "end": 9.006,
+      "probability": 0.97
+    },
+    {
+      "word": "launch.",
+      "start": 9.056,
+      "end": 9.45,
+      "probability": 0.97
+    },
+    {
+      "word": "הוחלט",
+      "start": 11,
+      "end": 11.521,
+      "probability": 0.97
+    },
+    {
+      "word": "להגדיל",
+      "start": 11.571,
+      "end": 12.093,
+      "probability": 0.97
+    },
+    {
+      "word": "את",
+      "start": 12.143,
+      "end": 12.664,
+      "probability": 0.97
+    },
+    {
+      "word": "תקציב",
+      "start": 12.714,
+      "end": 13.236,
+      "probability": 0.97
+    },
+    {
+      "word": "השיווק",
+      "start": 13.286,
+      "end": 13.807,
+      "probability": 0.97
+    },
+    {
+      "word": "בעשרה",
+      "start": 13.857,
+      "end": 14.379,
+      "probability": 0.97
+    },
+    {
+      "word": "אחוזים.",
+      "start": 14.429,
+      "end": 14.95,
+      "probability": 0.97
+    },
+    {
+      "word": "דנה",
+      "start": 16.5,
+      "end": 16.95,
+      "probability": 0.97
+    },
+    {
+      "word": "תשלח",
+      "start": 17,
+      "end": 17.45,
+      "probability": 0.97
+    },
+    {
+      "word": "את",
+      "start": 17.5,
+      "end": 17.95,
+      "probability": 0.97
+    },
+    {
+      "word": "התחזית",
+      "start": 18,
+      "end": 18.45,
+      "probability": 0.97
+    },
+    {
+      "word": "המעודכנת",
+      "start": 18.5,
+      "end": 18.95,
+      "probability": 0.97
+    },
+    {
+      "word": "עד",
+      "start": 19,
+      "end": 19.45,
+      "probability": 0.97
+    },
+    {
+      "word": "יום",
+      "start": 19.5,
+      "end": 19.95,
+      "probability": 0.97
+    },
+    {
+      "word": "חמישי.",
+      "start": 20,
+      "end": 20.45,
+      "probability": 0.97
+    },
+    {
+      "word": "We",
+      "start": 22,
+      "end": 22.3,
+      "probability": 0.97
+    },
+    {
+      "word": "still",
+      "start": 22.35,
+      "end": 22.65,
+      "probability": 0.97
+    },
+    {
+      "word": "need",
+      "start": 22.7,
+      "end": 23,
+      "probability": 0.97
+    },
+    {
+      "word": "sign-off",
+      "start": 23.05,
+      "end": 23.35,
+      "probability": 0.97
+    },
+    {
+      "word": "from",
+      "start": 23.4,
+      "end": 23.7,
+      "probability": 0.97
+    },
+    {
+      "word": "finance",
+      "start": 23.75,
+      "end": 24.05,
+      "probability": 0.97
+    },
+    {
+      "word": "on",
+      "start": 24.1,
+      "end": 24.4,
+      "probability": 0.97
+    },
+    {
+      "word": "the",
+      "start": 24.45,
+      "end": 24.75,
+      "probability": 0.97
+    },
+    {
+      "word": "vendor",
+      "start": 24.8,
+      "end": 25.1,
+      "probability": 0.97
+    },
+    {
+      "word": "contract.",
+      "start": 25.15,
+      "end": 25.45,
+      "probability": 0.97
+    },
+    {
+      "word": "תודה",
+      "start": 27,
+      "end": 27.45,
+      "probability": 0.97
+    },
+    {
+      "word": "רבה,",
+      "start": 27.5,
+      "end": 27.95,
+      "probability": 0.97
+    },
+    {
+      "word": "נתראה",
+      "start": 28,
+      "end": 28.45,
+      "probability": 0.97
+    },
+    {
+      "word": "בשבוע",
+      "start": 28.5,
+      "end": 28.95,
+      "probability": 0.97
+    },
+    {
+      "word": "הבא.",
+      "start": 29,
+      "end": 29.45,
+      "probability": 0.97
+    }
+  ],
+  "x_meetsum_fixture": {
+    "id": "he-en-30s",
+    "tones": [
+      3,
+      10,
+      17,
+      24,
+      5,
+      12,
+      19,
+      0,
+      7,
+      14,
+      21,
+      2,
+      9,
+      16,
+      23,
+      4,
+      11,
+      18,
+      25,
+      6,
+      13,
+      20,
+      1,
+      8,
+      15,
+      22,
+      3,
+      10,
+      17,
+      24
+    ]
+  }
+}
