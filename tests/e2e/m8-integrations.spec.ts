@@ -508,6 +508,8 @@ test.describe.serial("M8 integrations with fake providers", () => {
   })
 
   test("9. webhooks: v2 subscription, signed test-fire, delivery log", async ({ page, context, baseURL }) => {
+    // The completion events run through a tsx child process (several seconds).
+    test.setTimeout(120_000)
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     const section = page.locator("section", { has: page.locator("#integrations-webhooks-title") })
