@@ -22,27 +22,14 @@
  * postgres:16 with E2E_EXPECT_LEXICAL=1 and then expect the lexical badge.
  *   npx playwright test -g @lexical
  */
-import { existsSync, readFileSync } from "node:fs"
-
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test"
 
-function loadEnvFile(): Record<string, string> {
-  const path = process.env.E2E_ENV_FILE || ".secrets/e2e.env"
-  const values: Record<string, string> = {}
+import { loadSuiteEnv } from "../../scripts/e2e/env-file"
 
-  if (existsSync(path)) {
-    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-      const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line)
-
-      if (!match) continue
-      values[match[1]] = match[2].replace(/^(['"])(.*)\1$/, "$2")
-    }
-  }
-
-  return { ...values, ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("E2E_"))) as Record<string, string> }
-}
-
-const env = loadEnvFile()
+// E2E_M6_ENV_FILE, then E2E_ENV_FILE, then .secrets/e2e.env (scripts/e2e/env-file.ts).
+const env = loadSuiteEnv("m6")
+/** The he Ask title carries a U+2060 word joiner before "MeetSum" (lib/i18n/m6/ask.ts). */
+const HE_ASK_REGION = /שאלות ל-\u2060?MeetSum/
 const EXPECT_LEXICAL = env.E2E_EXPECT_LEXICAL === "1"
 const BUDGET_TERM = "תקציב"
 const BUDGET_SURFACE = "והתקציב"
@@ -191,7 +178,7 @@ test.describe("M6 Ask", () => {
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
     await page.getByRole("tab", { name: "שאלה", exact: true }).click()
 
-    const panel = page.getByRole("region", { name: "שאלות ל-MeetSum" })
+    const panel = page.getByRole("region", { name: HE_ASK_REGION })
 
     await expect(panel.locator('[data-ask-scope="meeting"]')).toBeVisible()
     await ask(panel, "מה הוחלט לגבי התקציב?")
@@ -221,7 +208,7 @@ test.describe("M6 Ask", () => {
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
     await page.getByRole("tab", { name: "שאלה", exact: true }).click()
 
-    const panel = page.getByRole("region", { name: "שאלות ל-MeetSum" })
+    const panel = page.getByRole("region", { name: HE_ASK_REGION })
 
     await ask(panel, "מה מזג האוויר על מאדים בשנה הבאה?")
 
@@ -264,7 +251,7 @@ test.describe("M6 Ask", () => {
     // Workspace thread from step 6.
     await page.goto("/he/search?tab=ask")
 
-    let panel = page.getByRole("region", { name: "שאלות ל-MeetSum" })
+    let panel = page.getByRole("region", { name: HE_ASK_REGION })
 
     await panel.getByRole("button", { name: "שיחות", exact: true }).click()
     await expect(panel.getByRole("navigation", { name: "שיחות" }).locator("li")).not.toHaveCount(0)
@@ -272,7 +259,7 @@ test.describe("M6 Ask", () => {
     // Meeting thread from steps 4–5: reload it and check the chips survive.
     await page.goto(`/he?meeting=${encodeURIComponent(env.E2E_BUDGET_MEETING_ID)}`)
     await page.getByRole("tab", { name: "שאלה", exact: true }).click()
-    panel = page.getByRole("region", { name: "שאלות ל-MeetSum" })
+    panel = page.getByRole("region", { name: HE_ASK_REGION })
     await panel.getByRole("button", { name: "שיחות", exact: true }).click()
 
     await panel.getByRole("navigation", { name: "שיחות" }).locator("li > button").first().click()
@@ -296,7 +283,7 @@ test.describe("M6 visibility", () => {
 
     await page.goto("/he/search?tab=ask")
 
-    const panel = page.getByRole("region", { name: "שאלות ל-MeetSum" })
+    const panel = page.getByRole("region", { name: HE_ASK_REGION })
 
     await ask(panel, `מה נאמר על ${env.E2E_PRIVATE_TERM}?`)
     await expect(lastTurn(panel)).toHaveAttribute("data-ask-status", /complete|refused/, { timeout: 30_000 })

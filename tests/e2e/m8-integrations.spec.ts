@@ -40,20 +40,10 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 
 import { dictionaries } from "@/lib/i18n/dictionaries"
 
-function loadEnvFile(): Record<string, string> {
-  const file = process.env.E2E_ENV_FILE || ".secrets/e2e-m8.env"
-  const values: Record<string, string> = {}
+import { loadSuiteEnv } from "../../scripts/e2e/env-file"
 
-  if (existsSync(file)) {
-    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-      const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line)
-
-      if (match) values[match[1]] = match[2].replace(/^(['"])(.*)\1$/, "$2")
-    }
-  }
-
-  return { ...values, ...(Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("E2E_"))) as Record<string, string>) }
-}
+// E2E_M8_ENV_FILE, then E2E_ENV_FILE, then .secrets/e2e-m8.env (scripts/e2e/env-file.ts).
+const loadEnvFile = () => loadSuiteEnv("m8")
 
 const env = loadEnvFile()
 const FAKE = env.E2E_FAKE_BASE_URL || "http://127.0.0.1:4010"
