@@ -30,6 +30,7 @@ import {
   withCalendarDedupeLock,
 } from "@/lib/integrations/microsoft/calendar-dedupe"
 import { type GraphEvent, type MappedOutlookEvent, mapGraphEventToCalendarEventLike } from "@/lib/integrations/microsoft/calendar-map"
+import { ProviderError } from "@/lib/integrations/core/types"
 import { GRAPH_BASE, graphGet, isSyncStateLost } from "@/lib/integrations/microsoft/graph"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -310,8 +311,33 @@ async function applyRemoval(deps: OutlookSyncDeps, externalEventId: string, stat
   await cancelRow(deps, id)
 }
 
-async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: OutlookSyncStats) {
+/**
+ * `@removed` (reason `deleted`) also covers events moved or changed *outside*
+ * the calendarView window, so it is not proof of a cancellation (verified
+ * 2026-10-14, https://learn.microsoft.com/en-us/graph/api/event-delta). Look
+ * the event up: cancel only when it is gone (404/410) or `isCancelled`.
+ */
+async function eventStillScheduled(deps: OutlookSyncDeps, token: string, eventId: string): Promise<boolean> {
+  try {
+    const event = await graphGet<{ isCancelled?: boolean | null }>(
+      deps.fetch,
+      token,
+      `${GRAPH_BASE}/me/events/${encodeURIComponent(eventId)}?$select=id,isCancelled`
+    )
+
+    return !event.isCancelled
+  } catch (error) {
+    if (error instanceof ProviderError && error.kind === "not_found") return false
+    throw error
+  }
+}
+
+async function applyEvent(deps: OutlookSyncDeps, graph: GraphEvent, stats: OutlookSyncStats, token: string) {
   if (graph["@removed"]) {
+    if (await eventStillScheduled(deps, token, graph.id)) {
+      stats.skipped += 1
+      return
+    }
     await applyRemoval(deps, graph.id, stats)
     return
   }
@@ -428,7 +454,7 @@ export async function runOutlookCalendarSync(deps: OutlookSyncDeps): Promise<Out
 
   for (const graph of delta.events) {
     try {
-      await applyEvent(deps, graph, stats)
+      await applyEvent(deps, graph, stats, token)
     } catch {
       // Counts only: provider/DB messages may hold titles or emails.
       stats.errors += 1

@@ -34,6 +34,10 @@ desktop-recorder/dist
 .idea
 .DS_Store
 
+# Deploy state on the VPS (database dumps, the deploy lock): never build context
+backups
+.deploy.lock
+
 # Test and debugging artifacts
 coverage
 test-results

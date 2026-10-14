@@ -31,6 +31,9 @@ import type {
   TranscriptSegment,
 } from "@/lib/meetings/repository"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "analytics" })
 
 type TranscriptInputs = {
   segments: TranscriptSegment[]
@@ -146,7 +149,7 @@ export async function recomputeMeetingAnalytics(
       sentimentStatus = "failed"
       if (error instanceof LlmError && error.kind === "config") sentimentError = "llm_not_configured"
       // Error kind only: provider/parse messages can carry model output.
-      console.warn(`[analytics] sentiment failed for ${meeting.id}: ${describeLlmFailure(error)}`)
+      log.warn(`[analytics] sentiment failed for ${meeting.id}: ${describeLlmFailure(error)}`)
     }
   }
 

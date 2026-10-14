@@ -82,7 +82,7 @@ function parseBody(body: Record<string, unknown>): ParsedPatch | string {
 export const PATCH = withAuthz<{ id: string; segmentId: string }>(
   "meeting:write",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

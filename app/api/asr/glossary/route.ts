@@ -18,7 +18,7 @@ import {
  * limits.
  */
 export const GET = withAuthz("workspace:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
@@ -36,7 +36,7 @@ export const GET = withAuthz("workspace:read", async (request, ctx) => {
  * answers 400 with per-field errors (`terms.3.aliases.1`).
  */
 export const PUT = withAuthz("settings:write", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

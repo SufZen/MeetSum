@@ -2,6 +2,7 @@
  * M9 Step 0: scripts/bundle-size.mjs parser and ratchet on fixtures
  * (Package D extends it with the real budget check).
  */
+import { readFileSync } from "node:fs"
 import path from "node:path"
 
 import { describe, expect, it } from "vitest"
@@ -43,5 +44,28 @@ describe("bundle-size.mjs", () => {
       "/[locale]: 301 KB over the 300 KB budget",
     ])
     expect(compare({}, budget).warnings).toEqual(["/[locale]: not found in the build"])
+  })
+})
+
+describe("M10 budgets (bundle-budget.json, enforced by bundle:check --strict)", () => {
+  type Entry = { budgetKb?: number; baselineKb?: number }
+  const budget = JSON.parse(readFileSync("bundle-budget.json", "utf8")) as { routes: Record<string, Entry> }
+
+  it("targets /[locale] <= 300 KB and /share/[token] <= 220 KB", () => {
+    expect(budget.routes["/[locale]"]?.budgetKb).toBeLessThanOrEqual(300)
+    expect(budget.routes["/share/[token]"]?.budgetKb).toBeLessThanOrEqual(220)
+  })
+
+  // The -5% target for tasks and search was missed (docs/parity/m10.md,
+  // "Integration: bundle result"): the budgets are the achieved values and
+  // may never exceed the M9 baselines (+1 KB measurement noise).
+  it.each([
+    ["/[locale]/tasks", 312.7],
+    ["/[locale]/search", 306.3],
+  ] as const)("caps %s at its M9 baseline", (route, m9Baseline) => {
+    const entry = budget.routes[route]!
+
+    expect(entry.budgetKb).toBeLessThanOrEqual(m9Baseline + 1)
+    expect(entry.baselineKb).toBeLessThanOrEqual(entry.budgetKb!)
   })
 })

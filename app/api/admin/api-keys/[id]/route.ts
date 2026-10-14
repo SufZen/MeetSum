@@ -5,6 +5,9 @@ import { revokeApiKey } from "@/lib/auth/api-keys"
 import { withAuthz } from "@/lib/auth/authz"
 import { recordAuditLog } from "@/lib/audit"
 import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "admin/api-keys" })
 
 /**
  * DELETE /api/admin/api-keys/:id — Revoke an API key of the active workspace.
@@ -12,7 +15,7 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
 export const DELETE = withAuthz<{ id: string }>(
   "api_keys:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
@@ -35,7 +38,7 @@ export const DELETE = withAuthz<{ id: string }>(
 
       return NextResponse.json({ revoked }, { headers: rateLimit.headers })
     } catch (error) {
-      console.error("[api-keys] revoke failed", error)
+      log.error({ err: error }, "[api-keys] revoke failed")
       return jsonError("Failed to revoke API key", 500)
     }
   }

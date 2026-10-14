@@ -107,7 +107,7 @@ May be the existing Teams capture app; the app-only `OnlineMeetingRecording.Read
 - **Exact scope string** MeetSum requests (`HUBSPOT_SCOPES` in `lib/integrations/hubspot/oauth.ts`): `scope=oauth crm.objects.contacts.read crm.objects.contacts.write crm.objects.deals.read` and `optional_scope=crm.objects.owners.read`. Select exactly these in the app's Auth settings (required vs optional must match, or HubSpot rejects the install).
 - **Verified by Package B (2026-10-13):** the HubSpot Meetings, Notes and Tasks v3 object guides list only `crm.objects.contacts.read`/`.write` for creating engagements and their associations, so no separate meetings, notes or tasks scope is requested; deals are only read (picker and association). Re-check on the first live run: a 403 `MISSING_SCOPES` on a meeting, note or task write means HubSpot changed this, and the scope it names must be added here and in `HUBSPOT_SCOPES`.
 - **Env:** `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`, `HUBSPOT_OPTIONAL_SCOPES`.
-- **Token endpoints (verify against current HubSpot docs on the first live run):** token info (connect and "Test connection") is `POST /oauth/v3/token/introspect` and disconnect revokes with `POST /oauth/v3/token/revoke`, both form-urlencoded with `client_id`, `client_secret`, `token` and `token_type_hint`, so no token ever appears in a URL (checked 2026-10-13; HubSpot's versioned reference also lists `/oauth/2026-03/token/...`). The legacy `GET /oauth/v1/access-tokens/{token}` and `DELETE /oauth/v1/refresh-tokens/{token}` put the token in the path and are no longer called; log redaction still masks those paths. If introspect ever stops returning `hub_id`, `GET /account-info/v3/details` with a Bearer header gives the portal id.
+- **Token endpoints (verified 2026-10-14, see "Verified against vendor docs"):** code exchange and refresh use `POST /oauth/2026-03/token`; token info (connect and "Test connection") is `POST /oauth/2026-03/token/introspect`; disconnect revokes with `POST /oauth/2026-03/token/revoke`. All are form-urlencoded (`client_id`, `client_secret`, `token`, `token_type_hint` for introspect/revoke), so no token ever appears in a URL. The deprecated `POST /oauth/v1/token` starts returning errors on 2027-02-16; `/oauth/v3/*` goes unsupported after September 2027. The legacy `GET /oauth/v1/access-tokens/{token}` and `DELETE /oauth/v1/refresh-tokens/{token}` put the token in the path and are not called; log redaction still masks those paths. If introspect ever stops returning `hub_id`, `GET /account-info/v3/details` with a Bearer header gives the portal id.
 - Screenshot placeholder: `docs/runbooks/img/hubspot-scopes.png`.
 
 ### Google OAuth client (Docs export)
@@ -251,6 +251,43 @@ Run each one in a test workspace with a Hebrew sample meeting (a summary, two ac
 3. The received email: subject `סיכום פגישה: …`, right-to-left body, an unsubscribe link and the one-click header.
 4. Open the unsubscribe link: GET shows a confirmation page; confirm; the next recap skips that address.
 5. Switch the mode back to Off.
+
+## Verified against vendor docs
+
+M10 (risk R2) re-checked the docs-checkable parts of the HubSpot and Microsoft integrations against the vendors' current official documentation on **2026-10-14**. Live behaviour still needs the apps (see "First live run").
+
+| Item | Result | Source (checked 2026-10-14) | Change |
+|---|---|---|---|
+| HubSpot scopes `oauth`, `crm.objects.contacts.read/.write`, `crm.objects.deals.read`, optional `crm.objects.owners.read` | Match. No separate meetings, notes or tasks scope exists; the Meetings, Notes and Tasks guides need only the contacts scopes | developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/scopes; …/api-reference/crm-meetings-v3/guide; …/crm-notes-v3/guide; …/crm-tasks-v3/guide | none |
+| HubSpot association type ids (meeting→contact 200, meeting→deal 212, note→contact 202, note→deal 214, task→contact 204, task→deal 216, `HUBSPOT_DEFINED`) | Match | developers.hubspot.com/docs/api-reference/crm-associations-v4/guide | pinned in `tests/hubspot-docs-verified.test.ts` |
+| HubSpot token endpoint `POST /oauth/v1/token` | **Mismatch:** deprecated, errors from 2027-02-16; replacement `POST /oauth/2026-03/token` with the same parameters and response | developers.hubspot.com/docs/api-reference/legacy/authentication/oauth-tokens/v1/migration-guide; developers.hubspot.com/changelog/v1-oauth-api-deprecation | moved to `/oauth/2026-03/token`; the bad-refresh fixture carries the documented `invalid_grant` body |
+| HubSpot introspect / revoke (`/oauth/v3/token/...`) | v3 is unsupported after September 2027; the migration guide maps revoke to `POST /oauth/2026-03/token/revoke`. Revoke status codes are not documented | developers.hubspot.com/changelog/legacy-apis-and-legacy-apps-whats-going-unsupported-and-when | moved to `/oauth/2026-03/token/{introspect,revoke}`; a 404 on revoke still means "already revoked" (live-run check) |
+| HubSpot task priority `NONE` | **Mismatch:** only LOW, MEDIUM, HIGH are documented | crm-tasks-v3 guide | the property is omitted when an item has no priority |
+| HubSpot batch create echoes `objectWriteTraceId` | Ambiguous: the trace id enables 207 partial results, but the echo in `results[]` is not documented | developers.hubspot.com/docs/api-reference/legacy/crm/objects/objects/batch/create-objects | index mapping only when every input got a result; otherwise the marker search maps tasks on retry |
+| HubSpot contact search (`IN`, lowercase values), owners (`email`, `archived`, `limit`) | Match | …/legacy/crm/search-the-crm; …/legacy/crm/owners/get-owners | none |
+| HubSpot engagement marker search on `hs_timestamp` | Not documented for engagements | — | live-run check |
+| HubSpot v4 associations and `/crm/v3/objects` | Supported until 2027-03-30 (v4) and September 2027 (v3) | developers.hubspot.com/changelog/deprecating-support-for-hubspot-v4-apis | AUDIT follow-up: move to the 2026-09 date paths |
+| Graph `calendarView/delta`: follow `@odata.nextLink`, store `@odata.deltaLink`, no window params on later rounds, `Prefer: odata.maxpagesize` | Match | learn.microsoft.com/en-us/graph/api/event-delta?view=graph-rest-1.0; learn.microsoft.com/en-us/graph/delta-query-events | none |
+| Graph expired delta token (`410 Gone`, or a 40X with `syncStateNotFound`) → full resync | Match for 410 and a top-level code; **gap** for a code nested in `innererror` (the errors page says to walk nested codes) | learn.microsoft.com/en-us/graph/delta-query-overview; learn.microsoft.com/en-us/graph/errors | `graphError` reads `innererror.code`; `tests/ms-graph-docs-verified.test.ts` |
+| Graph `@removed` (reason `deleted`) | **Mismatch:** it also covers events moved or changed *outside* the window; the docs say to filter | event-delta reference | the event is looked up (`GET /me/events/{id}?$select=id,isCancelled`); only a 404/410 or `isCancelled` cancels the meeting and its bot (`tests/ms-calendar-sync.test.ts`) |
+| Microsoft scopes `openid profile email offline_access User.Read Calendars.Read` | Match (`Calendars.Read` is the least-privileged delegated permission for event delta; no admin consent) | learn.microsoft.com/en-us/graph/permissions-reference | none |
+| Entra `invalid_grant` (AADSTS70000/70008/700082/700084/50173/70043), `interaction_required`, `consent_required` → reconnect | Match | learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes; …/v2-oauth2-auth-code-flow | none |
+| Entra AADSTS65001, AADSTS50020, AADSTS700016 at the authorize redirect | Ambiguous: shown as a generic "denied"; the docs do not pin the OAuth `error` value per code | reference-error-codes | live-run check; AUDIT follow-up (finer authorize error codes) |
+
+Live-run checklist additions: a HubSpot revoke on an already revoked token (status code), the `hs_timestamp` marker search on meetings, notes and tasks, a batch create that partly fails (does `results[]` echo the trace id?), and Entra sign-ins from an external-tenant user (AADSTS50020) and from a tenant without the app (AADSTS700016).
+
+## Rotating the token-encryption key
+
+`GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY` encrypts Google refresh tokens, integration tokens, webhook signing secrets and bot meeting passcodes (AES-256-GCM). M10 (risk R10) adds a keyring, so the key can change without anyone reconnecting:
+
+1. Generate a new key (`openssl rand -base64 48`). Keep the old one.
+2. Set `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY=<new>` and `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS=<old>` (comma-separate several old keys). If the old install had no `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY`, the old key is the value that was in effect: `MEETSUM_SESSION_SECRET` (or `WEBHOOK_SIGNING_SECRET`).
+3. Restart the app and the worker. New writes use the new key (the ciphertext carries a key id); reads still accept the old one.
+4. Dry run: `npx tsx scripts/reencrypt-tokens.ts` with the same env and `DATABASE_URL`. It prints counts per table (`would_rewrite`, `current`, `failed`, `skipped_concurrent`) and never prints a token or a key. `failed > 0` means a row was written with a key that is not in the keyring: find that key, or reconnect that integration.
+5. Apply: `npx tsx scripts/reencrypt-tokens.ts --apply`. Each row is rewritten in its own transaction under a row lock; integration rows are written only if their token generation did not change (a concurrent refresh wins, and its write is already under the new key). Re-running is a no-op.
+6. After a clean run (`would_rewrite=0`, `failed=0`), and once pending OAuth consents (10-minute states) have expired, remove the old key from `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS` and restart.
+
+Key material never appears in logs, errors or API responses (`tests/token-keyring.test.ts`).
 
 ## Troubleshooting
 

@@ -15,6 +15,9 @@ import { isWorkspaceVisibleMeeting, memberCanViewMeeting } from "@/lib/meetings/
 import { isDateOnly } from "@/lib/tasks/patch"
 import type { TaskListQuery, TaskMember } from "@/lib/tasks/types"
 import { getWorkspaceStore } from "@/lib/workspaces/store"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "tasks" })
 
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const
 const id = z.string().trim().min(1).max(200)
@@ -195,6 +198,6 @@ export async function notifyAssignment(
       },
     })
   } catch (error) {
-    console.warn("[tasks] task_assigned notification failed", error)
+    log.warn({ err: error }, "[tasks] task_assigned notification failed")
   }
 }

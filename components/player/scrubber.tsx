@@ -14,7 +14,7 @@ import { usePlayerState } from "@/components/player/meeting-player-provider"
 import { sliderActionForKey } from "@/lib/player/keyboard"
 import { formatSpokenDuration } from "@/lib/meetings/duration"
 import { formatClock } from "@/lib/player/time-format"
-import { formatMessage } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 
 export function Scrubber({

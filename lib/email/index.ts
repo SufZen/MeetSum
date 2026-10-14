@@ -8,6 +8,9 @@ import type {
   EmailSendResult,
   EmailSender,
 } from "@/lib/email/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "email" })
 
 export type { EmailMessage, EmailProvider, EmailSendResult, EmailSender }
 
@@ -86,17 +89,17 @@ export function createLogEmailSender(env: NodeJS.ProcessEnv = process.env): Emai
     provider: "log",
     isConfigured: () => {
       if (env.NODE_ENV !== "production") return true
-      console.warn("[email] MEETSUM_EMAIL_PROVIDER resolves to log in production: email is not configured")
+      log.warn("[email] MEETSUM_EMAIL_PROVIDER resolves to log in production: email is not configured")
       return false
     },
     async send(message) {
       captureForE2e(message, env)
       const recipients = (Array.isArray(message.to) ? message.to : [message.to]).filter(Boolean)
 
-      console.info("[email] log provider; not sent", {
+      log.info({
         recipients: recipients.length,
         toHash: createHash("sha256").update(recipients.join(",").toLowerCase()).digest("hex").slice(0, 12),
-      })
+      }, "[email] log provider; not sent")
 
       return { provider: "log" }
     },

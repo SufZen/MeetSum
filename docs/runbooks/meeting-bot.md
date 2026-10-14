@@ -17,9 +17,11 @@ The Vexa runtime starts one headless-browser container per meeting through the D
 3. Expose only the Vexa gateway to MeetSum, over a private network (`VEXA_API_URL`). Publish no Vexa port publicly and keep it off Traefik.
 4. If Vexa must share the MeetSum host, treat a Vexa compromise as a MeetSum host compromise and record that risk acceptance.
 
+The step-by-step setup for the isolated layout (network, firewall rules, what lives on which host, socket-proxy validation) is in [vexa-isolated-host.md](vexa-isolated-host.md).
+
 ## Trust boundaries in MeetSum
 
 - **Webhook** (`POST /api/integrations/vexa/webhook`): HMAC-SHA256 over `<timestamp>.<raw body>`, compared in constant time, timestamp tolerance (default 300 s), body capped at 256 KB while streaming (declared `Content-Length` checked first, then actual bytes) before the HMAC and JSON parse, idempotent per event id and per (workspace, Vexa meeting, event, status). The workspace comes only from the stored bot session (`getForWebhook`), never from the payload; unknown meetings are a 200 no-op.
 - **Workspace isolation**: every bot session read and write binds `workspace_id`. The only unscoped lookups are named system lookups (`getForWebhook`, the reconcile/dispatch/retention lists); their rows are used with their own workspace. Dispatch jobs load the session by id and workspace and fail unrecoverably on a mismatch. Adopting a running Vexa bot after a 409 is refused if another session owns that Vexa meeting or another workspace has an open session for the same target.
 - **APIs**: bot routes resolve meetings through the caller-scoped repository; an invisible meeting (other workspace or private) is a 404. Responses never include a passcode, Teams context or raw meeting URL; link secrets are sealed with `sealMeetingSecrets` at rest.
-- **Logs**: bot code logs through `botLog` / `redactBotError`, which strip URL queries, tokens and passcodes.
+- **Logs**: bot code logs through `botLog` / `redactBotError`, which strip URL queries, tokens and passcodes. Since M10 `botLog` writes through the pino server logger (`component: "bot"`), which redacts again (see [observability.md](observability.md)).

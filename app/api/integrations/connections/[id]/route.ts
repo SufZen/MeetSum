@@ -15,7 +15,7 @@ import { getIntegrationStore } from "@/lib/integrations/core/store"
  * disabled, queued deliveries cancelled). Personal → owner, or an admin.
  */
 export const PATCH = withAuthz<{ id: string }>("integrations:connect", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 
@@ -44,7 +44,7 @@ export const PATCH = withAuthz<{ id: string }>("integrations:connect", async (re
 })
 
 export const DELETE = withAuthz<{ id: string }>("integrations:connect", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

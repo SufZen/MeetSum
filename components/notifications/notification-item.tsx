@@ -7,6 +7,7 @@
  * unread state as a dot, bold text and a screen-reader label (never colour
  * alone). Invitations get an inline accept button.
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import {
   AtSignIcon,
   BotIcon,
@@ -27,9 +28,7 @@ import type { NotificationDTO, NotificationKind } from "@/lib/notifications/type
 import { cn } from "@/lib/utils"
 
 /** A content language usable as `lang` ("he", "en-US"); "mixed"/"unknown" are not BCP 47 tags. */
-export function bcp47Lang(lang: string | null | undefined): string | undefined {
-  return lang && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(lang) && lang !== "mixed" ? lang : undefined
-}
+export { bcp47Lang }
 
 const ICONS: Record<NotificationKind, LucideIcon> = {
   mention: AtSignIcon,

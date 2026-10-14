@@ -1,6 +1,9 @@
 import { getDatabasePool, type Queryable } from "@/lib/db/client"
 import { graphFetch } from "@/lib/capture/teams"
 import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "capture" })
 
 /**
  * Microsoft Graph change-notification subscriptions for Teams recordings.
@@ -462,10 +465,10 @@ export async function renewTeamsSubscriptions(
       result[outcome] += 1
     } catch (error) {
       result.failed += 1
-      console.error("[teams] subscription renewal failed", {
+      log.error({
         subscriptionId: record.externalSubscriptionId,
         error: error instanceof Error ? error.message : String(error),
-      })
+      }, "[teams] subscription renewal failed")
     }
   }
 
@@ -479,9 +482,9 @@ export async function renewTeamsSubscriptions(
       result.created += 1
     } catch (error) {
       result.failed += 1
-      console.error("[teams] subscription create failed", {
+      log.error({
         error: error instanceof Error ? error.message : String(error),
-      })
+      }, "[teams] subscription create failed")
     }
   }
 
@@ -549,11 +552,11 @@ export async function handleTeamsLifecycleNotifications(
         outcomes.push({ subscriptionId, lifecycleEvent, action: "ignored" })
       }
     } catch (error) {
-      console.error("[teams] lifecycle handling failed", {
+      log.error({
         subscriptionId,
         lifecycleEvent,
         error: error instanceof Error ? error.message : String(error),
-      })
+      }, "[teams] lifecycle handling failed")
       outcomes.push({ subscriptionId, lifecycleEvent, action: "failed" })
     }
   }

@@ -21,6 +21,7 @@
  * text) and no `cause`.
  */
 import { redactBotText } from "@/lib/bot/redact"
+import { getLogger } from "@/lib/log"
 import {
   ProviderError,
   type IntegrationErrorCode,
@@ -143,10 +144,16 @@ export function publicIntegrationError(stored: string | undefined): string | und
 /** Logging that always goes through redaction. */
 export const integrationLog = {
   warn(message: string, detail?: unknown) {
-    console.warn(`[integrations] ${redactIntegrationError(message)}${detail === undefined ? "" : ` ${redactIntegrationError(detail)}`}`)
+    getLogger({ component: "integrations" }).warn(
+      detail === undefined ? {} : { detail: redactIntegrationError(detail) },
+      redactIntegrationError(message)
+    )
   },
   error(message: string, detail?: unknown) {
-    console.error(`[integrations] ${redactIntegrationError(message)}${detail === undefined ? "" : ` ${redactIntegrationError(detail)}`}`)
+    getLogger({ component: "integrations" }).error(
+      detail === undefined ? {} : { detail: redactIntegrationError(detail) },
+      redactIntegrationError(message)
+    )
   },
 }
 

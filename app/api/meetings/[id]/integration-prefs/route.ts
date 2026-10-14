@@ -48,7 +48,7 @@ export const GET = withAuthz<{ id: string }>("meeting:read", async (_request, ct
 })
 
 export const PUT = withAuthz<{ id: string }>("meeting:write", async (request, ctx, route) => {
-  const limited = limitFor(request, ctx, "integrationsWrite")
+  const limited = await limitFor(request, ctx, "integrationsWrite")
 
   if (limited) return limited
 

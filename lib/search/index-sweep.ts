@@ -15,6 +15,13 @@
  */
 import type { Queryable } from "@/lib/db/client"
 import { formatEmbeddingKey, type EmbeddingKey } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "search" })
+/** `SweepDeps.log` default: console-shaped calls forwarded to the logger. */
+const sweepLog: Pick<Console, "warn"> = {
+  warn: (message: string, detail?: unknown) => log.warn({ errorName: detail }, message),
+}
 
 type Env = Record<string, string | undefined>
 
@@ -149,7 +156,7 @@ export async function sweepWorkspaceIndex(
       enqueued += 1
     } catch (error) {
       failed += 1
-      ;(deps.log ?? console).warn("[search] sweep enqueue failed", error instanceof Error ? error.name : "unknown")
+      ;(deps.log ?? sweepLog).warn("[search] sweep enqueue failed", error instanceof Error ? error.name : "unknown")
     }
   }
 
@@ -182,7 +189,7 @@ export async function enqueueIndexSweeps(
       await enqueue(String((row as { id: unknown }).id))
       count += 1
     } catch (error) {
-      ;(deps.log ?? console).warn("[search] sweep schedule failed", error instanceof Error ? error.name : "unknown")
+      ;(deps.log ?? sweepLog).warn("[search] sweep schedule failed", error instanceof Error ? error.name : "unknown")
     }
   }
 
@@ -413,7 +420,7 @@ export async function requestWorkspaceIndexing(
     await enqueueSweep(workspaceId, ADMIN_REINDEX_SWEEP_LIMIT)
     return { meetings, sweepQueued: true }
   } catch (error) {
-    console.warn("[search] admin sweep enqueue failed", error instanceof Error ? error.name : "unknown")
+    log.warn({ errorName: error instanceof Error ? error.name : "unknown" }, "[search] admin sweep enqueue failed")
     return { meetings, sweepQueued: false }
   }
 }

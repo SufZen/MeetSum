@@ -26,6 +26,7 @@ import path from "node:path"
 
 import { createSessionCookie, getSessionSecret } from "@/lib/auth/session"
 import { getDatabasePool, type Queryable } from "@/lib/db/client"
+import { suiteEnvFile } from "@/scripts/e2e/env-file"
 
 const PREFIX = "e2e_m9_"
 const W1 = `${PREFIX}ws_1`
@@ -490,7 +491,7 @@ async function main() {
 
   const pool = getDatabasePool()
   const lines = await seedM9E2E(pool, { secret: getSessionSecret() })
-  const file = process.env.E2E_ENV_FILE ?? path.join(".secrets", "e2e-m9.env")
+  const file = suiteEnvFile("m9")
 
   await mkdir(path.dirname(path.resolve(file)), { recursive: true })
   await writeFile(file, `${lines.join("\n")}\n`, { mode: 0o600 })

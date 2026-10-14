@@ -13,7 +13,7 @@ import { isInvitationTokenShape } from "@/lib/workspaces/tokens"
  * the signed-in user (email must match; idempotent) and make it active.
  */
 export const POST = withSession<{ token: string }>(async (request, session, { params }) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

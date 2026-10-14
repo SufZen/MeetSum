@@ -63,7 +63,7 @@ describe("self-hosted fonts (M9 B6)", () => {
   })
 
   it("keeps pdfkit external and ships the fonts in the runtime image", () => {
-    expect(readFileSync(path.join(root, "next.config.mjs"), "utf8")).toMatch(/serverExternalPackages:\s*\[\s*"pdfkit"\s*\]/)
+    expect(readFileSync(path.join(root, "next.config.mjs"), "utf8")).toMatch(/serverExternalPackages:\s*\[[^\]]*"pdfkit"[^\]]*\]/)
     expect(readFileSync(path.join(root, "Dockerfile"), "utf8")).toContain("COPY --from=builder /app/assets ./assets")
   })
 })

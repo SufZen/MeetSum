@@ -19,6 +19,9 @@
  * If Playwright browsers can't be installed on the host, the orchestrator
  * runs the same steps with agent-browser and attaches screenshots.
  */
+import { mkdirSync, writeFileSync } from "node:fs"
+import path from "node:path"
+
 import { expect, test } from "@playwright/test"
 
 import { dictionaries } from "@/lib/i18n/dictionaries"
@@ -129,6 +132,8 @@ test.describe("17.10 onboarding", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: he.onboardingTitle })).toBeVisible()
     await expect(page.locator("[data-icon=directional]").first()).toBeAttached()
+    // M10: under `next dev` a click before hydration is lost; wait for the client.
+    await page.waitForLoadState("networkidle")
     await page.getByRole("button", { name: he.onboardingSkip, exact: true }).click()
     await expect(page.locator("#onboarding-step-heading")).toBeFocused()
 
@@ -160,6 +165,10 @@ test.describe("17.5 Hebrew PDF (Package B)", () => {
     expect(response.headers()["content-disposition"]).toMatch(/filename\*=UTF-8''[^;]*%D7%/)
 
     const body = await response.body()
+
+    // M10 A6: the Hebrew PDF sample is a CI artifact (the workflow adds pdftotext output).
+    mkdirSync(path.join("test-results", "m9-pdf"), { recursive: true })
+    writeFileSync(path.join("test-results", "m9-pdf", "meeting-he.pdf"), body)
 
     expect(body.subarray(0, 8).toString("latin1")).toBe("%PDF-1.7")
     expect(body.toString("latin1")).toContain("IBMPlexSansHebrew")

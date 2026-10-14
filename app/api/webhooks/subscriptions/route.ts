@@ -12,7 +12,7 @@ import {
 } from "@/lib/webhooks/management"
 
 export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
@@ -22,7 +22,7 @@ export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
 })
 
 export const POST = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

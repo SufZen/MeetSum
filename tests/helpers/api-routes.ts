@@ -19,6 +19,9 @@ export const PUBLIC_ALLOWLIST = [
   "user/locale POST",
   "invitations/[token] GET",
   "health GET",
+  // M10: liveness (no dependency calls) and readiness (ok/fail/skip only).
+  "health/live GET",
+  "health/ready GET",
   "locales GET",
   "share/[token]/verify GET",
   "share/[token]/verify POST",

@@ -20,7 +20,7 @@ import { getWorkspaceStore } from "@/lib/workspaces/store"
 export const POST = withAuthz<{ id: string }>(
   "members:manage",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

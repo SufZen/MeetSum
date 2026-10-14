@@ -9,6 +9,9 @@ import { getCaptureWorkspaceId } from "@/lib/capture/workspace"
 import { enqueueMeetSumJob } from "@/lib/jobs/queue"
 import { getSystemMeetingRepository } from "@/lib/meetings/store"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "webhooks/teams" })
 
 export const runtime = "nodejs"
 
@@ -125,7 +128,7 @@ async function handleTeamsWebhook(request: Request) {
         await repository.discardMeeting(meetingId).catch(() => false)
       }
 
-      console.error("[teams] notification processing failed", error)
+      log.error({ err: error }, "[teams] notification processing failed")
     }
   }
 

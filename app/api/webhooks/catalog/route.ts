@@ -12,7 +12,7 @@ import { RATE_LIMIT_PRESETS, rateLimitRequest } from "@/lib/rate-limit"
  * data; `schemaUrl` is the generated JSON Schema in the repository.
  */
 export const GET = withAuthz("webhooks:manage", async (request) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

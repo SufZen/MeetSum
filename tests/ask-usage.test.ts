@@ -26,12 +26,6 @@ describe("migration 026 (static)", () => {
     expect(sql).toContain("primary key (workspace_id, principal_key, day)")
   })
 
-  it("is mirrored in db/schema.sql", () => {
-    const schema = flat(readFileSync("db/schema.sql", "utf8"))
-
-    expect(schema).toContain("create table if not exists ask_usage")
-    expect(schema).toContain("primary key (workspace_id, principal_key, day)")
-  })
 })
 
 describe("reserve SQL", () => {

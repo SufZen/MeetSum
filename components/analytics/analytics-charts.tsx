@@ -64,7 +64,10 @@ export function SparkBars({ data, color }: { data: Array<{ label: string; count:
   return (
     <div dir="ltr" aria-hidden>
       <ChartContainer config={config} className="aspect-auto h-12 w-full">
-        <BarChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+        {/* Decorative (the count is the card's text): no accessibility layer, so
+            the chart surface is not a tab stop inside the aria-hidden wrapper
+            (axe aria-hidden-focus). */}
+        <BarChart data={data} accessibilityLayer={false} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
           <Bar dataKey="count" fill="var(--color-count)" radius={2} />
         </BarChart>
       </ChartContainer>

@@ -1,8 +1,8 @@
 import { toast } from "sonner"
 
 import { exportFileBaseName, filenameFromContentDisposition } from "@/lib/http/content-disposition"
-import { getExportsMessages, type ExportsMessages } from "@/lib/i18n/m8/exports"
-import { formatMessage } from "@/lib/i18n/workspace-messages"
+import type { ExportsMessages } from "@/lib/i18n/m8/exports"
+import { formatMessage } from "@/lib/i18n/messages"
 
 /**
  * Client-side meeting exports (owner: Package C; docs/parity/m8.md, C3).
@@ -24,7 +24,8 @@ export const DOWNLOAD_URL_TTL_MS = 30_000
 
 type ExportOptions = {
   locale?: string
-  messages?: ExportsMessages
+  /** The UI locale's export strings (from the route's I18nProvider). */
+  messages: ExportsMessages
   /** Injected in tests. */
   fetchImpl?: typeof fetch
 }
@@ -41,9 +42,9 @@ export function downloadFilename(header: string | null, title: string, format: D
 export async function downloadExport(
   meeting: { id: string; title: string },
   format: DownloadExportFormat,
-  options: ExportOptions = {}
+  options: ExportOptions
 ): Promise<boolean> {
-  const t = options.messages ?? getExportsMessages(options.locale)
+  const t = options.messages
   const label = formatLabel(t, format)
   const query = options.locale ? `?locale=${encodeURIComponent(options.locale)}` : ""
   const response = await (options.fetchImpl ?? fetch)(

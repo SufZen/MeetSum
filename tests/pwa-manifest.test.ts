@@ -70,6 +70,8 @@ describe("precached files", () => {
 
     expect(html).toContain('<html lang="he" dir="rtl">')
     expect(html).toContain("navigator.language")
+    // The chosen UI language (meetsum_locale cookie) wins over the browser's.
+    expect(html).toContain("meetsum_locale=(he|en)")
     expect(html).toContain("You’re offline")
     expect(html).not.toMatch(/<script[^>]+src=/)
     expect(html).not.toMatch(/<link[^>]+stylesheet/)

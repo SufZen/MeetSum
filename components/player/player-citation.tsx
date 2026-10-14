@@ -8,6 +8,7 @@
  * and opens a peek with the speaker, time and quote, "Play from here" and
  * "Open in transcript".
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import { useState } from "react"
 import { PlayIcon, TextQuoteIcon } from "lucide-react"
 
@@ -16,7 +17,8 @@ import { Button } from "@/components/ui/button"
 import { CitationChip, formatTimecode } from "@/components/ui/meeting-atoms"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { directionForLanguage } from "@/components/speaker-display"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 
 export function PlayerCitation({
@@ -78,7 +80,7 @@ export function PlayerCitation({
         {segment ? (
           <blockquote
             dir={quoteDir}
-            lang={segment.language}
+            lang={bcp47Lang(segment.language)}
             className="line-clamp-4 text-base text-fg"
           >
             {segment.text}

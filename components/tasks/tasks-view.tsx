@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { bulkUpdateTasks, fetchTasks, patchActionItem } from "@/components/tasks/api"
 import { Isolated, withSlot } from "@/components/tasks/slot"
 import { isOverdue, TaskItemRow } from "@/components/tasks/task-item-row"
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { getTasksMessages, type TasksMessages } from "@/lib/i18n/m5/tasks"
+import type { TasksMessages } from "@/lib/i18n/m5/tasks"
 import type { ActionItemPatch } from "@/lib/meetings/repository"
 import { addDaysToDate, localDateIn } from "@/lib/tasks/due-date"
 import type { TaskListQuery, TaskMember, TaskRow } from "@/lib/tasks/types"
@@ -94,7 +95,9 @@ export function TasksView({
   rooms = [],
   members = [],
 }: TasksViewProps) {
-  const strings = dictionary ?? getTasksMessages(locale)
+  // Without a prop, the route's I18nProvider carries the task keys (M10 C).
+  const providerMessages = useOptionalI18n()?.messages
+  const strings = dictionary ?? ((providerMessages ?? {}) as unknown as TasksMessages)
   // Viewers (no meeting:write) see read-only rows.
   const canEditTasks = useWorkspace().can("meeting:write")
   const [chip, setChip] = useState<Chip>(chipFor(initialQuery))
@@ -293,7 +296,7 @@ export function TasksView({
           </Button>
         </div>
       ) : state === "loading" && !tasks.length ? (
-        <div className="grid gap-2" aria-busy="true" aria-label={strings.tasksLoading}>
+        <div role="status" className="grid gap-2" aria-busy="true" aria-label={strings.tasksLoading}>
           {[0, 1, 2].map((index) => (
             <Skeleton key={index} className="h-16 w-full rounded-lg" />
           ))}

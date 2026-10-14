@@ -3,6 +3,9 @@ import { redactBotError } from "@/lib/bot/redact"
 import { getBotSessionStore, type BotSessionStore } from "@/lib/bot/store"
 import { getBotProvider } from "@/lib/bot/vexa/client"
 import { VexaError, type BotProvider } from "@/lib/bot/vexa/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "bot" })
 
 /**
  * Daily Vexa artifact purge (M7 B6): once our copy is imported (or the
@@ -42,7 +45,7 @@ export async function runBotRetention(
     } catch (error) {
       if (!(error instanceof VexaError && error.kind === "not_found")) {
         if (!(error instanceof VexaError && error.kind === "conflict")) {
-          console.warn("[bot] retention delete failed", redactBotError(error))
+          log.warn({ error: redactBotError(error) }, "[bot] retention delete failed")
         }
         skipped += 1
         continue

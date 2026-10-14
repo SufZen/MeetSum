@@ -37,7 +37,7 @@ import {
   MeetingInboxPanel,
   type MeetingSortMode,
 } from "@/components/meeting-inbox-panel"
-import { MeetingWorkspace, type MeetingPermissions } from "@/components/meeting-workspace"
+import type { MeetingPermissions } from "@/components/meeting-workspace"
 import { useMeetingTranscript } from "@/components/transcript/use-meeting-transcript"
 import type { ProviderStatusView } from "@/components/provider-health-panel"
 import { providerLabelString, statusMessageString } from "@/components/status-message-text"
@@ -45,7 +45,6 @@ import { OfflineBanner } from "@/components/pwa/offline-banner"
 import { UploadQueueProvider } from "@/components/pwa/upload-queue-provider"
 import { usePromptDialog } from "@/components/ui/prompt-dialog"
 import { useShellUrl } from "@/hooks/use-shell-url"
-import { ShareMeetingDialog } from "@/components/share/share-meeting-dialog"
 import {
   TopCommandBar,
   type AiProviderStatus,
@@ -123,6 +122,31 @@ const RecorderDock = dynamic(
       .catch(() => function RecorderDockUnavailable() {
         return null
       }),
+  { ssr: false }
+)
+// M10 C bundle diet: the reading column (header, player, tabs, summary,
+// comments, export menu) is its own chunk. It still renders on the server,
+// so the skeleton only shows on a client-side switch before the chunk lands;
+// it keeps the column's box (header, player bar, tab row) to avoid layout shift.
+const workspaceLoading = () => (
+  <div
+    aria-busy="true"
+    className="flex min-h-0 min-w-0 flex-col gap-4 bg-surface px-4 pt-4 md:px-6 lg:h-full"
+  >
+    <div className="h-8 w-2/3 animate-pulse rounded-md bg-surface-2" />
+    <div className="h-4 w-1/3 animate-pulse rounded-md bg-surface-2" />
+    <div className="mx-auto h-14 w-full max-w-5xl animate-pulse rounded-md bg-surface-2" />
+    <div className="mx-auto h-9 w-full max-w-172 animate-pulse rounded-md bg-surface-2" />
+    <div className="mx-auto h-48 w-full max-w-5xl animate-pulse rounded-md bg-surface-2" />
+  </div>
+)
+const MeetingWorkspace = dynamic(
+  () => import("@/components/meeting-workspace").then((mod) => mod.MeetingWorkspace),
+  { loading: workspaceLoading }
+)
+// The share dialog mounts on first open.
+const ShareMeetingDialog = dynamic(
+  () => import("@/components/share/share-meeting-dialog").then((mod) => mod.ShareMeetingDialog),
   { ssr: false }
 )
 const StopBotDialog = dynamic(

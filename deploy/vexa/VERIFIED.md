@@ -41,5 +41,12 @@ fallback MeetSum uses.
   `DOCKER_HOST` (needed for `compose.socket-proxy.yml`) is **unverified**.
 - **MinIO client image.** `minio/mc` is no longer pullable from Docker Hub;
   `vexa-minio-init` uses `bitnamilegacy/minio-client:2025.7.21-debian-12-r3` pinned by digest.
-  (The production compose file's `minio/minio:latest` reference has the same problem; it is
-  outside M7's files and is flagged in the runbook.)
+  (The production compose file's `minio/minio:latest` reference had the same problem; M10
+  pinned the server to `coollabsio/minio:RELEASE.2025-10-15T17-29-55Z` by digest, see
+  `docs/runbooks/deploy.md` → "Images".)
+
+## Socket proxy (R3)
+
+**Not yet validated against a live Vexa host.** Procedure: `docs/runbooks/vexa-isolated-host.md`
+→ "Socket-proxy validation". Record here: the date, the Vexa version, whether bots spawned with
+`IMAGES=0 NETWORKS=0`, and which flags had to be enabled.

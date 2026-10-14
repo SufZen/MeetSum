@@ -8,6 +8,9 @@ import { getBotSessionStore, type BotSessionStore } from "@/lib/bot/store"
 import { BOT_PLATFORMS, type BotPlatform } from "@/lib/bot/types"
 import type { VexaServiceProvenance } from "@/lib/bot/vexa/types"
 import { verifyVexaSignature } from "@/lib/bot/webhook-verify"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "bot" })
 
 /**
  * Vexa webhook processing (M7 B3). The route only adapts HTTP; everything
@@ -344,7 +347,7 @@ export async function processVexaWebhook(
     if (recorded.event?.id) {
       await store
         .deleteEvent(recorded.event.id, { workspaceId: session.workspaceId })
-        .catch((cleanup: unknown) => console.error("[bot] webhook event cleanup failed", redactBotError(cleanup)))
+        .catch((cleanup: unknown) => log.error({ error: redactBotError(cleanup) }, "[bot] webhook event cleanup failed"))
     }
     throw error
   }

@@ -6,6 +6,9 @@ import {
 } from "@/lib/ai/providers"
 import { GEMINI_FREE_TIER_WARNING, getGeminiTier } from "@/lib/ai/llm/config"
 import { getWorkspaceAuthStatus } from "@/lib/google/auth"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ops" })
 
 export type RuntimeEnvironmentReport = {
   warnings: string[]
@@ -145,12 +148,12 @@ export function assertRuntimeEnvironment(
   const report = validateRuntimeEnvironment(env)
 
   for (const warning of report.warnings) {
-    console.warn(`[env] ${warning}`)
+    log.warn(`[env] ${warning}`)
   }
 
   if (report.fatal.length > 0) {
     for (const issue of report.fatal) {
-      console.error(`[env] FATAL: ${issue}`)
+      log.error(`[env] FATAL: ${issue}`)
     }
 
     throw new Error(

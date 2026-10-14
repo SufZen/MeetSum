@@ -17,8 +17,10 @@
 //
 // Ratchet: a route fails when it grows more than `maxGrowthKb` over its
 // recorded `baselineKb`. `budgetKb` is the target; it fails only with --strict
-// (the Integration step / CI once D lands the diet). Lowering a baseline is
-// always allowed (--write-baseline only lowers unless --force).
+// (M10 C set the targets; the M10 Integration step turns --strict on in CI).
+// Lowering a baseline is always allowed (--write-baseline only lowers unless
+// --force). The M10 PR also reports `--no-polyfills` numbers: the polyfill
+// chunk loads `nomodule`, so modern browsers skip it.
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import { pathToFileURL } from "node:url"

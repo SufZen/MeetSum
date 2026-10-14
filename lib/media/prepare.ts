@@ -23,6 +23,9 @@ import type {
   DeleteMeetingObjectsResult,
   StoredObject,
 } from "@/lib/storage/object-storage"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "media" })
 
 /**
  * `media.prepare` (M4 Package A): for one original asset, probe its
@@ -278,7 +281,7 @@ export async function prepareMediaAsset(options: {
       const deleted = await storage.deleteObjects(superseded.map((candidate) => candidate.storageKey))
 
       if (deleted.failed.length) {
-        console.warn(`media.prepare: ${deleted.failed.length} superseded object(s) not deleted`)
+        log.warn(`media.prepare: ${deleted.failed.length} superseded object(s) not deleted`)
       }
     }
 

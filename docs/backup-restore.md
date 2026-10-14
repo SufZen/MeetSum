@@ -15,6 +15,8 @@ Creates a timestamped directory under `./backups/` containing:
 - `minio/` — complete mirror of all MinIO buckets
 - `manifest.json` — backup metadata with checksums
 
+The MinIO server image is built from the official source (`deploy/minio/Dockerfile`, see [runbooks/deploy.md](runbooks/deploy.md#images)) and keeps the same `/data` layout as the previous images, so these backups restore into it unchanged. The mirror needs an `mc` on the host. If object storage later moves to Garage or SeaweedFS, restore the `minio/` mirror into the new server's bucket with `mc mirror` the same way.
+
 Override the backup location:
 
 ```bash
@@ -43,6 +45,8 @@ For quick pre-deploy backups:
 ```bash
 ./scripts/backup-postgres.sh
 ```
+
+`scripts/deploy-vps.sh` runs this before every deploy and stops when it fails. The script writes to a `.partial` file first and exits non-zero on a failed or empty dump, so a half-written file is never left behind as a "backup". The restore drill and the manual post-deploy restore are in [runbooks/deploy.md](runbooks/deploy.md).
 
 Restore a Postgres-only backup:
 

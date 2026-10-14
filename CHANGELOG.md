@@ -2,6 +2,32 @@
 
 All notable changes to MeetSum are documented in this file.
 
+## [0.7.0] — unreleased (Fireflies parity programme, M0–M10)
+
+`package.json` (and so `/api/health` and the log `version` field) moved to 0.7.0 at the M10 Integration step. Per-milestone detail is in `docs/parity/m0.md`–`m10.md` and in `docs/parity/STATUS.md`; the scored, evidence-backed feature comparison is in `docs/parity/AUDIT.md`.
+
+### Added
+- **M1, pipeline:** streaming idempotent uploads; Zoom and Teams capture webhooks; webhook SSRF guard and signed deliveries v2; scoped API keys.
+- **M2, workspaces:** multi-user workspaces with roles (viewer, member, admin, owner), invitations, meeting visibility (private, workspace, link) enforced on every read path, and API keys bound to a workspace.
+- **M3.5, design system:** Cadence v2.0 tokens and primitives (`design-system/`).
+- **M3, Hebrew ASR:** ASR router with a circuit breaker (RunPod ivrit-ai, Modal `asr-worker` with pyannote, Soniox, OpenAI-compatible Whisper including Groq), diarization, speaker suggestions, glossary, and the `asr:evaluate` harness.
+- **M4, player:** waveform, speaker lanes, range streaming, virtualized transcript, transcript editing with history and undo, in-transcript finder.
+- **M5, intelligence:** Hebrew-native cited summaries, 11 templates plus custom ones, chapters, action items with he/en relative due dates, a Tasks view, clips, comments, reactions, per-meeting analytics, and the `llm:evaluate` harness.
+- **M6, search and Ask:** Hebrew normalizer; hybrid pgvector, full-text and trigram search with a lexical fallback; streaming AskMeetSum with strict citations and private threads; `search:eval`.
+- **M7, meeting bot:** Vexa sidecar ("Join now", calendar rules, consent, lobby and stop lifecycle), webhook verification, live transcript behind `MEETSUM_LIVE_TRANSCRIPT`.
+- **M8, integrations:** Slack, Outlook calendar, Notion, HubSpot, Google Docs, DOCX, email recap, webhook catalog v2, one privacy gate for every push, and encrypted row-bound tokens.
+- **M9, i18n and polish:** he/en only (pt, es and it removed), full RTL, the gender-neutral Hebrew style guide, Hebrew PDF (Plex Sans Hebrew, bidi layout), notifications, onboarding, the analytics dashboard, PWA, and password-protected shares.
+- **M10, hardening:** generated `db/schema.sql` with a CI diff; a token-encryption keyring with `scripts/reencrypt-tokens.ts`; HubSpot and Graph behaviour re-verified against the vendor docs; RealizeOS behind the privacy gate; the transcript finder on the M6 normalizer; an API reference covering every route; truthful README and SETUP; the final parity audit. Packages A–C add CI end-to-end tests, structured logging, health and readiness checks, a Redis rate limiter, a one-build deploy with rollback, digest-pinned images, and the bundle diet.
+
+### Changed
+- HubSpot OAuth uses the date-versioned `/oauth/2026-03/token` endpoints (the v1 token endpoint errors from 2027-02-16).
+- Outlook calendar sync no longer cancels a meeting when Graph reports `@removed` for an event that only moved outside the sync window.
+- Historical docs moved to `docs/archive/`; `docs/design-system.md` (v1) was removed in favour of `design-system/README.md`.
+
+### Security
+- Ciphertexts carry a key id, so `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY` can be rotated with `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS` and a dry-run-first re-encrypt script.
+- A private meeting is exported to RealizeOS only with its current owner's opt-in.
+
 ## [Unreleased]
 
 Milestone M0 "Baseline & honesty" (see `docs/parity/PLAN.md`).

@@ -1,101 +1,50 @@
 "use client"
 
 /**
- * Notifications bell (docs/parity/m9.md C1), mounted in `top-command-bar`.
- * An icon button labelled with the unread count ("3 התראות שלא נקראו"), a
- * visible count capped at "9+" plus a dot (never colour alone). Polls
- * `/api/notifications/unread-count` with its weak ETag via `nextPollDelay`
- * (no polling while the tab is hidden; 60 s otherwise) and refetches on focus.
- * A polite live region announces a count increase once. The popover lists
- * the latest notifications, marks one read on open and offers "mark all read".
+ * Notifications popover (docs/parity/m9.md C1). Mounted on intent by
+ * `NotificationBellHost` (M10 C bundle diet), which owns the unread count, its
+ * polling and the live region, and renders the same button until then. The
+ * popover lists the latest notifications, marks one read on open and offers
+ * "mark all read"; mark-read answers report the new count to the host.
  */
-import { BellIcon } from "lucide-react"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { useI18n } from "@/components/i18n-provider"
+import { bellButtonProps } from "@/components/notifications/notification-bell-host"
 import { NotificationItem } from "@/components/notifications/notification-item"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { nextPollDelay } from "@/lib/client/polling"
 import type { NotificationDTO } from "@/lib/notifications/types"
 
 type ListResponse = { notifications: NotificationDTO[]; nextCursor: string | null }
 
 const PAGE = 20
 
-export function NotificationBell({ locale }: { locale: string }) {
+export function NotificationBell({
+  locale,
+  unread,
+  label,
+  face,
+  defaultOpen = false,
+  onUnreadChange,
+}: {
+  locale: string
+  unread: number
+  /** The button's accessible name (the unread count). */
+  label: string
+  /** The bell icon and badge, rendered by the host. */
+  face: ReactNode
+  defaultOpen?: boolean
+  onUnreadChange: (unread: number) => void
+}) {
   const i18n = useI18n()
   const titleId = useId()
-  const [count, setCount] = useState<number | null>(null)
-  const [announcement, setAnnouncement] = useState("")
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const [items, setItems] = useState<NotificationDTO[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
-  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle")
+  const [status, setStatus] = useState<"idle" | "loading" | "error">(defaultOpen ? "loading" : "idle")
   const [accepting, setAccepting] = useState<string | null>(null)
-  const etagRef = useRef<string | null>(null)
-  const countRef = useRef<number | null>(null)
-
-  const applyCount = useCallback(
-    (next: number) => {
-      const previous = countRef.current
-
-      countRef.current = next
-      setCount(next)
-      if (previous !== null && next > previous) {
-        setAnnouncement(i18n.plural("notifNew", next - previous, { count: i18n.fmt.number(next - previous) }))
-      }
-    },
-    [i18n]
-  )
-
-  const refreshCount = useCallback(async () => {
-    try {
-      const response = await fetch("/api/notifications/unread-count", {
-        headers: etagRef.current ? { "if-none-match": etagRef.current } : {},
-        cache: "no-store",
-      })
-
-      if (response.status === 304 || !response.ok) return
-      etagRef.current = response.headers.get("etag")
-      applyCount(((await response.json()) as { count: number }).count)
-    } catch {
-      // Offline or signed out: keep the last count.
-    }
-  }, [applyCount])
-
-  useEffect(() => {
-    let timer: number | undefined
-    let cancelled = false
-
-    const schedule = () => {
-      window.clearTimeout(timer)
-      const delay = nextPollDelay({ activeJobs: 0, selectedProcessing: false, hidden: document.visibilityState === "hidden" })
-
-      if (delay !== null && !cancelled) {
-        timer = window.setTimeout(() => {
-          void refreshCount().finally(schedule)
-        }, delay)
-      }
-    }
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void refreshCount().finally(schedule)
-      else window.clearTimeout(timer)
-    }
-    const onFocus = () => void refreshCount()
-
-    void refreshCount().finally(schedule)
-    document.addEventListener("visibilitychange", onVisible)
-    window.addEventListener("focus", onFocus)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-      window.removeEventListener("focus", onFocus)
-    }
-  }, [refreshCount])
 
   const load = useCallback(
     async (after: string | null) => {
@@ -137,12 +86,10 @@ export function NotificationBell({ locale }: { locale: string }) {
       if (response?.ok) {
         const result = (await response.json()) as { unread: number }
 
-        countRef.current = result.unread
-        setCount(result.unread)
-        etagRef.current = null
+        onUnreadChange(result.unread)
       }
     },
-    []
+    [onUnreadChange]
   )
 
   const markAllRead = async () => {
@@ -178,77 +125,52 @@ export function NotificationBell({ locale }: { locale: string }) {
     }
   }
 
-  const unread = count ?? 0
-  const label = unread > 0 ? i18n.plural("notifBellUnread", unread, { count: i18n.fmt.number(unread) }) : i18n.t("notifBellLabel")
-  const visibleCount = unread > 9 ? i18n.t("notifBellOverflow") : i18n.fmt.number(unread)
+  // Opened by the click that mounted it: load the list once.
+  const openedOnMount = defaultOpen
+  useEffect(() => {
+    if (openedOnMount) queueMicrotask(() => void load(null))
+  }, [openedOnMount, load])
 
   return (
-    <>
-      <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative rounded-full"
-              aria-label={label}
-              title={label}
-              data-testid="notification-bell"
-            />
-          }
-        >
-          <BellIcon aria-hidden className="size-5" />
-          {unread > 0 ? (
-            <span
-              aria-hidden
-              className="absolute -end-1 -top-1 flex h-4 min-w-4 items-center justify-center gap-0.5 rounded-full border border-line bg-surface px-1 font-mono text-xs leading-none text-fg tabular-nums"
-            >
-              <span className="size-1.5 rounded-full bg-brand" />
-              <span dir="ltr">{visibleCount}</span>
-            </span>
-          ) : null}
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-80 gap-2 p-2" aria-labelledby={titleId}>
-          <div className="flex items-center justify-between gap-2 px-1">
-            <h2 id={titleId} className="text-sm font-semibold text-fg">
-              {i18n.t("notifTitle")}
-            </h2>
-            <Button variant="ghost" size="sm" disabled={unread === 0} onClick={() => void markAllRead()}>
-              {i18n.t("notifMarkAllRead")}
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger render={<Button {...bellButtonProps(label)} />}>{face}</PopoverTrigger>
+      <PopoverContent align="end" className="w-80 gap-2 p-2" aria-labelledby={titleId}>
+        <div className="flex items-center justify-between gap-2 px-1">
+          <h2 id={titleId} className="text-sm font-semibold text-fg">
+            {i18n.t("notifTitle")}
+          </h2>
+          <Button variant="ghost" size="sm" disabled={unread === 0} onClick={() => void markAllRead()}>
+            {i18n.t("notifMarkAllRead")}
+          </Button>
+        </div>
+        {status === "error" ? (
+          <div className="grid justify-items-start gap-2 p-2 text-sm text-fg-2">
+            <p>{i18n.t("notifLoadFailed")}</p>
+            <Button variant="outline" size="sm" onClick={() => void load(null)}>
+              {i18n.t("notifRetry")}
             </Button>
           </div>
-          {status === "error" ? (
-            <div className="grid justify-items-start gap-2 p-2 text-sm text-fg-2">
-              <p>{i18n.t("notifLoadFailed")}</p>
-              <Button variant="outline" size="sm" onClick={() => void load(null)}>
-                {i18n.t("notifRetry")}
-              </Button>
-            </div>
-          ) : items.length === 0 && status !== "loading" ? (
-            <p className="p-3 text-center text-sm text-fg-3">{i18n.t("notifEmpty")}</p>
-          ) : (
-            <ul className="grid max-h-96 gap-0.5 overflow-y-auto" aria-busy={status === "loading"}>
-              {items.map((notification) => (
-                <NotificationItem
-                  key={notification.id}
-                  notification={notification}
-                  onOpen={onOpenItem}
-                  onAcceptInvitation={(item) => void onAcceptInvitation(item)}
-                  accepting={accepting === notification.id}
-                />
-              ))}
-            </ul>
-          )}
-          {cursor && status !== "error" ? (
-            <Button variant="ghost" size="sm" disabled={status === "loading"} onClick={() => void load(cursor)}>
-              {i18n.t("notifLoadMore")}
-            </Button>
-          ) : null}
-        </PopoverContent>
-      </Popover>
-      <span role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </span>
-    </>
+        ) : items.length === 0 && status !== "loading" ? (
+          <p className="p-3 text-center text-sm text-fg-3">{i18n.t("notifEmpty")}</p>
+        ) : (
+          <ul className="grid max-h-96 gap-0.5 overflow-y-auto" aria-busy={status === "loading"}>
+            {items.map((notification) => (
+              <NotificationItem
+                key={notification.id}
+                notification={notification}
+                onOpen={onOpenItem}
+                onAcceptInvitation={(item) => void onAcceptInvitation(item)}
+                accepting={accepting === notification.id}
+              />
+            ))}
+          </ul>
+        )}
+        {cursor && status !== "error" ? (
+          <Button variant="ghost" size="sm" disabled={status === "loading"} onClick={() => void load(cursor)}>
+            {i18n.t("notifLoadMore")}
+          </Button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   )
 }

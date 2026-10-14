@@ -29,7 +29,7 @@ gcloud services enable secretmanager.googleapis.com
 gcloud services enable cloudresourcemanager.googleapis.com
 ```
 
-Current status is tracked in `docs/bootstrap-status.md`.
+Current status is tracked in `docs/archive/bootstrap-status.md` (historical).
 
 ## Create Service Account
 

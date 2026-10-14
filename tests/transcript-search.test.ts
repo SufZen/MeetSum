@@ -22,7 +22,8 @@ describe("normalizeForSearch", () => {
   it("folds final letters, case, maqaf, geresh/gershayim and curly quotes", () => {
     expect(normalizeForSearch("ךםןףץ").text).toBe("כמנפצ")
     expect(normalizeForSearch("Due Diligence").text).toBe("due diligence")
-    expect(normalizeForSearch("בית־ספר").text).toBe("בית-ספר")
+    // M10 R12: the M6 normalizer turns maqaf into a space.
+    expect(normalizeForSearch("בית־ספר").text).toBe("בית ספר")
     expect(normalizeForSearch("צה״ל").text).toBe(normalizeForSearch('צה"ל').text)
     expect(normalizeForSearch("ג׳ירפה").text).toBe(normalizeForSearch("ג'ירפה").text)
     expect(normalizeForSearch("“quote” ‘x’").text).toBe("\"quote\" 'x'")

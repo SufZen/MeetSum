@@ -32,6 +32,9 @@ import {
 } from "@/lib/ai/embeddings/types"
 import { foldText } from "@/lib/search/hebrew-normalize"
 import { formatEmbeddingKey, type EmbeddingKey } from "@/lib/search/types"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ai.embeddings" })
 
 export * from "@/lib/ai/embeddings/types"
 
@@ -60,7 +63,7 @@ function selectProvider(env: Env, config: EmbeddingConfig): EmbeddingProvider | 
   if (!isValidEmbeddingKey({ model: config.model, dimensions: config.dimensions })) {
     if (!warnedInvalidKey) {
       warnedInvalidKey = true
-      console.warn("[search] MEETSUM_EMBEDDING_MODEL/DIMENSIONS is invalid; embeddings disabled (lexical search)")
+      log.warn("[search] MEETSUM_EMBEDDING_MODEL/DIMENSIONS is invalid; embeddings disabled (lexical search)")
     }
     return null
   }

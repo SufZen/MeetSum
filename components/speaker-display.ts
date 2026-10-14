@@ -1,5 +1,5 @@
 import { speakerColor, type SpeakerColor } from "@/components/ui/meeting-atoms"
-import { formatMessage } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type {
   MeetingParticipant,
   MeetingSpeaker,

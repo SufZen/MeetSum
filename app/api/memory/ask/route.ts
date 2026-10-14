@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
  * Not persisted.
  */
 export const POST = withAuthz("meeting:read", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.ask)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.ask)
 
   if (rateLimit.blocked) return rateLimit.blocked
 

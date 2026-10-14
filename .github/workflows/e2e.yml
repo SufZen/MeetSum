@@ -1,0 +1,219 @@
+name: E2E
+
+# M10 (docs/parity/m10.md, "E2E in CI"; package A): browser e2e with no
+# secrets. One matrix job per suite, each with its own empty database
+# (the seeds overlap): core (upload → transcript → summary → Ask → share,
+# visibility, the Redis-down state, bot webhooks), m6, m8, m9 and m9-prod.
+# Functional suites run on `next dev` with the fake providers, the fake ASR
+# and LLM replay (all refused in production); m9-prod runs a production build
+# with none of them. Every credential is a per-run random value written by
+# scripts/e2e/ci-env.sh under the gitignored .secrets/, never uploaded.
+# The Integration step pins the actions by SHA and makes the jobs required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NEXT_TELEMETRY_DISABLED: 1
+  # S3-compatible server. MinIO community images are no longer pullable
+  # anonymously (Docker Hub and quay.io, checked 2026-10-14; risk R16), so
+  # the e2e uses SeaweedFS's S3 gateway. Tag and digest resolved 2026-10-14.
+  S3_IMAGE: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core
+            seed: m10:e2e-seed
+            app: dev
+          - suite: m6
+            seed: search:e2e-seed
+            app: dev
+          - suite: m8
+            seed: integrations:e2e-seed
+            app: dev
+          - suite: m9
+            seed: m9:e2e-seed
+            app: dev
+          - suite: m9-prod
+            seed: m9:e2e-seed
+            app: prod
+
+    # Images pinned by tag and digest (resolved 2026-10-14); pgvector matches ci.yml.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+        env:
+          # Throwaway service credentials for this job only (not secrets).
+          POSTGRES_USER: meetings
+          POSTGRES_PASSWORD: meetings
+          POSTGRES_DB: meetsum_e2e
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meetings -d meetsum_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+        ports:
+          - 127.0.0.1:6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CI: "true"
+      E2E_CI_ENV_FILE: .secrets/ci.env
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # ffmpeg: media prepare and ASR transcoding; poppler-utils: pdftotext
+      # for the Hebrew PDF sample.
+      - name: Install ffmpeg and poppler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg poppler-utils
+
+      - name: Per-run env (random test secrets, loopback URLs)
+        run: bash scripts/e2e/ci-env.sh "${{ matrix.suite }}"
+
+      - name: Start the S3 server
+        run: |
+          docker run -d --name meetsum-e2e-s3 -p 127.0.0.1:9000:8333 \
+            -v "$PWD/.secrets/s3.json:/etc/seaweedfs/s3.json:ro" \
+            "$S3_IMAGE" server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=64
+          npx tsx scripts/e2e/wait-for.ts --url http://127.0.0.1:9000/healthz --any-status --timeout 90
+
+      - name: Migrate and seed (${{ matrix.seed }})
+        run: |
+          bash scripts/e2e/with-env.sh npm run db:migrate
+          # m6 runs hybrid on this pgvector image (E2E_EXPECT_LEXICAL unset):
+          # migration 025 indexes only the default embedding key, so the HNSW
+          # index of the e2e key (hash-test:256) is installed before the seed.
+          if [ "${{ matrix.suite }}" = "m6" ]; then
+            bash scripts/e2e/with-env.sh npm run search:vector-setup
+          fi
+          bash scripts/e2e/with-env.sh npm run "${{ matrix.seed }}"
+
+      - name: Start the fake providers and fake ASR
+        if: matrix.app == 'dev'
+        run: |
+          mkdir -p e2e-logs
+          nohup bash scripts/e2e/with-env.sh npm run integrations:fake > e2e-logs/fake-providers.log 2>&1 &
+          npx tsx scripts/e2e/wait-for.ts --url http://127.0.0.1:4010/__fake/requests --timeout 60
+
+      - name: Start the fake Vexa
+        if: matrix.suite == 'core'
+        run: |
+          mkdir -p e2e-logs
+          nohup bash scripts/e2e/with-env.sh npx tsx scripts/bot-simulate.ts --serve-only \
+            --wav tests/fixtures/e2e/media/he-en-30s.wav --port 18056 > e2e-logs/fake-vexa.log 2>&1 &
+          npx tsx scripts/e2e/wait-for.ts --url http://127.0.0.1:18056/health --timeout 60
+
+      - name: Production build
+        if: matrix.app == 'prod'
+        run: bash scripts/e2e/with-env.sh npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Start the worker
+        run: |
+          mkdir -p e2e-logs
+          nohup bash scripts/e2e/with-env.sh npm run worker > e2e-logs/worker.log 2>&1 &
+          # B's worker /ready when it lands; the startup log line until then.
+          npx tsx scripts/e2e/wait-for.ts --url http://127.0.0.1:3101/ready \
+            --log e2e-logs/worker.log --pattern "worker started" --timeout 120
+
+      - name: Start the app (next dev)
+        if: matrix.app == 'dev'
+        run: |
+          nohup bash scripts/e2e/with-env.sh npx next dev --turbopack -H 127.0.0.1 -p 3000 > e2e-logs/app.log 2>&1 &
+          npx tsx scripts/e2e/wait-for.ts --url http://localhost:3000/api/health/live --timeout 180
+
+      - name: Start the app (next start)
+        if: matrix.app == 'prod'
+        run: |
+          nohup bash scripts/e2e/with-env.sh npx next start -H 127.0.0.1 -p 3000 > e2e-logs/app.log 2>&1 &
+          npx tsx scripts/e2e/wait-for.ts --url http://localhost:3000/api/health/live --timeout 120
+
+      - name: Warm up the routes
+        run: bash scripts/e2e/with-env.sh npx tsx scripts/e2e/warmup.ts "${{ matrix.suite }}" --timeout 180
+
+      - name: Playwright (${{ matrix.suite }})
+        run: bash scripts/e2e/with-env.sh npx playwright test --project="${{ matrix.suite }}"
+        env:
+          # core step 9 stops and restarts Redis (the M6 non-blocking state).
+          E2E_REDIS_CONTAINER: ${{ job.services.redis.id }}
+
+      - name: Hebrew PDF sample as text (pdftotext)
+        if: always() && matrix.suite == 'm9'
+        run: |
+          if [ -f test-results/m9-pdf/meeting-he.pdf ]; then
+            pdftotext -layout test-results/m9-pdf/meeting-he.pdf test-results/m9-pdf/meeting-he.txt
+            head -n 20 test-results/m9-pdf/meeting-he.txt
+          fi
+
+      - name: Collect and scrub logs
+        if: always()
+        run: bash scripts/e2e/collect-logs.sh
+
+      # Never .secrets/ (the env file, the S3 identity, the suites' env files).
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-${{ matrix.suite }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            playwright-report/
+            e2e-logs/

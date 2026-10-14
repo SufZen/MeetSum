@@ -8,11 +8,14 @@ import {
   listWebhookDeliveries,
 } from "@/lib/webhooks/management"
 
+/** webhook_deliveries statuses that are still in flight (lib/webhooks/delivery.ts). */
+const IN_FLIGHT_STATUSES = new Set(["queued", "active", "retrying"])
+
 /**
  * GET /api/admin/webhooks/stats — Webhook health of the active workspace.
  */
 export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
-  const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
+  const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.admin)
 
   if (rateLimit.blocked) return rateLimit.blocked
 
@@ -35,9 +38,10 @@ export const GET = withAuthz("webhooks:manage", async (request, ctx) => {
 
     const successCount = last24h.filter((d) => d.status === "sent").length
     const failedCount = last24h.filter((d) => d.status === "failed").length
-    const pendingCount = last24h.filter(
-      (d) => d.status === "pending" || d.status === "active"
-    ).length
+    // In flight: queued (waiting for the worker), active (being sent) or
+    // retrying (a retryable failure with attempts left). There is no
+    // "pending" status; "cancelled" is terminal and counted in neither.
+    const pendingCount = last24h.filter((d) => IN_FLIGHT_STATUSES.has(d.status)).length
 
     const eventBreakdown = new Map<string, number>()
 

@@ -26,7 +26,7 @@ type SpeakerMapping = {
 export const GET = withAuthz<{ id: string }>(
   "meeting:read",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 
@@ -59,7 +59,7 @@ export const GET = withAuthz<{ id: string }>(
 export const POST = withAuthz<{ id: string }>(
   "meeting:write",
   async (request, ctx, { params }) => {
-    const rateLimit = rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
+    const rateLimit = await rateLimitRequest(request, RATE_LIMIT_PRESETS.api)
 
     if (rateLimit.blocked) return rateLimit.blocked
 

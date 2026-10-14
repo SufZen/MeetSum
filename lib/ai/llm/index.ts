@@ -24,6 +24,8 @@ import {
   type LlmRoute,
 } from "@/lib/ai/llm/router"
 import { recordLlmRun } from "@/lib/ai/llm/runs"
+import { getLogger } from "@/lib/log"
+import { isStructuredReplayEnabled, replayStructured } from "@/lib/ai/llm/structured-replay"
 import type {
   LlmProvider,
   LlmResult,
@@ -75,7 +77,7 @@ let freeTierWarned = false
 function warnFreeTierOnce() {
   if (freeTierWarned) return
   freeTierWarned = true
-  console.warn(GEMINI_FREE_TIER_WARNING)
+  getLogger({ component: "ai.llm" }).warn(GEMINI_FREE_TIER_WARNING)
 }
 
 async function workspacePreference(workspaceId: string): Promise<LlmPreference> {
@@ -103,7 +105,8 @@ export async function generateStructured<T>(req: LlmStructuredRequest<T>): Promi
   const record = req.record !== false
 
   try {
-    const result = await runRoutes(req, routes, providers)
+    // M10 A: e2e structured replay (MEETSUM_LLM_REPLAY_DIR; refused in production).
+    const result = isStructuredReplayEnabled() ? await replayStructured(req) : await runRoutes(req, routes, providers)
     const freeTier = result.provider === "gemini" && getGeminiTier() === "free"
 
     if (freeTier) warnFreeTierOnce()

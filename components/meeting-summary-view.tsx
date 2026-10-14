@@ -8,6 +8,7 @@
  * real segments; edited items are the user's. Paragraph direction comes from
  * the meeting's primary language, never `auto`.
  */
+import { bcp47Lang } from "@/lib/i18n/lang-attribute"
 import { useMemo, useState, type ReactNode } from "react"
 import {
   AlertTriangleIcon,
@@ -42,7 +43,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { AiProvenance } from "@/components/ui/meeting-atoms"
 import { summaryProvenance } from "@/lib/intelligence/provenance"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { SummaryItem, SummaryItemKind, SummaryItemRef } from "@/lib/intelligence"
 import { normalizeIntelligence } from "@/lib/intelligence/normalize"
 import { getMeetingCaptureReadiness } from "@/lib/meetings/capture-readiness"
@@ -463,7 +465,7 @@ export function MeetingSummaryView({
                       : t.intelAiLabel
                 }
               >
-                <p lang={summaryLanguage ?? undefined} className="leading-7">{text(overview, summaryLanguage)}</p>
+                <p lang={bcp47Lang(summaryLanguage)} className="leading-7">{text(overview, summaryLanguage)}</p>
               </AiProvenance>
               {moments.length ? (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
@@ -480,7 +482,7 @@ export function MeetingSummaryView({
                 </div>
               ) : null}
               {intelligence?.topics?.length ? (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
+                <div role="group" className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t.intelTopics}>
                   {intelligence.topics.map((topic) => (
                     <span key={topic} dir={dir} className="rounded-sm bg-surface-3 px-2 py-0.5 text-xs text-fg-2">
                       {text(topic, summaryLanguage)}
@@ -580,7 +582,7 @@ export function MeetingSummaryView({
             <section key={section.key} className="mt-8">
               <SectionHeader title={section.title ? text(section.title, summaryLanguage) : section.key} />
               {section.text ? (
-                <p dir={dir} lang={summaryLanguage ?? undefined} className="mb-2 text-md leading-7 text-fg">
+                <p dir={dir} lang={bcp47Lang(summaryLanguage)} className="mb-2 text-md leading-7 text-fg">
                   {text(section.text, summaryLanguage)}
                 </p>
               ) : null}

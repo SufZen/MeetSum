@@ -3,26 +3,13 @@
  * env file (E2E_ENV_FILE, default `.secrets/e2e-m9.env`, never printed),
  * test sign-in by cookie, and the local-only guard (security check 9).
  */
-import { existsSync, readFileSync } from "node:fs"
-
 import { test, type BrowserContext } from "@playwright/test"
 
+import { loadSuiteEnv } from "../../scripts/e2e/env-file"
+
+/** E2E_M9_ENV_FILE, then E2E_ENV_FILE, then .secrets/e2e-m9.env (scripts/e2e/env-file.ts). */
 export function loadM9Env(): Record<string, string> {
-  const file = process.env.E2E_ENV_FILE || ".secrets/e2e-m9.env"
-  const values: Record<string, string> = {}
-
-  if (existsSync(file)) {
-    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-      const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line)
-
-      if (match) values[match[1]!] = match[2]!.replace(/^(['"])(.*)\1$/, "$2")
-    }
-  }
-
-  return {
-    ...values,
-    ...(Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("E2E_"))) as Record<string, string>),
-  }
+  return loadSuiteEnv("m9")
 }
 
 export const env = loadM9Env()

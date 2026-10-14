@@ -1,0 +1,132 @@
+# Archived (M10, 2026-10-14). Historical document, kept for context only; current docs: docs/README.md.
+version: 0.3.0
+released: 2026-05-29
+status: complete
+
+sprints:
+  - sprint: 1
+    name: "Operational Hardening"
+    status: complete
+    stories:
+      - id: MS-301
+        title: "API Key Management"
+        status: done
+        priority: P0
+        pr: "#18"
+        notes: "Migration 013, CRUD endpoints, admin routes, audit logging. 16 tests."
+
+      - id: MS-302
+        title: "Rate Limit Middleware Integration"
+        status: done
+        priority: P0
+        pr: "#17"
+        notes: "rateLimitRequest() on 4 routes, 429 + headers, env disable. 6 tests."
+
+      - id: MS-303
+        title: "Operational Dashboard"
+        status: done
+        priority: P0
+        pr: "#17"
+        notes: "GET /api/admin/operations — 6 metric categories, parallel queries. 3 tests."
+
+      - id: MS-304
+        title: "Summary Template → AI Pipeline Wiring"
+        status: done
+        priority: P0
+        pr: "#17"
+        notes: "GeminiSummaryProvider reads template from settings, 5 domain addenda. 5 tests."
+
+      - id: MS-305
+        title: "Speaker-to-Person Assignment"
+        status: done
+        priority: P0
+        pr: "#18"
+        notes: "GET/POST /api/meetings/:id/speakers — mapping + listing. 9 tests."
+
+      - id: MS-306
+        title: "Hebrew ASR Evaluation Script"
+        status: done
+        priority: P0
+        pr: "#17"
+        notes: "--sample filter, --output JSON report. Already functional."
+
+  - sprint: 2
+    name: "Export & Share"
+    status: complete
+    stories:
+      - id: MS-309
+        title: "DOCX Export"
+        status: done
+        priority: P1
+        pr: "#19"
+        notes: "renderMeetingDocx() via docx package, POST /api/meetings/:id/export/docx. 3 tests."
+
+      - id: MS-310
+        title: "Share Link Enhancements"
+        status: done
+        priority: P1
+        pr: "#19"
+        notes: "passwordHash + expiresAt on MeetingShare, reuses SHA-256 hashing. 6 tests."
+
+  - sprint: 3
+    name: "Dashboard & Discovery"
+    status: complete
+    stories:
+      - id: MS-311
+        title: "Webhook Dashboard Stats"
+        status: done
+        priority: P1
+        pr: "#20"
+        notes: "GET /api/admin/webhooks/stats — subscription counts, delivery rates, failures. 4 tests."
+
+      - id: MS-312
+        title: "Meeting Timeline API"
+        status: done
+        priority: P1
+        pr: "#20"
+        notes: "GET /api/meetings/timeline — day/week/month grouping, date range + room filters. 7 tests."
+
+      - id: MS-308
+        title: "Meeting Search API"
+        status: done
+        priority: P1
+        pr: "#20"
+        notes: "GET /api/meetings/search — full-text + tag/status/source filters. 10 tests."
+
+stats:
+  test_files: 43
+  total_tests: 249
+  typescript_errors: 0
+  new_endpoints: 8
+  enhanced_endpoints: 5
+  new_migration: "013_api_keys.sql"
+
+deferred:
+  - id: MS-307
+    title: "Room Detail UI"
+    reason: "Frontend component — backend API already complete"
+  - id: MS-313
+    title: "Notion Export"
+    reason: "Deferred to v0.4.0"
+  - id: MS-314
+    title: "GitHub Actions Auto-Deploy"
+    reason: "Current rsync flow sufficient"
+  - id: MS-315
+    title: "n8n Starter Workflows"
+    reason: "Deferred to v0.4.0"
+  - id: MS-316
+    title: "Vertex AI Provider"
+    reason: "Pending cost evaluation"
+
+retrospective:
+  went_well:
+    - "Clean sprint execution: 11 stories completed across 3 sprints in one session"
+    - "Zero TypeScript errors maintained throughout all changes"
+    - "Test coverage grew from 180 to 249 tests (+38%)"
+    - "All deployments successful on first attempt"
+  improve:
+    - "Frontend stories (MS-307) deferred — backend-first approach leaves UI gap"
+    - "Rate limiter is in-memory only — needs Redis backend for horizontal scaling"
+  action_items:
+    - "Evaluate Redis-backed rate limiting for v0.4.0"
+    - "Build Room Detail UI as first v0.4.0 story"

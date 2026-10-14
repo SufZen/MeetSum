@@ -1,12 +1,19 @@
 /**
  * Niqqud-insensitive transcript search (M4, client-safe, pure).
  *
- * Text is folded per character (compatibility decomposition, combining marks
- * incl. niqqud and cantillation stripped, lowercase, Hebrew final letters to
- * their regular form, maqaf to "-", geresh/gershayim and curly quotes to
- * ASCII). Every folded character remembers the span of the original text it
- * came from, so matches highlight the original (pointed) text exactly.
+ * M10 (R12): folding delegates to the M6 normalizer (`foldWithOffsets` from
+ * `lib/search/hebrew-normalize`, the single text-folding authority), so the
+ * in-transcript finder and ⌘K search agree: niqqud and cantillation are
+ * stripped, final letters fold, Latin is lower-cased, maqaf is a space,
+ * geresh/gershayim after a Hebrew letter drop (`צה״ל` = `צהל`), and a
+ * hyphen-attached prefix drops (`ב-Supabase` finds `Supabase`). Curly quotes
+ * and dashes are mapped to ASCII first (same length, so offsets hold).
+ *
+ * Every folded unit remembers the span of the original text it came from;
+ * a span ends after the code point and any combining marks that follow it,
+ * so a highlight never splits a letter from its niqqud.
  */
+import { foldWithOffsets } from "@/lib/search/hebrew-normalize"
 
 export type NormalizedText = {
   text: string
@@ -16,74 +23,40 @@ export type NormalizedText = {
   ends: number[]
 }
 
-const FINAL_LETTERS: Record<string, string> = {
-  "ך": "כ",
-  "ם": "מ",
-  "ן": "נ",
-  "ף": "פ",
-  "ץ": "צ",
-}
-
-const PUNCTUATION_FOLDS: Record<string, string> = {
-  "־": "-", // maqaf
-  "‐": "-",
-  "‑": "-",
-  "–": "-",
-  "׳": "'", // geresh
+const ASCII_FOLDS: Record<string, string> = {
   "‘": "'",
   "’": "'",
   "‛": "'",
   "`": "'",
   "´": "'",
-  "״": '"', // gershayim
   "“": '"',
   "”": '"',
   "„": '"',
+  "–": "-",
 }
 
-const COMBINING_MARK = /\p{M}/u
+const TRAILING_MARK = /[\p{M}\p{Cf}]/u
 
-function foldChar(char: string): string {
-  let result = ""
+/** End (exclusive) of the code point at `index`, plus following marks. */
+function spanEnd(original: string, index: number): number {
+  const codePoint = original.codePointAt(index)
+  let end = index + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1)
 
-  for (const piece of char.normalize("NFKD")) {
-    if (COMBINING_MARK.test(piece)) continue
+  while (end < original.length) {
+    const next = String.fromCodePoint(original.codePointAt(end) ?? 0)
 
-    const punctuation = PUNCTUATION_FOLDS[piece]
-
-    if (punctuation) {
-      result += punctuation
-      continue
-    }
-
-    const lower = piece.toLowerCase()
-
-    result += FINAL_LETTERS[lower] ?? lower
+    if (!TRAILING_MARK.test(next)) break
+    end += next.length
   }
 
-  return result
+  return end
 }
 
 export function normalizeForSearch(original: string): NormalizedText {
-  let text = ""
-  const starts: number[] = []
-  const ends: number[] = []
-  let offset = 0
+  const prepared = original.replace(/[‘’‛`´“”„–]/g, (char) => ASCII_FOLDS[char] ?? char)
+  const { folded, map } = foldWithOffsets(prepared)
 
-  for (const char of original) {
-    const folded = foldChar(char)
-    const end = offset + char.length
-
-    for (let index = 0; index < folded.length; index += 1) {
-      starts.push(offset)
-      ends.push(end)
-    }
-
-    text += folded
-    offset = end
-  }
-
-  return { text, starts, ends }
+  return { text: folded, starts: map, ends: map.map((index) => spanEnd(original, index)) }
 }
 
 export type SearchableSegment = {

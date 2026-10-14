@@ -2,30 +2,37 @@ import { NextResponse } from "next/server"
 
 import { getProviderHealthStatus } from "@/lib/ai/provider-health"
 import { withPublicRoute } from "@/lib/auth/authz"
+import { checkRedis, checkStorage, type CheckResult } from "@/lib/health/checks"
 import { pingDatabase } from "@/lib/health/database"
+import { limitHealthProbe } from "@/lib/health/rate-limit"
 import { createHealthReport, type HealthState } from "@/lib/health/status"
 import { validateRuntimeEnvironment } from "@/lib/ops/environment"
+import packageJson from "@/package.json"
 
 const startedAt = Date.now()
 
-function configured(value: string | undefined): HealthState {
-  return value ? "configured" : "not_configured"
+/** M10: real Redis PING and S3 HeadBucket, reported in the legacy vocabulary. */
+function legacyState(result: CheckResult): HealthState {
+  if (result === "ok") return "ok"
+  if (result === "skip") return "not_configured"
+  return "degraded"
 }
 
+// Kept for compatibility (shape unchanged since M1). New probes should use
+// /api/health/live and /api/health/ready.
 export const GET = withPublicRoute(
   "Liveness/readiness probe for the reverse proxy and uptime checks; exposes no tenant data.",
-  async () => {
+  async (request) => {
+    const limited = await limitHealthProbe(request)
+
+    if (limited) return limited
+
     const report = await createHealthReport({
-      version: process.env.npm_package_version ?? "0.5.0",
+      version: packageJson.version,
       startedAt,
       database: () => pingDatabase(),
-      redis: async () => configured(process.env.REDIS_URL),
-      storage: async () =>
-        configured(
-          process.env.S3_ENDPOINT ??
-            process.env.MINIO_ENDPOINT ??
-            process.env.AWS_ENDPOINT_URL_S3
-        ),
+      redis: async () => legacyState(await checkRedis()),
+      storage: async () => legacyState(await checkStorage()),
       ai: async () => {
         const status = getProviderHealthStatus()
         return {

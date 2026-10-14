@@ -103,7 +103,6 @@ export function RuleEditorDrawer({
   if (!draft) return null
 
   const update = (patch: Partial<RuleDraft>) => setDraft((current) => (current ? { ...current, ...patch } : current))
-  const side = locale === "he" ? "left" : "right"
 
   async function save() {
     if (!draft) return
@@ -130,7 +129,7 @@ export function RuleEditorDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side={side} className="w-full overflow-y-auto sm:max-w-lg" dir={locale === "he" ? "rtl" : "ltr"} closeLabel={t.integrationsClose}>
+      <SheetContent side="end" className="w-full overflow-y-auto sm:max-w-lg" dir={locale === "he" ? "rtl" : "ltr"} closeLabel={t.integrationsClose}>
         <SheetHeader>
           <SheetTitle>{draft.id ? t.integrationsRuleEdit : t.integrationsRuleNew}</SheetTitle>
           <SheetDescription>{t.integrationsSectionRules}</SheetDescription>

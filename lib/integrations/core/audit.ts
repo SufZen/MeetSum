@@ -5,6 +5,9 @@
  * provider messages can never pass. Audit failures never break the caller.
  */
 import { recordAuditLog, type AuditAction } from "@/lib/audit"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "integrations" })
 
 const METADATA_KEYS = new Set([
   "provider",
@@ -86,6 +89,6 @@ export async function auditIntegration(
       metadata: sanitizeAuditMetadata(metadata),
     })
   } catch (error) {
-    console.error("[integrations] audit failed", error instanceof Error ? error.name : "error")
+    log.error({ errorName: error instanceof Error ? error.name : "error" }, "[integrations] audit failed")
   }
 }

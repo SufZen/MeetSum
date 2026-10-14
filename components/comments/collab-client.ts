@@ -12,6 +12,8 @@
 import { useParams } from "next/navigation"
 import { useMemo, useSyncExternalStore } from "react"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
+
 import type { ClipWire, CreateClipInput } from "@/lib/clips/types"
 import type {
   CommentListResult,
@@ -21,9 +23,9 @@ import type {
   ReactionSummary,
   ReactionTargetType,
 } from "@/lib/comments/types"
-import { formatMessage } from "@/lib/i18n/workspace-messages"
-import { clipsMessagesEn, clipsMessagesHe } from "@/lib/i18n/m5/clips"
-import { commentsMessagesEn, commentsMessagesHe } from "@/lib/i18n/m5/comments"
+import { formatMessage } from "@/lib/i18n/messages"
+import type { clipsMessagesEn } from "@/lib/i18n/m5/clips"
+import type { commentsMessagesEn } from "@/lib/i18n/m5/comments"
 
 /** Poll interval while subscribed and the tab is visible. */
 export const COLLAB_REFRESH_MS = 15_000
@@ -32,10 +34,12 @@ const FRESH_MS = 5_000
 
 /* ------------------------------------------------------------ strings */
 
-const EN = { ...clipsMessagesEn, ...commentsMessagesEn }
-const HE: typeof EN = { ...clipsMessagesHe, ...commentsMessagesHe }
-
-export type CollabStrings = typeof EN
+/**
+ * The clip and comment keys. They come from the route's `I18nProvider`
+ * (`app/[locale]` passes the whole dictionary, which includes both modules),
+ * so the message modules never ship in client JS (M10 C).
+ */
+export type CollabStrings = typeof clipsMessagesEn & typeof commentsMessagesEn
 
 function documentLocale(): string | undefined {
   return typeof document === "undefined" ? undefined : document.documentElement.lang
@@ -43,11 +47,13 @@ function documentLocale(): string | undefined {
 
 /** Clip/comment strings for the current route locale (`/[locale]/…`). */
 export function useCollabStrings(locale?: string): { t: CollabStrings; locale: "he" | "en" } {
+  const i18n = useOptionalI18n()
   const params = useParams<{ locale?: string }>()
-  const resolved = locale ?? params?.locale ?? documentLocale() ?? "en"
+  const resolved = locale ?? i18n?.locale ?? params?.locale ?? documentLocale() ?? "en"
   const he = resolved === "he" || resolved.startsWith("he-")
+  const messages = i18n?.messages
 
-  return useMemo(() => ({ t: he ? HE : EN, locale: he ? "he" : "en" }), [he])
+  return useMemo(() => ({ t: (messages ?? {}) as CollabStrings, locale: he ? "he" : "en" }), [he, messages])
 }
 
 export { formatMessage }

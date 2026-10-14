@@ -27,7 +27,8 @@ import { Textarea } from "@/components/ui/textarea"
 import type { BotJoinLanguage, JoinBotResponse } from "@/lib/bot/api-types"
 import { diagnoseMeetingLink, extractMeetingLinks } from "@/lib/bot/meeting-url"
 import { DEFAULT_BOT_NAME } from "@/lib/bot/types"
-import { formatMessage, type Dictionary } from "@/lib/i18n/dictionaries"
+import type { Dictionary } from "@/lib/i18n/dictionaries"
+import { formatMessage } from "@/lib/i18n/messages"
 import type { BotMessageKey } from "@/lib/i18n/m7/bot"
 
 const parser = {

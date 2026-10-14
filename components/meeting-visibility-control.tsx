@@ -123,9 +123,9 @@ export function MeetingVisibilityControl({
       <span
         className={badgeClass}
         title={`${hint}. ${t.visibilityReadOnly}`}
-        aria-label={`${t.visibilityLabel}: ${label}`}
       >
         <CurrentIcon aria-hidden="true" className="size-3.5" />
+        <span className="sr-only">{t.visibilityLabel}: </span>
         {label}
       </span>
     )

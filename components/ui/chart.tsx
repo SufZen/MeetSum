@@ -224,7 +224,7 @@ function ChartTooltipContent({
                       !hideIndicator && (
                         <div
                           className={cn(
-                            "shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
+                            "shrink-0 rounded-[2px]",
                             {
                               "h-2.5 w-2.5": indicator === "dot",
                               "w-1": indicator === "line",
@@ -233,12 +233,12 @@ function ChartTooltipContent({
                               "my-0.5": nestLabel && indicator === "dashed",
                             }
                           )}
-                          style={
-                            {
-                              "--color-bg": indicatorColor,
-                              "--color-border": indicatorColor,
-                            } as React.CSSProperties
-                          }
+                          // The series colour (a token var from the chart config), inline:
+                          // no arbitrary colour utility (M10 C, ds:check).
+                          style={{
+                            borderColor: indicatorColor,
+                            backgroundColor: indicator === "dashed" ? "transparent" : indicatorColor,
+                          }}
                         />
                       )
                     )}

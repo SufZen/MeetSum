@@ -29,8 +29,12 @@ import {
 import { listProviders } from "@/lib/integrations/core/registry"
 import { getIntegrationStore, type IntegrationStore } from "@/lib/integrations/core/store"
 import { ProviderError, type IntegrationProvider, type ProviderId } from "@/lib/integrations/core/types"
+import { getLogger } from "@/lib/log"
+import { runInJobLogContext } from "@/lib/log/job-context"
 
-export type IntegrationWorkerHandle = { close(): Promise<void> }
+const log = getLogger({ component: "integrations" })
+
+export type IntegrationWorkerHandle = { close(): Promise<void>; isRunning(): boolean }
 
 type AnyJob = Pick<Job, "name" | "data" | "attemptsMade" | "opts">
 
@@ -195,7 +199,7 @@ export async function upsertIntegrationSchedulers(queue = getIntegrationQueue())
 export function startIntegrationWorker(): IntegrationWorkerHandle | undefined {
   if (process.env.MEETSUM_STORAGE !== "postgres") return undefined
 
-  const worker = new Worker(INTEGRATIONS_QUEUE, (job) => processIntegrationJob(job), {
+  const worker = new Worker(INTEGRATIONS_QUEUE, (job) => runInJobLogContext(INTEGRATIONS_QUEUE, job, processIntegrationJob), {
     connection: { url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379" },
     concurrency: integrationsConcurrency(),
     limiter: { max: 20, duration: 1000 },
@@ -212,9 +216,10 @@ export function startIntegrationWorker(): IntegrationWorkerHandle | undefined {
   worker.on("error", (error) => integrationLog.error("worker error", error))
 
   void upsertIntegrationSchedulers().catch((error: unknown) => integrationLog.error("scheduler setup failed", error))
-  console.log("[integrations] meetsum-integrations worker started")
+  log.info("[integrations] meetsum-integrations worker started")
 
   return {
+    isRunning: () => worker.isRunning(),
     async close() {
       await worker.close()
       await closeIntegrationQueue()

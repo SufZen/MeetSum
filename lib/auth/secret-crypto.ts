@@ -28,6 +28,15 @@ import {
  *   through the legacy path. Callers that opt in re-encrypt to v2 on their
  *   next write (`encryptSecret(value, aad)` always writes v2).
  * There is no fallback to plaintext or base64.
+ *
+ * Key rotation (M10, R10): the keyring is the current master
+ * (`GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY`, falling back as before) plus the
+ * comma-separated `GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS`. New values
+ * carry a key id as a fifth segment (`v2:iv:tag:ct:k<8 hex>`); decryption uses
+ * that key, and a value without a key id (written before M10) tries the
+ * current key, then each previous key (GCM authentication rejects a wrong
+ * key). Encryption always uses the current key. `scripts/reencrypt-tokens.ts`
+ * rewrites old rows; key material is never logged or returned.
  */
 const VERSION_UNBOUND = "v1"
 const VERSION_BOUND = "v2"
@@ -46,7 +55,11 @@ export type DecryptSecretOptions = {
   allowLegacyV1?: boolean
 }
 
-function getMasterSecret() {
+const KEY_ID_PATTERN = /^k[0-9a-f]{8}$/
+
+type KeyringEntry = { id: string; source: string }
+
+function currentSource(): string {
   const source =
     process.env.GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY ??
     process.env.MEETSUM_SESSION_SECRET ??
@@ -61,8 +74,29 @@ function getMasterSecret() {
   return source
 }
 
-function keyFor(version: typeof VERSION_UNBOUND | typeof VERSION_BOUND) {
-  const master = createHash("sha256").update(getMasterSecret()).digest()
+/** Public key id of a master secret: 32 bits of a labelled hash, never the key. */
+export function secretKeyId(source: string): string {
+  return `k${createHash("sha256").update(`meetsum:secret-crypto:kid:${source}`).digest("hex").slice(0, 8)}`
+}
+
+/** Current key first, then GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS in order. */
+function keyring(): KeyringEntry[] {
+  const current = currentSource()
+  const previous = (process.env.GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEYS_PREVIOUS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0 && value !== current)
+
+  return [current, ...new Set(previous)].map((source) => ({ id: secretKeyId(source), source }))
+}
+
+/** Key id that new ciphertexts carry. */
+export function currentSecretKeyId(): string {
+  return secretKeyId(currentSource())
+}
+
+function keyFor(version: typeof VERSION_UNBOUND | typeof VERSION_BOUND, source: string) {
+  const master = createHash("sha256").update(source).digest()
 
   if (version === VERSION_UNBOUND) return master
 
@@ -71,8 +105,9 @@ function keyFor(version: typeof VERSION_UNBOUND | typeof VERSION_BOUND) {
 
 export function encryptSecret(value: string, aad?: string) {
   const version = aad !== undefined ? VERSION_BOUND : VERSION_UNBOUND
+  const source = currentSource()
   const iv = randomBytes(IV_BYTES)
-  const cipher = createCipheriv(ALGORITHM, keyFor(version), iv, {
+  const cipher = createCipheriv(ALGORITHM, keyFor(version, source), iv, {
     authTagLength: TAG_BYTES,
   })
 
@@ -88,6 +123,7 @@ export function encryptSecret(value: string, aad?: string) {
     iv.toString("base64url"),
     cipher.getAuthTag().toString("base64url"),
     encrypted.toString("base64url"),
+    secretKeyId(source),
   ].join(":")
 }
 
@@ -97,10 +133,11 @@ export function decryptSecret(
   options: DecryptSecretOptions = {}
 ) {
   const parts = value.split(":")
-  const [version, ivValue, tagValue, encryptedValue] = parts
+  const [version, ivValue, tagValue, encryptedValue, keyId] = parts
 
   if (
-    parts.length !== 4 ||
+    (parts.length !== 4 && parts.length !== 5) ||
+    (parts.length === 5 && !KEY_ID_PATTERN.test(keyId)) ||
     (version !== VERSION_UNBOUND && version !== VERSION_BOUND) ||
     !ivValue ||
     !tagValue ||
@@ -124,15 +161,50 @@ export function decryptSecret(
     throw new Error("Unsupported encrypted secret format")
   }
 
-  const decipher = createDecipheriv(ALGORITHM, keyFor(version), iv, {
-    authTagLength: TAG_BYTES,
-  })
+  const ring = keyring()
+  const candidates = keyId ? ring.filter((entry) => entry.id === keyId) : ring
 
-  if (version === VERSION_BOUND) decipher.setAAD(Buffer.from(aad as string, "utf8"))
-  decipher.setAuthTag(tag)
+  if (candidates.length === 0) {
+    throw new Error("Encrypted secret key is not in the keyring")
+  }
 
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedValue, "base64url")),
-    decipher.final(),
-  ]).toString("utf8")
+  let lastError: unknown
+
+  for (const entry of candidates) {
+    try {
+      const decipher = createDecipheriv(ALGORITHM, keyFor(version, entry.source), iv, {
+        authTagLength: TAG_BYTES,
+      })
+
+      if (version === VERSION_BOUND) decipher.setAAD(Buffer.from(aad as string, "utf8"))
+      decipher.setAuthTag(tag)
+
+      return Buffer.concat([
+        decipher.update(Buffer.from(encryptedValue, "base64url")),
+        decipher.final(),
+      ]).toString("utf8")
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unable to decrypt secret")
+}
+
+/**
+ * True when a stored value should be rewritten under the current key: it has
+ * no key id (pre-M10) or its key id is not the current one. Does not decrypt.
+ */
+export function secretNeedsReencryption(value: string): boolean {
+  const parts = value.split(":")
+
+  return parts.length !== 5 || parts[4] !== currentSecretKeyId()
+}
+
+/**
+ * Decrypts with the keyring and encrypts again with the current key (same
+ * binding). A bound field that opted into legacy v1 is upgraded to v2.
+ */
+export function reencryptSecret(value: string, aad?: string, options: DecryptSecretOptions = {}): string {
+  return encryptSecret(decryptSecret(value, aad, options), aad)
 }

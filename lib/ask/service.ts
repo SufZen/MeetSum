@@ -51,6 +51,9 @@ import { retrievePassages } from "@/lib/search/retrieve"
 import type { RetrievedPassage } from "@/lib/search/types"
 import { checkRateLimit, RATE_LIMIT_PRESETS } from "@/lib/rate-limit"
 import { getAppSettings } from "@/lib/settings/app-settings"
+import { getLogger } from "@/lib/log"
+
+const log = getLogger({ component: "ask" })
 
 export type AskDeps = {
   retrieve: typeof retrievePassages
@@ -108,9 +111,9 @@ export function askRateLimitKey(ctx: AskPrincipal): string {
 }
 
 /** Consumes one `ask` slot; false when blocked (or when the store fails). */
-function consumeAskRateLimit(ctx: AuthContext): boolean {
+async function consumeAskRateLimit(ctx: AuthContext): Promise<boolean> {
   if (process.env.MEETSUM_RATE_LIMIT === "false") return true
-  return checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask).allowed
+  return (await checkRateLimit(askRateLimitKey(ctx), RATE_LIMIT_PRESETS.ask)).allowed
 }
 
 async function loadSettings(workspaceId: string) {
@@ -208,7 +211,7 @@ function refusedDone(language: AskLanguage, dropped = 0): Extract<AskStreamEvent
 
 function logFailure(stage: string, error: unknown) {
   // Error name/kind only: messages can carry prompt or transcript fragments.
-  console.error(`AskMeetSum ${stage} failed:`, describeLlmFailure(error))
+  log.error({ error: describeLlmFailure(error) }, `AskMeetSum ${stage} failed:`)
 }
 
 export async function* askStream(
@@ -235,7 +238,7 @@ export async function* askStream(
 
   try {
     // 1. Per-minute limit (one bucket per principal, every entry point), then the daily cap.
-    if (!consumeAskRateLimit(ctx)) {
+    if (!(await consumeAskRateLimit(ctx))) {
       yield errorEvent("rate_limited", language)
       return
     }

@@ -14,6 +14,8 @@
 # test-results/m9-screenshots/ and are never committed (user decision).
 /test-results/
 /playwright-report/
+# CI/local e2e server logs and the generated e2e env file (scripts/e2e).
+/e2e-logs/
 
 # next.js
 /.next/
@@ -41,6 +43,7 @@ pnpm-debug.log*
 # env files
 .env*.local
 .env
+.env.e2e
 .secrets/
 dev-server*.log
 

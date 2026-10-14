@@ -40,20 +40,10 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 
 import { dictionaries } from "@/lib/i18n/dictionaries"
 
-function loadEnvFile(): Record<string, string> {
-  const file = process.env.E2E_ENV_FILE || ".secrets/e2e-m8.env"
-  const values: Record<string, string> = {}
+import { loadSuiteEnv } from "../../scripts/e2e/env-file"
 
-  if (existsSync(file)) {
-    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-      const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line)
-
-      if (match) values[match[1]] = match[2].replace(/^(['"])(.*)\1$/, "$2")
-    }
-  }
-
-  return { ...values, ...(Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("E2E_"))) as Record<string, string>) }
-}
+// E2E_M8_ENV_FILE, then E2E_ENV_FILE, then .secrets/e2e-m8.env (scripts/e2e/env-file.ts).
+const loadEnvFile = () => loadSuiteEnv("m8")
 
 const env = loadEnvFile()
 const FAKE = env.E2E_FAKE_BASE_URL || "http://127.0.0.1:4010"
@@ -180,11 +170,40 @@ async function meetingMenu(page: Page) {
   await page.getByRole("button", { name: he.meetingActions }).click()
 }
 
+/**
+ * Sends from the ⋯ menu and waits for *this* send's delivery to be sent. The
+ * "<provider>: sent" toast alone is not enough: a toast from the previous
+ * send can still be on screen, so the delivery id of this POST is polled.
+ */
 async function sendFromMeeting(page: Page, providerLabel: string) {
   await meetingMenu(page)
   await page.getByRole("menuitem", { name: he.exportSendTo || he.integrationsRuleDestination }).click()
+
+  const posted = page.waitForResponse(
+    (response) => /\/api\/meetings\/[^/]+\/integrations\/send$/.test(new URL(response.url()).pathname) && response.request().method() === "POST"
+  )
+
   await page.getByRole("menuitem", { name: new RegExp(providerLabel) }).click()
-  await expect(page.getByText(new RegExp(`${providerLabel}: ${he.integrationsStatusSent}`))).toBeVisible({ timeout: 30_000 })
+
+  const response = await posted
+
+  expect(response.ok(), `send ${providerLabel}`).toBe(true)
+  const { deliveryId } = (await response.json()) as { deliveryId: string }
+
+  await expect
+    .poll(
+      async () => {
+        const delivery = (await (await page.request.get(`/api/integrations/deliveries/${encodeURIComponent(deliveryId)}`)).json()) as {
+          delivery?: { status?: string }
+          status?: string
+        }
+
+        return delivery.delivery?.status ?? delivery.status
+      },
+      { timeout: 30_000 }
+    )
+    .toBe("sent")
+  await expect(page.getByText(new RegExp(`${providerLabel}: ${he.integrationsStatusSent}`)).last()).toBeVisible({ timeout: 30_000 })
 }
 
 async function deliveryRows(page: Page) {
@@ -489,6 +508,8 @@ test.describe.serial("M8 integrations with fake providers", () => {
   })
 
   test("9. webhooks: v2 subscription, signed test-fire, delivery log", async ({ page, context, baseURL }) => {
+    // The completion events run through a tsx child process (several seconds).
+    test.setTimeout(120_000)
     await signIn(context, baseURL, "w1Owner")
     await openIntegrations(page, "he")
     const section = page.locator("section", { has: page.locator("#integrations-webhooks-title") })
@@ -516,8 +537,23 @@ test.describe.serial("M8 integrations with fake providers", () => {
     expect(Math.abs(Date.now() / 1000 - Number(t))).toBeLessThan(300)
     expect(createHmac("sha256", state.secret!).update(`${t}.${raw}`).digest("hex")).toBe(v1)
 
-    await page.getByRole("tab", { name: he.integrationsLogTabWebhooks }).click()
-    await expect(page.locator("[data-webhook-delivery-id]").first()).toBeVisible({ timeout: 30_000 })
+    // A test-fire is sent inline and never written to webhook_deliveries
+    // (lib/webhooks/management.ts sendWebhookTest), so on a fresh database the
+    // log is empty here; it only passed locally on leftover rows. A real event
+    // (the completion events of the Hebrew meeting) gives the new
+    // subscription its delivery row.
+    completeMeeting(env.E2E_M8_HEBREW_MEETING_ID)
+    await expect
+      .poll(
+        async () => {
+          await openIntegrations(page, "he")
+          await page.getByRole("tab", { name: he.integrationsLogTabWebhooks }).click()
+
+          return page.locator("[data-webhook-delivery-id]").count()
+        },
+        { timeout: 60_000, intervals: [1_000, 3_000] }
+      )
+      .toBeGreaterThan(0)
   })
 
   test("10. a private meeting is skipped until its owner opts in", async ({ page, context, baseURL }) => {

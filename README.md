@@ -1,175 +1,122 @@
 # MeetSum
 
-Self-hosted, AI-first meeting intelligence for Google Workspace.
+Self-hosted meeting intelligence for teams that work in Hebrew and English: record or import a meeting, get a speaker-labelled transcript, a cited summary, action items and tasks, search and chat across meetings, and push the results to the tools you already use.
 
-MeetSum is being built as a production-grade alternative to meeting-summary tools like Fireflies, with a special focus on Hebrew accuracy, Google Workspace integration, automation, and interoperability with business systems such as RealizeOS, AI agents, n8n, REST APIs, CLIs, and MCP clients.
+MeetSum is a self-hosted alternative to Fireflies.ai. It is Hebrew-first (right-to-left UI, Hebrew-tuned speech recognition routing, Hebrew-aware search, Hebrew PDF and DOCX) and runs on your own server: Next.js, Postgres, Redis and S3-compatible storage. Feature parity with Fireflies is tracked row by row, with evidence, in [docs/parity/AUDIT.md](docs/parity/AUDIT.md).
 
-## Current Status
+## Status
 
-**v0.6.0** — Desktop capture companion, Google Workspace ingestion, RealizeOS/webhook automation, exports, rooms, memory/search, and VPS deployment hardening are in place. The app is ready for a production VPS update with migrations and worker restart.
+Version 0.7.0, with the M0–M10 parity milestones merged (M10: hardening and the final audit). Everything listed below is built and covered by automated tests that need no keys. Features that talk to outside services (speech recognition providers, Gemini/Claude, the meeting bot, Slack/Microsoft/Notion/HubSpot) are verified offline with recorded fixtures and fake providers. Their live runs wait for your keys or accounts: [AUDIT → "Needs your keys or accounts"](docs/parity/AUDIT.md#needs-your-keys-or-accounts) lists each one, with the command to run.
 
-Architecture highlights:
+Nothing in this repository has been deployed by the parity programme. The deploy path and runbooks exist, but treat a first production install as yours to verify ([docs/production-deployment.md](docs/production-deployment.md)).
 
-- Next.js 16 App Router UI with meeting inbox, transcript, summary, action items, Google context, recorder shell, and automation rail.
-- Production-oriented app shell with locale-prefixed UI routes for English, Hebrew, Portuguese, Spanish, and Italian.
-- **Workspace command center** with Meet artifact sync, job health summary, meeting pipeline status breakdown, and meeting-grouped job recovery with stale-failure detection.
-- **Export system** with provider metadata tables (model, latency, confidence per AI stage) in Markdown and PDF exports.
-- **Public share pages** with processing metadata footer showing all completed AI runs.
-- **Whisper diagnostic instrumentation** with structured error classification (timeout, connection, CUDA OOM, model load, server error) and health check endpoint.
-- Deterministic mixed-language intelligence for language metadata, Hebrew cleanup, auto-tags, smart tasks, and structured follow-up output.
-- Postgres migration runner and repository adapter, with in-memory demo mode for local UI work.
-- API key hashing/verification, bearer-token CLI support, and request validation.
-- Google Calendar sync, Drive recording import, Meet artifact status checks, and BullMQ worker processing.
-- Gemini 3.5 Flash audio/summary provider with AI Studio active and Vertex AI credential path prepared.
-- **RealizeOS export** with approval-gated webhook delivery, audit logging, and retry support.
-- **Webhook management** with subscription CRUD, signed delivery, test endpoints, and retry.
-- **Rooms** with context linking, stat aggregation, and participant deduplication.
-- VPS-oriented Docker Compose stack with Next.js, Postgres, Redis, MinIO, and n8n.
-- **GitHub Actions CI** on pushes and PRs to `main`: typecheck, lint (errors and warnings fail the build), tests, and a production `next build`.
+## Features
 
-## Quick Start
+Each line links the guide or runbook that covers it.
+
+**Capture**
+- Upload audio or video (streamed, resumable, idempotent), record in the browser (with an offline queue), or use the Windows desktop companion for mic plus system audio ([desktop-recorder.md](docs/desktop-recorder.md)).
+- Import from Google Drive and Meet artifacts, Zoom and Teams webhooks ([google-workspace-setup.md](docs/google-workspace-setup.md)).
+- Meeting bot: a Vexa sidecar joins Meet, Teams or Zoom from "Join now" or calendar rules, with consent, lobby and stop handling. A live transcript view sits behind `MEETSUM_LIVE_TRANSCRIPT` ([runbooks/vexa.md](docs/runbooks/vexa.md)).
+
+**Transcript and player**
+- ASR router with fallback and a circuit breaker: RunPod (ivrit-ai), Modal with our `asr-worker` (ivrit-ai and pyannote diarization), Soniox, or any OpenAI-compatible Whisper server, including Groq's free tier ([runbooks/free-tier-asr.md](docs/runbooks/free-tier-asr.md)).
+- Speaker diarization, speaker-name suggestions and a workspace glossary.
+- Waveform player with speaker lanes, range streaming, click-to-seek, a virtualized transcript, an in-transcript finder, and editing with history and undo.
+
+**Intelligence**
+- Hebrew-native summaries with citations, 11 templates plus custom ones, chapters, titles and tags (Gemini by default, Claude optional, with a heuristic fallback when no key is set).
+- Action items with owners and he/en relative due dates, plus a Tasks view.
+- Clips with share links, comments with mentions, reactions, follow-up email drafts and pre-meeting briefs.
+- Per-meeting analytics (talk time, words per minute, questions, filler words, sentiment) and a workspace dashboard.
+
+**Search and Ask**
+- Global search: Hebrew-aware full-text plus trigram search, with pgvector hybrid search when available (`GET /api/search`, ⌘K palette).
+- AskMeetSum: streaming answers with strict citations, scoped to a meeting, a room or the workspace, in private threads.
+
+**Teams and sharing**
+- Workspaces, roles (viewer, member, admin, owner), invitations, and API keys scoped `read`, `write` or `admin`.
+- Meeting visibility (private, workspace, link). Private meetings fail closed everywhere: search, Ask, exports, integrations and webhooks.
+- Public share links with sections, an optional password and expiry.
+
+**Integrations and automation** ([runbooks/integrations.md](docs/runbooks/integrations.md))
+- Slack, Outlook calendar (Microsoft Graph), Notion, HubSpot, Google Docs export, DOCX/PDF/Markdown export and email recaps.
+- Signed webhooks (catalog v2, [docs/webhooks](docs/webhooks/README.md)), n8n templates, a CLI (`bin/meetings.mjs`), a REST API ([docs/api-reference.md](docs/api-reference.md)) and an MCP server (see below).
+- RealizeOS export, approval-gated, through the same privacy gate as every other push.
+
+**Interface**
+- Hebrew (default) and English UI. Fully right-to-left in Hebrew, with logical CSS, `<bdi>` around mixed-direction names, and light and dark themes. Installable as a PWA.
+
+## Hebrew features
+
+Where MeetSum aims to be measurably better than Fireflies. The evidence is in [AUDIT](docs/parity/AUDIT.md#hebrew-superiority-evidence).
+
+- **ASR routing for Hebrew:** ivrit-ai fine-tuned Whisper first (RunPod or Modal, or locally on a laptop), Soniox as the paid fallback, code-switched Hebrew/English per meeting, and glossary hotwords. Harness: `npm run asr:evaluate` (WER, CER, Latin-token WER, DER).
+- **Diarization:** pyannote in the `asr-worker`, or Soniox; speaker suggestions from Meet participants and voiceprints.
+- **RTL UI:** Hebrew is the default locale. Direction comes from the locale; mixed-direction runs are isolated with `<bdi>`.
+- **Gender-neutral UI Hebrew:** [docs/i18n/hebrew-style.md](docs/i18n/hebrew-style.md), linted by `tests/dictionary-hebrew-lint.test.ts`.
+- **Hebrew search normalizer:** niqqud, final letters, geresh and gershayim, maqaf, hyphenated prefixes (`ב-Supabase`) and prefix stripping (`תקציב` finds `והתקציב`). On the synthetic Hebrew corpus, lexical recall@5 is 0.94, against 0.28 for the old ILIKE search ([search-eval.md](docs/parity/search-eval.md)). The in-transcript finder uses the same normalizer.
+- **Hebrew PDF and DOCX:** embedded IBM Plex Sans Hebrew, a bidi-correct layout (`pdftotext` shows logical order) and Hebrew file names.
+- **Hebrew dates and due dates:** relative due dates such as "עד יום חמישי" or "בעוד שבועיים" resolve in the workspace time zone, and Hebrew plural rules apply in the UI.
+
+## Stack
+
+Next.js 16 (App Router) and React 19 · Postgres 17 (pgvector optional; without it, search runs in lexical mode) · Redis with BullMQ workers · MinIO or any S3 storage · Gemini (Developer API or Vertex AI) and optionally Claude · a Python `asr-worker` (faster-whisper, pyannote) · a Vexa sidecar for the bot · Docker Compose for dev and production.
+
+## Quick start
+
+The full walkthrough is [SETUP.md](SETUP.md), which starts with free-tier keys.
 
 ```bash
-npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:3000/en`. If that port is already in use:
-
-```bash
-npm run dev -- --hostname 127.0.0.1 --port 3001
-```
-
-Run database migrations against a configured Postgres database:
-
-```bash
+docker compose up -d postgres redis minio   # local services
+npm ci
+cp .env.example .env.local                 # then edit: localhost URLs, secrets, Google OAuth client
 npm run db:migrate
+npm run dev                                # http://127.0.0.1:3000 (Hebrew UI by default)
+npm run worker                             # second terminal: transcription, summaries, indexing
 ```
 
 ## Verification
 
+These commands need no keys:
+
 ```bash
-npm test
 npm run typecheck
-npm run lint
+npm run lint -- --max-warnings=0
+npm test                       # vitest, offline (fixtures, PGlite, fake providers)
 npm run build
+npm run ds:check               # design-system guardrails
+npm run bundle:check           # first-load JS budget
+npm run db:schema:check        # db/schema.sql vs a fresh pg_dump (needs a migrated Postgres 17)
+npm run api:reference -- --check
+npm run search:eval            # Hebrew search recall table (synthetic corpus)
+npm run llm:evaluate           # summary eval, replay mode
+npm run asr:evaluate -- --replay tests/fixtures/asr/eval
 ```
 
-## Local API Examples
+CI runs `quality` (typecheck, lint, design-system check, tests, build, bundle budget) and `schema` (migrations on pgvector Postgres 17, a no-op re-run, the schema diff, and an install on plain Postgres). The browser end-to-end matrix is added in M10 (package A).
 
-```bash
-curl http://127.0.0.1:3000/api/meetings
-curl http://127.0.0.1:3000/api/health
-curl http://127.0.0.1:3000/api/locales
+## MCP server
 
-curl -X POST http://127.0.0.1:3000/api/meetings/meet_google_workspace/ask \
-  -H "authorization: Bearer $MEETSUM_API_KEY" \
-  -H "content-type: application/json" \
-  -d "{\"question\":\"What is the Google Workspace source of truth?\"}"
+`npm run mcp` starts a stdio MCP server, so Claude Desktop, Claude Code or any MCP client can search and query your meetings. Setup, the tool list and a config snippet are in [SETUP.md → MCP](SETUP.md#mcp-server).
 
-node bin/meetings.mjs export --target markdown
-```
+## Status table
 
-Every API call needs a credential: a browser session or an API key. Create keys in **Admin → API keys**; each key acts on one workspace and has a scope (`read` ⊂ `write` ⊂ `admin`). Set `MEETSUM_API_KEY` for the CLI and MCP server, or pass `--api-key`. A `read` key is enough for the MCP read tools; uploads and processing need `write`; Google sync and workspace administration need `admin`.
-
-## Search
-
-`GET /api/search` runs a Hebrew-aware hybrid search over the meetings the caller can see (`meeting:read`, 60 requests/min per user or key creator):
-
-```bash
-curl -G http://127.0.0.1:3000/api/search \
-  -H "authorization: Bearer $MEETSUM_API_KEY" \
-  --data-urlencode "q=תקציב" --data-urlencode "room=<roomId>" --data-urlencode "from=2026-01-01"
-
-node bin/meetings.mjs search "תקציב" --room <roomId> --from 2026-01-01
-node bin/meetings.mjs ask "מה הוחלט על התקציב?" --room <roomId>
-```
-
-- Params: `q` (≤ 300 chars), `from`/`to` (inclusive dates), repeatable `participant`, `speaker`, `room`, `tag`, `language` (`he|en|mixed`), `type` (meeting type), `source`, `kind` (`transcript|summary|item|action_item|chapter|meta`), `meetingId`; `group=meeting|chunk`, `limit` (≤ 25 meetings / ≤ 50 passages), `hits` (≤ 10 per meeting), `cursor` (from `nextCursor`).
-- Matching folds niqqud, final letters and geresh/gershayim, and strips prefixes (`תקציב` finds `בתקציב`, `והתקציב`); short tokens such as `על`, `AI`, `Q3` stay searchable. Hits carry a snippet, highlight offsets and the segment start for click-to-seek.
-- `mode` is `hybrid` (pgvector + embeddings + full-text + trigram) or `lexical` (no pgvector, no embedding provider or a failed query embedding); `degraded` names the reason. Without Hebrew trigrams (C-locale databases) the trigram leg is skipped.
-- `GET /api/search/facets` lists filter values from visible meetings. `/api/meetings/search` and `/api/memory/search` (deprecated) keep their legacy shapes on top of the same engine.
-- Retrieval quality is tracked by `npm run search:eval` (synthetic Hebrew corpus; report in [docs/parity/search-eval.md](docs/parity/search-eval.md)).
-
-## MCP Server
-
-`npm run mcp` starts the stdio MCP server (`mcp/server.mjs`, tools in `mcp/tools.mjs`). Set `MEETINGS_APP_URL` and `MEETSUM_API_KEY` (a workspace-scoped key; every tool acts on that key's workspace and visibility only). `MEETSUM_MCP_MAX_CHARS` (default 50000) truncates large responses.
-
-- `read` key: `search_meetings` / `search_transcripts` (filters, `cursor` pagination), `ask` (`scope: meeting|room|workspace`, cited answer), `ask_meeting_memory` (alias, meeting scope), `list_meetings`, `get_meeting`, `get_meeting_summary`, `get_transcript_segments` (`offset`/`limit`), `list_action_items` (`status`, `cursor`), `create_followup_draft`.
-- `write` key: `send_context_to_realizeos`.
-
-## Desktop Capture Companion
-
-MeetSum includes a local Electron companion for mic plus system-audio capture:
-
-```bash
-npm run desktop:dev
-```
-
-The companion records locally, keeps an offline spool, and uploads through `/api/desktop-capture/ingest`. See [docs/desktop-recorder.md](docs/desktop-recorder.md).
-
-Build a Windows installer and portable app with:
-
-```bash
-npm run desktop:dist:win
-```
-
-For personal/internal use, the unsigned installer is acceptable. Code signing is wired through `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` for later public distribution.
-
-## Self-Hosted Stack
-
-Copy `.env.example` to `.env.local`, fill real values, then run:
-
-```bash
-docker compose up --build
-```
-
-The compose stack includes:
-
-- `app`: Next.js UI and API.
-- `migrate`: one-shot migration runner.
-- `worker`: BullMQ job worker (`npm run worker`) — media ingest, transcription, intelligence, Google Calendar/Drive/Meet sync schedules. The MCP server is not a compose service; run it locally over stdio with `npm run mcp`.
-- `faster-whisper` (optional, `--profile local-asr`): local Hebrew ASR server.
-- `postgres`: source-of-truth database.
-- `redis`: queues, locks, retry state.
-- `minio`: S3-compatible meeting media storage.
-- `n8n`: first automation surface.
-
-Production VPS deploy uses `docker-compose.prod.yml`, binds MeetSum to `127.0.0.1:3005` on the host (loopback only; public traffic goes through Traefik), and includes Traefik labels for `meetsum.realization.co.il`. Rate limiting trusts `MEETSUM_TRUSTED_PROXY_HOPS` (default `1`) proxies in `X-Forwarded-For`.
+| Area | State | Evidence |
+|---|---|---|
+| Parity matrix (14 rows) | see AUDIT | [docs/parity/AUDIT.md](docs/parity/AUDIT.md) |
+| Milestones M0–M9 | merged (#16–#27) | [docs/parity/STATUS.md](docs/parity/STATUS.md) |
+| M10 hardening | in progress | [docs/parity/m10.md](docs/parity/m10.md) |
+| Live runs needing your keys | listed, with a command for each | [AUDIT → Needs your keys](docs/parity/AUDIT.md#needs-your-keys-or-accounts) |
 
 ## Documentation
 
-- `docs/architecture.md`: current architecture and integration surfaces.
-- `docs/user-manual.md`: basic logic, daily workflow, capture model, integrations, and operating rules.
-- `docs/desktop-recorder.md`: local companion setup, capture flow, spool, and retry behavior.
-- `docs/design-system.md`: UI palette, typography, layout, and component layer.
-- `docs/internationalization.md`: locale routing, language cookie, and RTL policy.
-- `docs/language-intelligence.md`: mixed-language detection, Hebrew cleanup, tags, and smart tasks.
-- `docs/production-deployment.md`: VPS compose, Traefik, health checks, and deploy flow.
-- `docs/backup-restore.md`: Postgres backup and restore commands.
-- `docs/competitive-feature-plan.md`: Fireflies/Timeless-inspired feature staging.
-- `docs/google-workspace-setup.md`: Workspace admin setup notes.
-- `docs/development-roadmap.md`: production-grade next-stage plan.
+Start at [docs/README.md](docs/README.md), the index of current guides. Historical plans live in `docs/archive/`.
 
 ## License
 
-MeetSum is licensed under the MIT License. See `LICENSE`.
-
-Third-party dependencies keep their own licenses. Private secrets, deployment environment files, Google credentials, Fireflies transcript exports, recordings, summaries, and meeting data are not covered by the repository license and must not be committed.
-
-## Product Direction
-
-MeetSum should become:
-
-- Google Workspace-native: Calendar, Gmail, Drive, shared drives, Meet recordings, users, and domain-wide delegation.
-- Hebrew-strong: local-first processing with escalation to stronger API providers when Hebrew confidence is weak.
-- AI-first: summaries, action items, decisions, prep, follow-up drafts, semantic search, meeting memory, and agent workflows.
-- Integration-first: REST, signed webhooks, CLI, MCP, n8n, RealizeOS, and future SDKs.
-- VPS-first: deployable and maintainable without depending on Vercel or Supabase Cloud.
+MIT; see `LICENSE`. Third-party dependencies keep their own licenses. Secrets, deployment env files, Google credentials, recordings, transcripts, summaries and meeting data are not covered by the license and must never be committed.
 
 ## Built by Realization
 
-MeetSum is designed, built and operated by [Realization](https://realization.world).
-
-- Case study, including how Hebrew speech recognition is routed safely: [realization.world/work/meetsum](https://realization.world/work/meetsum)
-- Want meetings that feed your own systems? [realization.world/advisory](https://realization.world/advisory)
+MeetSum is designed, built and operated by [Realization](https://realization.world). Case study: [realization.world/work/meetsum](https://realization.world/work/meetsum).
