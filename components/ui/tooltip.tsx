@@ -2,7 +2,22 @@
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
+import { useOptionalI18n } from "@/components/i18n-provider"
 import { cn } from "@/lib/utils"
+
+type TooltipSide = NonNullable<TooltipPrimitive.Positioner.Props["side"]>
+
+/**
+ * `left`/`right` are deprecated: they map to the logical side with the same
+ * on-screen result in `dir`, so the popup's `data-side` (and the arrow
+ * classes below) are always top/bottom/inline-start/inline-end (M10 C).
+ */
+export function logicalTooltipSide(side: TooltipSide, dir: "rtl" | "ltr"): TooltipSide {
+  if (side === "left") return dir === "rtl" ? "inline-end" : "inline-start"
+  if (side === "right") return dir === "rtl" ? "inline-start" : "inline-end"
+
+  return side
+}
 
 function TooltipProvider({
   delay = 0,
@@ -38,12 +53,14 @@ function TooltipContent({
     TooltipPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const dir = useOptionalI18n()?.dir ?? "ltr"
+
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
-        side={side}
+        side={logicalTooltipSide(side, dir)}
         sideOffset={sideOffset}
         className="isolate z-50"
       >
@@ -56,7 +73,7 @@ function TooltipContent({
           {...props}
         >
           {children}
-          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-fg fill-fg data-[side=bottom]:top-1 data-[side=inline-end]:top-1/2! data-[side=inline-end]:-start-1 data-[side=inline-end]:-translate-y-1/2 data-[side=inline-start]:top-1/2! data-[side=inline-start]:-end-1 data-[side=inline-start]:-translate-y-1/2 data-[side=left]:top-1/2! data-[side=left]:-right-1 data-[side=left]:-translate-y-1/2 data-[side=right]:top-1/2! data-[side=right]:-left-1 data-[side=right]:-translate-y-1/2 data-[side=top]:-bottom-2.5" />
+          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-fg fill-fg data-[side=bottom]:top-1 data-[side=inline-end]:top-1/2! data-[side=inline-end]:-start-1 data-[side=inline-end]:-translate-y-1/2 data-[side=inline-start]:top-1/2! data-[side=inline-start]:-end-1 data-[side=inline-start]:-translate-y-1/2 data-[side=top]:-bottom-2.5" />
         </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>

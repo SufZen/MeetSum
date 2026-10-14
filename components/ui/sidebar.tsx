@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import {
+  logicalSheetSide,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -150,8 +151,14 @@ function SidebarProvider({
   )
 }
 
+/**
+ * `start`/`end` follow the text direction. `left`/`right` are deprecated
+ * aliases with their old on-screen meaning (`logicalSheetSide`, M10 C).
+ */
+export type SidebarSide = "start" | "end"
+
 function Sidebar({
-  side = "left",
+  side: sideProp = "start",
   variant = "sidebar",
   collapsible = "offcanvas",
   className,
@@ -159,12 +166,13 @@ function Sidebar({
   dir,
   ...props
 }: React.ComponentProps<"div"> & {
-  side?: "left" | "right"
+  side?: SidebarSide | "left" | "right"
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const i18n = useOptionalI18n()
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const side = logicalSheetSide(sideProp, dir === "rtl" || dir === "ltr" ? dir : (i18n?.dir ?? "ltr")) as SidebarSide
 
   if (collapsible === "none") {
     return (
@@ -222,7 +230,7 @@ function Sidebar({
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
           "group-data-[collapsible=offcanvas]:w-0",
-          "group-data-[side=right]:rotate-180",
+          "group-data-[side=end]:rotate-180",
           variant === "floating" || variant === "inset"
             ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
@@ -232,11 +240,11 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[inset-inline-start,inset-inline-end,width] duration-200 ease-linear data-[side=start]:start-0 data-[side=start]:group-data-[collapsible=offcanvas]:-start-(--sidebar-width) data-[side=end]:end-0 data-[side=end]:group-data-[collapsible=offcanvas]:-end-(--sidebar-width) md:flex",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
-            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-e group-data-[side=right]:border-s",
+            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=start]:border-e group-data-[side=end]:border-s",
           className
         )}
         {...props}
@@ -293,12 +301,12 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onClick={toggleSidebar}
       title={i18n?.t("shellToggleSidebar")}
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-0.5 hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
-        "in-data-[side=left]:cursor-w-resize rtl:in-data-[side=left]:cursor-e-resize in-data-[side=right]:cursor-e-resize rtl:in-data-[side=right]:cursor-w-resize",
-        "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize rtl:[[data-side=left][data-state=collapsed]_&]:cursor-w-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize rtl:[[data-side=right][data-state=collapsed]_&]:cursor-e-resize",
+        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=start]:-end-4 group-data-[side=end]:start-0 after:absolute after:inset-y-0 after:start-1/2 after:w-0.5 hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        "in-data-[side=start]:cursor-w-resize rtl:in-data-[side=start]:cursor-e-resize in-data-[side=end]:cursor-e-resize rtl:in-data-[side=end]:cursor-w-resize",
+        "[[data-side=start][data-state=collapsed]_&]:cursor-e-resize rtl:[[data-side=start][data-state=collapsed]_&]:cursor-w-resize [[data-side=end][data-state=collapsed]_&]:cursor-w-resize rtl:[[data-side=end][data-state=collapsed]_&]:cursor-e-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 rtl:group-data-[collapsible=offcanvas]:-translate-x-0 group-data-[collapsible=offcanvas]:after:start-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
-        "[[data-side=left][data-collapsible=offcanvas]_&]:-end-2",
-        "[[data-side=right][data-collapsible=offcanvas]_&]:-start-2",
+        "[[data-side=start][data-collapsible=offcanvas]_&]:-end-2",
+        "[[data-side=end][data-collapsible=offcanvas]_&]:-start-2",
         className
       )}
       {...props}
@@ -545,7 +553,7 @@ function SidebarMenuButton({
     <Tooltip>
       {comp}
       <TooltipContent
-        side="right"
+        side="inline-end"
         align="center"
         hidden={state !== "collapsed" || isMobile}
         {...tooltip}
