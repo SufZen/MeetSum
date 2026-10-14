@@ -6,7 +6,7 @@ MeetSum is a self-hosted alternative to Fireflies.ai. It is Hebrew-first (right-
 
 ## Status
 
-Version 0.6.0 on `main`, with the M0–M9 parity milestones merged and M10 (hardening and the final audit) in progress. Everything listed below is built and covered by automated tests that need no keys. Features that talk to outside services (speech recognition providers, Gemini/Claude, the meeting bot, Slack/Microsoft/Notion/HubSpot) are verified offline with recorded fixtures and fake providers. Their live runs wait for your keys or accounts: [AUDIT → "Needs your keys or accounts"](docs/parity/AUDIT.md#needs-your-keys-or-accounts) lists each one, with the command to run.
+Version 0.7.0, with the M0–M10 parity milestones merged (M10: hardening and the final audit). Everything listed below is built and covered by automated tests that need no keys. Features that talk to outside services (speech recognition providers, Gemini/Claude, the meeting bot, Slack/Microsoft/Notion/HubSpot) are verified offline with recorded fixtures and fake providers. Their live runs wait for your keys or accounts: [AUDIT → "Needs your keys or accounts"](docs/parity/AUDIT.md#needs-your-keys-or-accounts) lists each one, with the command to run.
 
 Nothing in this repository has been deployed by the parity programme. The deploy path and runbooks exist, but treat a first production install as yours to verify ([docs/production-deployment.md](docs/production-deployment.md)).
 

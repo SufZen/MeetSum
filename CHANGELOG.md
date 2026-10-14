@@ -4,7 +4,7 @@ All notable changes to MeetSum are documented in this file.
 
 ## [0.7.0] — unreleased (Fireflies parity programme, M0–M10)
 
-The version bump to 0.7.0 happens at the M10 Integration step. Per-milestone detail is in `docs/parity/m0.md`–`m10.md` and in `docs/parity/STATUS.md`; the scored, evidence-backed feature comparison is in `docs/parity/AUDIT.md`.
+`package.json` (and so `/api/health` and the log `version` field) moved to 0.7.0 at the M10 Integration step. Per-milestone detail is in `docs/parity/m0.md`–`m10.md` and in `docs/parity/STATUS.md`; the scored, evidence-backed feature comparison is in `docs/parity/AUDIT.md`.
 
 ### Added
 - **M1, pipeline:** streaming idempotent uploads; Zoom and Teams capture webhooks; webhook SSRF guard and signed deliveries v2; scoped API keys.
