@@ -188,7 +188,7 @@ services:
       retries: 5
 
   n8n:
-    image: n8nio/n8n:2.43.4@sha256:c34ee9107a42b837e25cec0c8a927ab90a45b776aa2ccbf15e5b9cda466fad2c
+    image: n8nio/n8n:2.44.3@sha256:5032941f437e1daa421cad0cc3ea57cd054f0d44a7256b38a0a3fca1b460834a
     profiles:
       - automation
     restart: unless-stopped
