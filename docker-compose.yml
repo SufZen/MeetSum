@@ -85,7 +85,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:8.10.0-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
     logging: *default-logging
     ports:
       - "${REDIS_PORT:-6379}:6379"

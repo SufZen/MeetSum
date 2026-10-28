@@ -141,7 +141,7 @@ services:
     # running container: scripts/infra-drift.sh compares IDs, and
     # docs/runbooks/upgrade-0.6-to-0.7.md shows how to pin the exact running
     # image in docker-compose.local.yml instead.
-    image: redis:7.4.8-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
+    image: redis:8.10.0-alpine@sha256:978f0e01593e65eed801f2402944efcd936d43b5027e4908a7897baf88ed6241
     restart: unless-stopped
     logging: *default-logging
     command: ["redis-server", "--appendonly", "yes"]
