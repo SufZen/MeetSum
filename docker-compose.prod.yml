@@ -115,7 +115,7 @@ services:
     # collation refresh or a dump/restore: add docker-compose.pgvector.yml and
     # follow docs/runbooks/postgres-17-pgvector.md. Never switch it by editing
     # this line during an app deploy.
-    image: postgres:17.9-alpine@sha256:c7526c0f6c3f30260a563d7bcf8ad778effac59a44f8ffa86678c35418338609
+    image: postgres:18.7-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
     hostname: meetsum-postgres
     restart: unless-stopped
     logging: *default-logging
