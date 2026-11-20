@@ -21,6 +21,7 @@ import {
   toggleListValue,
   type DatePreset,
   type SearchUrlState,
+  type SearchUrlUpdate,
 } from "@/lib/client/search-url"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import { formatMessage } from "@/lib/i18n/messages"
@@ -51,14 +52,14 @@ function MultiSelect({
   label,
   options,
   selected,
-  onChange,
+  onToggle,
   dictionary: t,
   filterable,
 }: {
   label: string
   options: Option[]
   selected: string[]
-  onChange: (next: string[]) => void
+  onToggle: (value: string) => void
   dictionary: Dictionary
   filterable?: boolean
 }) {
@@ -99,7 +100,7 @@ function MultiSelect({
               <li key={option.value} role="option" aria-selected={checked}>
                 <button
                   type="button"
-                  onClick={() => onChange(toggleListValue(selected, option.value))}
+                  onClick={() => onToggle(option.value)}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm hover:bg-surface-3 focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent"
                 >
                   <span
@@ -131,7 +132,7 @@ function DateFilter({
   dictionary: t,
 }: {
   state: SearchUrlState
-  onChange: (next: SearchUrlState) => void
+  onChange: (update: SearchUrlUpdate) => void
   dictionary: Dictionary
 }) {
   const custom = !state.range && Boolean(state.from || state.to)
@@ -163,7 +164,7 @@ function DateFilter({
                 type="button"
                 role="radio"
                 aria-checked={active}
-                onClick={() => onChange({ ...state, range: preset, from: undefined, to: undefined })}
+                onClick={() => onChange((current) => ({ ...current, range: preset, from: undefined, to: undefined }))}
                 className={cn(
                   "rounded-md px-2 py-1.5 text-start text-sm hover:bg-surface-3 focus-visible:shadow-focus focus-visible:outline-2 focus-visible:outline-transparent",
                   active && "bg-brand-soft font-medium text-brand-text"
@@ -183,7 +184,11 @@ function DateFilter({
               dir="ltr"
               value={state.from ?? ""}
               max={state.to}
-              onChange={(event) => onChange({ ...state, range: undefined, from: event.target.value || undefined })}
+              onChange={(event) => {
+                const from = event.target.value || undefined
+
+                onChange((current) => ({ ...current, range: undefined, from }))
+              }}
               className="h-8"
             />
           </label>
@@ -194,7 +199,11 @@ function DateFilter({
               dir="ltr"
               value={state.to ?? ""}
               min={state.from}
-              onChange={(event) => onChange({ ...state, range: undefined, to: event.target.value || undefined })}
+              onChange={(event) => {
+                const to = event.target.value || undefined
+
+                onChange((current) => ({ ...current, range: undefined, to }))
+              }}
               className="h-8"
             />
           </label>
@@ -213,7 +222,7 @@ export function SearchFilters({
 }: {
   state: SearchUrlState
   facets: SearchFacets
-  onChange: (next: SearchUrlState) => void
+  onChange: (update: SearchUrlUpdate) => void
   locale: string
   dictionary: Dictionary
 }) {
@@ -234,7 +243,7 @@ export function SearchFilters({
           label={t.searchPeople}
           options={people}
           selected={state.participants}
-          onChange={(participants) => onChange({ ...state, participants })}
+          onToggle={(value) => onChange((current) => ({ ...current, participants: toggleListValue(current.participants, value) }))}
           dictionary={t}
           filterable
         />
@@ -242,7 +251,7 @@ export function SearchFilters({
           label={t.searchRooms}
           options={rooms}
           selected={state.rooms}
-          onChange={(next) => onChange({ ...state, rooms: next })}
+          onToggle={(value) => onChange((current) => ({ ...current, rooms: toggleListValue(current.rooms, value) }))}
           dictionary={t}
           filterable
         />
@@ -250,7 +259,7 @@ export function SearchFilters({
           label={t.searchTags}
           options={tags}
           selected={state.tags}
-          onChange={(next) => onChange({ ...state, tags: next })}
+          onToggle={(value) => onChange((current) => ({ ...current, tags: toggleListValue(current.tags, value) }))}
           dictionary={t}
           filterable
         />
@@ -259,7 +268,7 @@ export function SearchFilters({
             label={t.searchMeetingType}
             options={types}
             selected={state.meetingTypes}
-            onChange={(meetingTypes) => onChange({ ...state, meetingTypes })}
+            onToggle={(value) => onChange((current) => ({ ...current, meetingTypes: toggleListValue(current.meetingTypes, value) }))}
             dictionary={t}
           />
         ) : null}
@@ -273,7 +282,7 @@ export function SearchFilters({
                 key={language}
                 type="button"
                 aria-pressed={on}
-                onClick={() => onChange({ ...state, languages: toggleListValue(state.languages, language) })}
+                onClick={() => onChange((current) => ({ ...current, languages: toggleListValue(current.languages, language) }))}
                 className={cn(chip, on ? chipOn : chipOff)}
               >
                 {t[LANGUAGE_KEYS[language]]}
@@ -292,7 +301,7 @@ export function SearchFilters({
               key={kind}
               type="button"
               aria-pressed={on}
-              onClick={() => onChange({ ...state, kinds: toggleListValue(state.kinds, kind) })}
+              onClick={() => onChange((current) => ({ ...current, kinds: toggleListValue(current.kinds, kind) }))}
               className={cn(chip, on ? chipOn : chipOff)}
             >
               {t[KIND_KEYS[kind]]}
@@ -300,7 +309,7 @@ export function SearchFilters({
           )
         })}
         {hasActiveFilters(state) ? (
-          <Button size="xs" variant="ghost" className="ms-auto" onClick={() => onChange(clearFilters(state))}>
+          <Button size="xs" variant="ghost" className="ms-auto" onClick={() => onChange(clearFilters)}>
             <XIcon data-icon="inline-start" />
             {t.searchClearAll}
           </Button>

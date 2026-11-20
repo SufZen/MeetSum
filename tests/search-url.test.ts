@@ -4,6 +4,7 @@ import {
   EMPTY_SEARCH_STATE,
   buildSearchApiParams,
   clearFilters,
+  createPendingSearchState,
   datePresetRange,
   hasActiveFilters,
   isSearchable,
@@ -122,5 +123,31 @@ describe("search URL state", () => {
   it("toggles list values", () => {
     expect(toggleListValue(["a"], "b")).toEqual(["a", "b"])
     expect(toggleListValue(["a", "b"], "a")).toEqual(["b"])
+  })
+})
+
+describe("pending search state (filters applied before the URL catches up)", () => {
+  const base: SearchUrlState = { ...EMPTY_SEARCH_STATE, q: "תקציב" }
+
+  it("composes updates made before the URL reflects the first one", () => {
+    const pending = createPendingSearchState()
+
+    pending.next(base, (current) => ({ ...current, rooms: ["room-1"] }))
+    const next = pending.next(base, (current) => ({ ...current, range: "90" }))
+
+    expect(next.rooms).toEqual(["room-1"])
+    expect(next.range).toBe("90")
+  })
+
+  it("keeps the pending state while the URL shows an older one, and drops it once the URL matches", () => {
+    const pending = createPendingSearchState()
+    const withRoom = pending.next(base, (current) => ({ ...current, rooms: ["room-1"] }))
+    const both = pending.next(base, (current) => ({ ...current, range: "90" }))
+
+    pending.settle(withRoom)
+    expect(pending.next(withRoom, (current) => current)).toEqual(both)
+
+    pending.settle(both)
+    expect(pending.next(base, (current) => current)).toEqual(base)
   })
 })
