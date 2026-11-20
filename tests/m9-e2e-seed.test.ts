@@ -38,12 +38,15 @@ describe("seed guards", () => {
 
 let db: PgLike | undefined
 let env: Record<string, string> = {}
+// The seed and every clock-dependent check use the same fixed "now", so the
+// "fresh workspace" window (14 days) does not expire as real time passes.
+const SEED_NOW = Date.parse("2026-10-13T12:00:00Z")
 
 beforeAll(async () => {
   db = await createM9Database()
   if (!db) return
 
-  const lines = await seedM9E2E(db, { secret: "test-secret-0123456789abcdef0123456789", now: Date.parse("2026-10-13T12:00:00Z") })
+  const lines = await seedM9E2E(db, { secret: "test-secret-0123456789abcdef0123456789", now: SEED_NOW })
 
   env = Object.fromEntries(lines.filter((line) => line.includes("=")).map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]))
 }, 120_000)
@@ -133,12 +136,14 @@ describe("seeded fixture", () => {
       await computeOnboardingRedirect(ctx(env.E2E_M9_W3_WORKSPACE_ID!, "e2e_m9_fresh_owner", "m9-fresh@example.test", "owner"), {
         progress,
         workspaceCreatedAt: createdAt,
+        now: new Date(SEED_NOW),
       })
     ).toBe(true)
     expect(
       await computeOnboardingRedirect(ctx(env.E2E_M9_W1_WORKSPACE_ID!, "e2e_m9_owner", "m9-owner@example.test", "owner"), {
         progress,
         workspaceCreatedAt: createdAt,
+        now: new Date(SEED_NOW),
       })
     ).toBe(false)
   })

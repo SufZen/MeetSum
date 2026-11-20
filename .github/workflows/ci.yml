@@ -17,7 +17,7 @@ env:
 jobs:
   quality:
     name: Quality checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -68,7 +68,7 @@ jobs:
   # Images are pinned by tag and digest (resolved 2026-10-14).
   schema:
     name: Schema and migrations
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
