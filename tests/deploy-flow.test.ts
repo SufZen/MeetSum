@@ -189,4 +189,23 @@ describe.runIf(hasSh)("deploy-vps.sh flow (stubbed docker/git/flock)", { timeout
     expect(calls.filter((call) => / up -d --no-deps app worker$/.test(call))).toHaveLength(1)
     expect(calls.some((call) => /MEETSUM_IMAGE_TAG=previous/.test(call))).toBe(false)
   })
+
+  it("after a breaking migration a failed `up` still prints the manual restore path", () => {
+    const { status, output, calls } = deploy(host(versions(1, 14), [{ match: "up -d --no-deps app worker", exit: 1 }]))
+
+    expect(status).toBe(1)
+    expect(output).toContain("starting the new app and worker failed")
+    expect(output).toContain("there is no automatic rollback")
+    expect(output).toContain("restore backups/postgres/meetsum-postgres-test.dump")
+    expect(calls.some((call) => /MEETSUM_IMAGE_TAG=previous/.test(call))).toBe(false)
+  })
+
+  it("without a breaking migration a failed `up` rolls back", () => {
+    const { status, output } = deploy(host(versions(1, 32), [{ match: "up -d --no-deps app worker", exit: 1 }]))
+
+    expect(status).toBe(1)
+    expect(output).toContain("starting the new app and worker failed")
+    expect(output).toContain("rolling back")
+    expect(output).not.toContain("there is no automatic rollback")
+  })
 })

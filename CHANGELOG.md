@@ -12,6 +12,8 @@ Fixes found while preparing the first production upgrade from v0.6.0 (`6f9dd96`)
 - **ASR silently lost the Gemini fallback.** v0.7.0 mapped the legacy `MEETSUM_TRANSCRIPTION_PROVIDER=auto` to the default chain without Gemini. While `MEETSUM_ASR_CHAIN` is unset, `auto` again means local Whisper, then Gemini when a Gemini key or Vertex is configured (the v0.6.0 meaning).
 - **`backup-full.sh` skipped MinIO when the host had no `mc`** (production has none). Both full backup and restore now run `mc` inside a throwaway container of the minio service (`docker compose run --rm --no-deps --pull never`) and exit non-zero when the MinIO part fails.
 - A failed image build during a deploy moves the checkout back to the previous commit.
+- **A failed `up` after a breaking migration exited silently.** Under `set -e` the deploy stopped without the manual restore path. It now prints that path after a breaking migration, and rolls back otherwise.
+- **Upgrade runbook:** the step 4 dry run read the v0.6.0 migrations (001–014) and reported no breaking migration; it now reads the v0.7.1 migrations through `MIGRATIONS_DIR`. Step 5 prints the deploy script's own exit code, since a pipe into `tee` hid a failure.
 
 ### Added
 - **Maintenance mode** for non-backward-compatible releases: `--maintenance`, or automatic when a migration marked `-- meetsum:breaking` is not yet in `schema_migrations` (`scripts/breaking-migrations.sh`). The sequence is stop app + worker, write-freeze backup, migrate, switch, readiness. Migration 019 (workspace scoping) is marked. A migration that fails before the breaking one restarts the stopped release; after a breaking migration there is no automatic rollback.
