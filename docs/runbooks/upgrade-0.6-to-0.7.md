@@ -103,7 +103,10 @@ rm -rf /tmp/meetsum-0.7.1 && mkdir -p /tmp/meetsum-0.7.1
 for f in deploy-vps.sh infra-drift.sh breaking-migrations.sh; do
   git show "origin/main:scripts/$f" > "/tmp/meetsum-0.7.1/$f"
 done
-sh /tmp/meetsum-0.7.1/deploy-vps.sh --dry-run --maintenance
+# The dry run does not pull, so it would read the v0.6.0 migrations (001-014)
+# and report no breaking migration. Point it at the v0.7.1 migrations instead.
+git archive origin/main db/migrations | tar -x -C /tmp/meetsum-0.7.1
+MIGRATIONS_DIR=/tmp/meetsum-0.7.1/db/migrations sh /tmp/meetsum-0.7.1/deploy-vps.sh --dry-run --maintenance
 ```
 
 The plan must show `using the host-local override docker-compose.local.yml`, `migrations marked breaking: 019_workspace_scoping.sql`, `stop app worker` before the second backup, `run --rm --no-deps migrate`, and `up -d --no-deps app worker` as the only `up`.
@@ -119,8 +122,11 @@ sh /tmp/meetsum-0.7.1/infra-drift.sh --project-directory /opt/meetsum --env-file
 ## 5. Upgrade (write freeze)
 
 ```bash
-sh /tmp/meetsum-0.7.1/deploy-vps.sh --maintenance 2>&1 | tee "backups/upgrade-0.7.1-$(date -u +%Y%m%dT%H%M%SZ).log"
+LOG="backups/upgrade-0.7.1-$(date -u +%Y%m%dT%H%M%SZ).log"
+{ sh /tmp/meetsum-0.7.1/deploy-vps.sh --maintenance; echo "deploy-vps.sh exit code: $?"; } 2>&1 | tee "$LOG"
 ```
+
+A pipe into `tee` reports `tee`'s exit status, not the script's, so the script's own exit code is printed as the last line. Go on to step 6 only when it reads `deploy-vps.sh exit code: 0`; anything else means the upgrade failed: read the log and follow "Rollback".
 
 `--maintenance` is automatic here anyway (019 is pending in `schema_migrations`); passing it makes the freeze explicit. What happens:
 

@@ -464,7 +464,18 @@ if image_exists "$IMAGE_REPO:current"; then
 fi
 
 step "up app worker"
-compose_tag "$NEW_TAG" "" up -d --no-deps app worker
+# Not left to `set -e`: after a breaking migration the operator needs the
+# manual restore path, and otherwise the previous release comes back.
+if ! compose_tag "$NEW_TAG" "" up -d --no-deps app worker; then
+  log "starting the new app and worker failed"
+  if [ -n "$BREAKING" ]; then
+    manual_restore_help
+    exit 1
+  fi
+  log "rolling back"
+  rollback || true
+  exit 1
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   if [ "$MAINTENANCE" -eq 1 ]; then
