@@ -212,3 +212,27 @@ export function searchKey(state: SearchUrlState): string {
 export function toggleListValue<T extends string>(list: readonly T[], value: T): T[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
 }
+
+export type SearchUrlUpdate = (current: SearchUrlState) => SearchUrlState
+
+/**
+ * Filters write the URL with `router.replace`, which lands asynchronously. A
+ * second filter applied before the URL shows the first one must build on the
+ * first, not on the URL, or it overwrites it. `next` applies an update to the
+ * pending state (or to the URL state when nothing is pending); `settle` drops
+ * the pending state once the URL shows it.
+ */
+export function createPendingSearchState() {
+  let pending: SearchUrlState | null = null
+
+  return {
+    next(current: SearchUrlState, update: SearchUrlUpdate): SearchUrlState {
+      pending = update(pending ?? current)
+
+      return pending
+    },
+    settle(state: SearchUrlState) {
+      if (pending && serializeSearchUrl(pending) === serializeSearchUrl(state)) pending = null
+    },
+  }
+}

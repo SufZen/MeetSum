@@ -21,7 +21,13 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { AskScope } from "@/lib/ask/types"
-import { SEARCH_QUERY_MAX, parseSearchUrl, serializeSearchUrl, type SearchUrlState } from "@/lib/client/search-url"
+import {
+  SEARCH_QUERY_MAX,
+  createPendingSearchState,
+  parseSearchUrl,
+  serializeSearchUrl,
+  type SearchUrlUpdate,
+} from "@/lib/client/search-url"
 import type { Dictionary } from "@/lib/i18n/dictionaries"
 import { formatMessage } from "@/lib/i18n/messages"
 
@@ -42,6 +48,7 @@ export function SearchView({
   const query = searchParams.toString()
   const state = useMemo(() => parseSearchUrl(query), [query])
   const stateRef = useRef(state)
+  const pendingRef = useRef(createPendingSearchState())
   const [input, setInput] = useState(state.q)
   const [syncedQ, setSyncedQ] = useState(state.q)
   const [askOpened, setAskOpened] = useState(state.tab === "ask")
@@ -51,6 +58,7 @@ export function SearchView({
 
   useEffect(() => {
     stateRef.current = state
+    pendingRef.current.settle(state)
   })
 
   // Back/forward or a palette link changed `q`: follow it in the box.
@@ -60,8 +68,8 @@ export function SearchView({
   }
 
   const navigate = useCallback(
-    (next: SearchUrlState) => {
-      const search = serializeSearchUrl(next)
+    (update: SearchUrlUpdate) => {
+      const search = serializeSearchUrl(pendingRef.current.next(stateRef.current, update))
 
       router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false })
     },
@@ -74,7 +82,7 @@ export function SearchView({
 
     if (q === stateRef.current.q) return
 
-    const timer = window.setTimeout(() => navigate({ ...stateRef.current, q }), DEBOUNCE_MS)
+    const timer = window.setTimeout(() => navigate((current) => ({ ...current, q })), DEBOUNCE_MS)
 
     return () => window.clearTimeout(timer)
   }, [input, navigate])
@@ -102,7 +110,7 @@ export function SearchView({
           const tab = value === "ask" ? "ask" : "search"
 
           if (tab === "ask") setAskOpened(true)
-          navigate({ ...state, q: input.trim(), tab })
+          navigate((current) => ({ ...current, q: input.trim(), tab }))
         }}
         className="gap-4"
       >
@@ -117,7 +125,7 @@ export function SearchView({
             className="flex items-center gap-2"
             onSubmit={(event) => {
               event.preventDefault()
-              navigate({ ...state, q: input.trim() })
+              navigate((current) => ({ ...current, q: input.trim() }))
             }}
           >
             <div className="relative flex-1">
