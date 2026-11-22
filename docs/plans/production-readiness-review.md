@@ -139,6 +139,7 @@ backup. No further migration defects were found.
 | T4 | Medium | The real-Redis rate limiter test never runs in CI (`runIf(REDIS_URL)`, and the `quality` job has no Redis). | `tests/rate-limit-redis.test.ts:127`, `.github/workflows/ci.yml:18-62` | Add a Redis service + `REDIS_URL` to `quality`. | S |
 | T5 | Medium | No coverage configuration or threshold although `@vitest/coverage-v8` is installed. | `vitest.config.ts:13-16`, `package.json:111` | Enable v8 coverage in CI with floors for `lib/auth`, `lib/sharing`, `lib/webhooks`, `lib/jobs`. | S |
 | T6 | Low | Playwright has no `forbidOnly`; `retries: 1` in CI hides flakes; several suites skip on missing env instead of failing. | `playwright.config.ts:22`; `tests/e2e/m10-bot.spec.ts:45`, `m6-search-ask.spec.ts:142-318`, `m8-integrations.spec.ts:431`, `m9-polish.spec.ts:183` | `forbidOnly: !!process.env.CI`; fail on unexpected skips. | S |
+| T8 | High | The E2E matrix is flaky at the reviewed revision, so a red run carries no signal. On `ad1b365` the push run failed `m8` (`m8-integrations.spec.ts:253`, 31 s timeout, failed again on retry; run 45035575967). This docs-only PR's run on the same code failed `core` (`m10-core-flow.spec.ts:308`, then the upload test `:58` got a 500 instead of 202 on retry) and `m6` (run 45074731623). | `.github/workflows/e2e.yml`; specs above | Before C1 makes E2E a deploy gate: fix the Redis-stop test (`:308`) leaking state into later tests, triage the m8 Slack-connect timeout, and track flake rate. | M |
 | T7 | Low | Deploy tests use stubbed docker/git/flock only; nothing validates the real compose files. | `tests/deploy-flow.test.ts:83` | See C3. | — |
 
 ### 6. `.github/workflows/`
@@ -200,7 +201,7 @@ marked ⓪ before running it, since they protect that upgrade itself.
 | 6 | L3, L4 (at least "skip ASR on retry"), L8, L20 | Wrong "completed" summaries, double ASR cost, silently missed imports. |
 | 7 | A1 + A21, A3, A4, L6 | Cost abuse, public config disclosure, missing headers, key fallback. |
 | 8 | S4, S6, T3, D8 | A restore (including onto a fresh host) must be safe and proven, not assumed. |
-| 9 | T1, C1, C3, C6 | CI must fail when isolation tests are skipped or a pipeline step fails, and must build the image the VPS will run. |
+| 9 | T8, T1, C1, C3, C6 | CI must fail when isolation tests are skipped or a pipeline step fails, and must build the image the VPS will run. |
 | 10 | K1 | Memory limits so one runaway process cannot take Postgres down. |
 
 ### Phase 2: cleanup and refactors
