@@ -337,3 +337,45 @@ test("9. with Redis stopped, regenerate shows the non-blocking queue state (no h
 // Step 10 (axe) runs inside steps 1–8: `scanA11y` fails the step on any
 // serious/critical finding outside scripts/axe-allowlist.json and writes
 // test-results/m10/a11y-report.json.
+
+/** A valid 16-bit mono 16 kHz PCM WAV of silence, `dataBytes` long. */
+function silentWav(dataBytes: number): Buffer {
+  const header = Buffer.alloc(44)
+
+  header.write("RIFF", 0)
+  header.writeUInt32LE(36 + dataBytes, 4)
+  header.write("WAVEfmt ", 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(16_000, 24)
+  header.writeUInt32LE(32_000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write("data", 36)
+  header.writeUInt32LE(dataBytes, 40)
+  return Buffer.concat([header, Buffer.alloc(dataBytes)])
+}
+
+// v0.7.2: Next hands a proxied route at most proxyClientMaxBodySize (10 MiB)
+// of the body; v0.7.1 ran the proxy on the upload route and cut recordings.
+test("11. an upload over 10 MiB is stored whole", async ({ page, context }) => {
+  await signIn(context, "owner")
+
+  const created = await page.request.post("/api/meetings", {
+    data: { title: "e2e upload over 10 MiB", source: "upload", startedAt: new Date().toISOString() },
+    headers: ORIGIN,
+  })
+
+  expect(created.status()).toBe(201)
+  const id = ((await created.json()) as { meeting: { id: string } }).meeting.id
+  const wav = silentWav(11 * 1024 * 1024)
+  const uploaded = await page.request.post(`/api/meetings/${encodeURIComponent(id)}/upload`, {
+    multipart: { file: { name: "over-10mib.wav", mimeType: "audio/wav", buffer: wav } },
+    headers: ORIGIN,
+    timeout: 120_000,
+  })
+
+  expect(uploaded.status(), await uploaded.text()).toBe(202)
+  expect(((await uploaded.json()) as { asset: { sizeBytes: number } }).asset.sizeBytes).toBe(wav.length)
+})

@@ -4,6 +4,7 @@
  * characters, wrong length) with a fresh UUID, forwards it to the route and
  * echoes it on the response; the route wrappers put it in the log context.
  */
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server"
 import { NextRequest, NextResponse } from "next/server"
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -55,6 +56,21 @@ describe("request ids", () => {
     expect(matcher.test("/he/tasks")).toBe(true)
     expect(matcher.test("/_next/static/chunk.js")).toBe(false)
     expect(matcher.test("/sw.js")).toBe(false)
+  })
+
+  // v0.7.2: Next clones a proxied request body up to proxyClientMaxBodySize
+  // (10 MiB) and hands the route only that much, so media uploads must skip
+  // the proxy (v0.7.1 regression: recordings over 10 MiB arrived truncated).
+  it("skips the proxy on the media upload routes (Next's own matcher)", () => {
+    const matches = (url: string) => unstable_doesMiddlewareMatch({ config, url })
+
+    expect(matches("/api/meetings/abc-123/upload")).toBe(false)
+    expect(matches("/api/desktop-capture/ingest")).toBe(false)
+    expect(matches("/api/meetings/abc-123")).toBe(true)
+    expect(matches("/api/meetings/abc-123/upload-status")).toBe(true)
+    expect(matches("/api/desktop-capture/ingest-status")).toBe(true)
+    expect(matches("/api/meetings")).toBe(true)
+    expect(matches("/he/meetings/abc-123/upload")).toBe(true)
   })
 
   it("builds route templates without ids, tokens or queries", () => {
