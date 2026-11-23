@@ -2,6 +2,11 @@
 
 All notable changes to MeetSum are documented in this file.
 
+## [0.7.2] — unreleased (upload fix before the first production upgrade)
+
+### Fixed
+- **Recording uploads over 10 MiB were truncated (v0.7.1 regression).** v0.7.1 ran `proxy.ts` on every `/api` route for request ids, and Next 16 hands a route behind the proxy at most `proxyClientMaxBodySize` (10 MiB) of the request body. `POST /api/meetings/:id/upload` and `POST /api/desktop-capture/ingest` now skip the proxy, as all of `/api` did in v0.6.0. Both still log a request id (`withAuthz` resolves one), but their responses no longer echo `x-request-id`. The e2e core flow now uploads an 11 MiB file and checks the stored size.
+
 ## [0.7.1] — unreleased (deploy safety for the first production upgrade)
 
 Fixes found while preparing the first production upgrade from v0.6.0 (`6f9dd96`) to v0.7.x. The procedure is `docs/runbooks/upgrade-0.6-to-0.7.md`.
