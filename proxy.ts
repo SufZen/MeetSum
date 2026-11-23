@@ -86,6 +86,9 @@ export function proxy(request: NextRequest) {
 }
 
 // Pages and API routes (request ids); static assets and files are skipped.
+// The media upload routes are skipped too: Next clones a proxied request body
+// only up to `proxyClientMaxBodySize` (10 MiB) and the route then receives a
+// truncated stream. Those routes resolve their own request id in `withAuthz`.
 export const config = {
-  matcher: ["/((?!_next/|.*\\..*).*)"],
+  matcher: ["/((?!_next/|api/meetings/[^/]+/upload$|api/desktop-capture/ingest$|.*\\..*).*)"],
 }
