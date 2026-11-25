@@ -120,7 +120,7 @@ services:
       retries: 5
 
   n8n:
-    image: n8nio/n8n:2.43.4@sha256:c34ee9107a42b837e25cec0c8a927ab90a45b776aa2ccbf15e5b9cda466fad2c
+    image: n8nio/n8n:2.49.3@sha256:69f3d3694b42992d7cce232b7ba46f22205e39d5eb61bd235588e4d5d111d8c4
     logging: *default-logging
     ports:
       - "${N8N_PORT:-5678}:5678"
